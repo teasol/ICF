@@ -1,0 +1,77 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environments and local environment variables
+.venv/
+venv/
+env/
+ENV/
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Packaging and build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Training runs, logs, and experiment trackers
+checkpoints/
+logs/
+outputs/
+wandb/
+lightning_logs/
+mlruns/
+.hydra/
+multirun/
+events.out.tfevents.*
+
+# Generated predictions and model artifacts
+predictions/
+*.ckpt
+*.pt
+*.pth
+*.onnx
+*.safetensors
+
+# Cluster and local runtime artifacts
+slurmlog/
+slurm-*.out
+slurm-*.err
+*.pid
+*.log
+
+# Local datasets (keep source code under src/datasets/)
+/data/
+/datasets/
+
+# Jupyter and editor files
+.ipynb_checkpoints/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Local agent configuration
+.agents/
+.codex/

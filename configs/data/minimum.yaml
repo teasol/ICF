@@ -1,0 +1,64 @@
+dataset_src: synthetic_data.SyntheticEpisodeDataset
+episode_dataset: true
+
+num_workers: 0
+pin_memory: false
+persistent_workers: false
+train_shuffle: true
+val_shuffle: false
+test_shuffle: false
+
+dataset_kwargs:
+  # Minimum learnability benchmark: every bag comes entirely from one of two
+  # strongly separated Gaussian populations. The episode-specific random
+  # linear map changes feature coordinates, but preserves the class geometry.
+  episodes_per_epoch: 2048
+  seed: null
+  generation_device: cuda
+  difficulty_curriculum_episodes: 0
+  effect_scale_start: [1.0, 1.0]
+  effect_scale_end: [1.0, 1.0]
+
+  num_bags: [24, 40]
+  num_cells: [100, 200]
+  latent_dim: 8
+  output_dim: 512
+  mlp_hidden_dim: 32
+  # One random linear map keeps this benchmark intentionally easy.
+  mlp_num_layers: 1
+  class_separation: [3.0, 5.0]
+  latent_scale: [0.5, 0.8]
+
+  # Disable shared backgrounds, continuous effects, covariance tasks, and
+  # rare populations. Mean aggregation is sufficient by construction.
+  shared_component_probability: 0.0
+  num_shared_components: 1
+  shared_component_fraction: [0.0, 0.0]
+  donor_shift_scale: 0.05
+  donor_component_shift_scale: 0.0
+  donor_mixture_logit_scale: 0.0
+  continuous_response_probability: 0.0
+  response_score_scale: 0.0
+  response_score_min_margin: 0.0
+  response_mixture_effect_scale: 0.0
+  response_state_effect_scale: [0.0, 0.0]
+  response_task_probabilities: [1.0, 0.0, 0.0, 0.0, 0.0]
+  response_covariance_effect_scale: [0.0, 0.0]
+  rare_response_probability: 0.0
+  # Unused because rare_response_probability is zero; kept positive to satisfy
+  # the generator's general range validation.
+  rare_response_fraction: [0.01, 0.01]
+  observation_noise: 0.005
+  normalize_output: true
+  output_norm_eps: 1.0e-8
+  # Balance is acceptable in this diagnostic dataset: attention is normalized
+  # within each class set and class counts are not passed to the scorer.
+  balanced: true
+
+val_dataset_kwargs:
+  episodes_per_epoch: 104
+  seed: 30042
+
+test_dataset_kwargs:
+  episodes_per_epoch: 104
+  seed: 40042

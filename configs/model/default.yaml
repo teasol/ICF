@@ -1,0 +1,31 @@
+model_src: src.models.baseline.BaseModel
+
+# Architecture v18: hybrid density/rare anchors, multi-statistic slots,
+# class-memory cross-attention, rare-instance evidence, and interaction fusion.
+input_dim: 512
+aggregator_num_slots: 12
+aggregator_num_density_slots: 8
+aggregator_context_samples_per_bag: 32
+aggregator_assignment_temperature: 0.1
+aggregator_density_refinement_steps: 4
+aggregator_density_temperature: 0.15
+aggregator_slot_rare_fraction: 0.05
+aggregator_tail_fractions: [0.01, 0.05, 0.15]
+aggregator_min_tail_instances: 1
+meta_hidden_dim: 256
+meta_num_heads: 8
+meta_num_set_layers: 1
+meta_relation_hidden_dim: 256
+meta_ridge_dim: 64
+meta_ridge_lambda: 1.0
+meta_ridge_logit_scale: 2.0
+meta_attention_residual_scale: 0.1
+meta_population_residual_scale: 0.25
+meta_tail_residual_scale: 0.10
+meta_minimum_population_residual_scale: 0.10
+meta_minimum_tail_residual_scale: 0.05
+meta_routing_temperature: 0.5
+meta_class_memory_tokens: 8
+meta_rare_evidence_fractions: [0.01, 0.05, 0.10, 0.20]
+meta_fusion_residual_scale: 0.10
+num_classes: 2

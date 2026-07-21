@@ -1,0 +1,6 @@
+name: wandb
+save_dir: logs
+run_name_prefix: v16
+project: ICF
+entity:
+log_model: false

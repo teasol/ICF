@@ -1,0 +1,10 @@
+seed: 42
+ckpt_path:
+
+data: default
+model: default
+optimizer: adamw
+scheduler: warmup_reduce_on_plateau
+trainer: default
+logger: wandb
+callbacks: default

@@ -1,0 +1,3 @@
+name: tensorboard
+save_dir: logs
+experiment_name: tiranos

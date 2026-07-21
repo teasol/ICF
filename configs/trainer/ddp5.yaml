@@ -1,0 +1,10 @@
+max_epochs: 1000
+accelerator: gpu
+# Must match torchrun's WORLD_SIZE for Lightning's TorchElastic environment.
+devices: 5
+strategy: ddp_find_unused_parameters_false
+precision: 16-mixed
+log_every_n_steps: 50
+check_val_every_n_epoch: 1
+num_sanity_val_steps: 0
+gradient_clip_val: 1.0

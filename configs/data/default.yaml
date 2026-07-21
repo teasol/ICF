@@ -1,0 +1,21 @@
+dataset_src: base_data.ICIDataset
+
+batch_size: null
+num_workers: 2
+pin_memory: true
+drop_last: false
+persistent_workers: true
+
+train_shuffle: true
+val_shuffle: false
+test_shuffle: false
+
+dataset_kwargs:
+  # Relative paths are resolved from the repository root.
+  root_dir: data/ICI_CVOnly_scConcept_512
+  cv: 0
+  seed: 42
+  # Pass every donor cell as a variable-length bag. The v16 aggregator computes
+  # exact means, 12 population slots, and adaptive tails without padding.
+  all_cell_mean: false
+  target_cells: -1

@@ -1,0 +1,18 @@
+seed: 42
+ckpt_path:
+
+data: synthetic
+model: default
+optimizer: adamw
+scheduler: warmup_reduce_on_plateau
+trainer: ddp8
+logger: wandb
+callbacks: default
+
+model_kwargs:
+  # Each query is classified independently against the same labelled context.
+  # The sampler always leaves at least one context bag for every class.
+  training_targets_per_episode: [5, 20]
+  ranking_loss_weight: 0.10
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.01

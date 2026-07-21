@@ -1,0 +1,18 @@
+scheduler_src: src.utils.schedulers.WarmupReduceLROnPlateau
+scheduler_kwargs:
+  warmup_epochs: 5
+  warmup_start_factor: 0.1
+  plateau_start_epoch: 5
+  step_epoch_interval: 1
+  plateau_check_interval: 1
+  mode: min
+  factor: 0.5
+  patience: 10
+  threshold: 0.00001
+  threshold_mode: rel
+  cooldown: 5
+  min_lr: 0.000001
+
+monitor: val_ce_loss
+interval: epoch
+frequency: 1
