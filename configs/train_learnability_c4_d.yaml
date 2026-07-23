@@ -12,6 +12,7 @@ data_overrides:
     response_task_probabilities: [1.0, 0.0, 0.0, 0.0, 0.0]
     rare_response_probability: 0.0
     manifold_mode: nonlinear
+    return_oracle_diagnostics: true
 model: default
 optimizer: adamw_learnability_5e4
 scheduler: warmup_reduce_on_plateau_medium

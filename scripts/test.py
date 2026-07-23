@@ -60,6 +60,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--devices", type=int, default=1)
     parser.add_argument(
+        "--validation-only",
+        action="store_true",
+        help="Run five-fold CV validation without requiring the external cohort.",
+    )
+    parser.add_argument(
         "--precision",
         default="16-mixed",
         help="Lightning inference precision (default: 16-mixed for RTX 2080 Ti).",
@@ -229,6 +234,8 @@ def main() -> None:
             f"Fold {fold} validation: "
             f"{format_metrics(validation_result['metrics'])}"
         )
+        if args.validation_only:
+            continue
 
         # Keep this fold's training dataset as context for external inference.
         datamodule.setup("test")
@@ -248,6 +255,28 @@ def main() -> None:
             f"Fold {fold} external: "
             f"{format_metrics(external_result['metrics'])}"
         )
+
+    if args.validation_only:
+        validation_aggregate = concatenate_predictions(validation_results)
+        validation_aggregate["donor_id"] = [
+            donor_id
+            for fold_result in validation_results
+            for donor_id in fold_result["donor_id"]
+        ]
+        validation_aggregate["metrics"] = binary_metrics(validation_aggregate)
+        result = {
+            "seed": args.seed,
+            "validation": validation_results,
+            "validation_aggregate": validation_aggregate,
+        }
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(result, output_path)
+        print(
+            "Validation aggregate: "
+            f"{format_metrics(validation_aggregate['metrics'])}"
+        )
+        print(f"Saved five-fold validation predictions to {output_path}")
+        return
 
     external_donor_ids = external_results[0]["donor_id"]
     external_targets = external_results[0]["target"]

@@ -1,9 +1,15 @@
 model_src: src.models.baseline.BaseModel
 
-# Architecture v18 large-capacity ablation. Keep the synthetic generator,
+# Architecture v19 large-capacity configuration. Keep the synthetic generator,
 # aggregator semantics, objective, and optimization policy identical to the
 # 6.57M B200 baseline; only meta-classifier capacity is increased.
 input_dim: 512
+bag_centered_representation: true
+global_summary: centered_spread
+use_raw_mean_branch: false
+aggregator_covariance_sketch_dim: 64
+aggregator_covariance_mode: correlation
+aggregator_covariance_shrinkage: 0.1
 aggregator_num_slots: 12
 aggregator_num_density_slots: 8
 aggregator_context_samples_per_bag: 32
@@ -29,4 +35,6 @@ meta_routing_temperature: 0.5
 meta_class_memory_tokens: 16
 meta_rare_evidence_fractions: [0.01, 0.05, 0.10, 0.20]
 meta_fusion_residual_scale: 0.10
+meta_covariance_ridge_logit_scale: 2.0
+meta_covariance_residual_scale: 0.25
 num_classes: 2

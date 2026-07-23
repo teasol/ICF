@@ -6,9 +6,7 @@ input_dim: 512
 bag_centered_representation: true
 global_summary: centered_spread
 use_raw_mean_branch: false
-aggregator_covariance_sketch_dim: 64
-aggregator_covariance_mode: correlation
-aggregator_covariance_shrinkage: 0.1
+aggregator_covariance_sketch_dim: 32
 aggregator_num_slots: 12
 aggregator_num_density_slots: 8
 aggregator_context_samples_per_bag: 32

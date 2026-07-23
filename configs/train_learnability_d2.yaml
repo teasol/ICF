@@ -1,4 +1,6 @@
-base_config: train_learnability_d0.yaml
+base_config: train_learnability_c4_d.yaml
 data_overrides:
   dataset_kwargs:
-    donor_component_shift_scale: 0.12
+    donor_mixture_logit_scale: 0.65
+    return_oracle_diagnostics: true
+trainer: learnability_d20

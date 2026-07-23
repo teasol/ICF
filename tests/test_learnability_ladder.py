@@ -89,7 +89,9 @@ class ManifoldLadderTest(unittest.TestCase):
         mapped = generator._map_episode_manifold(
             z, torch.Generator().manual_seed(3), torch.device("cpu")
         )
-        torch.testing.assert_close(torch.cdist(z[0], z[0]), torch.cdist(mapped[0], mapped[0]))
+        torch.testing.assert_close(
+            torch.cdist(z[0], z[0]), torch.cdist(mapped[0], mapped[0])
+        )
 
     def test_binary_diagnostics_match_known_predictions(self):
         logits = torch.tensor([[2.0, 0.0], [0.0, 2.0], [0.0, 2.0], [2.0, 0.0]])
@@ -107,9 +109,7 @@ class OracleAbundanceTest(unittest.TestCase):
         abundance = torch.tensor([0.1, 0.8, 0.2, 0.7, 0.3, 0.6])
         labels = torch.tensor([0, 1, 0, 1, 0, 1])
         query = torch.tensor([4, 5])
-        expected = ModelInterface._fit_oracle_abundance_logits(
-            abundance, labels, query
-        )
+        expected = ModelInterface._fit_oracle_abundance_logits(abundance, labels, query)
         changed_query_labels = labels.clone()
         changed_query_labels[query] = 1 - changed_query_labels[query]
         actual = ModelInterface._fit_oracle_abundance_logits(
@@ -133,15 +133,14 @@ class OracleAbundanceTest(unittest.TestCase):
 
 class NuisanceResolvedConfigTest(unittest.TestCase):
     nuisance = {
-        "d0": (None, 0.0),
-        "d1": ("donor_shift_scale", 0.35),
-        "d2": ("donor_component_shift_scale", 0.12),
-        "d3": ("donor_mixture_logit_scale", 0.65),
-        "d4": ("shared_component_base_logit_scale", 0.70),
-        "d5": ("donor_shared_component_logit_scale", 0.70),
+        "d0": ("donor_shift_scale", 0.35),
+        "d1": ("donor_component_shift_scale", 0.12),
+        "d2": ("donor_mixture_logit_scale", 0.65),
+        "d3": ("shared_component_base_logit_scale", 0.70),
+        "d4": ("donor_shared_component_logit_scale", 0.70),
     }
 
-    def test_d_stages_differ_from_d0_only_in_selected_nuisance(self):
+    def test_d_stages_differ_only_in_selected_nuisance(self):
         root = Path(__file__).resolve().parents[1]
         configs = {
             stage: merge_train_config(
@@ -150,9 +149,7 @@ class NuisanceResolvedConfigTest(unittest.TestCase):
             for stage in self.nuisance
         }
         base = configs["d0"]
-        nuisance_keys = {
-            key for key, _ in self.nuisance.values() if key is not None
-        }
+        nuisance_keys = {key for key, _ in self.nuisance.values() if key is not None}
         for stage, (enabled_key, enabled_value) in self.nuisance.items():
             kwargs = configs[stage]["data"]["dataset_kwargs"]
             self.assertTrue(kwargs["return_oracle_diagnostics"])

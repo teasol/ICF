@@ -129,6 +129,8 @@ def merge_train_config(config_path: Path) -> dict[str, Any]:
     merged["data"] = deep_merge(merged["data"], config.get("data_overrides", {}))
     merged.pop("data_overrides", None)
     merged["model"] = resolve_config_group("model", config.get("model"))
+    merged["model"] = deep_merge(merged["model"], config.get("model_overrides", {}))
+    merged.pop("model_overrides", None)
     merged["optimizer"] = resolve_config_group("optimizer", config.get("optimizer"))
     merged["scheduler"] = resolve_config_group("scheduler", config.get("scheduler"))
     merged["trainer"] = resolve_config_group("trainer", config.get("trainer"))

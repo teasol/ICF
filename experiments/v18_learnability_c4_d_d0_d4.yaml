@@ -1,5 +1,5 @@
 schema_version: 1
-experiment: v18_learnability_d0_d5
+experiment: v18_learnability_c4_d_d0_d4
 architecture_version: 18
 status: frozen_baseline_candidate
 
@@ -39,13 +39,12 @@ common_conditions:
   oracle_diagnostics: true
   devices: 1
 
-result_table: results/v18/nuisance_ablation_d0_d5.csv
-human_readable_report: docs/nuisance_ablation_d0_d5.md
+result_table: results/v18/nuisance_ablation_c4_d_d0_d4.csv
+human_readable_report: docs/nuisance_ablation_c4_d_d0_d4.md
 
 stages:
-  d0:
-    config: configs/train_learnability_d0.yaml
-    historical_run_config: configs/train_learnability_c4_d.yaml
+  C4-D:
+    config: configs/train_learnability_c4_d.yaml
     nuisance: none
     wandb_run_id: n3vvqdfm
     wandb_url: https://wandb.ai/teasol/ICF/runs/n3vvqdfm
@@ -54,9 +53,9 @@ stages:
     checkpoint_sha256: 8c62ba8eb40c943b5c64021068323ddd7c4374b9237d2bccc9a374635778f1ae
     run_status: manually_stopped
     result: pass
-    caveat: The historical C4-D run predates oracle logging. D0 oracle metrics were recomputed separately and are reference-only.
-  d1:
-    config: configs/train_learnability_d1.yaml
+    caveat: The historical C4-D run predates oracle logging. C4-D oracle metrics were recomputed separately and are reference-only.
+  D0:
+    config: configs/train_learnability_d0.yaml
     nuisance: global_bag_shift
     nuisance_scale: 0.35
     wandb_run_id: 8un8ikl0
@@ -66,8 +65,8 @@ stages:
     checkpoint_sha256: 69d26f5550f8036f6528c8d0e8a8d1e78b17fd3e12d0798d3b8802888216bbfc
     run_status: completed
     result: fail
-  d2:
-    config: configs/train_learnability_d2.yaml
+  D1:
+    config: configs/train_learnability_d1.yaml
     nuisance: bag_component_shift
     nuisance_scale: 0.12
     wandb_run_id: lknvabxz
@@ -77,8 +76,8 @@ stages:
     checkpoint_sha256: f59b3a9a7ac6f04b99a106b5223f549d34d9bc8ffa91fb7e72d8451c78186a7c
     run_status: completed
     result: pass
-  d3:
-    config: configs/train_learnability_d3.yaml
+  D2:
+    config: configs/train_learnability_d2.yaml
     nuisance: response_shared_fraction_logit_noise
     nuisance_scale: 0.65
     wandb_run_id: 0uvxlmw8
@@ -88,8 +87,8 @@ stages:
     checkpoint_sha256: 2fb4f096a955749a2366fc1648791d4f46ca201d87910a67e6f8eee3724a7279
     run_status: completed
     result: pass
-  d4:
-    config: configs/train_learnability_d4.yaml
+  D3:
+    config: configs/train_learnability_d3.yaml
     nuisance: episode_common_shared_mixture_variation
     nuisance_scale: 0.70
     wandb_run_id: luleqpsa
@@ -99,8 +98,8 @@ stages:
     checkpoint_sha256: 4a9da342f4410cc8b2bb9a800fc00c61cfdbffcd6a7d8896c05b4a24a9039219
     run_status: completed
     result: pass
-  d5:
-    config: configs/train_learnability_d5.yaml
+  D4:
+    config: configs/train_learnability_d4.yaml
     nuisance: bag_specific_shared_mixture_variation
     nuisance_scale: 0.70
     wandb_run_id: sbuml2ru

@@ -1,4 +1,4 @@
-"""Lightning interface for the architecture-v18 class-memory classifier."""
+"""Lightning interface for the architecture-v19 class-memory classifier."""
 
 from __future__ import annotations
 
@@ -26,21 +26,23 @@ class ModelInterface(L.LightningModule):
         expected = getattr(self.model, "architecture_version", None)
         if version is None or expected is None or int(version.item()) != int(expected):
             raise RuntimeError(
-                "This checkpoint is incompatible with architecture v18. "
-                "Start a new run with hybrid anchors and class memory."
+                "Checkpoint architecture version is incompatible. "
+                f"Expected v{expected}, found "
+                f"{'missing' if version is None else int(version.item())}. "
+                "Start a new run instead of resuming."
             )
 
     def _raise_if_nonfinite_parameters(self, stage: str) -> None:
         named = list(self.named_parameters())
         tensors = [parameter for _, parameter in named]
-        if tensors and torch.stack(
-            [torch.isfinite(parameter).all() for parameter in tensors]
-        ).all():
+        if (
+            tensors
+            and torch.stack(
+                [torch.isfinite(parameter).all() for parameter in tensors]
+            ).all()
+        ):
             return
-        bad = [
-            name for name, parameter in named
-            if not torch.isfinite(parameter).all()
-        ]
+        bad = [name for name, parameter in named if not torch.isfinite(parameter).all()]
         raise RuntimeError(f"Non-finite parameters at {stage}: {bad}")
 
     def _raise_if_nonfinite_gradients(self, stage: str) -> None:
@@ -50,14 +52,14 @@ class ModelInterface(L.LightningModule):
             if parameter.grad is not None
         ]
         gradients = [gradient for _, gradient in named]
-        if gradients and torch.stack(
-            [torch.isfinite(gradient).all() for gradient in gradients]
-        ).all():
+        if (
+            gradients
+            and torch.stack(
+                [torch.isfinite(gradient).all() for gradient in gradients]
+            ).all()
+        ):
             return
-        bad = [
-            name for name, gradient in named
-            if not torch.isfinite(gradient).all()
-        ]
+        bad = [name for name, gradient in named if not torch.isfinite(gradient).all()]
         raise RuntimeError(f"Non-finite gradients at {stage}: {bad}")
 
     def on_train_start(self) -> None:
@@ -97,8 +99,7 @@ class ModelInterface(L.LightningModule):
             )
             for episode in range(x.shape[0]):
                 auxiliary = {
-                    name: value[episode]
-                    for name, value in batched_auxiliary.items()
+                    name: value[episode] for name, value in batched_auxiliary.items()
                 }
                 episode_loss, terms = self._losses_from_output(
                     logits[episode],
@@ -119,15 +120,22 @@ class ModelInterface(L.LightningModule):
             name: sum(
                 values[name] * count
                 for values, count in zip(episode_terms, query_counts)
-            ) / total_queries
+            )
+            / total_queries
             for name in episode_terms[0]
         }
-        logged_loss = sum(
-            value * count for value, count in zip(losses, query_counts)
-        ) / total_queries
+        logged_loss = (
+            sum(value * count for value, count in zip(losses, query_counts))
+            / total_queries
+        )
         self.log(
-            "train_loss", logged_loss, on_step=False, on_epoch=True,
-            prog_bar=True, batch_size=total_queries, sync_dist=True,
+            "train_loss",
+            logged_loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+            batch_size=total_queries,
+            sync_dist=True,
         )
         self._log_loss_components("train", terms, total_queries)
         return loss
@@ -167,15 +175,9 @@ class ModelInterface(L.LightningModule):
         }
 
     def _evaluation_step(self, batch: Any, stage: str) -> torch.Tensor:
-        x, y, mask_index, oracle_abundance = self._unpack_evaluation_batch(
-            batch, stage
-        )
-        logits, auxiliary = self.model(
-            x, y, mask_index, return_auxiliary=True
-        )
-        loss, terms = self._losses_from_output(
-            logits, auxiliary, y[mask_index]
-        )
+        x, y, mask_index, oracle_abundance = self._unpack_evaluation_batch(batch, stage)
+        logits, auxiliary = self.model(x, y, mask_index, return_auxiliary=True)
+        loss, terms = self._losses_from_output(logits, auxiliary, y[mask_index])
         self.log(
             f"{stage}_loss",
             loss,
@@ -234,9 +236,11 @@ class ModelInterface(L.LightningModule):
             raise ValueError(f"A {stage} episode must contain at least one query.")
         oracle_abundance = None
         if len(batch) == 4:
-            oracle_abundance = torch.as_tensor(
-                batch[3], device=y.device, dtype=torch.float32
-            ).flatten().detach()
+            oracle_abundance = (
+                torch.as_tensor(batch[3], device=y.device, dtype=torch.float32)
+                .flatten()
+                .detach()
+            )
             if oracle_abundance.shape != y.shape:
                 raise ValueError("Oracle abundance must contain one scalar per bag.")
         return x, y, index, oracle_abundance
@@ -266,8 +270,12 @@ class ModelInterface(L.LightningModule):
             raise ValueError(f"Episode labels must be in [0, {num_classes - 1}].")
         class_counts = torch.bincount(y.long(), minlength=num_classes)
         if torch.any(class_counts == 0):
-            missing = torch.nonzero(class_counts == 0, as_tuple=False).flatten().tolist()
-            raise ValueError(f"Every episode must contain all classes; missing {missing}.")
+            missing = (
+                torch.nonzero(class_counts == 0, as_tuple=False).flatten().tolist()
+            )
+            raise ValueError(
+                f"Every episode must contain all classes; missing {missing}."
+            )
 
         max_removable = y.numel() - num_classes
         max_targets = min(max_targets, max_removable)
@@ -279,7 +287,9 @@ class ModelInterface(L.LightningModule):
         if num_targets_override is not None:
             num_targets = int(num_targets_override)
             if not min_targets <= num_targets <= max_targets:
-                raise ValueError("The shared query count is outside the configured range.")
+                raise ValueError(
+                    "The shared query count is outside the configured range."
+                )
         elif min_targets == max_targets:
             num_targets = min_targets
         else:
@@ -323,9 +333,7 @@ class ModelInterface(L.LightningModule):
         y: torch.Tensor,
         mask_index: torch.Tensor,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        logits, auxiliary = self.model(
-            x, y, mask_index, return_auxiliary=True
-        )
+        logits, auxiliary = self.model(x, y, mask_index, return_auxiliary=True)
         return self._losses_from_output(logits, auxiliary, y[mask_index])
 
     def _losses_from_output(
@@ -348,10 +356,14 @@ class ModelInterface(L.LightningModule):
         terms.update(self._binary_query_diagnostics(logits, targets))
 
         population_weights = auxiliary["population_slot_weights"].float()
-        routing_entropy = -(
-            population_weights.clamp_min(1e-12)
-            * population_weights.clamp_min(1e-12).log()
-        ).sum(dim=-1).mean()
+        routing_entropy = (
+            -(
+                population_weights.clamp_min(1e-12)
+                * population_weights.clamp_min(1e-12).log()
+            )
+            .sum(dim=-1)
+            .mean()
+        )
         routing_sparsity_weight = float(
             self.hparams.get("routing_sparsity_weight", 0.0)
         )
@@ -362,24 +374,32 @@ class ModelInterface(L.LightningModule):
         # slot from monopolizing an entire episode. KL(mean_usage || uniform)
         # is zero only when the episode-level slot utilization is balanced.
         routing_balance_loss = self._routing_balance_loss(population_weights)
-        routing_balance_weight = float(
-            self.hparams.get("routing_balance_weight", 0.0)
-        )
+        routing_balance_weight = float(self.hparams.get("routing_balance_weight", 0.0))
         total = total + routing_balance_weight * routing_balance_loss
         terms["routing_balance_loss"] = routing_balance_loss
-        for path in ("mean", "population", "tail"):
-            terms[f"{path}_logit_std"] = auxiliary[
-                f"{path}_logits"
-            ].float().std(unbiased=False)
-        terms["population_residual_scale"] = auxiliary[
-            "population_residual_scale"
+        for path in ("global_shape", "covariance", "population", "tail"):
+            terms[f"{path}_logit_std"] = (
+                auxiliary[f"{path}_logits"].float().std(unbiased=False)
+            )
+        terms["abundance_ridge_logit_std"] = auxiliary[
+            "abundance_ridge_logits"
+        ].float().std(unbiased=False)
+        terms["population_attention_logit_std"] = auxiliary[
+            "population_attention_logits"
+        ].float().std(unbiased=False)
+        terms["abundance_ridge_scale"] = auxiliary["abundance_ridge_scale"]
+        terms["covariance_ridge_scale"] = auxiliary["covariance_ridge_scale"]
+        terms["covariance_residual_scale"] = auxiliary["covariance_residual_scale"]
+        terms["population_attention_residual_scale"] = auxiliary[
+            "population_attention_residual_scale"
         ]
+        terms["population_residual_scale"] = auxiliary["population_residual_scale"]
         terms["tail_residual_scale"] = auxiliary["tail_residual_scale"]
         terms["fusion_residual_scale"] = auxiliary["fusion_residual_scale"]
         rare_weights = auxiliary["tail_weights"].float().clamp_min(1e-12)
-        terms["rare_fraction_entropy"] = -(
-            rare_weights * rare_weights.log()
-        ).sum(dim=-1).mean()
+        terms["rare_fraction_entropy"] = (
+            -(rare_weights * rare_weights.log()).sum(dim=-1).mean()
+        )
         return total, terms
 
     @staticmethod
@@ -392,9 +412,7 @@ class ModelInterface(L.LightningModule):
             return {}
         targets = targets.long()
         positive_fraction = targets.float().mean()
-        majority_accuracy = torch.maximum(
-            positive_fraction, 1.0 - positive_fraction
-        )
+        majority_accuracy = torch.maximum(positive_fraction, 1.0 - positive_fraction)
         eps = torch.finfo(logits.float().dtype).eps
         prior = positive_fraction.clamp(eps, 1.0 - eps)
         empirical_prior_ce = -(
@@ -451,9 +469,7 @@ class ModelInterface(L.LightningModule):
         design = torch.stack((context_feature, torch.ones_like(context_feature)), dim=1)
         target = context_labels.float().mul(2).sub(1)
         penalty = torch.diag(
-            torch.tensor(
-                [ridge_lambda, 0.0], device=design.device, dtype=design.dtype
-            )
+            torch.tensor([ridge_lambda, 0.0], device=design.device, dtype=design.dtype)
         )
         # Keep the tiny ridge solve in FP32 even when validation runs under
         # BF16 autocast; oracle diagnostics never participate in optimization.
@@ -474,9 +490,7 @@ class ModelInterface(L.LightningModule):
         mask_index: torch.Tensor,
         model_auroc: torch.Tensor,
     ) -> dict[str, torch.Tensor]:
-        oracle_logits = cls._fit_oracle_abundance_logits(
-            abundance, labels, mask_index
-        )
+        oracle_logits = cls._fit_oracle_abundance_logits(abundance, labels, mask_index)
         query_labels = labels.detach().long()[mask_index]
         diagnostics = cls._binary_query_diagnostics(oracle_logits, query_labels)
         class0 = abundance.detach().float()[mask_index][query_labels == 0]
@@ -492,9 +506,9 @@ class ModelInterface(L.LightningModule):
             snr = abundance.detach().float().sum() * 0
         oracle_auroc = diagnostics["auroc"]
         return {
-            "oracle_abundance_accuracy": (
-                oracle_logits.argmax(dim=-1) == query_labels
-            ).float().mean(),
+            "oracle_abundance_accuracy": (oracle_logits.argmax(dim=-1) == query_labels)
+            .float()
+            .mean(),
             "oracle_abundance_balanced_accuracy": diagnostics["balanced_accuracy"],
             "oracle_abundance_auroc": oracle_auroc,
             "oracle_abundance_ce": F.cross_entropy(oracle_logits, query_labels),
@@ -556,9 +570,7 @@ class ModelInterface(L.LightningModule):
             self.parameters(), **self.hparams.get("optimizer_kwargs", {})
         )
         scheduler_cls = self._scheduler_class()
-        scheduler = scheduler_cls(
-            optimizer, **self.hparams.get("scheduler_kwargs", {})
-        )
+        scheduler = scheduler_cls(optimizer, **self.hparams.get("scheduler_kwargs", {}))
         return {
             "optimizer": optimizer,
             "lr_scheduler": {

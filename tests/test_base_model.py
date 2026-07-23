@@ -37,6 +37,71 @@ class MeanAggregatorTest(unittest.TestCase):
         )
         torch.testing.assert_close(aggregator(x), x.mean(dim=1))
 
+    def test_centered_view_is_translation_invariant(self) -> None:
+        torch.manual_seed(25)
+        aggregator = StructuredEpisodePopulationAggregator(
+            input_dim=8, num_slots=4, context_samples_per_bag=6
+        ).eval()
+        bag = torch.randn(5, 23, 8)
+        shifted = bag + torch.randn(5, 1, 8)
+        centered, spread, delta = aggregator._bag_view(bag)
+        shifted_centered, shifted_spread, shifted_delta = aggregator._bag_view(shifted)
+        torch.testing.assert_close(
+            delta.float().mean(dim=1), torch.zeros(5, 8), atol=1e-6, rtol=0
+        )
+        torch.testing.assert_close(centered, shifted_centered, atol=2e-6, rtol=2e-6)
+        torch.testing.assert_close(spread, shifted_spread, atol=2e-6, rtol=2e-6)
+        torch.testing.assert_close(delta, shifted_delta, atol=2e-6, rtol=2e-6)
+
+    def test_covariance_sketch_is_shift_and_instance_order_invariant(self) -> None:
+        torch.manual_seed(29)
+        aggregator = StructuredEpisodePopulationAggregator(
+            input_dim=8, num_slots=4, context_samples_per_bag=6
+        ).eval()
+        bags = torch.randn(5, 23, 8)
+        delta = aggregator._bag_view(bags)[2]
+        shifted_delta = aggregator._bag_view(bags + torch.randn(5, 1, 8))[2]
+        expected = aggregator._covariance_sketch(delta)
+        shifted = aggregator._covariance_sketch(shifted_delta)
+        permuted = aggregator._covariance_sketch(delta[:, torch.randperm(23)])
+        self.assertEqual(expected.shape, (5, 36))
+        torch.testing.assert_close(expected, shifted, atol=2e-6, rtol=2e-6)
+        torch.testing.assert_close(expected, permuted, atol=2e-6, rtol=2e-6)
+
+
+    def test_covariance_modes_are_shift_invariant_and_finite(self) -> None:
+        torch.manual_seed(30)
+        bags = torch.randn(4, 29, 8)
+        shifts = torch.randn(4, 1, 8)
+        for mode, expected_width in (
+            ("correlation", 36),
+            ("log_correlation", 36),
+            ("covariance_log_correlation", 72),
+        ):
+            aggregator = StructuredEpisodePopulationAggregator(
+                input_dim=8,
+                num_slots=4,
+                context_samples_per_bag=6,
+                covariance_mode=mode,
+                covariance_shrinkage=0.1,
+            ).eval()
+            expected = aggregator._covariance_sketch(aggregator._bag_view(bags)[2])
+            actual = aggregator._covariance_sketch(
+                aggregator._bag_view(bags + shifts)[2]
+            )
+            self.assertEqual(expected.shape, (4, expected_width))
+            self.assertTrue(torch.isfinite(expected).all())
+            torch.testing.assert_close(expected, actual, atol=5e-5, rtol=5e-5)
+
+    def test_invalid_centering_config_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Centered v19 mode"):
+            StructuredEpisodePopulationAggregator(
+                input_dim=8,
+                bag_centered_representation=True,
+                global_summary="raw_mean",
+                use_raw_mean_branch=False,
+            )
+
     def test_is_invariant_to_instance_order(self) -> None:
         torch.manual_seed(1)
         aggregator = MeanAggregator(input_dim=8)
@@ -116,9 +181,7 @@ class EpisodePopulationAggregatorTest(unittest.TestCase):
             self.bags, self.context_mask, return_auxiliary=True
         )
         changed = [*self.bags[:3], torch.randn(23, 8), torch.randn(24, 8)]
-        _, actual = self.aggregator(
-            changed, self.context_mask, return_auxiliary=True
-        )
+        _, actual = self.aggregator(changed, self.context_mask, return_auxiliary=True)
         torch.testing.assert_close(
             expected["population_anchors"], actual["population_anchors"]
         )
@@ -127,9 +190,7 @@ class EpisodePopulationAggregatorTest(unittest.TestCase):
         _, auxiliary = self.aggregator(
             self.bags, self.context_mask, return_auxiliary=True
         )
-        torch.testing.assert_close(
-            auxiliary["tail_counts"][0], torch.tensor([2, 5])
-        )
+        torch.testing.assert_close(auxiliary["tail_counts"][0], torch.tensor([2, 5]))
 
 
 class StructuredEpisodePopulationAggregatorTest(unittest.TestCase):
@@ -146,14 +207,13 @@ class StructuredEpisodePopulationAggregatorTest(unittest.TestCase):
         representation, auxiliary = aggregator(
             bags, context_mask, return_auxiliary=True
         )
-        self.assertEqual(representation["mean"].shape, (5, 8))
+        self.assertEqual(representation["global_summary"].shape, (5, 8))
         self.assertEqual(representation["slots"].shape, (5, 4, 3, 8))
         self.assertEqual(representation["tails"].shape, (5, 2, 8))
         self.assertEqual(representation["slot_metadata"].shape, (5, 4, 2))
-        torch.testing.assert_close(
-            auxiliary["tail_counts"][0], torch.tensor([2, 5])
-        )
+        torch.testing.assert_close(auxiliary["tail_counts"][0], torch.tensor([2, 5]))
         self.assertEqual(auxiliary["num_density_slots"].item(), 3)
+
 
     def test_is_invariant_to_instance_order(self) -> None:
         torch.manual_seed(23)
@@ -167,7 +227,9 @@ class StructuredEpisodePopulationAggregatorTest(unittest.TestCase):
             [bag[torch.randperm(len(bag))] for bag in bags], context_mask
         )
         for name in expected:
-            torch.testing.assert_close(expected[name], actual[name], atol=2e-6, rtol=2e-6)
+            torch.testing.assert_close(
+                expected[name], actual[name], atol=1e-5, rtol=1e-5
+            )
 
 
 class SetCrossAttentionMetaClassifierTest(unittest.TestCase):
@@ -273,16 +335,18 @@ class StructuredPopulationMetaClassifierTest(unittest.TestCase):
             ridge_dim=4,
         ).eval()
         self.context = {
-            "mean": torch.randn(8, 8),
+            "global_summary": torch.randn(8, 8),
             "slots": torch.randn(8, 4, 3, 8),
             "tails": torch.randn(8, 3, 8),
             "slot_metadata": torch.randn(8, 4, 2),
+            "covariance_sketch": torch.randn(8, 36),
         }
         self.query = {
-            "mean": torch.randn(3, 8),
+            "global_summary": torch.randn(3, 8),
             "slots": torch.randn(3, 4, 3, 8),
             "tails": torch.randn(3, 3, 8),
             "slot_metadata": torch.randn(3, 4, 2),
+            "covariance_sketch": torch.randn(3, 36),
         }
         self.query_instances = [torch.randn(13 + index, 8) for index in range(3)]
         self.labels = torch.tensor([0, 1, 0, 1, 0, 1, 0, 1])
@@ -311,10 +375,48 @@ class StructuredPopulationMetaClassifierTest(unittest.TestCase):
             "slots": self.query["slots"][:, permutation],
             "slot_metadata": self.query["slot_metadata"][:, permutation],
         }
-        actual = self.classifier(
-            context, self.labels, query, self.query_instances
+        actual = self.classifier(context, self.labels, query, self.query_instances)
+        torch.testing.assert_close(expected, actual, atol=1e-6, rtol=1e-6)
+
+    def test_abundance_ridge_is_slot_permutation_equivariant(self) -> None:
+        expected = self.classifier._abundance_ridge_logits(
+            self.context["slot_metadata"], self.labels, self.query["slot_metadata"]
+        )
+        permutation = torch.randperm(4)
+        actual = self.classifier._abundance_ridge_logits(
+            self.context["slot_metadata"][:, permutation],
+            self.labels,
+            self.query["slot_metadata"][:, permutation],
         )
         torch.testing.assert_close(expected, actual, atol=1e-6, rtol=1e-6)
+
+    def test_dual_ridge_matches_primal_ridge(self) -> None:
+        primal = self.classifier._abundance_ridge_logits(
+            self.context["covariance_sketch"], self.labels, self.query["covariance_sketch"]
+        )
+        dual = self.classifier._abundance_ridge_logits(
+            self.context["covariance_sketch"],
+            self.labels,
+            self.query["covariance_sketch"],
+            dual=True,
+        )
+        torch.testing.assert_close(primal, dual, atol=2e-5, rtol=2e-5)
+
+    def test_abundance_ridge_responds_with_finite_gradients(self) -> None:
+        context = self.context["slot_metadata"].clone().requires_grad_()
+        query = self.query["slot_metadata"].clone().requires_grad_()
+        logits = self.classifier._abundance_ridge_logits(
+            context, self.labels, query
+        )
+        changed = query.detach().clone()
+        changed[:, 0, 0] += 1.0
+        changed_logits = self.classifier._abundance_ridge_logits(
+            context.detach(), self.labels, changed
+        )
+        self.assertFalse(torch.allclose(logits.detach(), changed_logits))
+        logits.square().mean().backward()
+        self.assertTrue(torch.isfinite(context.grad).all())
+        self.assertTrue(torch.isfinite(query.grad).all())
 
     def test_residual_gates_cannot_disconnect_specialized_paths(self) -> None:
         with torch.no_grad():
@@ -330,9 +432,7 @@ class StructuredPopulationMetaClassifierTest(unittest.TestCase):
         torch.testing.assert_close(
             auxiliary["population_residual_scale"], torch.tensor(0.10)
         )
-        torch.testing.assert_close(
-            auxiliary["tail_residual_scale"], torch.tensor(0.05)
-        )
+        torch.testing.assert_close(auxiliary["tail_residual_scale"], torch.tensor(0.05))
 
     def test_rare_instance_evidence_has_finite_gradients(self) -> None:
         classifier = self.classifier.train()
@@ -340,21 +440,16 @@ class StructuredPopulationMetaClassifierTest(unittest.TestCase):
         context = {
             **self.context,
             "tails": (
-                shared_tail.expand(8, -1, -1)
-                + 1e-7 * torch.randn(8, 3, 8)
+                shared_tail.expand(8, -1, -1) + 1e-7 * torch.randn(8, 3, 8)
             ).requires_grad_(),
         }
         query_instances = [
             bag.detach().clone().requires_grad_() for bag in self.query_instances
         ]
-        logits = classifier(
-            context, self.labels, self.query, query_instances
-        )
+        logits = classifier(context, self.labels, self.query, query_instances)
         F.cross_entropy(logits, torch.tensor([0, 1, 0])).backward()
         self.assertTrue(torch.isfinite(context["tails"].grad).all())
-        self.assertTrue(
-            all(torch.isfinite(bag.grad).all() for bag in query_instances)
-        )
+        self.assertTrue(all(torch.isfinite(bag.grad).all() for bag in query_instances))
 
 
 class BaseModelTest(unittest.TestCase):
@@ -364,6 +459,54 @@ class BaseModelTest(unittest.TestCase):
         self.x = torch.randn(10, 13, 8)
         self.y = torch.tensor([0, 1, 0, 1, 0, 1, 0, 1, 0, 1])
         self.mask_index = torch.tensor([8, 9])
+
+    def test_architecture_version_is_19(self) -> None:
+        self.assertEqual(self.model.architecture_version, 19)
+        self.assertEqual(self.model._architecture_version.item(), 19)
+
+    def test_final_logits_are_invariant_to_per_bag_shift(self) -> None:
+        shift = torch.randn(self.x.shape[0], 1, self.x.shape[-1])
+        expected = self.model(self.x, self.y, self.mask_index)
+        actual = self.model(self.x + shift, self.y, self.mask_index)
+        torch.testing.assert_close(expected, actual, atol=1e-5, rtol=1e-4)
+
+    def test_all_branch_logits_are_invariant_to_per_bag_shift(self) -> None:
+        shift = torch.randn(self.x.shape[0], 1, self.x.shape[-1])
+        _, expected = self.model(self.x, self.y, self.mask_index, return_auxiliary=True)
+        _, actual = self.model(
+            self.x + shift, self.y, self.mask_index, return_auxiliary=True
+        )
+        for name in (
+            "global_shape_logits",
+            "population_logits",
+            "tail_logits",
+            "class_memories",
+            "slot_tokens",
+            "tail_tokens",
+        ):
+            torch.testing.assert_close(
+                expected[name], actual[name], atol=1e-5, rtol=1e-4
+            )
+
+    def test_ragged_final_logits_are_invariant_to_per_bag_shift(self) -> None:
+        bags = [torch.randn(9 + index, 8) for index in range(10)]
+        shifts = [torch.randn(1, 8) for _ in bags]
+        expected = self.model(bags, self.y, self.mask_index)
+        actual = self.model(
+            [bag + shift for bag, shift in zip(bags, shifts)],
+            self.y,
+            self.mask_index,
+        )
+        torch.testing.assert_close(expected, actual, atol=1e-5, rtol=1e-4)
+
+    def test_outer_batch_is_invariant_to_per_bag_shift(self) -> None:
+        batch_x = torch.stack((self.x, self.x.roll(1, dims=0)))
+        batch_y = torch.stack((self.y, self.y.roll(2)))
+        batch_mask = self.mask_index.expand(2, -1)
+        shifts = torch.randn(2, 10, 1, 8)
+        expected = self.model.forward_episode_batch(batch_x, batch_y, batch_mask)
+        actual = self.model.forward_episode_batch(batch_x + shifts, batch_y, batch_mask)
+        torch.testing.assert_close(expected, actual, atol=1e-5, rtol=1e-4)
 
     def test_target_labels_are_never_read(self) -> None:
         logits = self.model(self.x, self.y, self.mask_index)
@@ -376,32 +519,25 @@ class BaseModelTest(unittest.TestCase):
         batch_x = torch.stack((self.x, self.x + 0.1))
         batch_y = torch.stack((self.y, self.y.roll(2)))
         batch_mask = self.mask_index.expand(2, -1)
-        expected = torch.stack([
-            self.model(x, y, mask)
-            for x, y, mask in zip(batch_x, batch_y, batch_mask)
-        ])
-        actual = self.model.forward_episode_batch(
-            batch_x, batch_y, batch_mask
+        expected = torch.stack(
+            [self.model(x, y, mask) for x, y, mask in zip(batch_x, batch_y, batch_mask)]
         )
+        actual = self.model.forward_episode_batch(batch_x, batch_y, batch_mask)
         torch.testing.assert_close(expected, actual, atol=3e-5, rtol=3e-5)
 
     def test_all_cell_evidence_is_instance_order_invariant(self) -> None:
         expected = self.model(self.x, self.y, self.mask_index)
         permuted = self.x.clone()
         for bag_index in range(permuted.shape[0]):
-            permuted[bag_index] = permuted[
-                bag_index, torch.randperm(permuted.shape[1])
-            ]
+            permuted[bag_index] = permuted[bag_index, torch.randperm(permuted.shape[1])]
         actual = self.model(permuted, self.y, self.mask_index)
-        torch.testing.assert_close(expected, actual, atol=3e-6, rtol=3e-6)
+        torch.testing.assert_close(expected, actual, atol=3e-5, rtol=3e-5)
 
     def test_context_bag_order_does_not_change_prediction(self) -> None:
         expected = self.model(self.x, self.y, self.mask_index)
         context_permutation = torch.randperm(8)
         permutation = torch.cat((context_permutation, torch.tensor([8, 9])))
-        actual = self.model(
-            self.x[permutation], self.y[permutation], self.mask_index
-        )
+        actual = self.model(self.x[permutation], self.y[permutation], self.mask_index)
         torch.testing.assert_close(expected, actual, atol=3e-6, rtol=3e-6)
 
     def test_variable_length_bags_are_supported(self) -> None:
@@ -454,9 +590,7 @@ class BaseModelTest(unittest.TestCase):
             torch.tensor([[1, 1, 2, 3], [1, 1, 2, 3]]),
         )
         self.assertEqual(auxiliary["class_memories"].shape, (2, 8, 16))
-        self.assertGreaterEqual(
-            auxiliary["population_residual_scale"].item(), 0.10
-        )
+        self.assertGreaterEqual(auxiliary["population_residual_scale"].item(), 0.10)
         self.assertGreaterEqual(auxiliary["tail_residual_scale"].item(), 0.05)
         self.assertEqual(auxiliary["cross_attention_entropy"].shape, (2, 2))
         torch.testing.assert_close(

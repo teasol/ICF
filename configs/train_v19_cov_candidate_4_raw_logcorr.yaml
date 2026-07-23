@@ -1,0 +1,5 @@
+base_config: train_learnability_d0.yaml
+model_overrides:
+  aggregator_covariance_sketch_dim: 64
+  aggregator_covariance_mode: covariance_log_correlation
+  aggregator_covariance_shrinkage: 0.1

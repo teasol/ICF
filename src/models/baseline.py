@@ -232,10 +232,7 @@ class EpisodePopulationAggregator(nn.Module):
             nn.GELU(),
             nn.Linear(state_dim, state_dim),
         )
-        population_dim = (
-            num_slots * (state_dim + 2)
-            + len(fractions) * state_dim
-        )
+        population_dim = num_slots * (state_dim + 2) + len(fractions) * state_dim
         self.population_projection = nn.Sequential(
             nn.LayerNorm(population_dim),
             nn.Linear(population_dim, input_dim),
@@ -261,9 +258,7 @@ class EpisodePopulationAggregator(nn.Module):
         if not bags:
             raise ValueError("An episode must contain at least one bag.")
         if any(
-            bag.ndim != 2
-            or bag.shape[0] == 0
-            or bag.shape[1] != self.input_dim
+            bag.ndim != 2 or bag.shape[0] == 0 or bag.shape[1] != self.input_dim
             for bag in bags
         ):
             raise ValueError(
@@ -279,12 +274,16 @@ class EpisodePopulationAggregator(nn.Module):
         center = F.normalize(normalized.mean(dim=0, keepdim=True), dim=-1)
         centrality = (normalized * center).sum(dim=-1)
         order = torch.argsort(centrality)
-        positions = torch.linspace(
-            0,
-            bag.shape[0] - 1,
-            self.context_samples_per_bag,
-            device=bag.device,
-        ).round().long()
+        positions = (
+            torch.linspace(
+                0,
+                bag.shape[0] - 1,
+                self.context_samples_per_bag,
+                device=bag.device,
+            )
+            .round()
+            .long()
+        )
         return bag[order[positions]]
 
     def _context_anchors(
@@ -301,7 +300,9 @@ class EpisodePopulationAggregator(nn.Module):
             dim=0,
         )
         if candidates.shape[0] < self.num_slots:
-            raise ValueError("Context does not contain enough cells for population slots.")
+            raise ValueError(
+                "Context does not contain enough cells for population slots."
+            )
         normalized = F.normalize(candidates.float(), dim=-1)
         center = F.normalize(normalized.mean(dim=0, keepdim=True), dim=-1)
         first = torch.argmin((normalized * center).sum(dim=-1))
@@ -345,9 +346,9 @@ class EpisodePopulationAggregator(nn.Module):
             proportion = mass / bag.shape[0]
             slot_mean = (assignment.T @ bag) / mass.unsqueeze(-1)
             state = self.state_projection(slot_mean - anchors)
-            dispersion = (
-                assignment * (1.0 - similarity).to(assignment.dtype)
-            ).sum(dim=0) / mass
+            dispersion = (assignment * (1.0 - similarity).to(assignment.dtype)).sum(
+                dim=0
+            ) / mass
 
             nearest_similarity, nearest_slot = similarity.max(dim=-1)
             novelty = 1.0 - nearest_similarity
@@ -417,12 +418,32 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         slot_rare_fraction: float = 0.05,
         tail_fractions: Sequence[float] = (0.01, 0.05, 0.15),
         min_tail_instances: int = 1,
+        bag_centered_representation: bool = True,
+        global_summary: str = "centered_spread",
+        use_raw_mean_branch: bool = False,
+        covariance_sketch_dim: int | None = None,
+        covariance_mode: str = "covariance",
+        covariance_shrinkage: float = 0.0,
     ) -> None:
         # Deliberately initialize nn.Module directly: anchor construction is
         # inherited, while the v13 compressed projections are not retained.
         nn.Module.__init__(self)
+        if covariance_sketch_dim is None:
+            covariance_sketch_dim = min(32, input_dim)
         if min(input_dim, num_slots, context_samples_per_bag) < 1:
             raise ValueError("Structured aggregator dimensions must be positive.")
+        if not 1 <= covariance_sketch_dim <= input_dim:
+            raise ValueError("covariance_sketch_dim must be in [1, input_dim].")
+        covariance_modes = {
+            "covariance",
+            "correlation",
+            "log_correlation",
+            "covariance_log_correlation",
+        }
+        if covariance_mode not in covariance_modes:
+            raise ValueError(f"Unsupported covariance_mode: {covariance_mode}")
+        if not 0.0 <= covariance_shrinkage < 1.0:
+            raise ValueError("covariance_shrinkage must be in [0, 1).")
         if num_density_slots is None:
             num_density_slots = min(8, max(1, round(2 * num_slots / 3)))
         if not 1 <= num_density_slots <= num_slots:
@@ -447,8 +468,53 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         self.density_temperature = float(density_temperature)
         self.slot_rare_fraction = float(slot_rare_fraction)
         self.tail_fractions = fractions
+        if bag_centered_representation:
+            if global_summary != "centered_spread" or use_raw_mean_branch:
+                raise ValueError(
+                    "Centered v19 mode requires a centered spread summary "
+                    "and use_raw_mean_branch=False."
+                )
+        elif global_summary != "raw_mean" or not use_raw_mean_branch:
+            raise ValueError(
+                "Raw-mean diagnostic mode requires global_summary=raw_mean "
+                "and use_raw_mean_branch=True."
+            )
         self.min_tail_instances = int(min_tail_instances)
         self.slot_statistic_count = 3
+        self.bag_centered_representation = bool(bag_centered_representation)
+        self.global_summary = str(global_summary)
+        self.use_raw_mean_branch = bool(use_raw_mean_branch)
+        self.covariance_sketch_dim = int(covariance_sketch_dim)
+        self.covariance_mode = str(covariance_mode)
+        self.covariance_shrinkage = float(covariance_shrinkage)
+        candidate_index = torch.arange(
+            1, self.context_samples_per_bag + 1, dtype=torch.float32
+        )[:, None]
+        feature_index = torch.arange(1, self.input_dim + 1, dtype=torch.float32)[
+            None, :
+        ]
+        candidate_directions = torch.sin(
+            0.017 * candidate_index * feature_index
+        ) + torch.cos(0.013 * (candidate_index + 1) * feature_index)
+        self.register_buffer(
+            "_candidate_directions",
+            F.normalize(candidate_directions, dim=-1, eps=1e-6),
+            persistent=False,
+        )
+        covariance_index = torch.arange(
+            1, self.covariance_sketch_dim + 1, dtype=torch.float32
+        )[None, :]
+        covariance_directions = torch.sin(
+            0.019 * feature_index.T * covariance_index
+        ) + torch.cos(0.011 * (feature_index.T + 1) * covariance_index)
+        covariance_basis = torch.linalg.qr(
+            covariance_directions, mode="reduced"
+        ).Q
+        triangle = torch.triu_indices(
+            self.covariance_sketch_dim, self.covariance_sketch_dim
+        )
+        self.register_buffer("_covariance_projection", covariance_basis, persistent=False)
+        self.register_buffer("_covariance_triangle", triangle, persistent=False)
         self.center_slot_encoder = self._make_slot_encoder(input_dim)
         self.spread_slot_encoder = self._make_slot_encoder(input_dim)
         self.rare_slot_encoder = self._make_slot_encoder(input_dim)
@@ -476,6 +542,73 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             nn.Linear(input_dim, input_dim),
         )
 
+    def _bag_view(
+        self, bag: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return classification instances, summary, and centered deltas."""
+        bag_mean = bag.mean(dim=-2, keepdim=True)
+        centered_delta = bag - bag_mean
+        global_spread = torch.sqrt(
+            centered_delta.float().square().mean(dim=-2) + 1e-6
+        )
+        if self.bag_centered_representation:
+            classification_instances = F.normalize(
+                centered_delta.float(), dim=-1, eps=1e-6
+            ).to(bag.dtype)
+            summary = global_spread.to(bag.dtype)
+        else:
+            classification_instances = bag
+            summary = bag_mean.squeeze(-2)
+        return classification_instances, summary, centered_delta
+
+    def _covariance_sketch(self, centered_delta: torch.Tensor) -> torch.Tensor:
+        """Return a configurable translation-invariant second-moment feature."""
+        values = centered_delta.float()
+        projected = values @ self._covariance_projection.float()
+        covariance = projected.transpose(-1, -2) @ projected
+        covariance = covariance / projected.shape[-2]
+        row, column = self._covariance_triangle
+        raw_feature = covariance[..., row, column]
+        if self.covariance_mode == "covariance":
+            return raw_feature.to(centered_delta.dtype)
+
+        diagonal = covariance.diagonal(dim1=-2, dim2=-1).clamp_min(1e-6)
+        inverse_scale = diagonal.rsqrt()
+        correlation = (
+            covariance * inverse_scale.unsqueeze(-1) * inverse_scale.unsqueeze(-2)
+        )
+        if self.covariance_shrinkage:
+            identity = torch.eye(
+                self.covariance_sketch_dim,
+                device=correlation.device,
+                dtype=correlation.dtype,
+            )
+            correlation = (
+                (1.0 - self.covariance_shrinkage) * correlation
+                + self.covariance_shrinkage * identity
+            )
+        if self.covariance_mode == "correlation":
+            return correlation[..., row, column].to(centered_delta.dtype)
+
+        eigenvalues, eigenvectors = torch.linalg.eigh(correlation.float())
+        log_values = eigenvalues.clamp_min(1e-4).log()
+        log_correlation = (eigenvectors * log_values.unsqueeze(-2)) @ eigenvectors.transpose(-1, -2)
+        log_feature = log_correlation[..., row, column]
+        if self.covariance_mode == "log_correlation":
+            return log_feature.to(centered_delta.dtype)
+        return torch.cat((raw_feature, log_feature), dim=-1).to(centered_delta.dtype)
+
+
+    def _population_candidates(self, bag: torch.Tensor) -> torch.Tensor:
+        """Build stable, order-invariant soft candidates in centered space."""
+        normalized = F.normalize(bag.float(), dim=-1, eps=1e-6)
+        candidate_count = min(self.context_samples_per_bag, bag.shape[0])
+        directions = self._candidate_directions[:candidate_count].float()
+        scores = normalized @ directions.T
+        weights = torch.softmax(scores.mul(10.0), dim=0)
+        candidates = weights.T @ normalized
+        return F.normalize(candidates, dim=-1, eps=1e-6).to(bag.dtype)
+
     def _context_anchors(
         self,
         bags: list[torch.Tensor],
@@ -490,7 +623,9 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             dim=0,
         )
         if candidates.shape[0] < self.num_slots:
-            raise ValueError("Context does not contain enough cells for population slots.")
+            raise ValueError(
+                "Context does not contain enough cells for population slots."
+            )
         normalized = F.normalize(candidates.float(), dim=-1)
         center = F.normalize(normalized.mean(dim=0, keepdim=True), dim=-1)
         centrality = (normalized * center).sum(dim=-1)
@@ -502,12 +637,16 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             self.num_density_slots,
             int(math.ceil(0.85 * order.numel())),
         )
-        positions = torch.linspace(
-            0,
-            density_limit - 1,
-            self.num_density_slots,
-            device=order.device,
-        ).round().long()
+        positions = (
+            torch.linspace(
+                0,
+                density_limit - 1,
+                self.num_density_slots,
+                device=order.device,
+            )
+            .round()
+            .long()
+        )
         density = normalized[order[positions]]
         for _ in range(self.density_refinement_steps):
             similarity = normalized @ density.T
@@ -538,17 +677,18 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             selected.append(normalized[index])
             available[index] = False
             similarity = normalized @ normalized[index]
-            diversity = torch.minimum(
-                diversity, (1.0 - similarity).clamp_min(0.0)
-            )
+            diversity = torch.minimum(diversity, (1.0 - similarity).clamp_min(0.0))
         rare = torch.stack(selected)
         return torch.cat((density, rare), dim=0).to(candidates.dtype)
+
 
     def _forward_dense(
         self,
         instances: torch.Tensor,
         anchors: torch.Tensor,
         return_auxiliary: bool,
+        global_summary: torch.Tensor | None = None,
+        covariance_sketch: torch.Tensor | None = None,
     ) -> (
         dict[str, torch.Tensor]
         | tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]
@@ -581,9 +721,9 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             / mass.float().unsqueeze(-1)
             + 1e-6
         ).to(instances.dtype)
-        dispersion = (
-            assignment * (1.0 - similarity).to(assignment.dtype)
-        ).sum(dim=1) / mass
+        dispersion = (assignment * (1.0 - similarity).to(assignment.dtype)).sum(
+            dim=1
+        ) / mass
         metadata = torch.stack((proportion.log(), dispersion), dim=-1)
 
         rare_count = min(
@@ -601,9 +741,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         center_features = torch.cat(
             (expanded_anchors, slot_mean - expanded_anchors, metadata), dim=-1
         )
-        spread_features = torch.cat(
-            (expanded_anchors, slot_std, metadata), dim=-1
-        )
+        spread_features = torch.cat((expanded_anchors, slot_std, metadata), dim=-1)
         rare_features = torch.cat(
             (expanded_anchors, rare_state - expanded_anchors, metadata), dim=-1
         )
@@ -614,9 +752,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         spread_token = slot_std + residual_scale * self.spread_slot_encoder(
             spread_features
         )
-        rare_token = rare_state + residual_scale * self.rare_slot_encoder(
-            rare_features
-        )
+        rare_token = rare_state + residual_scale * self.rare_slot_encoder(rare_features)
         slot_tokens = torch.stack((center_token, spread_token, rare_token), dim=2)
 
         nearest_similarity, nearest_slot = similarity.max(dim=-1)
@@ -646,11 +782,16 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 )
             selected_counts.append(count)
 
+        if global_summary is None:
+            _, global_summary, _ = self._bag_view(instances)
+        if covariance_sketch is None:
+            covariance_sketch = self._covariance_sketch(instances - instances.mean(dim=-2, keepdim=True))
         representation = {
-            "mean": instances.mean(dim=1),
+            "global_summary": global_summary,
             "slots": slot_tokens,
             "tails": torch.stack(tail_tokens, dim=1),
             "slot_metadata": metadata,
+            "covariance_sketch": covariance_sketch,
         }
         if not return_auxiliary:
             return representation
@@ -665,9 +806,9 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             "instance_counts": torch.full(
                 (num_bags,), num_instances, device=anchors.device
             ),
-            "tail_counts": torch.tensor(
-                selected_counts, device=anchors.device
-            ).expand(num_bags, -1),
+            "tail_counts": torch.tensor(selected_counts, device=anchors.device).expand(
+                num_bags, -1
+            ),
             "slot_residual_scale": residual_scale,
         }
 
@@ -680,7 +821,12 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         dict[str, torch.Tensor]
         | tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]
     ):
-        bags = self._normalize_bags(instances)
+        raw_bags = self._normalize_bags(instances)
+        prepared = [self._bag_view(bag) for bag in raw_bags]
+        bags = [item[0] for item in prepared]
+        global_summaries = [item[1] for item in prepared]
+        centered_deltas = [item[2] for item in prepared]
+        covariance_sketches = [self._covariance_sketch(delta) for delta in centered_deltas]
         context_mask = torch.as_tensor(
             context_mask,
             device=bags[0].device,
@@ -690,9 +836,18 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             raise ValueError("context_mask must identify at least one context bag.")
         anchors = self._context_anchors(bags, context_mask)
         if isinstance(instances, torch.Tensor):
-            return self._forward_dense(instances, anchors, return_auxiliary)
+            result = self._forward_dense(
+                torch.stack(bags),
+                anchors,
+                return_auxiliary,
+                global_summary=torch.stack(global_summaries),
+                covariance_sketch=torch.stack(covariance_sketches),
+            )
+            if return_auxiliary:
+                representation, auxiliary = result
+                return representation, auxiliary
+            return result
 
-        mean_tokens: list[torch.Tensor] = []
         slot_tokens: list[torch.Tensor] = []
         tail_tokens: list[torch.Tensor] = []
         proportions: list[torch.Tensor] = []
@@ -700,7 +855,6 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         slot_means: list[torch.Tensor] = []
         selected_counts: list[list[int]] = []
         for bag in bags:
-            mean_tokens.append(bag.mean(dim=0))
             normalized = F.normalize(bag.float(), dim=-1)
             similarity = normalized @ anchors.float().T
             assignment = torch.softmax(
@@ -719,9 +873,9 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 / mass.float().unsqueeze(-1)
                 + 1e-6
             ).to(bag.dtype)
-            dispersion = (
-                assignment * (1.0 - similarity).to(assignment.dtype)
-            ).sum(dim=0) / mass
+            dispersion = (assignment * (1.0 - similarity).to(assignment.dtype)).sum(
+                dim=0
+            ) / mass
             metadata = torch.stack((proportion.log(), dispersion), dim=-1)
 
             rare_states: list[torch.Tensor] = []
@@ -731,7 +885,9 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             )
             slot_distance = difference.float().square().mean(dim=-1)
             for slot_index in range(self.num_slots):
-                rare_score = assignment[:, slot_index].float() * slot_distance[:, slot_index]
+                rare_score = (
+                    assignment[:, slot_index].float() * slot_distance[:, slot_index]
+                )
                 values, index = rare_score.topk(rare_count)
                 weights = torch.softmax(values, dim=0).to(bag.dtype)
                 rare_states.append((weights.unsqueeze(-1) * bag[index]).sum(dim=0))
@@ -740,12 +896,8 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             center_features = torch.cat(
                 (anchors, slot_mean - anchors, metadata), dim=-1
             )
-            spread_features = torch.cat(
-                (anchors, slot_std, metadata), dim=-1
-            )
-            rare_features = torch.cat(
-                (anchors, rare_state - anchors, metadata), dim=-1
-            )
+            spread_features = torch.cat((anchors, slot_std, metadata), dim=-1)
+            rare_features = torch.cat((anchors, rare_state - anchors, metadata), dim=-1)
             residual_scale = torch.sigmoid(self.slot_residual_logit)
             center_token = slot_mean + residual_scale * self.center_slot_encoder(
                 center_features
@@ -792,7 +944,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             selected_counts.append(bag_selected_counts)
 
         representation = {
-            "mean": torch.stack(mean_tokens),
+            "global_summary": torch.stack(global_summaries),
             "slots": torch.stack(slot_tokens),
             "tails": torch.stack(tail_tokens),
             "slot_metadata": torch.stack(
@@ -801,6 +953,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                     for proportion, dispersion in zip(proportions, dispersions)
                 ]
             ),
+            "covariance_sketch": torch.stack(covariance_sketches),
         }
         if not return_auxiliary:
             return representation
@@ -817,6 +970,10 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             ),
             "tail_counts": torch.tensor(selected_counts, device=anchors.device),
             "slot_residual_scale": torch.sigmoid(self.slot_residual_logit),
+            "centered_delta_mean": torch.stack(
+                [delta.float().mean(dim=0) for delta in centered_deltas]
+            ),
+            "global_summary": torch.stack(global_summaries),
         }
 
 
@@ -898,17 +1055,16 @@ class SetCrossAttentionMetaClassifier(nn.Module):
                 f"context_tokens must have shape [context, {self.token_dim}]."
             )
         if query_tokens.ndim != 2 or query_tokens.shape[-1] != self.token_dim:
-            raise ValueError(
-                f"query_tokens must have shape [query, {self.token_dim}]."
-            )
-        if context_labels.ndim != 1 or context_labels.shape[0] != context_tokens.shape[0]:
+            raise ValueError(f"query_tokens must have shape [query, {self.token_dim}].")
+        if (
+            context_labels.ndim != 1
+            or context_labels.shape[0] != context_tokens.shape[0]
+        ):
             raise ValueError("context_labels must have shape [context].")
         if context_tokens.shape[0] == 0 or query_tokens.shape[0] == 0:
             raise ValueError("Context and query sets must both be non-empty.")
         if torch.any((context_labels < 0) | (context_labels >= self.num_classes)):
-            raise ValueError(
-                f"Context labels must be in [0, {self.num_classes - 1}]."
-            )
+            raise ValueError(f"Context labels must be in [0, {self.num_classes - 1}].")
         counts = torch.bincount(context_labels.long(), minlength=self.num_classes)
         if torch.any(counts == 0):
             missing = torch.nonzero(counts == 0, as_tuple=False).flatten().tolist()
@@ -968,11 +1124,8 @@ class SetCrossAttentionMetaClassifier(nn.Module):
             return logits
         return logits, {
             "context_class_counts": class_counts,
-            "cross_attention_entropy": torch.stack(
-                class_attention_entropy, dim=-1
-            ),
+            "cross_attention_entropy": torch.stack(class_attention_entropy, dim=-1),
         }
-
 
     def forward_batched(
         self,
@@ -986,9 +1139,9 @@ class SetCrossAttentionMetaClassifier(nn.Module):
             raise ValueError("Batched context/query tokens must have three dimensions.")
         encoded_context = self.input_projection(self.input_norm(context_tokens))
         encoded_query = self.input_projection(self.input_norm(query_tokens))
-        counts = F.one_hot(
-            context_labels.long(), num_classes=self.num_classes
-        ).sum(dim=1)
+        counts = F.one_hot(context_labels.long(), num_classes=self.num_classes).sum(
+            dim=1
+        )
         class_logits = []
         class_entropies = []
         for class_index in range(self.num_classes):
@@ -1006,9 +1159,7 @@ class SetCrossAttentionMetaClassifier(nn.Module):
                 average_attn_weights=True,
             )
             denominator = valid.sum(dim=1, keepdim=True).clamp_min(1)
-            class_mean = (
-                class_context * valid.unsqueeze(-1)
-            ).sum(dim=1) / denominator
+            class_mean = (class_context * valid.unsqueeze(-1)).sum(dim=1) / denominator
             class_summary = self.cross_attention_norm(
                 attended + class_mean.unsqueeze(1)
             )
@@ -1023,9 +1174,7 @@ class SetCrossAttentionMetaClassifier(nn.Module):
             )
             class_logits.append(self.relation_scorer(relation).squeeze(-1))
             probability = weights.float().clamp_min(1e-12)
-            class_entropies.append(
-                -(probability * probability.log()).sum(dim=-1)
-            )
+            class_entropies.append(-(probability * probability.log()).sum(dim=-1))
         logits = torch.stack(class_logits, dim=-1)
         if not return_auxiliary:
             return logits
@@ -1033,6 +1182,7 @@ class SetCrossAttentionMetaClassifier(nn.Module):
             "context_class_counts": counts,
             "cross_attention_entropy": torch.stack(class_entropies, dim=-1),
         }
+
 
 class RidgeResidualMetaClassifier(SetCrossAttentionMetaClassifier):
     """Class-balanced ridge prediction with a bounded attention residual.
@@ -1063,11 +1213,7 @@ class RidgeResidualMetaClassifier(SetCrossAttentionMetaClassifier):
             relation_hidden_dim=relation_hidden_dim,
             num_classes=num_classes,
         )
-        if (
-            ridge_dim < 1
-            or ridge_lambda <= 0
-            or ridge_logit_scale <= 0
-        ):
+        if ridge_dim < 1 or ridge_lambda <= 0 or ridge_logit_scale <= 0:
             raise ValueError("Ridge parameters must be positive.")
         if not 0 < attention_residual_scale < 1:
             raise ValueError("attention_residual_scale must be in (0, 1).")
@@ -1093,18 +1239,19 @@ class RidgeResidualMetaClassifier(SetCrossAttentionMetaClassifier):
         """Solve a positive-definite ridge system with adaptive FP32 jitter."""
         if not torch.isfinite(gram).all() or not torch.isfinite(rhs).all():
             raise RuntimeError("The ridge system contains NaN or Inf values.")
-        identity = torch.eye(
-            gram.shape[-1], device=gram.device, dtype=gram.dtype
-        )
+        identity = torch.eye(gram.shape[-1], device=gram.device, dtype=gram.dtype)
         if gram.ndim == 3:
             identity = identity.expand(gram.shape[0], -1, -1)
         system = gram + ridge_lambda.float() * identity
         if not torch.isfinite(system).all():
             raise RuntimeError("The ridge system contains NaN or Inf values.")
 
-        diagonal_scale = gram.diagonal(dim1=-2, dim2=-1).abs().mean(
-            dim=-1, keepdim=True
-        ).clamp_min(1.0)
+        diagonal_scale = (
+            gram.diagonal(dim1=-2, dim2=-1)
+            .abs()
+            .mean(dim=-1, keepdim=True)
+            .clamp_min(1.0)
+        )
         jitter = diagonal_scale * 1e-6
         for attempt in range(6):
             candidate = system
@@ -1145,9 +1292,7 @@ class RidgeResidualMetaClassifier(SetCrossAttentionMetaClassifier):
         # classes equal total mass even when donor counts are imbalanced.
         context32 = context.float()
         query32 = query.float()
-        targets = F.one_hot(
-            context_labels.long(), num_classes=self.num_classes
-        ).float()
+        targets = F.one_hot(context_labels.long(), num_classes=self.num_classes).float()
         sample_weight = class_counts.float().reciprocal()[context_labels.long()]
         ridge_lambda = self.ridge_log_lambda.exp().clamp(1e-4, 1e4)
         with torch.autocast(device_type=context_tokens.device.type, enabled=False):
@@ -1157,12 +1302,12 @@ class RidgeResidualMetaClassifier(SetCrossAttentionMetaClassifier):
             # joint system with an unregularized bias made rare CUDA episodes
             # singular and could produce non-finite gradients in solve backward.
             total_weight = sample_weight.sum().clamp_min(1e-12)
-            feature_mean = (
-                sample_weight.unsqueeze(-1) * context32
-            ).sum(dim=0, keepdim=True) / total_weight
-            target_mean = (
-                sample_weight.unsqueeze(-1) * targets
-            ).sum(dim=0, keepdim=True) / total_weight
+            feature_mean = (sample_weight.unsqueeze(-1) * context32).sum(
+                dim=0, keepdim=True
+            ) / total_weight
+            target_mean = (sample_weight.unsqueeze(-1) * targets).sum(
+                dim=0, keepdim=True
+            ) / total_weight
             centered_context = context32 - feature_mean
             centered_targets = targets - target_mean
             root_weight = sample_weight.sqrt().unsqueeze(-1)
@@ -1196,21 +1341,19 @@ class RidgeResidualMetaClassifier(SetCrossAttentionMetaClassifier):
             query = self.ridge_projection(query / rms)
         context32 = context.float()
         query32 = query.float()
-        targets = F.one_hot(
-            context_labels.long(), num_classes=self.num_classes
-        ).float()
-        sample_weight = class_counts.float().reciprocal().gather(
-            1, context_labels.long()
+        targets = F.one_hot(context_labels.long(), num_classes=self.num_classes).float()
+        sample_weight = (
+            class_counts.float().reciprocal().gather(1, context_labels.long())
         )
         ridge_lambda = self.ridge_log_lambda.exp().clamp(1e-4, 1e4)
         with torch.autocast(device_type=context_tokens.device.type, enabled=False):
             total_weight = sample_weight.sum(dim=1, keepdim=True).clamp_min(1e-12)
-            feature_mean = (
-                sample_weight.unsqueeze(-1) * context32
-            ).sum(dim=1, keepdim=True) / total_weight.unsqueeze(-1)
-            target_mean = (
-                sample_weight.unsqueeze(-1) * targets
-            ).sum(dim=1, keepdim=True) / total_weight.unsqueeze(-1)
+            feature_mean = (sample_weight.unsqueeze(-1) * context32).sum(
+                dim=1, keepdim=True
+            ) / total_weight.unsqueeze(-1)
+            target_mean = (sample_weight.unsqueeze(-1) * targets).sum(
+                dim=1, keepdim=True
+            ) / total_weight.unsqueeze(-1)
             centered_context = context32 - feature_mean
             centered_targets = targets - target_mean
             root_weight = sample_weight.sqrt().unsqueeze(-1)
@@ -1282,10 +1425,7 @@ class RidgeResidualMetaClassifier(SetCrossAttentionMetaClassifier):
         )
         ridge_scale = self.ridge_log_scale.exp().clamp(0.1, 100.0)
         residual_scale = torch.sigmoid(self.attention_residual_logit)
-        logits = (
-            ridge_scale * ridge_logits
-            + residual_scale * attention_logits
-        )
+        logits = ridge_scale * ridge_logits + residual_scale * attention_logits
         if not return_auxiliary:
             return logits
         return logits, {
@@ -1320,6 +1460,8 @@ class StructuredPopulationMetaClassifier(nn.Module):
         class_memory_tokens: int = 8,
         rare_evidence_fractions: Sequence[float] = (0.01, 0.05, 0.10, 0.20),
         fusion_residual_scale: float = 0.10,
+        covariance_ridge_logit_scale: float = 2.0,
+        covariance_residual_scale: float = 0.25,
         num_classes: int = 2,
     ) -> None:
         super().__init__()
@@ -1346,6 +1488,10 @@ class StructuredPopulationMetaClassifier(nn.Module):
             raise ValueError("rare_evidence_fractions must contain values in (0, 1].")
         if not 0 < fusion_residual_scale < 1:
             raise ValueError("fusion_residual_scale must be in (0, 1).")
+        if covariance_ridge_logit_scale <= 0:
+            raise ValueError("covariance_ridge_logit_scale must be positive.")
+        if not 0 < covariance_residual_scale < 1:
+            raise ValueError("covariance_residual_scale must be in (0, 1).")
         self.token_dim = int(token_dim)
         self.hidden_dim = int(hidden_dim)
         self.num_classes = int(num_classes)
@@ -1356,7 +1502,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
             minimum_population_residual_scale
         )
         self.minimum_tail_residual_scale = float(minimum_tail_residual_scale)
-        self.mean_classifier = RidgeResidualMetaClassifier(
+        self.global_shape_classifier = RidgeResidualMetaClassifier(
             token_dim=token_dim,
             hidden_dim=hidden_dim,
             num_heads=num_heads,
@@ -1367,6 +1513,28 @@ class StructuredPopulationMetaClassifier(nn.Module):
             ridge_logit_scale=ridge_logit_scale,
             attention_residual_scale=attention_residual_scale,
             num_classes=num_classes,
+        )
+        self.abundance_ridge_log_lambda = nn.Parameter(
+            torch.tensor(math.log(ridge_lambda))
+        )
+        self.abundance_ridge_log_scale = nn.Parameter(
+            torch.tensor(math.log(ridge_logit_scale))
+        )
+        self.covariance_ridge_log_lambda = nn.Parameter(
+            torch.tensor(math.log(ridge_lambda))
+        )
+        self.covariance_ridge_log_scale = nn.Parameter(
+            torch.tensor(math.log(covariance_ridge_logit_scale))
+        )
+        covariance_logit = math.log(
+            covariance_residual_scale / (1.0 - covariance_residual_scale)
+        )
+        self.covariance_residual_logit = nn.Parameter(torch.tensor(covariance_logit))
+        population_attention_logit = math.log(
+            attention_residual_scale / (1.0 - attention_residual_scale)
+        )
+        self.population_attention_residual_logit = nn.Parameter(
+            torch.tensor(population_attention_logit)
         )
         self.memory_input_norm = nn.LayerNorm(token_dim)
         self.memory_input_projection = nn.Linear(token_dim, hidden_dim)
@@ -1422,9 +1590,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
             nn.GELU(),
             nn.Linear(relation_hidden_dim, 1),
         )
-        fusion_logit = math.log(
-            fusion_residual_scale / (1.0 - fusion_residual_scale)
-        )
+        fusion_logit = math.log(fusion_residual_scale / (1.0 - fusion_residual_scale))
         self.fusion_residual_logit = nn.Parameter(torch.tensor(fusion_logit))
         # A sigmoid gate with a positive floor prevents either specialized path
         # from becoming permanently disconnected from the final prediction.
@@ -1477,22 +1643,33 @@ class StructuredPopulationMetaClassifier(nn.Module):
         representation: dict[str, torch.Tensor],
         name: str,
     ) -> None:
-        if set(representation) != {"mean", "slots", "tails", "slot_metadata"}:
+        if set(representation) != {"global_summary", "slots", "tails", "slot_metadata", "covariance_sketch"}:
             raise ValueError(
-                f"{name} must contain mean, slots, tails, and slot_metadata."
+                f"{name} must contain global_summary, slots, tails, slot_metadata, and covariance_sketch."
             )
-        mean = representation["mean"]
+        global_summary = representation["global_summary"]
         slots = representation["slots"]
         tails = representation["tails"]
         metadata = representation["slot_metadata"]
-        if mean.ndim != 2 or mean.shape[-1] != self.token_dim:
-            raise ValueError(f"{name} mean tokens have an invalid shape.")
-        if slots.ndim != 4 or slots.shape[0] != mean.shape[0] or slots.shape[-1] != self.token_dim:
+        covariance_sketch = representation["covariance_sketch"]
+        if global_summary.ndim != 2 or global_summary.shape[-1] != self.token_dim:
+            raise ValueError(f"{name} global-summary tokens have an invalid shape.")
+        if (
+            slots.ndim != 4
+            or slots.shape[0] != global_summary.shape[0]
+            or slots.shape[-1] != self.token_dim
+        ):
             raise ValueError(f"{name} slot tokens have an invalid shape.")
-        if tails.ndim != 3 or tails.shape[0] != mean.shape[0] or tails.shape[-1] != self.token_dim:
+        if (
+            tails.ndim != 3
+            or tails.shape[0] != global_summary.shape[0]
+            or tails.shape[-1] != self.token_dim
+        ):
             raise ValueError(f"{name} tail tokens have an invalid shape.")
         if metadata.shape != slots.shape[:2] + (2,):
             raise ValueError(f"{name} slot metadata have an invalid shape.")
+        if covariance_sketch.ndim != 2 or covariance_sketch.shape[0] != global_summary.shape[0]:
+            raise ValueError(f"{name} covariance sketches have an invalid shape.")
 
     @staticmethod
     def _flatten_slot_tokens(representation: dict[str, torch.Tensor]) -> torch.Tensor:
@@ -1504,7 +1681,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
     ) -> torch.Tensor:
         return torch.cat(
             (
-                representation["mean"].unsqueeze(1),
+                representation["global_summary"].unsqueeze(1),
                 self._flatten_slot_tokens(representation),
                 representation["tails"],
             ),
@@ -1539,9 +1716,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
         class_memories: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         query_tokens = self._flatten_slot_tokens(query)
-        encoded_query = self.slot_input_projection(
-            self.slot_input_norm(query_tokens)
-        )
+        encoded_query = self.slot_input_projection(self.slot_input_norm(query_tokens))
         importance_logits = self.slot_importance(query_tokens).squeeze(-1)
         token_weights = F.softmax(
             importance_logits.float() / self.routing_temperature,
@@ -1550,8 +1725,10 @@ class StructuredPopulationMetaClassifier(nn.Module):
 
         class_logits: list[torch.Tensor] = []
         for class_index in range(self.num_classes):
-            memory = class_memories[class_index].unsqueeze(0).expand(
-                encoded_query.shape[0], -1, -1
+            memory = (
+                class_memories[class_index]
+                .unsqueeze(0)
+                .expand(encoded_query.shape[0], -1, -1)
             )
             attended, _ = self.population_cross_attention(
                 encoded_query, memory, memory, need_weights=False
@@ -1598,9 +1775,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
                     query_instances.shape[1],
                     max(1, int(math.ceil(fraction * query_instances.shape[1]))),
                 )
-                fraction_scores.append(
-                    evidence.topk(count, dim=-1).values.mean(dim=-1)
-                )
+                fraction_scores.append(evidence.topk(count, dim=-1).values.mean(dim=-1))
                 counts.append(count)
             stacked_scores = torch.stack(fraction_scores, dim=-1)
             logits = self.rare_evidence_head(
@@ -1662,14 +1837,14 @@ class StructuredPopulationMetaClassifier(nn.Module):
 
     def _fuse_evidence(
         self,
-        mean_logits: torch.Tensor,
+        global_shape_logits: torch.Tensor,
         population_logits: torch.Tensor,
         rare_logits: torch.Tensor,
         population_scale: torch.Tensor,
         rare_scale: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         evidence = torch.stack(
-            (mean_logits, population_logits, rare_logits), dim=-1
+            (global_shape_logits, population_logits, rare_logits), dim=-1
         )
         pair_products = torch.stack(
             (
@@ -1693,12 +1868,137 @@ class StructuredPopulationMetaClassifier(nn.Module):
         interaction = self.fusion_scorer(interaction_features).squeeze(-1)
         fusion_scale = torch.sigmoid(self.fusion_residual_logit)
         logits = (
-            mean_logits
+            global_shape_logits
             + population_scale * population_logits
             + rare_scale * rare_logits
             + fusion_scale * interaction
         )
         return logits, fusion_scale
+
+    def _abundance_ridge_logits(
+        self,
+        context_metadata: torch.Tensor,
+        context_labels: torch.Tensor,
+        query_metadata: torch.Tensor,
+        ridge_lambda: torch.Tensor | None = None,
+        dual: bool = False,
+    ) -> torch.Tensor:
+        """Class-balanced ridge on identity-aligned slot statistics."""
+        output_dtype = query_metadata.dtype
+        context = context_metadata.float().flatten(start_dim=1)
+        query = query_metadata.float().flatten(start_dim=1)
+        center = context.mean(dim=0, keepdim=True)
+        context = context - center
+        query = query - center
+        rms = context.square().mean().sqrt().clamp_min(1e-6)
+        context = context / rms
+        query = query / rms
+        targets = F.one_hot(
+            context_labels.long(), num_classes=self.num_classes
+        ).float()
+        class_counts = torch.bincount(
+            context_labels.long(), minlength=self.num_classes
+        )
+        sample_weight = class_counts.float().reciprocal()[context_labels.long()]
+        total_weight = sample_weight.sum().clamp_min(1e-12)
+        feature_mean = (sample_weight.unsqueeze(-1) * context).sum(
+            dim=0, keepdim=True
+        ) / total_weight
+        target_mean = (sample_weight.unsqueeze(-1) * targets).sum(
+            dim=0, keepdim=True
+        ) / total_weight
+        centered_context = context - feature_mean
+        centered_targets = targets - target_mean
+        root_weight = sample_weight.sqrt().unsqueeze(-1)
+        weighted_design = centered_context * root_weight
+        weighted_targets = centered_targets * root_weight
+        if ridge_lambda is None:
+            ridge_lambda = self.abundance_ridge_log_lambda
+        ridge_lambda = ridge_lambda.exp().clamp(1e-4, 1e4)
+        with torch.autocast(device_type=context.device.type, enabled=False):
+            design32 = weighted_design.float()
+            targets32 = weighted_targets.float()
+            if dual:
+                dual_coefficients = RidgeResidualMetaClassifier._solve_ridge_system(
+                    design32 @ design32.T, targets32, ridge_lambda.float()
+                )
+                coefficients = design32.T @ dual_coefficients
+            else:
+                coefficients = RidgeResidualMetaClassifier._solve_ridge_system(
+                    design32.T @ design32,
+                    design32.T @ targets32,
+                    ridge_lambda.float(),
+                )
+            intercept = target_mean.float() - feature_mean.float() @ coefficients
+            logits = query.float() @ coefficients + intercept
+        if not torch.isfinite(logits).all():
+            raise RuntimeError("The abundance ridge logits contain NaN or Inf.")
+        return logits.to(output_dtype)
+
+    def _abundance_ridge_logits_batched(
+        self,
+        context_metadata: torch.Tensor,
+        context_labels: torch.Tensor,
+        query_metadata: torch.Tensor,
+        ridge_lambda: torch.Tensor | None = None,
+        dual: bool = False,
+    ) -> torch.Tensor:
+        output_dtype = query_metadata.dtype
+        context = context_metadata.float().flatten(start_dim= 2 )
+        query = query_metadata.float().flatten(start_dim= 2 )
+        center = context.mean(dim=1, keepdim=True)
+        context = context - center
+        query = query - center
+        rms = context.square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
+        context = context / rms
+        query = query / rms
+        targets = F.one_hot(
+            context_labels.long(), num_classes=self.num_classes
+        ).float()
+        class_counts = F.one_hot(
+            context_labels.long(), num_classes=self.num_classes
+        ).sum(dim=1)
+        sample_weight = class_counts.float().reciprocal().gather(
+            1, context_labels.long()
+        )
+        total_weight = sample_weight.sum(dim=1, keepdim=True).clamp_min(1e-12)
+        feature_mean = (sample_weight.unsqueeze(-1) * context).sum(
+            dim=1, keepdim=True
+        ) / total_weight.unsqueeze(-1)
+        target_mean = (sample_weight.unsqueeze(-1) * targets).sum(
+            dim=1, keepdim=True
+        ) / total_weight.unsqueeze(-1)
+        centered_context = context - feature_mean
+        centered_targets = targets - target_mean
+        root_weight = sample_weight.sqrt().unsqueeze(-1)
+        weighted_design = centered_context * root_weight
+        weighted_targets = centered_targets * root_weight
+        if ridge_lambda is None:
+            ridge_lambda = self.abundance_ridge_log_lambda
+        ridge_lambda = ridge_lambda.exp().clamp(1e-4, 1e4)
+        with torch.autocast(device_type=context.device.type, enabled=False):
+            design32 = weighted_design.float()
+            targets32 = weighted_targets.float()
+            if dual:
+                dual_coefficients = RidgeResidualMetaClassifier._solve_ridge_system(
+                    design32 @ design32.transpose(1, 2),
+                    targets32,
+                    ridge_lambda.float(),
+                )
+                coefficients = design32.transpose(1, 2) @ dual_coefficients
+            else:
+                coefficients = RidgeResidualMetaClassifier._solve_ridge_system(
+                    design32.transpose(1, 2) @ design32,
+                    design32.transpose(1, 2) @ targets32,
+                    ridge_lambda.float(),
+                )
+            intercept = target_mean.float() - feature_mean.float() @ coefficients
+            logits = query.float() @ coefficients + intercept
+        if not torch.isfinite(logits).all():
+            raise RuntimeError(
+                "The batched abundance ridge logits contain NaN or Inf."
+            )
+        return logits.to(output_dtype)
 
     def _class_memories_batched(
         self,
@@ -1706,28 +2006,24 @@ class StructuredPopulationMetaClassifier(nn.Module):
         context_labels: torch.Tensor,
     ) -> torch.Tensor:
         slots = context["slots"]
-        flat_slots = slots.reshape(
-            slots.shape[0], slots.shape[1], -1, slots.shape[-1]
-        )
+        flat_slots = slots.reshape(slots.shape[0], slots.shape[1], -1, slots.shape[-1])
         context_tokens = torch.cat(
-            (
-                context["mean"].unsqueeze(2), flat_slots, context["tails"]
-            ),
+            (context["global_summary"].unsqueeze(2), flat_slots, context["tails"]),
             dim=2,
         )
         episodes, context_count, tokens_per_bag, _ = context_tokens.shape
         flat_tokens = context_tokens.reshape(
             episodes, context_count * tokens_per_bag, self.token_dim
         )
-        encoded = self.memory_input_projection(
-            self.memory_input_norm(flat_tokens)
-        )
+        encoded = self.memory_input_projection(self.memory_input_norm(flat_tokens))
         memories = []
         for class_index in range(self.num_classes):
             valid_bags = context_labels == class_index
-            valid_tokens = valid_bags.unsqueeze(-1).expand(
-                -1, -1, tokens_per_bag
-            ).reshape(episodes, -1)
+            valid_tokens = (
+                valid_bags.unsqueeze(-1)
+                .expand(-1, -1, tokens_per_bag)
+                .reshape(episodes, -1)
+            )
             seeds = self.memory_seeds.unsqueeze(0).expand(episodes, -1, -1)
             attended, _ = self.memory_cross_attention(
                 seeds,
@@ -1750,9 +2046,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
             raw_slots.shape[0], raw_slots.shape[1], -1, raw_slots.shape[-1]
         )
         episodes, queries, slots, _ = query_tokens.shape
-        encoded_query = self.slot_input_projection(
-            self.slot_input_norm(query_tokens)
-        )
+        encoded_query = self.slot_input_projection(self.slot_input_norm(query_tokens))
         importance_logits = self.slot_importance(query_tokens).squeeze(-1)
         token_weights = F.softmax(
             importance_logits.float() / self.routing_temperature,
@@ -1761,9 +2055,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
         flat_query = encoded_query.reshape(episodes * queries, slots, -1)
         class_logits = []
         for class_index in range(self.num_classes):
-            memory = class_memories[:, class_index].repeat_interleave(
-                queries, dim=0
-            )
+            memory = class_memories[:, class_index].repeat_interleave(queries, dim=0)
             attended, _ = self.population_cross_attention(
                 flat_query, memory, memory, need_weights=False
             )
@@ -1777,9 +2069,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 ),
                 dim=-1,
             )
-            relation = self.slot_relation_scorer(
-                relation_features
-            ).squeeze(-1)
+            relation = self.slot_relation_scorer(relation_features).squeeze(-1)
             class_logits.append((relation * token_weights).sum(dim=-1))
         return torch.stack(class_logits, dim=-1), token_weights
 
@@ -1807,17 +2097,15 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 query_instances.shape[2],
                 max(1, int(math.ceil(fraction * query_instances.shape[2]))),
             )
-            fraction_scores.append(
-                evidence.topk(count, dim=-1).values.mean(dim=-1)
-            )
+            fraction_scores.append(evidence.topk(count, dim=-1).values.mean(dim=-1))
             counts.append(count)
         stacked_scores = torch.stack(fraction_scores, dim=-1)
         logits = self.rare_evidence_head(
             stacked_scores.to(query_instances.dtype)
         ).squeeze(-1)
-        rare_counts = torch.tensor(
-            counts, device=query_instances.device
-        ).expand(query_instances.shape[0], query_instances.shape[1], -1)
+        rare_counts = torch.tensor(counts, device=query_instances.device).expand(
+            query_instances.shape[0], query_instances.shape[1], -1
+        )
         return logits, stacked_scores, rare_counts
 
     def forward_batched(
@@ -1828,15 +2116,44 @@ class StructuredPopulationMetaClassifier(nn.Module):
         query_instances: torch.Tensor,
         return_auxiliary: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        mean_logits, mean_auxiliary = self.mean_classifier.forward_batched(
-            context["mean"],
-            context_labels,
-            query["mean"],
-            return_auxiliary=True,
+        global_shape_logits, global_shape_auxiliary = (
+            self.global_shape_classifier.forward_batched(
+                context["global_summary"],
+                context_labels,
+                query["global_summary"],
+                return_auxiliary=True,
+            )
         )
         class_memories = self._class_memories_batched(context, context_labels)
-        population_logits, population_weights = (
+        population_attention_logits, population_weights = (
             self._population_memory_logits_batched(query, class_memories)
+        )
+        abundance_ridge_logits = self._abundance_ridge_logits_batched(
+            context["slot_metadata"],
+            context_labels,
+            query["slot_metadata"],
+        )
+        abundance_ridge_scale = self.abundance_ridge_log_scale.exp().clamp(
+            0.1, 100.0
+        )
+        covariance_ridge_logits = self._abundance_ridge_logits_batched(
+            context["covariance_sketch"],
+            context_labels,
+            query["covariance_sketch"],
+            ridge_lambda=self.covariance_ridge_log_lambda,
+            dual=True,
+        )
+        covariance_ridge_scale = self.covariance_ridge_log_scale.exp().clamp(
+            0.1, 100.0
+        )
+        covariance_logits = covariance_ridge_scale * covariance_ridge_logits
+        covariance_residual_scale = torch.sigmoid(self.covariance_residual_logit)
+        population_attention_scale = torch.sigmoid(
+            self.population_attention_residual_logit
+        )
+        population_logits = (
+            abundance_ridge_scale * abundance_ridge_logits
+            + population_attention_scale * population_attention_logits
         )
         tail_logits, rare_fraction_scores, rare_counts = (
             self._rare_instance_logits_batched(query_instances, class_memories)
@@ -1850,19 +2167,30 @@ class StructuredPopulationMetaClassifier(nn.Module):
             self.minimum_tail_residual_scale,
         )
         logits, fusion_scale = self._fuse_evidence(
-            mean_logits,
+            global_shape_logits,
             population_logits,
             tail_logits,
             population_scale,
             tail_scale,
         )
+        logits = logits + covariance_residual_scale * covariance_logits
         if not return_auxiliary:
             return logits
         episodes = context_labels.shape[0]
         return logits, {
-            **mean_auxiliary,
-            "mean_logits": mean_logits,
+            **global_shape_auxiliary,
+            "global_shape_logits": global_shape_logits,
             "population_logits": population_logits,
+            "abundance_ridge_logits": abundance_ridge_logits,
+            "covariance_logits": covariance_logits,
+            "covariance_ridge_logits": covariance_ridge_logits,
+            "covariance_ridge_scale": covariance_ridge_scale.expand(episodes),
+            "covariance_residual_scale": covariance_residual_scale.expand(episodes),
+            "abundance_ridge_scale": abundance_ridge_scale.expand(episodes),
+            "population_attention_logits": population_attention_logits,
+            "population_attention_residual_scale": (
+                population_attention_scale.expand(episodes)
+            ),
             "tail_logits": tail_logits,
             "population_slot_weights": population_weights,
             "tail_weights": torch.softmax(rare_fraction_scores, dim=-1),
@@ -1884,15 +2212,11 @@ class StructuredPopulationMetaClassifier(nn.Module):
     ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
         self._validate_representation(context, "context")
         self._validate_representation(query, "query")
-        if context_labels.shape != (context["mean"].shape[0],):
+        if context_labels.shape != (context["global_summary"].shape[0],):
             raise ValueError("context_labels must have shape [context].")
         if torch.any((context_labels < 0) | (context_labels >= self.num_classes)):
-            raise ValueError(
-                f"Context labels must be in [0, {self.num_classes - 1}]."
-            )
-        class_counts = torch.bincount(
-            context_labels.long(), minlength=self.num_classes
-        )
+            raise ValueError(f"Context labels must be in [0, {self.num_classes - 1}].")
+        class_counts = torch.bincount(context_labels.long(), minlength=self.num_classes)
         if torch.any(class_counts == 0):
             raise ValueError("Every class must occur in the context set.")
         if context["slots"].shape[1:3] != query["slots"].shape[1:3]:
@@ -1900,12 +2224,42 @@ class StructuredPopulationMetaClassifier(nn.Module):
         if context["tails"].shape[1] != query["tails"].shape[1]:
             raise ValueError("Context and query tail counts must match.")
 
-        mean_logits, mean_auxiliary = self.mean_classifier(
-            context["mean"], context_labels, query["mean"], return_auxiliary=True
+        global_shape_logits, global_shape_auxiliary = self.global_shape_classifier(
+            context["global_summary"],
+            context_labels,
+            query["global_summary"],
+            return_auxiliary=True,
         )
         class_memories = self._class_memories(context, context_labels)
-        population_logits, population_weights = self._population_memory_logits(
-            query, class_memories
+        population_attention_logits, population_weights = (
+            self._population_memory_logits(query, class_memories)
+        )
+        abundance_ridge_logits = self._abundance_ridge_logits(
+            context["slot_metadata"],
+            context_labels,
+            query["slot_metadata"],
+        )
+        abundance_ridge_scale = self.abundance_ridge_log_scale.exp().clamp(
+            0.1, 100.0
+        )
+        covariance_ridge_logits = self._abundance_ridge_logits(
+            context["covariance_sketch"],
+            context_labels,
+            query["covariance_sketch"],
+            ridge_lambda=self.covariance_ridge_log_lambda,
+            dual=True,
+        )
+        covariance_ridge_scale = self.covariance_ridge_log_scale.exp().clamp(
+            0.1, 100.0
+        )
+        covariance_logits = covariance_ridge_scale * covariance_ridge_logits
+        covariance_residual_scale = torch.sigmoid(self.covariance_residual_logit)
+        population_attention_scale = torch.sigmoid(
+            self.population_attention_residual_logit
+        )
+        population_logits = (
+            abundance_ridge_scale * abundance_ridge_logits
+            + population_attention_scale * population_attention_logits
         )
         tail_logits, rare_fraction_scores, rare_counts = self._rare_instance_logits(
             query_instances, class_memories
@@ -1919,18 +2273,27 @@ class StructuredPopulationMetaClassifier(nn.Module):
             self.minimum_tail_residual_scale,
         )
         logits, fusion_scale = self._fuse_evidence(
-            mean_logits,
+            global_shape_logits,
             population_logits,
             tail_logits,
             population_scale,
             tail_scale,
         )
+        logits = logits + covariance_residual_scale * covariance_logits
         if not return_auxiliary:
             return logits
         return logits, {
-            **mean_auxiliary,
-            "mean_logits": mean_logits,
+            **global_shape_auxiliary,
+            "global_shape_logits": global_shape_logits,
             "population_logits": population_logits,
+            "abundance_ridge_logits": abundance_ridge_logits,
+            "covariance_logits": covariance_logits,
+            "covariance_ridge_logits": covariance_ridge_logits,
+            "covariance_ridge_scale": covariance_ridge_scale,
+            "covariance_residual_scale": covariance_residual_scale,
+            "abundance_ridge_scale": abundance_ridge_scale,
+            "population_attention_logits": population_attention_logits,
+            "population_attention_residual_scale": population_attention_scale,
             "tail_logits": tail_logits,
             "population_slot_weights": population_weights,
             "tail_weights": torch.softmax(rare_fraction_scores, dim=-1),
@@ -1946,7 +2309,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
 class BaseModel(nn.Module):
     """Compose hybrid population aggregation with class-memory meta learning."""
 
-    architecture_version = 18
+    architecture_version = 19
 
     def __init__(
         self,
@@ -1960,6 +2323,12 @@ class BaseModel(nn.Module):
         aggregator_slot_rare_fraction: float = 0.05,
         aggregator_tail_fractions: Sequence[float] = (0.01, 0.05, 0.15),
         aggregator_min_tail_instances: int = 1,
+        bag_centered_representation: bool = True,
+        global_summary: str = "centered_spread",
+        use_raw_mean_branch: bool = False,
+        aggregator_covariance_sketch_dim: int | None = None,
+        aggregator_covariance_mode: str = "covariance",
+        aggregator_covariance_shrinkage: float = 0.0,
         meta_hidden_dim: int = 256,
         meta_num_heads: int = 8,
         meta_num_set_layers: int = 1,
@@ -1976,6 +2345,8 @@ class BaseModel(nn.Module):
         meta_class_memory_tokens: int = 8,
         meta_rare_evidence_fractions: Sequence[float] = (0.01, 0.05, 0.10, 0.20),
         meta_fusion_residual_scale: float = 0.10,
+        meta_covariance_ridge_logit_scale: float = 2.0,
+        meta_covariance_residual_scale: float = 0.25,
         num_classes: int = 2,
     ) -> None:
         super().__init__()
@@ -1992,6 +2363,12 @@ class BaseModel(nn.Module):
             slot_rare_fraction=aggregator_slot_rare_fraction,
             tail_fractions=aggregator_tail_fractions,
             min_tail_instances=aggregator_min_tail_instances,
+            bag_centered_representation=bag_centered_representation,
+            global_summary=global_summary,
+            use_raw_mean_branch=use_raw_mean_branch,
+            covariance_sketch_dim=aggregator_covariance_sketch_dim,
+            covariance_mode=aggregator_covariance_mode,
+            covariance_shrinkage=aggregator_covariance_shrinkage,
         )
         self.meta_classifier = StructuredPopulationMetaClassifier(
             token_dim=self.input_dim,
@@ -2005,14 +2382,14 @@ class BaseModel(nn.Module):
             attention_residual_scale=meta_attention_residual_scale,
             population_residual_scale=meta_population_residual_scale,
             tail_residual_scale=meta_tail_residual_scale,
-            minimum_population_residual_scale=(
-                meta_minimum_population_residual_scale
-            ),
+            minimum_population_residual_scale=(meta_minimum_population_residual_scale),
             minimum_tail_residual_scale=meta_minimum_tail_residual_scale,
             routing_temperature=meta_routing_temperature,
             class_memory_tokens=meta_class_memory_tokens,
             rare_evidence_fractions=meta_rare_evidence_fractions,
             fusion_residual_scale=meta_fusion_residual_scale,
+            covariance_ridge_logit_scale=meta_covariance_ridge_logit_scale,
+            covariance_residual_scale=meta_covariance_residual_scale,
             num_classes=self.num_classes,
         )
         self.register_buffer(
@@ -2045,7 +2422,9 @@ class BaseModel(nn.Module):
     ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
         """Run dense equal-shape episodes through one batched aggregator."""
         if x.ndim != 4:
-            raise ValueError("Batched x must be [episodes, bags, instances, input_dim].")
+            raise ValueError(
+                "Batched x must be [episodes, bags, instances, input_dim]."
+            )
         episodes, num_bags, num_instances, input_dim = x.shape
         if input_dim != self.input_dim or y.shape != (episodes, num_bags):
             raise ValueError("Batched x/y shapes are incompatible.")
@@ -2054,23 +2433,31 @@ class BaseModel(nn.Module):
         if torch.any((mask_index < 0) | (mask_index >= num_bags)):
             raise IndexError("mask_index contains an out-of-range bag index.")
 
-        is_context = torch.ones(
-            episodes, num_bags, dtype=torch.bool, device=x.device
-        )
+        is_context = torch.ones(episodes, num_bags, dtype=torch.bool, device=x.device)
         is_context.scatter_(1, mask_index.long(), False)
-        anchors = torch.stack([
-            self.aggregator._context_anchors(
-                list(x[episode].unbind(0)), is_context[episode]
-            )
-            for episode in range(episodes)
-        ])
-        per_bag_anchors = anchors[:, None].expand(
-            -1, num_bags, -1, -1
-        ).reshape(episodes * num_bags, anchors.shape[1], anchors.shape[2])
+        flat_x = x.reshape(episodes * num_bags, num_instances, input_dim)
+        classification_flat, global_summary, centered_delta = self.aggregator._bag_view(flat_x)
+        covariance_sketch = self.aggregator._covariance_sketch(centered_delta)
+        classification_x = classification_flat.reshape_as(x)
+        anchors = torch.stack(
+            [
+                self.aggregator._context_anchors(
+                    list(classification_x[episode].unbind(0)), is_context[episode]
+                )
+                for episode in range(episodes)
+            ]
+        )
+        per_bag_anchors = (
+            anchors[:, None]
+            .expand(-1, num_bags, -1, -1)
+            .reshape(episodes * num_bags, anchors.shape[1], anchors.shape[2])
+        )
         flat_representation = self.aggregator._forward_dense(
-            x.reshape(episodes * num_bags, num_instances, input_dim),
+            classification_flat,
             per_bag_anchors,
             return_auxiliary=False,
+            global_summary=global_summary,
+            covariance_sketch=covariance_sketch,
         )
         representation = {
             name: tokens.reshape(episodes, num_bags, *tokens.shape[1:])
@@ -2078,15 +2465,13 @@ class BaseModel(nn.Module):
         }
 
         context_count = num_bags - mask_index.shape[1]
-        context_index = torch.nonzero(
-            is_context, as_tuple=False
-        )[:, 1].reshape(episodes, context_count)
+        context_index = torch.nonzero(is_context, as_tuple=False)[:, 1].reshape(
+            episodes, context_count
+        )
 
         def gather_bags(tokens: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
             view_shape = index.shape + (1,) * (tokens.ndim - 2)
-            expanded = index.reshape(view_shape).expand(
-                index.shape + tokens.shape[2:]
-            )
+            expanded = index.reshape(view_shape).expand(index.shape + tokens.shape[2:])
             return tokens.gather(1, expanded)
 
         context = {
@@ -2098,7 +2483,7 @@ class BaseModel(nn.Module):
             for name, tokens in representation.items()
         }
         context_labels = y.gather(1, context_index)
-        query_instances = gather_bags(x, mask_index.long())
+        query_instances = gather_bags(classification_x, mask_index.long())
         return self.meta_classifier.forward_batched(
             context=context,
             context_labels=context_labels,
@@ -2116,7 +2501,9 @@ class BaseModel(nn.Module):
     ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
         if isinstance(x, torch.Tensor):
             if x.ndim != 3:
-                raise ValueError("Dense x must have shape [bags, instances, input_dim].")
+                raise ValueError(
+                    "Dense x must have shape [bags, instances, input_dim]."
+                )
             num_bags = x.shape[0]
         else:
             num_bags = len(x)
@@ -2129,14 +2516,14 @@ class BaseModel(nn.Module):
             mask_index, num_bags=num_bags, device=y.device
         )
         normalized_bags = self.aggregator._normalize_bags(x)
-        if isinstance(normalized_bags, torch.Tensor):
-            query_instances: torch.Tensor | list[torch.Tensor] = normalized_bags[
-                query_index
-            ]
-        else:
-            query_instances = [
-                normalized_bags[index] for index in query_index.detach().cpu().tolist()
-            ]
+        classification_bags = [
+            self.aggregator._bag_view(bag)[0] for bag in normalized_bags
+        ]
+        query_instances = [
+            classification_bags[index] for index in query_index.detach().cpu().tolist()
+        ]
+        if isinstance(x, torch.Tensor):
+            query_instances = torch.stack(query_instances)
         is_context = torch.ones(num_bags, dtype=torch.bool, device=y.device)
         is_context[query_index] = False
         if return_auxiliary:
@@ -2165,7 +2552,7 @@ class BaseModel(nn.Module):
             return result
         logits, auxiliary = result
         return logits, {
-            "bag_tokens": representation["mean"],
+            "bag_tokens": representation["global_summary"],
             "slot_tokens": representation["slots"],
             "tail_tokens": representation["tails"],
             "slot_metadata": representation["slot_metadata"],
