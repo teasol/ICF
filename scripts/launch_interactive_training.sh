@@ -21,6 +21,9 @@ CUDA_DEVICES="${CUDA_DEVICES:-0,1,2,3,4,5,6,7}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
 # Avoid allocator fragmentation from changing synthetic episode shapes.
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+# This A6000 host has an unstable NCCL peer-to-peer/NVLink path. Force NCCL to
+# use its non-P2P transport so the first DDP collective cannot hang.
+export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
 
 CKPT_PATH="${CKPT_PATH:-}"
 RUN_TIME="${ICF_RUN_TIME:-$(date +%Y%m%d_%H%M%S)}"
