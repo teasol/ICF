@@ -129,7 +129,7 @@ def main() -> None:
     existing.sort(key=lambda row: (row["stage"], int(row["seed"])))
     fieldnames = list(record)
     with output.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        writer = csv.DictWriter(stream, fieldnames=fieldnames, lineterminator="\n")
         writer.writeheader()
         writer.writerows(existing)
     print(json.dumps(record, indent=2, sort_keys=False))

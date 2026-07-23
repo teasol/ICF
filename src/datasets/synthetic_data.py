@@ -907,18 +907,30 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
             )
         self._sample_count = epoch * samples_per_rank
 
+    def _generation_device(self) -> torch.device:
+        """Resolve bare ``cuda`` to this DDP rank's current local device.
+
+        CUDA's current device is thread-local. Nested generation workers would
+        otherwise interpret ``torch.device("cuda")`` as device zero, causing
+        different DDP ranks to generate into the same GPU.
+        """
+        device = torch.device(self.generation_device)
+        if device.type == "cuda" and device.index is None:
+            return torch.device("cuda", torch.cuda.current_device())
+        return device
+
     def __getitems__(
         self, indices: list[int]
     ) -> list[tuple[torch.Tensor, torch.Tensor]]:
         if (
             len(indices) <= 1
             or self.seed is not None
-            or torch.device(self.generation_device).type != "cuda"
+            or self._generation_device().type != "cuda"
         ):
             return [self[index] for index in indices]
         start = self._sample_count
         self._sample_count += len(indices)
-        device = torch.device(self.generation_device)
+        device = self._generation_device()
         shape_seed = torch.initial_seed() + start // self.shape_group_size
         shape_generator = torch.Generator(device=device).manual_seed(shape_seed)
         num_bags = self.episode_generator.sample_num_bags(
@@ -936,6 +948,7 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
                     start + offset,
                     num_bags=num_bags,
                     num_cells=num_cells,
+                    device=device,
                 )
             stream.synchronize()
             return sample
@@ -953,8 +966,8 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         sample_count: int,
         num_bags: int,
         num_cells: int,
+        device: torch.device,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        device = torch.device(self.generation_device)
         rank = int(os.environ.get("RANK", "0"))
         sample_seed = torch.initial_seed() + rank * 1_000_003 + sample_count
         generator = torch.Generator(device=device).manual_seed(sample_seed)
@@ -974,7 +987,7 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         return self._format_episode(episode)
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
-        device = torch.device(self.generation_device)
+        device = self._generation_device()
         sample_count = self._sample_count
         episode_index = (
             index % self.fixed_episode_count
