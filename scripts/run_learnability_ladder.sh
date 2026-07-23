@@ -25,12 +25,14 @@ fi
 
 display_stage="${stage^^}"
 display_stage="${display_stage//_/-}"
-run_kind="learnability_${stage}"
+seed="${SEED:-42}"
+run_kind="learnability_${stage}_seed${seed}"
 config="configs/train_learnability_${stage}.yaml"
-checkpoint_dir="${project_root}/checkpoints/learnability_ladder/${display_stage}"
+checkpoint_dir="${project_root}/checkpoints/learnability_ladder/${display_stage}/seed_${seed}"
 CUDA_DEVICES="${CUDA_DEVICES:-0,1,2,3}" \
 NPROC_PER_NODE="${NPROC_PER_NODE:-4}" \
 ICF_CHECKPOINT_DIR="${checkpoint_dir}" \
+SEED="${seed}" \
 CKPT_PATH= \
 TORCHRUN_BIN="${TORCHRUN_BIN:-${bagpfn_torchrun}}" \
     scripts/launch_interactive_training.sh "${run_kind}" "${config}"
