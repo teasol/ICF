@@ -1,5 +1,6 @@
 from __future__ import annotations
 from importlib import import_module
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -44,10 +45,59 @@ class EvaluationEpisodeCollator:
 
 
 def collate_synthetic_training_episode(samples: list[Any]):
-    """Remove DataLoader's outer batch dimension from one generated episode."""
-    if len(samples) != 1:
-        raise ValueError("Synthetic episode loaders require batch_size=1.")
-    return samples[0]
+    """Stack equal-shape synthetic episodes for single-device DDP emulation."""
+    if not samples:
+        raise ValueError("A synthetic training batch cannot be empty.")
+    if len(samples) == 1:
+        return samples[0]
+    x = torch.stack([sample[0] for sample in samples])
+    y = torch.stack([sample[1] for sample in samples])
+    if len(samples[0]) == 2:
+        return x, y
+    if len(samples[0]) != 3 or any(len(sample) != 3 for sample in samples):
+        raise ValueError("Synthetic episode samples must have two or three fields.")
+    oracle_abundance = torch.stack([sample[2] for sample in samples])
+    return x, y, oracle_abundance
+
+
+class _CudaPrefetchIterator:
+    """Generate the next CUDA batch while the current batch trains."""
+
+    def __init__(self, source: Any) -> None:
+        self.source = source
+        self.executor = ThreadPoolExecutor(max_workers=1)
+        self.stream = torch.cuda.Stream()
+        self.future = self.executor.submit(self._next_batch)
+
+    def _next_batch(self) -> Any:
+        with torch.cuda.stream(self.stream):
+            batch = next(self.source)
+        self.stream.synchronize()
+        return batch
+
+    def __iter__(self) -> "_CudaPrefetchIterator":
+        return self
+
+    def __next__(self) -> Any:
+        try:
+            batch = self.future.result()
+        except BaseException:
+            self.executor.shutdown(wait=False)
+            raise
+        self.future = self.executor.submit(self._next_batch)
+        return batch
+
+    def __del__(self) -> None:
+        executor = getattr(self, "executor", None)
+        if executor is not None:
+            executor.shutdown(wait=False, cancel_futures=True)
+
+
+class CudaPrefetchDataLoader(DataLoader[Any]):
+    """DataLoader whose next batch is produced on a background CUDA stream."""
+
+    def __iter__(self) -> _CudaPrefetchIterator:
+        return _CudaPrefetchIterator(super().__iter__())
 
 
 def collate_synthetic_evaluation_episode(samples: list[Any]):
@@ -57,7 +107,8 @@ def collate_synthetic_evaluation_episode(samples: list[Any]):
     Twenty percent of bags (at most 20) are queried together, while one bag
     from every observed class is protected as labelled context.
     """
-    x, y = collate_synthetic_training_episode(samples)
+    episode = collate_synthetic_training_episode(samples)
+    x, y = episode[:2]
     observed_classes = torch.unique(y, sorted=True)
     protected = []
     for class_index in observed_classes:
@@ -73,7 +124,9 @@ def collate_synthetic_evaluation_episode(samples: list[Any]):
             "A synthetic evaluation episode needs context bags and a query."
         )
     mask_index = candidates[:num_queries]
-    return x, y, mask_index
+    if len(episode) == 2:
+        return x, y, mask_index
+    return x, y, mask_index, episode[2]
 
 
 class DataInterface(LightningDataModule):
@@ -205,9 +258,15 @@ class DataInterface(LightningDataModule):
         persistent_workers = (
             self.hparams.get("persistent_workers", False) and num_workers > 0
         )
-        return DataLoader(
+        batch_size = self.hparams.get("episode_batch_size", 1) if split == "train" else 1
+        loader_cls = (
+            CudaPrefetchDataLoader
+            if split == "train" and self.hparams.get("cuda_prefetch", False)
+            else DataLoader
+        )
+        return loader_cls(
             dataset,
-            batch_size=1,
+            batch_size=batch_size,
             shuffle=self.hparams.get(f"{split}_shuffle", split == "train"),
             num_workers=num_workers,
             pin_memory=self.hparams.get("pin_memory", False),

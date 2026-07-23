@@ -1,0 +1,11 @@
+checkpoint:
+  enabled: true
+  dirpath: checkpoints
+  filename: "{epoch:03d}-{val_accuracy:.4f}"
+  monitor: val_accuracy
+  mode: max
+  save_top_k: 3
+  save_last: true
+lr_monitor:
+  enabled: true
+  logging_interval: epoch

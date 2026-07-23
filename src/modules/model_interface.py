@@ -30,20 +30,106 @@ class ModelInterface(L.LightningModule):
                 "Start a new run with hybrid anchors and class memory."
             )
 
+    def _raise_if_nonfinite_parameters(self, stage: str) -> None:
+        named = list(self.named_parameters())
+        tensors = [parameter for _, parameter in named]
+        if tensors and torch.stack(
+            [torch.isfinite(parameter).all() for parameter in tensors]
+        ).all():
+            return
+        bad = [
+            name for name, parameter in named
+            if not torch.isfinite(parameter).all()
+        ]
+        raise RuntimeError(f"Non-finite parameters at {stage}: {bad}")
+
+    def _raise_if_nonfinite_gradients(self, stage: str) -> None:
+        named = [
+            (name, parameter.grad)
+            for name, parameter in self.named_parameters()
+            if parameter.grad is not None
+        ]
+        gradients = [gradient for _, gradient in named]
+        if gradients and torch.stack(
+            [torch.isfinite(gradient).all() for gradient in gradients]
+        ).all():
+            return
+        bad = [
+            name for name, gradient in named
+            if not torch.isfinite(gradient).all()
+        ]
+        raise RuntimeError(f"Non-finite gradients at {stage}: {bad}")
+
+    def on_train_start(self) -> None:
+        self._raise_if_nonfinite_parameters("training start")
+
+    def on_before_optimizer_step(self, optimizer: torch.optim.Optimizer) -> None:
+        # Lightning calls this after AMP unscaling and before gradient clipping.
+        self._raise_if_nonfinite_gradients(
+            f"epoch={self.current_epoch}, optimizer step={self.global_step}"
+        )
+
+    def optimizer_step(self, *args: Any, **kwargs: Any) -> None:
+        super().optimizer_step(*args, **kwargs)
+        self._raise_if_nonfinite_parameters(f"optimizer step={self.global_step}")
+
     def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
         x, y = batch[:2]
-        mask_index = self._sample_training_queries(y)
-        loss, terms = self._episode_losses(x, y, mask_index)
+        losses, episode_terms, query_counts = [], [], []
+        if x.ndim == 3:
+            mask_index = self._sample_training_queries(y)
+            episode_loss, terms = self._episode_losses(x, y, mask_index)
+            losses.append(episode_loss)
+            episode_terms.append(terms)
+            query_counts.append(mask_index.numel())
+        elif x.ndim == 4 and y.ndim == 2 and x.shape[0] == y.shape[0]:
+            first_mask = self._sample_training_queries(y[0])
+            query_count = first_mask.numel()
+            masks = [first_mask] + [
+                self._sample_training_queries(
+                    episode_y, num_targets_override=query_count
+                )
+                for episode_y in y[1:]
+            ]
+            mask_index = torch.stack(masks)
+            logits, batched_auxiliary = self.model.forward_episode_batch(
+                x, y, mask_index, return_auxiliary=True
+            )
+            for episode in range(x.shape[0]):
+                auxiliary = {
+                    name: value[episode]
+                    for name, value in batched_auxiliary.items()
+                }
+                episode_loss, terms = self._losses_from_output(
+                    logits[episode],
+                    auxiliary,
+                    y[episode, mask_index[episode]],
+                )
+                losses.append(episode_loss)
+                episode_terms.append(terms)
+                query_counts.append(query_count)
+        else:
+            raise ValueError(
+                "Synthetic training input must be one episode [bags, cells, dim] "
+                "or a batch [episodes, bags, cells, dim]."
+            )
+        loss = torch.stack(losses).mean()
+        total_queries = sum(query_counts)
+        terms = {
+            name: sum(
+                values[name] * count
+                for values, count in zip(episode_terms, query_counts)
+            ) / total_queries
+            for name in episode_terms[0]
+        }
+        logged_loss = sum(
+            value * count for value, count in zip(losses, query_counts)
+        ) / total_queries
         self.log(
-            "train_loss",
-            loss,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-            batch_size=mask_index.numel(),
-            sync_dist=True,
+            "train_loss", logged_loss, on_step=False, on_epoch=True,
+            prog_bar=True, batch_size=total_queries, sync_dist=True,
         )
-        self._log_loss_components("train", terms, mask_index.numel())
+        self._log_loss_components("train", terms, total_queries)
         return loss
 
     def on_train_epoch_start(self) -> None:
@@ -52,7 +138,11 @@ class ModelInterface(L.LightningModule):
         train_dataset = getattr(train_loader, "dataset", None)
         set_curriculum_epoch = getattr(train_dataset, "set_curriculum_epoch", None)
         if set_curriculum_epoch is not None:
-            set_curriculum_epoch(self.current_epoch, len(train_loader))
+            batch_size = getattr(train_loader, "batch_size", 1) or 1
+            set_curriculum_epoch(
+                self.current_epoch,
+                len(train_loader) * batch_size,
+            )
 
     def validation_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
         return self._evaluation_step(batch, "val")
@@ -66,7 +156,7 @@ class ModelInterface(L.LightningModule):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> dict[str, torch.Tensor]:
-        x, y, mask_index = self._unpack_evaluation_batch(batch, "prediction")
+        x, y, mask_index, _ = self._unpack_evaluation_batch(batch, "prediction")
         logits = self.model(x, y, mask_index)
         probabilities = torch.softmax(logits, dim=-1)
         return {
@@ -77,8 +167,15 @@ class ModelInterface(L.LightningModule):
         }
 
     def _evaluation_step(self, batch: Any, stage: str) -> torch.Tensor:
-        x, y, mask_index = self._unpack_evaluation_batch(batch, stage)
-        loss, terms = self._episode_losses(x, y, mask_index)
+        x, y, mask_index, oracle_abundance = self._unpack_evaluation_batch(
+            batch, stage
+        )
+        logits, auxiliary = self.model(
+            x, y, mask_index, return_auxiliary=True
+        )
+        loss, terms = self._losses_from_output(
+            logits, auxiliary, y[mask_index]
+        )
         self.log(
             f"{stage}_loss",
             loss,
@@ -89,6 +186,19 @@ class ModelInterface(L.LightningModule):
             sync_dist=True,
         )
         self._log_loss_components(stage, terms, mask_index.numel())
+        if oracle_abundance is not None:
+            oracle_terms = self._oracle_abundance_diagnostics(
+                oracle_abundance, y, mask_index, terms["auroc"]
+            )
+            for name, value in oracle_terms.items():
+                self.log(
+                    f"{stage}/{name}",
+                    value,
+                    on_step=False,
+                    on_epoch=True,
+                    batch_size=mask_index.numel(),
+                    sync_dist=True,
+                )
         return loss
 
     def _log_loss_components(
@@ -112,18 +222,30 @@ class ModelInterface(L.LightningModule):
     def _unpack_evaluation_batch(
         batch: Any,
         stage: str,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        if len(batch) != 3:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        if len(batch) not in (3, 4):
             raise ValueError(
-                f"A {stage} batch must contain (x, y, mask_index)."
+                f"A {stage} batch must contain (x, y, mask_index) and optional "
+                "oracle metadata."
             )
-        x, y, mask_index = batch
+        x, y, mask_index = batch[:3]
         index = torch.as_tensor(mask_index, device=y.device, dtype=torch.long).flatten()
         if index.numel() == 0:
             raise ValueError(f"A {stage} episode must contain at least one query.")
-        return x, y, index
+        oracle_abundance = None
+        if len(batch) == 4:
+            oracle_abundance = torch.as_tensor(
+                batch[3], device=y.device, dtype=torch.float32
+            ).flatten().detach()
+            if oracle_abundance.shape != y.shape:
+                raise ValueError("Oracle abundance must contain one scalar per bag.")
+        return x, y, index, oracle_abundance
 
-    def _sample_training_queries(self, y: torch.Tensor) -> torch.Tensor:
+    def _sample_training_queries(
+        self,
+        y: torch.Tensor,
+        num_targets_override: int | None = None,
+    ) -> torch.Tensor:
         """Sample queries while retaining at least one context bag per class."""
         target_range = self.hparams.get("training_targets_per_episode", 1)
         if isinstance(target_range, Sequence) and not isinstance(
@@ -154,24 +276,37 @@ class ModelInterface(L.LightningModule):
                 "Not enough bags to sample the requested queries while retaining "
                 "one context bag per class."
             )
-        if min_targets == max_targets:
+        if num_targets_override is not None:
+            num_targets = int(num_targets_override)
+            if not min_targets <= num_targets <= max_targets:
+                raise ValueError("The shared query count is outside the configured range.")
+        elif min_targets == max_targets:
             num_targets = min_targets
         else:
             num_targets = int(
                 torch.randint(min_targets, max_targets + 1, (), device="cpu").item()
             )
 
-        # Randomly protect one context example from every class, then sample
-        # queries from the remaining bags.  This prevents undefined prototypes.
+        fixed_queries = bool(self.hparams.get("fixed_training_queries", False))
+        # Protect one context example from every class. Learnability diagnostics
+        # use the first occurrence so a fixed episode keeps a fixed split.
         protected: list[torch.Tensor] = []
         for class_index in range(num_classes):
             candidates = torch.nonzero(y == class_index, as_tuple=False).flatten()
-            choice = torch.randint(candidates.numel(), (), device=y.device)
+            choice = (
+                torch.zeros((), dtype=torch.long, device=y.device)
+                if fixed_queries
+                else torch.randint(candidates.numel(), (), device=y.device)
+            )
             protected.append(candidates[choice])
         can_query = torch.ones(y.numel(), dtype=torch.bool, device=y.device)
         can_query[torch.stack(protected)] = False
         candidates = torch.nonzero(can_query, as_tuple=False).flatten()
-        order = torch.randperm(candidates.numel(), device=y.device)
+        order = (
+            torch.arange(candidates.numel(), device=y.device)
+            if fixed_queries
+            else torch.randperm(candidates.numel(), device=y.device)
+        )
         return candidates[order[:num_targets]]
 
     def _episode_loss(
@@ -191,7 +326,14 @@ class ModelInterface(L.LightningModule):
         logits, auxiliary = self.model(
             x, y, mask_index, return_auxiliary=True
         )
-        targets = y[mask_index]
+        return self._losses_from_output(logits, auxiliary, y[mask_index])
+
+    def _losses_from_output(
+        self,
+        logits: torch.Tensor,
+        auxiliary: dict[str, torch.Tensor],
+        targets: torch.Tensor,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         cross_entropy = F.cross_entropy(logits, targets)
         ranking = self._pairwise_ranking_loss(logits, targets)
         ranking_weight = float(self.hparams.get("ranking_loss_weight", 0.0))
@@ -199,9 +341,11 @@ class ModelInterface(L.LightningModule):
         total = main_loss
         terms = {
             "ce_loss": cross_entropy,
+            "accuracy": (logits.argmax(dim=-1) == targets).float().mean(),
             "ranking_loss": ranking,
             "main_loss": main_loss,
         }
+        terms.update(self._binary_query_diagnostics(logits, targets))
 
         population_weights = auxiliary["population_slot_weights"].float()
         routing_entropy = -(
@@ -237,6 +381,126 @@ class ModelInterface(L.LightningModule):
             rare_weights * rare_weights.log()
         ).sum(dim=-1).mean()
         return total, terms
+
+    @staticmethod
+    def _binary_query_diagnostics(
+        logits: torch.Tensor,
+        targets: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        """Episode-level baselines and discrimination metrics for binary queries."""
+        if logits.ndim != 2 or logits.shape[-1] != 2:
+            return {}
+        targets = targets.long()
+        positive_fraction = targets.float().mean()
+        majority_accuracy = torch.maximum(
+            positive_fraction, 1.0 - positive_fraction
+        )
+        eps = torch.finfo(logits.float().dtype).eps
+        prior = positive_fraction.clamp(eps, 1.0 - eps)
+        empirical_prior_ce = -(
+            positive_fraction * prior.log()
+            + (1.0 - positive_fraction) * (1.0 - prior).log()
+        )
+        predictions = logits.argmax(dim=-1)
+        positive = targets == 1
+        negative = ~positive
+        positive_recall = (predictions[positive] == 1).float().mean()
+        negative_recall = (predictions[negative] == 0).float().mean()
+        both_classes = positive.any() & negative.any()
+        balanced_accuracy = (positive_recall + negative_recall) / 2
+        scores = (logits[:, 1] - logits[:, 0]).float()
+        pairwise = scores[positive][:, None] - scores[negative][None, :]
+        auroc = (pairwise.gt(0).float() + 0.5 * pairwise.eq(0).float()).mean()
+        zero = logits.float().sum() * 0
+        return {
+            "query_positive_fraction": positive_fraction,
+            "majority_accuracy": majority_accuracy,
+            "empirical_prior_ce": empirical_prior_ce,
+            "positive_recall": torch.where(positive.any(), positive_recall, zero),
+            "negative_recall": torch.where(negative.any(), negative_recall, zero),
+            "balanced_accuracy": torch.where(both_classes, balanced_accuracy, zero),
+            "auroc": torch.where(both_classes, auroc, zero),
+            "positive_recall_valid": positive.any().float(),
+            "negative_recall_valid": negative.any().float(),
+            "binary_ranking_metrics_valid": both_classes.float(),
+        }
+
+    @staticmethod
+    @torch.no_grad()
+    def _fit_oracle_abundance_logits(
+        abundance: torch.Tensor,
+        labels: torch.Tensor,
+        mask_index: torch.Tensor,
+        ridge_lambda: float = 1e-3,
+    ) -> torch.Tensor:
+        """Fit a detached 1-D ridge classifier using labelled context only."""
+        abundance = abundance.detach().float().flatten()
+        labels = labels.detach().long().flatten()
+        mask_index = mask_index.detach().long().flatten()
+        context_mask = torch.ones_like(labels, dtype=torch.bool)
+        context_mask[mask_index] = False
+        context_abundance = abundance[context_mask]
+        context_labels = labels[context_mask]
+        if context_abundance.numel() < 2 or torch.unique(context_labels).numel() < 2:
+            raise ValueError("Oracle ridge fitting requires both classes in context.")
+
+        center = context_abundance.mean()
+        scale = context_abundance.std(unbiased=False).clamp_min(1e-6)
+        context_feature = (context_abundance - center) / scale
+        query_feature = (abundance[mask_index] - center) / scale
+        design = torch.stack((context_feature, torch.ones_like(context_feature)), dim=1)
+        target = context_labels.float().mul(2).sub(1)
+        penalty = torch.diag(
+            torch.tensor(
+                [ridge_lambda, 0.0], device=design.device, dtype=design.dtype
+            )
+        )
+        # Keep the tiny ridge solve in FP32 even when validation runs under
+        # BF16 autocast; oracle diagnostics never participate in optimization.
+        with torch.autocast(device_type=abundance.device.type, enabled=False):
+            coefficients = torch.linalg.solve(
+                design.float().T @ design.float() + penalty.float(),
+                design.float().T @ target.float(),
+            )
+        score = query_feature * coefficients[0] + coefficients[1]
+        return torch.stack((-0.5 * score, 0.5 * score), dim=-1).detach()
+
+    @classmethod
+    @torch.no_grad()
+    def _oracle_abundance_diagnostics(
+        cls,
+        abundance: torch.Tensor,
+        labels: torch.Tensor,
+        mask_index: torch.Tensor,
+        model_auroc: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        oracle_logits = cls._fit_oracle_abundance_logits(
+            abundance, labels, mask_index
+        )
+        query_labels = labels.detach().long()[mask_index]
+        diagnostics = cls._binary_query_diagnostics(oracle_logits, query_labels)
+        class0 = abundance.detach().float()[mask_index][query_labels == 0]
+        class1 = abundance.detach().float()[mask_index][query_labels == 1]
+        if class0.numel() and class1.numel():
+            pooled_variance = (
+                class0.var(unbiased=False) + class1.var(unbiased=False)
+            ) / 2
+            snr = (class1.mean() - class0.mean()).abs() / torch.sqrt(
+                pooled_variance + 1e-8
+            )
+        else:
+            snr = abundance.detach().float().sum() * 0
+        oracle_auroc = diagnostics["auroc"]
+        return {
+            "oracle_abundance_accuracy": (
+                oracle_logits.argmax(dim=-1) == query_labels
+            ).float().mean(),
+            "oracle_abundance_balanced_accuracy": diagnostics["balanced_accuracy"],
+            "oracle_abundance_auroc": oracle_auroc,
+            "oracle_abundance_ce": F.cross_entropy(oracle_logits, query_labels),
+            "oracle_abundance_snr": snr,
+            "oracle_model_auroc_gap": oracle_auroc - model_auroc.detach().float(),
+        }
 
     @staticmethod
     def _routing_balance_loss(weights: torch.Tensor) -> torch.Tensor:
@@ -279,6 +543,7 @@ class ModelInterface(L.LightningModule):
             "ranking_loss_weight",
             "routing_sparsity_weight",
             "routing_balance_weight",
+            "fixed_training_queries",
         ):
             kwargs.pop(key, None)
         module_name, class_name = model_src.rsplit(".", 1)

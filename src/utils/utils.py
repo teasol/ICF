@@ -117,7 +117,8 @@ def resolve_config_group(group: str, value: Any) -> dict[str, Any]:
 
 
 def merge_train_config(config_path: Path) -> dict[str, Any]:
-    config = load_yaml(config_path)
+    config_path = config_path.resolve()
+    config = _load_train_config(config_path, ())
     dataset_config = resolve_config_group("dataset", config.get("dataset"))
 
     merged = dict(config)
@@ -125,6 +126,8 @@ def merge_train_config(config_path: Path) -> dict[str, Any]:
         dataset_config,
         resolve_config_group("data", config.get("data")),
     )
+    merged["data"] = deep_merge(merged["data"], config.get("data_overrides", {}))
+    merged.pop("data_overrides", None)
     merged["model"] = resolve_config_group("model", config.get("model"))
     merged["optimizer"] = resolve_config_group("optimizer", config.get("optimizer"))
     merged["scheduler"] = resolve_config_group("scheduler", config.get("scheduler"))
@@ -132,6 +135,25 @@ def merge_train_config(config_path: Path) -> dict[str, Any]:
     merged["logger"] = resolve_config_group("logger", config.get("logger"))
     merged["callbacks"] = resolve_config_group("callbacks", config.get("callbacks"))
     return merged
+
+
+def _load_train_config(
+    config_path: Path,
+    stack: tuple[Path, ...],
+) -> dict[str, Any]:
+    """Load an optional train-config base before resolving config groups."""
+    if config_path in stack:
+        cycle = " -> ".join(str(path) for path in (*stack, config_path))
+        raise ValueError(f"Circular base_config chain: {cycle}")
+    config = load_yaml(config_path)
+    base_value = config.pop("base_config", None)
+    if base_value is None:
+        return config
+    base_path = Path(base_value)
+    if not base_path.is_absolute():
+        base_path = config_path.parent / base_path
+    base = _load_train_config(base_path.resolve(), (*stack, config_path))
+    return deep_merge(base, config)
 
 
 def build_datamodule(config: dict[str, Any]) -> DataInterface:

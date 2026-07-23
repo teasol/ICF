@@ -3,8 +3,8 @@
 # horizon; increasing epochs would not compensate for structural failure.
 max_epochs: 100
 accelerator: gpu
-devices: 8
-strategy: ddp_find_unused_parameters_false
+devices: 1
+strategy: auto
 # BF16 keeps FP32-like exponent range and avoids FP16 GradScaler collapse.
 precision: bf16-mixed
 log_every_n_steps: 100

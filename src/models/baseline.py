@@ -544,6 +544,133 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         rare = torch.stack(selected)
         return torch.cat((density, rare), dim=0).to(candidates.dtype)
 
+    def _forward_dense(
+        self,
+        instances: torch.Tensor,
+        anchors: torch.Tensor,
+        return_auxiliary: bool,
+    ) -> (
+        dict[str, torch.Tensor]
+        | tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]
+    ):
+        """Vectorized equivalent of the per-bag path for synthetic episodes."""
+        num_bags, num_instances, _ = instances.shape
+        normalized = F.normalize(instances.float(), dim=-1)
+        if anchors.ndim == 2:
+            expanded_anchors = anchors.unsqueeze(0).expand(num_bags, -1, -1)
+        elif anchors.ndim == 3 and anchors.shape[0] == num_bags:
+            expanded_anchors = anchors
+        else:
+            raise ValueError("Anchors must be [slots, dim] or [bags, slots, dim].")
+        similarity = torch.einsum("bnd,bsd->bns", normalized, expanded_anchors.float())
+        assignment = torch.softmax(
+            similarity / self.assignment_temperature,
+            dim=-1,
+        ).to(instances.dtype)
+        mass = assignment.sum(dim=1).clamp_min(1e-6)
+        proportion = mass / num_instances
+        slot_mean = torch.einsum(
+            "bns,bnd->bsd", assignment, instances
+        ) / mass.unsqueeze(-1)
+        difference = instances[:, :, None, :] - slot_mean[:, None, :, :]
+        slot_std = torch.sqrt(
+            (
+                assignment.float().transpose(1, 2).unsqueeze(-1)
+                * difference.float().square().transpose(1, 2)
+            ).sum(dim=2)
+            / mass.float().unsqueeze(-1)
+            + 1e-6
+        ).to(instances.dtype)
+        dispersion = (
+            assignment * (1.0 - similarity).to(assignment.dtype)
+        ).sum(dim=1) / mass
+        metadata = torch.stack((proportion.log(), dispersion), dim=-1)
+
+        rare_count = min(
+            num_instances,
+            max(1, int(math.ceil(self.slot_rare_fraction * num_instances))),
+        )
+        slot_distance = difference.float().square().mean(dim=-1)
+        rare_score = assignment.float() * slot_distance
+        values, index = rare_score.transpose(1, 2).topk(rare_count, dim=-1)
+        weights = torch.softmax(values, dim=-1).to(instances.dtype)
+        batch_index = torch.arange(num_bags, device=instances.device)[:, None, None]
+        selected = instances[batch_index, index]
+        rare_state = (weights.unsqueeze(-1) * selected).sum(dim=2)
+
+        center_features = torch.cat(
+            (expanded_anchors, slot_mean - expanded_anchors, metadata), dim=-1
+        )
+        spread_features = torch.cat(
+            (expanded_anchors, slot_std, metadata), dim=-1
+        )
+        rare_features = torch.cat(
+            (expanded_anchors, rare_state - expanded_anchors, metadata), dim=-1
+        )
+        residual_scale = torch.sigmoid(self.slot_residual_logit)
+        center_token = slot_mean + residual_scale * self.center_slot_encoder(
+            center_features
+        )
+        spread_token = slot_std + residual_scale * self.spread_slot_encoder(
+            spread_features
+        )
+        rare_token = rare_state + residual_scale * self.rare_slot_encoder(
+            rare_features
+        )
+        slot_tokens = torch.stack((center_token, spread_token, rare_token), dim=2)
+
+        nearest_similarity, nearest_slot = similarity.max(dim=-1)
+        novelty = 1.0 - nearest_similarity
+        tail_tokens: list[torch.Tensor] = []
+        selected_counts: list[int] = []
+        for fraction in self.tail_fractions:
+            count = min(
+                num_instances,
+                max(
+                    self.min_tail_instances,
+                    int(math.ceil(fraction * num_instances)),
+                ),
+            )
+            index = novelty.topk(count, dim=1).indices
+            selected_instances = instances.gather(
+                1, index.unsqueeze(-1).expand(-1, -1, instances.shape[-1])
+            )
+            selected_slots = nearest_slot.gather(1, index)
+            selected_anchors = expanded_anchors.gather(
+                1, selected_slots.unsqueeze(-1).expand(-1, -1, anchors.shape[-1])
+            )
+            deviation = selected_instances - selected_anchors
+            with torch.autocast(device_type=instances.device.type, enabled=False):
+                tail_tokens.append(
+                    self.shared_tail_encoder(deviation.float()).mean(dim=1)
+                )
+            selected_counts.append(count)
+
+        representation = {
+            "mean": instances.mean(dim=1),
+            "slots": slot_tokens,
+            "tails": torch.stack(tail_tokens, dim=1),
+            "slot_metadata": metadata,
+        }
+        if not return_auxiliary:
+            return representation
+        return representation, {
+            "population_anchors": anchors,
+            "num_density_slots": torch.tensor(
+                self.num_density_slots, device=anchors.device
+            ),
+            "population_proportions": proportion,
+            "population_dispersions": dispersion,
+            "population_slot_means": slot_mean,
+            "instance_counts": torch.full(
+                (num_bags,), num_instances, device=anchors.device
+            ),
+            "tail_counts": torch.tensor(
+                selected_counts, device=anchors.device
+            ).expand(num_bags, -1),
+            "slot_residual_scale": residual_scale,
+        }
+
     def forward(
         self,
         instances: torch.Tensor | Sequence[torch.Tensor],
@@ -562,6 +689,8 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         if context_mask.numel() != len(bags) or not torch.any(context_mask):
             raise ValueError("context_mask must identify at least one context bag.")
         anchors = self._context_anchors(bags, context_mask)
+        if isinstance(instances, torch.Tensor):
+            return self._forward_dense(instances, anchors, return_auxiliary)
 
         mean_tokens: list[torch.Tensor] = []
         slot_tokens: list[torch.Tensor] = []
@@ -845,6 +974,66 @@ class SetCrossAttentionMetaClassifier(nn.Module):
         }
 
 
+    def forward_batched(
+        self,
+        context_tokens: torch.Tensor,
+        context_labels: torch.Tensor,
+        query_tokens: torch.Tensor,
+        return_auxiliary: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """Batched equivalent of forward for equal-size episode sets."""
+        if context_tokens.ndim != 3 or query_tokens.ndim != 3:
+            raise ValueError("Batched context/query tokens must have three dimensions.")
+        encoded_context = self.input_projection(self.input_norm(context_tokens))
+        encoded_query = self.input_projection(self.input_norm(query_tokens))
+        counts = F.one_hot(
+            context_labels.long(), num_classes=self.num_classes
+        ).sum(dim=1)
+        class_logits = []
+        class_entropies = []
+        for class_index in range(self.num_classes):
+            valid = context_labels == class_index
+            class_context = self.set_encoder(
+                encoded_context,
+                src_key_padding_mask=~valid,
+            )
+            attended, weights = self.cross_attention(
+                encoded_query,
+                class_context,
+                class_context,
+                key_padding_mask=~valid,
+                need_weights=True,
+                average_attn_weights=True,
+            )
+            denominator = valid.sum(dim=1, keepdim=True).clamp_min(1)
+            class_mean = (
+                class_context * valid.unsqueeze(-1)
+            ).sum(dim=1) / denominator
+            class_summary = self.cross_attention_norm(
+                attended + class_mean.unsqueeze(1)
+            )
+            relation = torch.cat(
+                (
+                    encoded_query,
+                    class_summary,
+                    encoded_query - class_summary,
+                    encoded_query * class_summary,
+                ),
+                dim=-1,
+            )
+            class_logits.append(self.relation_scorer(relation).squeeze(-1))
+            probability = weights.float().clamp_min(1e-12)
+            class_entropies.append(
+                -(probability * probability.log()).sum(dim=-1)
+            )
+        logits = torch.stack(class_logits, dim=-1)
+        if not return_auxiliary:
+            return logits
+        return logits, {
+            "context_class_counts": counts,
+            "cross_attention_entropy": torch.stack(class_entropies, dim=-1),
+        }
+
 class RidgeResidualMetaClassifier(SetCrossAttentionMetaClassifier):
     """Class-balanced ridge prediction with a bounded attention residual.
 
@@ -895,6 +1084,43 @@ class RidgeResidualMetaClassifier(SetCrossAttentionMetaClassifier):
         )
         self.attention_residual_logit = nn.Parameter(torch.tensor(residual_logit))
 
+    @staticmethod
+    def _solve_ridge_system(
+        gram: torch.Tensor,
+        rhs: torch.Tensor,
+        ridge_lambda: torch.Tensor,
+    ) -> torch.Tensor:
+        """Solve a positive-definite ridge system with adaptive FP32 jitter."""
+        if not torch.isfinite(gram).all() or not torch.isfinite(rhs).all():
+            raise RuntimeError("The ridge system contains NaN or Inf values.")
+        identity = torch.eye(
+            gram.shape[-1], device=gram.device, dtype=gram.dtype
+        )
+        if gram.ndim == 3:
+            identity = identity.expand(gram.shape[0], -1, -1)
+        system = gram + ridge_lambda.float() * identity
+        if not torch.isfinite(system).all():
+            raise RuntimeError("The ridge system contains NaN or Inf values.")
+
+        diagonal_scale = gram.diagonal(dim1=-2, dim2=-1).abs().mean(
+            dim=-1, keepdim=True
+        ).clamp_min(1.0)
+        jitter = diagonal_scale * 1e-6
+        for attempt in range(6):
+            candidate = system
+            if attempt:
+                candidate = system + jitter.unsqueeze(-1) * identity
+            factor, info = torch.linalg.cholesky_ex(candidate, check_errors=False)
+            if bool((info == 0).all()):
+                coefficients = torch.cholesky_solve(rhs, factor)
+                if torch.isfinite(coefficients).all():
+                    return coefficients
+            jitter = jitter * 10.0
+        raise RuntimeError(
+            "The ridge system remained non-finite or non-positive-definite "
+            "after adaptive jitter."
+        )
+
     def _ridge_logits(
         self,
         context_tokens: torch.Tensor,
@@ -904,43 +1130,136 @@ class RidgeResidualMetaClassifier(SetCrossAttentionMetaClassifier):
     ) -> torch.Tensor:
         # Center and globally scale each episode before the learned projection.
         # A scalar scale preserves the geometry between feature dimensions.
+        output_dtype = query_tokens.dtype
+        context_tokens = context_tokens.float()
+        query_tokens = query_tokens.float()
         center = context_tokens.mean(dim=0, keepdim=True)
         context = context_tokens - center
         query = query_tokens - center
         rms = context.square().mean().sqrt().clamp_min(1e-6)
-        context = self.ridge_projection(context / rms)
-        query = self.ridge_projection(query / rms)
+        with torch.autocast(device_type=context_tokens.device.type, enabled=False):
+            context = self.ridge_projection(context / rms)
+            query = self.ridge_projection(query / rms)
 
         # The solve is kept in fp32 under AMP. Class weights give both context
         # classes equal total mass even when donor counts are imbalanced.
         context32 = context.float()
         query32 = query.float()
-        ones = torch.ones(context32.shape[0], 1, device=context32.device)
-        query_ones = torch.ones(query32.shape[0], 1, device=query32.device)
-        design = torch.cat((context32, ones), dim=-1)
-        query_design = torch.cat((query32, query_ones), dim=-1)
         targets = F.one_hot(
             context_labels.long(), num_classes=self.num_classes
         ).float()
         sample_weight = class_counts.float().reciprocal()[context_labels.long()]
-        root_weight = sample_weight.sqrt().unsqueeze(-1)
-        weighted_design = design * root_weight
-        weighted_targets = targets * root_weight
-
-        regularizer = torch.eye(
-            design.shape[-1], device=design.device, dtype=design.dtype
-        )
-        regularizer[-1, -1] = 0.0
         ridge_lambda = self.ridge_log_lambda.exp().clamp(1e-4, 1e4)
         with torch.autocast(device_type=context_tokens.device.type, enabled=False):
+            # Eliminate the unregularized intercept by weighted centering. This
+            # is algebraically equivalent to solving the augmented system, but
+            # leaves a strictly positive-definite feature block. Forming one
+            # joint system with an unregularized bias made rare CUDA episodes
+            # singular and could produce non-finite gradients in solve backward.
+            total_weight = sample_weight.sum().clamp_min(1e-12)
+            feature_mean = (
+                sample_weight.unsqueeze(-1) * context32
+            ).sum(dim=0, keepdim=True) / total_weight
+            target_mean = (
+                sample_weight.unsqueeze(-1) * targets
+            ).sum(dim=0, keepdim=True) / total_weight
+            centered_context = context32 - feature_mean
+            centered_targets = targets - target_mean
+            root_weight = sample_weight.sqrt().unsqueeze(-1)
+            weighted_design = centered_context * root_weight
+            weighted_targets = centered_targets * root_weight
             gram = weighted_design.T @ weighted_design
             rhs = weighted_design.T @ weighted_targets
-            coefficients = torch.linalg.solve(
-                gram + ridge_lambda.float() * regularizer,
-                rhs,
-            )
-            logits = query_design @ coefficients
-        return logits.to(query_tokens.dtype)
+            coefficients = self._solve_ridge_system(gram, rhs, ridge_lambda)
+            intercept = target_mean - feature_mean @ coefficients
+            logits = query32 @ coefficients + intercept
+            if not torch.isfinite(logits).all():
+                raise RuntimeError("The ridge logits contain NaN or Inf values.")
+        return logits.to(output_dtype)
+
+    def _ridge_logits_batched(
+        self,
+        context_tokens: torch.Tensor,
+        context_labels: torch.Tensor,
+        query_tokens: torch.Tensor,
+        class_counts: torch.Tensor,
+    ) -> torch.Tensor:
+        output_dtype = query_tokens.dtype
+        context_tokens = context_tokens.float()
+        query_tokens = query_tokens.float()
+        center = context_tokens.mean(dim=1, keepdim=True)
+        context = context_tokens - center
+        query = query_tokens - center
+        rms = context.square().mean(dim=(1, 2), keepdim=True).sqrt().clamp_min(1e-6)
+        with torch.autocast(device_type=context_tokens.device.type, enabled=False):
+            context = self.ridge_projection(context / rms)
+            query = self.ridge_projection(query / rms)
+        context32 = context.float()
+        query32 = query.float()
+        targets = F.one_hot(
+            context_labels.long(), num_classes=self.num_classes
+        ).float()
+        sample_weight = class_counts.float().reciprocal().gather(
+            1, context_labels.long()
+        )
+        ridge_lambda = self.ridge_log_lambda.exp().clamp(1e-4, 1e4)
+        with torch.autocast(device_type=context_tokens.device.type, enabled=False):
+            total_weight = sample_weight.sum(dim=1, keepdim=True).clamp_min(1e-12)
+            feature_mean = (
+                sample_weight.unsqueeze(-1) * context32
+            ).sum(dim=1, keepdim=True) / total_weight.unsqueeze(-1)
+            target_mean = (
+                sample_weight.unsqueeze(-1) * targets
+            ).sum(dim=1, keepdim=True) / total_weight.unsqueeze(-1)
+            centered_context = context32 - feature_mean
+            centered_targets = targets - target_mean
+            root_weight = sample_weight.sqrt().unsqueeze(-1)
+            weighted_design = centered_context * root_weight
+            weighted_targets = centered_targets * root_weight
+            gram = weighted_design.transpose(1, 2) @ weighted_design
+            rhs = weighted_design.transpose(1, 2) @ weighted_targets
+            coefficients = self._solve_ridge_system(gram, rhs, ridge_lambda)
+            intercept = target_mean - feature_mean @ coefficients
+            logits = query32 @ coefficients + intercept
+            if not torch.isfinite(logits).all():
+                raise RuntimeError(
+                    "The batched ridge logits contain NaN or Inf values."
+                )
+        return logits.to(output_dtype)
+
+    def forward_batched(
+        self,
+        context_tokens: torch.Tensor,
+        context_labels: torch.Tensor,
+        query_tokens: torch.Tensor,
+        return_auxiliary: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        class_counts = F.one_hot(
+            context_labels.long(), num_classes=self.num_classes
+        ).sum(dim=1)
+        ridge_logits = self._ridge_logits_batched(
+            context_tokens, context_labels, query_tokens, class_counts
+        )
+        attention_logits, attention_auxiliary = super().forward_batched(
+            context_tokens,
+            context_labels,
+            query_tokens,
+            return_auxiliary=True,
+        )
+        ridge_scale = self.ridge_log_scale.exp().clamp(0.1, 100.0)
+        residual_scale = torch.sigmoid(self.attention_residual_logit)
+        logits = ridge_scale * ridge_logits + residual_scale * attention_logits
+        if not return_auxiliary:
+            return logits
+        episodes = context_tokens.shape[0]
+        return logits, {
+            **attention_auxiliary,
+            "ridge_logits": ridge_logits,
+            "attention_logits": attention_logits,
+            "ridge_lambda": self.ridge_log_lambda.exp().expand(episodes),
+            "ridge_scale": ridge_scale.expand(episodes),
+            "attention_residual_scale": residual_scale.expand(episodes),
+        }
 
     def forward(
         self,
@@ -1252,11 +1571,48 @@ class StructuredPopulationMetaClassifier(nn.Module):
 
     def _rare_instance_logits(
         self,
-        query_instances: Sequence[torch.Tensor],
+        query_instances: torch.Tensor | Sequence[torch.Tensor],
         class_memories: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         class_memory32 = F.normalize(class_memories.float(), dim=-1)
         similarity_scale = self.rare_similarity_log_scale.exp().clamp(0.1, 50.0)
+        if isinstance(query_instances, torch.Tensor):
+            if query_instances.ndim != 3 or query_instances.shape[-1] != self.token_dim:
+                raise ValueError(
+                    "Dense query instances must be [queries, instances, token_dim]."
+                )
+            encoded = self.instance_input_projection(
+                self.instance_input_norm(query_instances)
+            )
+            encoded32 = F.normalize(encoded.float(), dim=-1)
+            similarities = similarity_scale.float() * torch.einsum(
+                "qnd,cmd->qcnm", encoded32, class_memory32
+            )
+            evidence = torch.logsumexp(similarities, dim=-1) - math.log(
+                self.class_memory_tokens
+            )
+            fraction_scores = []
+            counts = []
+            for fraction in self.rare_evidence_fractions:
+                count = min(
+                    query_instances.shape[1],
+                    max(1, int(math.ceil(fraction * query_instances.shape[1]))),
+                )
+                fraction_scores.append(
+                    evidence.topk(count, dim=-1).values.mean(dim=-1)
+                )
+                counts.append(count)
+            stacked_scores = torch.stack(fraction_scores, dim=-1)
+            logits = self.rare_evidence_head(
+                stacked_scores.to(query_instances.dtype)
+            ).squeeze(-1)
+            return (
+                logits,
+                stacked_scores,
+                torch.tensor(counts, device=class_memories.device).expand(
+                    query_instances.shape[0], -1
+                ),
+            )
         query_logits: list[torch.Tensor] = []
         query_fraction_scores: list[torch.Tensor] = []
         query_counts: list[list[int]] = []
@@ -1343,6 +1699,180 @@ class StructuredPopulationMetaClassifier(nn.Module):
             + fusion_scale * interaction
         )
         return logits, fusion_scale
+
+    def _class_memories_batched(
+        self,
+        context: dict[str, torch.Tensor],
+        context_labels: torch.Tensor,
+    ) -> torch.Tensor:
+        slots = context["slots"]
+        flat_slots = slots.reshape(
+            slots.shape[0], slots.shape[1], -1, slots.shape[-1]
+        )
+        context_tokens = torch.cat(
+            (
+                context["mean"].unsqueeze(2), flat_slots, context["tails"]
+            ),
+            dim=2,
+        )
+        episodes, context_count, tokens_per_bag, _ = context_tokens.shape
+        flat_tokens = context_tokens.reshape(
+            episodes, context_count * tokens_per_bag, self.token_dim
+        )
+        encoded = self.memory_input_projection(
+            self.memory_input_norm(flat_tokens)
+        )
+        memories = []
+        for class_index in range(self.num_classes):
+            valid_bags = context_labels == class_index
+            valid_tokens = valid_bags.unsqueeze(-1).expand(
+                -1, -1, tokens_per_bag
+            ).reshape(episodes, -1)
+            seeds = self.memory_seeds.unsqueeze(0).expand(episodes, -1, -1)
+            attended, _ = self.memory_cross_attention(
+                seeds,
+                encoded,
+                encoded,
+                key_padding_mask=~valid_tokens,
+                need_weights=False,
+            )
+            memory = self.memory_norm(seeds + attended)
+            memories.append(self.memory_encoder(memory))
+        return torch.stack(memories, dim=1)
+
+    def _population_memory_logits_batched(
+        self,
+        query: dict[str, torch.Tensor],
+        class_memories: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        raw_slots = query["slots"]
+        query_tokens = raw_slots.reshape(
+            raw_slots.shape[0], raw_slots.shape[1], -1, raw_slots.shape[-1]
+        )
+        episodes, queries, slots, _ = query_tokens.shape
+        encoded_query = self.slot_input_projection(
+            self.slot_input_norm(query_tokens)
+        )
+        importance_logits = self.slot_importance(query_tokens).squeeze(-1)
+        token_weights = F.softmax(
+            importance_logits.float() / self.routing_temperature,
+            dim=-1,
+        ).to(query_tokens.dtype)
+        flat_query = encoded_query.reshape(episodes * queries, slots, -1)
+        class_logits = []
+        for class_index in range(self.num_classes):
+            memory = class_memories[:, class_index].repeat_interleave(
+                queries, dim=0
+            )
+            attended, _ = self.population_cross_attention(
+                flat_query, memory, memory, need_weights=False
+            )
+            attended = attended.reshape(episodes, queries, slots, -1)
+            relation_features = torch.cat(
+                (
+                    encoded_query,
+                    attended,
+                    encoded_query - attended,
+                    encoded_query * attended,
+                ),
+                dim=-1,
+            )
+            relation = self.slot_relation_scorer(
+                relation_features
+            ).squeeze(-1)
+            class_logits.append((relation * token_weights).sum(dim=-1))
+        return torch.stack(class_logits, dim=-1), token_weights
+
+    def _rare_instance_logits_batched(
+        self,
+        query_instances: torch.Tensor,
+        class_memories: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        encoded = self.instance_input_projection(
+            self.instance_input_norm(query_instances)
+        )
+        encoded32 = F.normalize(encoded.float(), dim=-1)
+        memory32 = F.normalize(class_memories.float(), dim=-1)
+        scale = self.rare_similarity_log_scale.exp().clamp(0.1, 50.0)
+        similarities = scale.float() * torch.einsum(
+            "eqnd,ecmd->eqcnm", encoded32, memory32
+        )
+        evidence = torch.logsumexp(similarities, dim=-1) - math.log(
+            self.class_memory_tokens
+        )
+        fraction_scores = []
+        counts = []
+        for fraction in self.rare_evidence_fractions:
+            count = min(
+                query_instances.shape[2],
+                max(1, int(math.ceil(fraction * query_instances.shape[2]))),
+            )
+            fraction_scores.append(
+                evidence.topk(count, dim=-1).values.mean(dim=-1)
+            )
+            counts.append(count)
+        stacked_scores = torch.stack(fraction_scores, dim=-1)
+        logits = self.rare_evidence_head(
+            stacked_scores.to(query_instances.dtype)
+        ).squeeze(-1)
+        rare_counts = torch.tensor(
+            counts, device=query_instances.device
+        ).expand(query_instances.shape[0], query_instances.shape[1], -1)
+        return logits, stacked_scores, rare_counts
+
+    def forward_batched(
+        self,
+        context: dict[str, torch.Tensor],
+        context_labels: torch.Tensor,
+        query: dict[str, torch.Tensor],
+        query_instances: torch.Tensor,
+        return_auxiliary: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        mean_logits, mean_auxiliary = self.mean_classifier.forward_batched(
+            context["mean"],
+            context_labels,
+            query["mean"],
+            return_auxiliary=True,
+        )
+        class_memories = self._class_memories_batched(context, context_labels)
+        population_logits, population_weights = (
+            self._population_memory_logits_batched(query, class_memories)
+        )
+        tail_logits, rare_fraction_scores, rare_counts = (
+            self._rare_instance_logits_batched(query_instances, class_memories)
+        )
+        population_scale = self._floored_residual_scale(
+            self.population_residual_logit,
+            self.minimum_population_residual_scale,
+        )
+        tail_scale = self._floored_residual_scale(
+            self.tail_residual_logit,
+            self.minimum_tail_residual_scale,
+        )
+        logits, fusion_scale = self._fuse_evidence(
+            mean_logits,
+            population_logits,
+            tail_logits,
+            population_scale,
+            tail_scale,
+        )
+        if not return_auxiliary:
+            return logits
+        episodes = context_labels.shape[0]
+        return logits, {
+            **mean_auxiliary,
+            "mean_logits": mean_logits,
+            "population_logits": population_logits,
+            "tail_logits": tail_logits,
+            "population_slot_weights": population_weights,
+            "tail_weights": torch.softmax(rare_fraction_scores, dim=-1),
+            "rare_fraction_scores": rare_fraction_scores,
+            "rare_counts": rare_counts,
+            "class_memories": class_memories,
+            "population_residual_scale": population_scale.expand(episodes),
+            "tail_residual_scale": tail_scale.expand(episodes),
+            "fusion_residual_scale": fusion_scale.expand(episodes),
+        }
 
     def forward(
         self,
@@ -1506,6 +2036,77 @@ class BaseModel(nn.Module):
             raise ValueError("mask_index cannot contain duplicate bag indices.")
         return index
 
+    def forward_episode_batch(
+        self,
+        x: torch.Tensor,
+        y: torch.Tensor,
+        mask_index: torch.Tensor,
+        return_auxiliary: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """Run dense equal-shape episodes through one batched aggregator."""
+        if x.ndim != 4:
+            raise ValueError("Batched x must be [episodes, bags, instances, input_dim].")
+        episodes, num_bags, num_instances, input_dim = x.shape
+        if input_dim != self.input_dim or y.shape != (episodes, num_bags):
+            raise ValueError("Batched x/y shapes are incompatible.")
+        if mask_index.ndim != 2 or mask_index.shape[0] != episodes:
+            raise ValueError("Batched mask_index must be [episodes, queries].")
+        if torch.any((mask_index < 0) | (mask_index >= num_bags)):
+            raise IndexError("mask_index contains an out-of-range bag index.")
+
+        is_context = torch.ones(
+            episodes, num_bags, dtype=torch.bool, device=x.device
+        )
+        is_context.scatter_(1, mask_index.long(), False)
+        anchors = torch.stack([
+            self.aggregator._context_anchors(
+                list(x[episode].unbind(0)), is_context[episode]
+            )
+            for episode in range(episodes)
+        ])
+        per_bag_anchors = anchors[:, None].expand(
+            -1, num_bags, -1, -1
+        ).reshape(episodes * num_bags, anchors.shape[1], anchors.shape[2])
+        flat_representation = self.aggregator._forward_dense(
+            x.reshape(episodes * num_bags, num_instances, input_dim),
+            per_bag_anchors,
+            return_auxiliary=False,
+        )
+        representation = {
+            name: tokens.reshape(episodes, num_bags, *tokens.shape[1:])
+            for name, tokens in flat_representation.items()
+        }
+
+        context_count = num_bags - mask_index.shape[1]
+        context_index = torch.nonzero(
+            is_context, as_tuple=False
+        )[:, 1].reshape(episodes, context_count)
+
+        def gather_bags(tokens: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
+            view_shape = index.shape + (1,) * (tokens.ndim - 2)
+            expanded = index.reshape(view_shape).expand(
+                index.shape + tokens.shape[2:]
+            )
+            return tokens.gather(1, expanded)
+
+        context = {
+            name: gather_bags(tokens, context_index)
+            for name, tokens in representation.items()
+        }
+        query = {
+            name: gather_bags(tokens, mask_index.long())
+            for name, tokens in representation.items()
+        }
+        context_labels = y.gather(1, context_index)
+        query_instances = gather_bags(x, mask_index.long())
+        return self.meta_classifier.forward_batched(
+            context=context,
+            context_labels=context_labels,
+            query=query,
+            query_instances=query_instances,
+            return_auxiliary=return_auxiliary,
+        )
+
     def forward(
         self,
         x: torch.Tensor | Sequence[torch.Tensor],
@@ -1528,9 +2129,14 @@ class BaseModel(nn.Module):
             mask_index, num_bags=num_bags, device=y.device
         )
         normalized_bags = self.aggregator._normalize_bags(x)
-        query_instances = [
-            normalized_bags[index] for index in query_index.detach().cpu().tolist()
-        ]
+        if isinstance(normalized_bags, torch.Tensor):
+            query_instances: torch.Tensor | list[torch.Tensor] = normalized_bags[
+                query_index
+            ]
+        else:
+            query_instances = [
+                normalized_bags[index] for index in query_index.detach().cpu().tolist()
+            ]
         is_context = torch.ones(num_bags, dtype=torch.bool, device=y.device)
         is_context[query_index] = False
         if return_auxiliary:

@@ -236,6 +236,30 @@ class RidgeResidualMetaClassifierTest(unittest.TestCase):
         swapped = classifier(context, 1 - labels, query)
         torch.testing.assert_close(logits, swapped.flip(-1))
 
+    def test_degenerate_context_has_finite_forward_and_backward(self) -> None:
+        torch.manual_seed(13)
+        classifier = RidgeResidualMetaClassifier(
+            token_dim=8,
+            hidden_dim=16,
+            num_heads=4,
+            num_set_layers=1,
+            relation_hidden_dim=16,
+            ridge_dim=64,
+        )
+        context = torch.ones(10, 8, requires_grad=True)
+        labels = torch.tensor([0, 1, 0, 1, 0, 1, 0, 1, 0, 1])
+        query = torch.ones(3, 8, requires_grad=True)
+        loss = classifier(context, labels, query).square().mean()
+        self.assertTrue(torch.isfinite(loss))
+        loss.backward()
+        gradients = [
+            parameter.grad
+            for parameter in classifier.parameters()
+            if parameter.grad is not None
+        ]
+        self.assertTrue(gradients)
+        self.assertTrue(all(torch.isfinite(gradient).all() for gradient in gradients))
+
 
 class StructuredPopulationMetaClassifierTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -347,6 +371,19 @@ class BaseModelTest(unittest.TestCase):
         changed_y[self.mask_index] = 1 - changed_y[self.mask_index]
         changed = self.model(self.x, changed_y, self.mask_index)
         torch.testing.assert_close(logits, changed)
+
+    def test_outer_episode_batch_matches_sequential_forward(self) -> None:
+        batch_x = torch.stack((self.x, self.x + 0.1))
+        batch_y = torch.stack((self.y, self.y.roll(2)))
+        batch_mask = self.mask_index.expand(2, -1)
+        expected = torch.stack([
+            self.model(x, y, mask)
+            for x, y, mask in zip(batch_x, batch_y, batch_mask)
+        ])
+        actual = self.model.forward_episode_batch(
+            batch_x, batch_y, batch_mask
+        )
+        torch.testing.assert_close(expected, actual, atol=3e-5, rtol=3e-5)
 
     def test_all_cell_evidence_is_instance_order_invariant(self) -> None:
         expected = self.model(self.x, self.y, self.mask_index)

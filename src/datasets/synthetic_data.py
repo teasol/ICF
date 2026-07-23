@@ -1,12 +1,17 @@
 from __future__ import annotations
 from typing import Any
 import math
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 import os
 from dataclasses import dataclass
 
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
+
+
+_MANIFOLD_DECOMPOSITION_LOCK = Lock()
 
 
 @dataclass(frozen=True)
@@ -21,6 +26,7 @@ class SyntheticEpisode:
     response_dispersion_factor: torch.Tensor | None = None
     responsive_component_index: int | None = None
     effect_cell_fraction: torch.Tensor | None = None
+    oracle_response_abundance: torch.Tensor | None = None
     effect_scale_multiplier: float = 1.0
     rare_response: bool = False
     oracle_population_features: torch.Tensor | None = None
@@ -70,6 +76,9 @@ class SyntheticManifoldGenerator:
         observation_noise: float = 0.01,
         normalize_output: bool = False,
         output_norm_eps: float = 1e-8,
+        manifold_mode: str = "nonlinear",
+        manifold_seed: int = 0,
+        manifold_max_condition_number: float = 3.0,
         balanced: bool = True,
     ) -> None:
         if isinstance(num_bags, int):
@@ -213,6 +222,15 @@ class SyntheticManifoldGenerator:
             raise ValueError("observation_noise must be non-negative.")
         if output_norm_eps <= 0:
             raise ValueError("output_norm_eps must be positive.")
+        valid_manifold_modes = {
+            "nonlinear", "shared_nonlinear", "orthogonal", "bounded_linear"
+        }
+        if manifold_mode not in valid_manifold_modes:
+            raise ValueError(
+                f"manifold_mode must be one of {sorted(valid_manifold_modes)}."
+            )
+        if manifold_max_condition_number < 1:
+            raise ValueError("manifold_max_condition_number must be at least 1.")
 
         self.num_bags = tuple(num_bags)
         self.num_cells = tuple(num_cells)
@@ -245,6 +263,9 @@ class SyntheticManifoldGenerator:
         self.observation_noise = observation_noise
         self.normalize_output = bool(normalize_output)
         self.output_norm_eps = float(output_norm_eps)
+        self.manifold_mode = manifold_mode
+        self.manifold_seed = int(manifold_seed)
+        self.manifold_max_condition_number = float(manifold_max_condition_number)
         self.balanced = balanced
 
     def sample_episode(
@@ -503,8 +524,7 @@ class SyntheticManifoldGenerator:
                 bag_index, component_index
             ]
 
-        weights, biases = self._sample_mlp(generator, device)
-        x = self._map_to_manifold(z, weights, biases)
+        x = self._map_episode_manifold(z, generator, device)
         if self.observation_noise > 0:
             noise = torch.randn(
                 x.shape, dtype=x.dtype, device=device, generator=generator
@@ -553,6 +573,11 @@ class SyntheticManifoldGenerator:
             responsive_component_index=responsive_component_index,
             effect_cell_fraction=(
                 effect_cell_fraction[permutation]
+                if effect_cell_fraction is not None
+                else None
+            ),
+            oracle_response_abundance=(
+                effect_cell_fraction[permutation].detach()
                 if effect_cell_fraction is not None
                 else None
             ),
@@ -713,6 +738,65 @@ class SyntheticManifoldGenerator:
             biases.append(bias)
         return weights, biases
 
+    def _manifold_generator(self, device: torch.device) -> torch.Generator:
+        """Return a reproducible generator without advancing the episode RNG."""
+        return torch.Generator(device=device).manual_seed(self.manifold_seed)
+
+    def _map_episode_manifold(
+        self,
+        z: torch.Tensor,
+        generator: torch.Generator | None,
+        device: torch.device,
+    ) -> torch.Tensor:
+        mode = self.manifold_mode
+        parameter_generator = (
+            self._manifold_generator(device) if mode == "shared_nonlinear" else generator
+        )
+        if mode in ("nonlinear", "shared_nonlinear"):
+            weights, biases = self._sample_mlp(parameter_generator, device)
+            return self._map_to_manifold(z, weights, biases)
+
+        # A tall matrix with orthonormal columns is an isometric embedding from
+        # latent space into output space. A square latent-space rotation makes
+        # every episode use a different orientation without changing distances.
+        if self.output_dim < self.latent_dim:
+            raise ValueError(
+                f"{mode} requires output_dim >= latent_dim for an isometric basis."
+            )
+        # CUDA linalg lazy initialization is not thread-safe when outer-batch
+        # prefetch creates several episode manifolds concurrently.
+        with _MANIFOLD_DECOMPOSITION_LOCK:
+            basis, _ = torch.linalg.qr(
+                torch.randn(
+                    self.output_dim,
+                    self.latent_dim,
+                    device=device,
+                    generator=parameter_generator,
+                ),
+                mode="reduced",
+            )
+            rotation, _ = torch.linalg.qr(
+                torch.randn(
+                    self.latent_dim,
+                    self.latent_dim,
+                    device=device,
+                    generator=parameter_generator,
+                )
+            )
+        singular_values = torch.ones(self.latent_dim, device=device)
+        if mode == "bounded_linear":
+            singular_values = torch.empty(self.latent_dim, device=device).uniform_(
+                1.0,
+                self.manifold_max_condition_number,
+                generator=parameter_generator,
+            )
+            # Make the configured upper bound exact and avoid scale drift.
+            singular_values[0] = 1.0
+            if self.latent_dim > 1:
+                singular_values[-1] = self.manifold_max_condition_number
+        weight = basis @ torch.diag(singular_values) @ rotation.T
+        return F.linear(z, weight)
+
     @staticmethod
     def _map_to_manifold(
         z: torch.Tensor,
@@ -773,16 +857,27 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         self,
         episodes_per_epoch: int = 1000,
         seed: int | None = None,
+        fixed_episode_count: int | None = None,
         generation_device: str = "cpu",
+        shape_group_size: int = 1,
         difficulty_curriculum_episodes: int = 0,
         effect_scale_start: float | tuple[float, float] = (1.0, 1.0),
         effect_scale_end: float | tuple[float, float] = (1.0, 1.0),
+        return_oracle_diagnostics: bool = False,
         **generator_kwargs: Any,
     ) -> None:
         if episodes_per_epoch < 1:
             raise ValueError("episodes_per_epoch must be positive.")
+        if fixed_episode_count is not None and not 1 <= fixed_episode_count <= episodes_per_epoch:
+            raise ValueError(
+                "fixed_episode_count must be in [1, episodes_per_epoch]."
+            )
+        if fixed_episode_count is not None and seed is None:
+            raise ValueError("fixed_episode_count requires a fixed dataset seed.")
         if difficulty_curriculum_episodes < 0:
             raise ValueError("difficulty_curriculum_episodes cannot be negative.")
+        if shape_group_size < 1:
+            raise ValueError("shape_group_size must be positive.")
         effect_scale_start = self._as_non_negative_range(
             "effect_scale_start", effect_scale_start
         )
@@ -791,10 +886,13 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         )
         self.episodes_per_epoch = episodes_per_epoch
         self.seed = seed
+        self.fixed_episode_count = fixed_episode_count
         self.generation_device = generation_device
         self.difficulty_curriculum_episodes = difficulty_curriculum_episodes
         self.effect_scale_start = effect_scale_start
+        self.shape_group_size = int(shape_group_size)
         self.effect_scale_end = effect_scale_end
+        self.return_oracle_diagnostics = bool(return_oracle_diagnostics)
         self._sample_count = 0
         self.episode_generator = SyntheticManifoldGenerator(**generator_kwargs)
 
@@ -809,9 +907,80 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
             )
         self._sample_count = epoch * samples_per_rank
 
+    def __getitems__(
+        self, indices: list[int]
+    ) -> list[tuple[torch.Tensor, torch.Tensor]]:
+        if (
+            len(indices) <= 1
+            or self.seed is not None
+            or torch.device(self.generation_device).type != "cuda"
+        ):
+            return [self[index] for index in indices]
+        start = self._sample_count
+        self._sample_count += len(indices)
+        device = torch.device(self.generation_device)
+        shape_seed = torch.initial_seed() + start // self.shape_group_size
+        shape_generator = torch.Generator(device=device).manual_seed(shape_seed)
+        num_bags = self.episode_generator.sample_num_bags(
+            shape_generator, device=device
+        )
+        num_cells = self.episode_generator.sample_num_cells(
+            shape_generator, device=device
+        )
+
+        def generate(offset: int, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+            stream = torch.cuda.Stream(device=device)
+            with torch.cuda.stream(stream):
+                sample = self._generate_at(
+                    index,
+                    start + offset,
+                    num_bags=num_bags,
+                    num_cells=num_cells,
+                )
+            stream.synchronize()
+            return sample
+
+        with ThreadPoolExecutor(max_workers=len(indices)) as executor:
+            futures = [
+                executor.submit(generate, offset, index)
+                for offset, index in enumerate(indices)
+            ]
+            return [future.result() for future in futures]
+
+    def _generate_at(
+        self,
+        index: int,
+        sample_count: int,
+        num_bags: int,
+        num_cells: int,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        device = torch.device(self.generation_device)
+        rank = int(os.environ.get("RANK", "0"))
+        sample_seed = torch.initial_seed() + rank * 1_000_003 + sample_count
+        generator = torch.Generator(device=device).manual_seed(sample_seed)
+        effect_scale_multiplier = self._sample_effect_scale(
+            generator,
+            device,
+            sample_count,
+            final_difficulty=False,
+        )
+        episode = self.episode_generator.sample_episode(
+            generator,
+            device=device,
+            effect_scale_multiplier=effect_scale_multiplier,
+            num_bags=num_bags,
+            num_cells=num_cells,
+        )
+        return self._format_episode(episode)
+
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
         device = torch.device(self.generation_device)
         sample_count = self._sample_count
+        episode_index = (
+            index % self.fixed_episode_count
+            if self.fixed_episode_count is not None
+            else index
+        )
         if self.seed is None:
             # Every DDP rank starts from the same Lightning seed. Give each rank
             # an independent, non-repeating episode stream without changing the
@@ -821,15 +990,15 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
             self._sample_count += 1
         else:
             # Validation/test episodes remain fixed and reproducible by index.
-            sample_seed = self.seed + index
+            sample_seed = self.seed + episode_index
         # Keep the variable tensor shape synchronized across training ranks at
         # each local step. This avoids making faster ranks wait for a rank that
         # happened to draw a much larger episode, while the episode contents
         # remain rank-specific through sample_seed above.
         shape_seed = (
-            torch.initial_seed() + sample_count
+            torch.initial_seed() + sample_count // self.shape_group_size
             if self.seed is None
-            else self.seed + index
+            else self.seed + episode_index
         )
         shape_generator = torch.Generator(device=device).manual_seed(shape_seed)
         num_bags = self.episode_generator.sample_num_bags(
@@ -854,7 +1023,17 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
             num_bags=num_bags,
             num_cells=num_cells,
         )
-        return episode.x, episode.y
+        return self._format_episode(episode)
+
+    def _format_episode(self, episode: SyntheticEpisode) -> tuple[torch.Tensor, ...]:
+        if not self.return_oracle_diagnostics:
+            return episode.x, episode.y
+        abundance = episode.oracle_response_abundance
+        if abundance is None:
+            raise RuntimeError(
+                "Oracle abundance diagnostics require a responsive component."
+            )
+        return episode.x, episode.y, abundance.detach()
 
     def _sample_effect_scale(
         self,

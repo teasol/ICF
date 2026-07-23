@@ -1,0 +1,59 @@
+dataset_src: synthetic_data.SyntheticEpisodeDataset
+episode_dataset: true
+episode_batch_size: 1
+cuda_prefetch: false
+num_workers: 0
+pin_memory: false
+persistent_workers: false
+train_shuffle: false
+val_shuffle: false
+test_shuffle: false
+
+dataset_kwargs:
+  episodes_per_epoch: 256
+  seed: 72001
+  fixed_episode_count: 64
+  generation_device: cuda
+  shape_group_size: 1
+  difficulty_curriculum_episodes: 0
+  effect_scale_start: [1.0, 1.0]
+  effect_scale_end: [1.0, 1.0]
+  num_bags: 64
+  num_cells: 256
+  latent_dim: 32
+  output_dim: 512
+  mlp_hidden_dim: 96
+  mlp_num_layers: 3
+  class_separation: [1.0, 1.0]
+  latent_scale: [1.0, 1.0]
+  shared_component_probability: 1.0
+  num_shared_components: 4
+  shared_component_fraction: 0.85
+  donor_shift_scale: 0.0
+  donor_component_shift_scale: 0.0
+  donor_mixture_logit_scale: 0.0
+  shared_component_base_logit_scale: 0.0
+  donor_shared_component_logit_scale: 0.0
+  continuous_response_probability: 1.0
+  response_score_scale: 0.5
+  response_score_min_margin: 0.5
+  response_mixture_effect_scale: 2.0
+  response_state_effect_scale: [0.0, 0.0]
+  response_task_probabilities: [1.0, 0.0, 0.0, 0.0, 0.0]
+  response_covariance_effect_scale: [0.0, 0.0]
+  rare_response_probability: 0.0
+  rare_response_fraction: [0.02, 0.08]
+  observation_noise: 0.0
+  normalize_output: true
+  output_norm_eps: 1.0e-8
+  balanced: true
+
+val_dataset_kwargs:
+  episodes_per_epoch: 64
+  seed: 72001
+  fixed_episode_count: 64
+
+test_dataset_kwargs:
+  episodes_per_epoch: 64
+  seed: 72001
+  fixed_episode_count: 64

@@ -19,6 +19,9 @@ CONFIG="${CONFIG:-${DEFAULT_CONFIG}}"
 SEED="${SEED:-42}"
 CUDA_DEVICES="${CUDA_DEVICES:-0,1,2,3,4,5,6,7}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
+# Avoid allocator fragmentation from changing synthetic episode shapes.
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+
 CKPT_PATH="${CKPT_PATH:-}"
 RUN_TIME="${ICF_RUN_TIME:-$(date +%Y%m%d_%H%M%S)}"
 LOG_ROOT="${ICF_LOG_ROOT:-${PROJECT_ROOT}/logs}"
@@ -99,8 +102,21 @@ if [[ -n "${CKPT_PATH}" ]]; then
     echo "Resuming from checkpoint: ${CKPT_PATH}"
 fi
 
+if [[ -z "${WANDB_MODE:-}" ]]; then
+    NETRC_FILE="${NETRC:-${PROJECT_ROOT}/../.netrc}"
+    if [[ ! -r "${NETRC_FILE}" ]]; then
+        NETRC_FILE="${HOME}/.netrc"
+    fi
+    if [[ -n "${WANDB_API_KEY:-}" ]] || \
+        { [[ -r "${NETRC_FILE}" ]] && grep -q 'machine api\.wandb\.ai' "${NETRC_FILE}"; }; then
+        export WANDB_MODE=online
+        export NETRC="${NETRC_FILE}"
+    else
+        export WANDB_MODE=offline
+    fi
+fi
+
 set +e
-NCCL_P2P_DISABLE=1 \
 PYTHONUNBUFFERED=1 \
 CUDA_VISIBLE_DEVICES="${CUDA_DEVICES}" "${TORCHRUN_BIN}" \
     --standalone \

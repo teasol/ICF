@@ -1,0 +1,15 @@
+seed: 42
+ckpt_path:
+data: medium
+model: default
+optimizer: adamw_medium
+scheduler: warmup_reduce_on_plateau_medium
+trainer: medium_ddp8
+logger: wandb
+callbacks: default
+model_kwargs:
+  training_targets_per_episode: [5, 12]
+  fixed_training_queries: false
+  ranking_loss_weight: 0.0
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0

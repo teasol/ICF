@@ -1,0 +1,23 @@
+seed: 42
+ckpt_path:
+data: learnability_manifold
+data_overrides:
+  dataset_kwargs:
+    manifold_mode: nonlinear
+    donor_shift_scale: 0.35
+    donor_component_shift_scale: 0.12
+    donor_mixture_logit_scale: 0.65
+    shared_component_base_logit_scale: 0.70
+    donor_shared_component_logit_scale: 0.70
+model: default
+optimizer: adamw_learnability_5e4
+scheduler: warmup_reduce_on_plateau_medium
+trainer: medium_ddp8
+logger: wandb
+callbacks: default
+model_kwargs:
+  training_targets_per_episode: [5, 12]
+  fixed_training_queries: false
+  ranking_loss_weight: 0.0
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0

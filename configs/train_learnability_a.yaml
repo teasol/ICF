@@ -1,0 +1,15 @@
+seed: 42
+ckpt_path:
+data: learnability_a
+model: default
+optimizer: adamw_medium
+scheduler: learnability
+trainer: learnability_a
+logger: wandb
+callbacks: learnability
+model_kwargs:
+  training_targets_per_episode: 16
+  fixed_training_queries: true
+  ranking_loss_weight: 0.0
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0

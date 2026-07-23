@@ -1,6 +1,11 @@
 dataset_src: synthetic_data.SyntheticEpisodeDataset
 episode_dataset: true
 
+# Match the eight episode gradients averaged by the original 8-GPU DDP run.
+episode_batch_size: 8
+# Overlap generation of the next eight episodes with the current optimizer step.
+cuda_prefetch: true
+
 num_workers: 0
 pin_memory: false
 persistent_workers: false
@@ -14,6 +19,7 @@ dataset_kwargs:
   episodes_per_epoch: 4096
   seed: null
   generation_device: cuda
+  shape_group_size: 8
   difficulty_curriculum_episodes: 0
   # Stationary mixture from the first epoch: clear, medium, and weak effects
   # are sampled continuously without changing difficulty over training time.

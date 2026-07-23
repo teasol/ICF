@@ -1,0 +1,4 @@
+base_config: train_learnability_d0.yaml
+data_overrides:
+  dataset_kwargs:
+    donor_shift_scale: 0.35

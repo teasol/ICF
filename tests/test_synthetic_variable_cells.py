@@ -68,6 +68,41 @@ class VariableCellCountTest(unittest.TestCase):
         self.assertEqual(torch.unique(collated_y[context_mask]).tolist(), [0, 1])
         torch.testing.assert_close(collated_x, x)
 
+    def test_oracle_metadata_is_opt_in_detached_and_aligned(self) -> None:
+        kwargs = dict(
+            episodes_per_epoch=1,
+            seed=41,
+            generation_device="cpu",
+            num_bags=64,
+            num_cells=256,
+            latent_dim=4,
+            output_dim=8,
+            mlp_hidden_dim=8,
+            mlp_num_layers=2,
+            shared_component_probability=1.0,
+            continuous_response_probability=1.0,
+            response_task_probabilities=(1.0, 0.0, 0.0, 0.0, 0.0),
+            response_score_min_margin=0.5,
+            response_mixture_effect_scale=2.0,
+            balanced=True,
+        )
+        plain = SyntheticEpisodeDataset(**kwargs)[0]
+        diagnostic = SyntheticEpisodeDataset(
+            **kwargs, return_oracle_diagnostics=True
+        )[0]
+        self.assertEqual(len(plain), 2)
+        self.assertEqual(len(diagnostic), 3)
+        x, y, abundance = diagnostic
+        torch.testing.assert_close(x, plain[0])
+        torch.testing.assert_close(y, plain[1])
+        self.assertEqual(abundance.shape, y.shape)
+        self.assertFalse(abundance.requires_grad)
+        self.assertGreater(abundance[y == 1].mean(), abundance[y == 0].mean())
+
+        collated = collate_synthetic_evaluation_episode([diagnostic])
+        self.assertEqual(len(collated), 4)
+        torch.testing.assert_close(collated[3], abundance)
+
     def test_disabled_curriculum_uses_validation_difficulty(self) -> None:
         dataset = SyntheticEpisodeDataset(
             episodes_per_epoch=1,
@@ -214,6 +249,40 @@ class VariableCellCountTest(unittest.TestCase):
         self.assertEqual(rank_0_episode[0].shape, rank_1_episode[0].shape)
         self.assertFalse(torch.equal(rank_0_episode[0], rank_1_episode[0]))
 
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required")
+    def test_cuda_outer_batch_generation_matches_sequential_stream(self) -> None:
+        kwargs = {
+            "episodes_per_epoch": 8,
+            "seed": None,
+            "generation_device": "cuda",
+            "shape_group_size": 8,
+            "num_bags": (6, 8),
+            "num_cells": (8, 12),
+            "latent_dim": 4,
+            "output_dim": 8,
+            "mlp_hidden_dim": 8,
+            "mlp_num_layers": 2,
+        }
+        torch.manual_seed(31)
+        sequential_dataset = SyntheticEpisodeDataset(**kwargs)
+        sequential = [sequential_dataset[index] for index in range(8)]
+
+        torch.manual_seed(31)
+        batched_dataset = SyntheticEpisodeDataset(**kwargs)
+        batched = batched_dataset.__getitems__(list(range(8)))
+
+        self.assertEqual(batched_dataset._sample_count, 8)
+        self.assertEqual(
+            {tuple(x.shape) for x, _ in batched},
+            {tuple(batched[0][0].shape)},
+        )
+        for sequential_episode, batched_episode in zip(sequential, batched):
+            torch.testing.assert_close(
+                sequential_episode[0], batched_episode[0], rtol=0, atol=0
+            )
+            torch.testing.assert_close(
+                sequential_episode[1], batched_episode[1], rtol=0, atol=0
+            )
 
 if __name__ == "__main__":
     unittest.main()
