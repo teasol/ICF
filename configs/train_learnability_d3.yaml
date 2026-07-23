@@ -1,4 +1,4 @@
-base_config: train_learnability_d0.yaml
+base_config: train_learnability_d_base.yaml
 data_overrides:
   dataset_kwargs:
-    donor_mixture_logit_scale: 0.65
+    shared_component_base_logit_scale: 0.70

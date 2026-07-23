@@ -4,16 +4,24 @@ data: medium
 data_overrides:
   episode_batch_size: 2
   dataset_kwargs:
+    donor_shift_scale: 0.0
+    donor_component_shift_scale: 0.0
+    donor_mixture_logit_scale: 0.0
+    shared_component_base_logit_scale: 0.0
+    donor_shared_component_logit_scale: 0.0
+    observation_noise: 0.0
     response_task_probabilities: [1.0, 0.0, 0.0, 0.0, 0.0]
+    rare_response_probability: 0.0
     manifold_mode: nonlinear
+    return_oracle_diagnostics: true
     shape_group_size: 2
   test_dataset_kwargs:
     episodes_per_epoch: 8192
     seed: 86042
 model: default
-optimizer: adamw_medium
+optimizer: adamw_learnability_5e4
 scheduler: warmup_reduce_on_plateau_medium
-trainer: learnability_ddp4
+trainer: learnability_d20_ddp4
 logger: wandb
 callbacks: learnability_best
 model_kwargs:

@@ -26,6 +26,15 @@ class AlwaysSaveLastModelCheckpoint(ModelCheckpoint):
     made interruption recovery silently lose many epochs.
     """
 
+    def __init__(self, *args: Any, selection_start_epoch: int = 0, **kwargs: Any) -> None:
+        if selection_start_epoch < 0:
+            raise ValueError("selection_start_epoch cannot be negative.")
+        self.selection_start_epoch = int(selection_start_epoch)
+        super().__init__(*args, **kwargs)
+
+    def _selection_is_open(self, trainer: L.Trainer) -> bool:
+        return trainer.current_epoch >= self.selection_start_epoch
+
     def _save_last_if_due(self, trainer: L.Trainer) -> None:
         if not self.save_last or self._last_global_step_saved == trainer.global_step:
             return
@@ -38,6 +47,8 @@ class AlwaysSaveLastModelCheckpoint(ModelCheckpoint):
     def on_validation_end(
         self, trainer: L.Trainer, pl_module: L.LightningModule
     ) -> None:
+        if not self._selection_is_open(trainer):
+            return
         super().on_validation_end(trainer, pl_module)
         if (
             not self._should_skip_saving_checkpoint(trainer)
@@ -48,6 +59,8 @@ class AlwaysSaveLastModelCheckpoint(ModelCheckpoint):
     def on_train_epoch_end(
         self, trainer: L.Trainer, pl_module: L.LightningModule
     ) -> None:
+        if not self._selection_is_open(trainer):
+            return
         super().on_train_epoch_end(trainer, pl_module)
         if (
             not self._should_skip_saving_checkpoint(trainer)
@@ -226,6 +239,9 @@ def build_callbacks(config: dict[str, Any]) -> list[Any]:
                 mode=checkpoint_config.get("mode", "min"),
                 save_top_k=checkpoint_config.get("save_top_k", 3),
                 save_last=checkpoint_config.get("save_last", True),
+                selection_start_epoch=checkpoint_config.get(
+                    "selection_start_epoch", 0
+                ),
             )
         )
 

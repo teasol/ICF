@@ -4,9 +4,13 @@ data: learnability_b
 model: default
 optimizer: adamw_medium
 scheduler: learnability
-trainer: learnability_b
+trainer: learnability_b_ddp4
 logger: wandb
-callbacks: learnability
+callbacks: learnability_best_accuracy
+data_overrides:
+  episode_batch_size: 2
+  dataset_kwargs:
+    shape_group_size: 2
 model_kwargs:
   training_targets_per_episode: 16
   fixed_training_queries: true

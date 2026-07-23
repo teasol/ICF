@@ -10,7 +10,8 @@ val_shuffle: false
 test_shuffle: false
 
 dataset_kwargs:
-  episodes_per_epoch: 256
+  # Effective batch 8 with 256 optimizer steps per epoch.
+  episodes_per_epoch: 2048
   seed: 72001
   fixed_episode_count: 64
   generation_device: cuda

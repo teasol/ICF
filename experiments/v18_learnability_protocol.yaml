@@ -1,0 +1,191 @@
+schema_version: 1
+protocol: v18_learnability_ladder_a6000_ddp4
+architecture_version: 18
+status: frozen
+
+training:
+  seeds: [42, 43, 44]
+  smoke_seed: 42
+  precision: bf16-mixed
+  devices: 4
+  episodes_per_rank: 2
+  effective_episode_batch: 8
+  gradient_clip_global_norm: 1.0
+  warmup_epochs: 5
+  optimizer_and_lr_must_match_within_comparison: true
+
+checkpoint_selection:
+  eligible_epochs: [5, 19]
+  metric: val_ce_loss
+  mode: min
+  auroc_selection_forbidden: true
+  save_top_k: 1
+  notes:
+    - A and B still select by val_accuracy because they are memorization gates;
+      their CE at the selected checkpoint remains mandatory reporting.
+    - C4-N and C4-D use an extended 100-epoch diagnostic budget and an eligible
+      selection interval of [5, 99].
+
+evaluation:
+  prediction_aggregation: concatenate_all_queries_per_seed
+  validation_and_evaluation_banks_must_differ: true
+  frozen_evaluation_episodes: 8192
+  report_metrics:
+    - model_auroc
+    - oracle_auroc
+    - oracle_model_auroc_gap
+    - balanced_accuracy
+    - accuracy
+    - majority_accuracy
+    - cross_entropy
+    - empirical_prior_cross_entropy
+    - positive_recall
+    - negative_recall
+    - mean_logit_std
+    - population_logit_std
+    - tail_logit_std
+  aggregate_across_seeds: [mean, minimum]
+  validity_checks:
+    - architecture_version_is_18
+    - config_matches_manifest
+    - evaluation_bank_seed_and_size_match_manifest
+    - model_parameters_and_gradients_are_finite
+    - oracle_is_diagnostic_only
+
+banks:
+  a:
+    type: fixed_training_episode
+    seed: 71001
+    episodes: 1
+    independent_evaluation: false
+  b:
+    type: fixed_training_bank
+    seed: 72001
+    episodes: 64
+    independent_evaluation: false
+  c_full:
+    validation_seed: 50042
+    evaluation_seed: 85042
+    evaluation_episodes: 8192
+  manifold:
+    validation_seed: 73042
+    evaluation_seed: 84042
+    evaluation_episodes: 8192
+  nuisance:
+    validation_seed: 50042
+    evaluation_seed: 86042
+    evaluation_episodes: 8192
+
+stages:
+  A:
+    config: configs/train_learnability_a.yaml
+    max_epochs: 20
+    checkpoint_metric: val_accuracy
+    checkpoint_mode: max
+    eligible_epochs: [5, 19]
+    evaluation_bank: a
+    pass_all_seeds:
+      train_accuracy_min: 0.99
+      train_ce_max: 0.001
+  B:
+    config: configs/train_learnability_b.yaml
+    max_epochs: 20
+    checkpoint_metric: val_accuracy
+    checkpoint_mode: max
+    eligible_epochs: [5, 19]
+    evaluation_bank: b
+    pass_all_seeds:
+      train_accuracy_min: 0.99
+      val_accuracy_min: 0.99
+      train_ce_max: 0.01
+      val_ce_max: 0.01
+  C:
+    config: configs/train_learnability_c.yaml
+    max_epochs: 20
+    evaluation_bank: c_full
+    expected_pattern: negative_control_full_task_failure
+    reproduction_mean:
+      model_auroc_max: 0.65
+  C0:
+    config: configs/train_learnability_c0.yaml
+    max_epochs: 20
+    evaluation_bank: manifold
+    reproduction_mean: {model_auroc_min: 0.95}
+    reproduction_minimum_seed: {model_auroc_min: 0.90}
+  C1:
+    config: configs/train_learnability_c1.yaml
+    max_epochs: 20
+    evaluation_bank: manifold
+    reproduction_mean: {model_auroc_min: 0.95}
+    reproduction_minimum_seed: {model_auroc_min: 0.90}
+  C2:
+    config: configs/train_learnability_c2.yaml
+    max_epochs: 20
+    evaluation_bank: manifold
+    reproduction_mean: {model_auroc_min: 0.95}
+    reproduction_minimum_seed: {model_auroc_min: 0.90}
+  C3:
+    config: configs/train_learnability_c3.yaml
+    max_epochs: 20
+    evaluation_bank: manifold
+    reproduction_mean: {model_auroc_min: 0.95}
+    reproduction_minimum_seed: {model_auroc_min: 0.90}
+  C4:
+    config: configs/train_learnability_c4.yaml
+    max_epochs: 20
+    evaluation_bank: nuisance
+    expected_pattern: negative_control_combined_failure
+    reproduction_mean: {model_auroc_max: 0.70}
+  C4-N:
+    config: configs/train_learnability_c4_n.yaml
+    max_epochs: 100
+    eligible_epochs: [5, 99]
+    evaluation_bank: manifold
+    reproduction_mean: {model_auroc_min: 0.68}
+    reproduction_minimum_seed: {model_auroc_min: 0.62}
+  C4-D:
+    config: configs/train_learnability_c4_d.yaml
+    max_epochs: 100
+    eligible_epochs: [5, 99]
+    evaluation_bank: nuisance
+    reproduction_mean: {model_auroc_min: 0.90}
+    reproduction_minimum_seed: {model_auroc_min: 0.85}
+  C5:
+    config: configs/train_learnability_c5.yaml
+    max_epochs: 20
+    evaluation_bank: nuisance
+    expected_pattern: composition_nuisance_and_rare_effect
+  D0:
+    config: configs/train_learnability_d0.yaml
+    max_epochs: 20
+    evaluation_bank: nuisance
+    reproduction_mean:
+      model_auroc_max: 0.70
+      oracle_auroc_min: 0.95
+      oracle_model_auroc_gap_min: 0.25
+  D1:
+    config: configs/train_learnability_d1.yaml
+    max_epochs: 20
+    evaluation_bank: nuisance
+    reproduction_mean: {model_auroc_min: 0.87}
+  D2:
+    config: configs/train_learnability_d2.yaml
+    max_epochs: 20
+    evaluation_bank: nuisance
+    reproduction_mean: {model_auroc_min: 0.87}
+  D3:
+    config: configs/train_learnability_d3.yaml
+    max_epochs: 20
+    evaluation_bank: nuisance
+    reproduction_mean: {model_auroc_min: 0.90}
+  D4:
+    config: configs/train_learnability_d4.yaml
+    max_epochs: 20
+    evaluation_bank: nuisance
+    reproduction_mean: {model_auroc_min: 0.88}
+
+overall_grades:
+  REPRODUCED: All validity checks and every stage reproduction criterion pass.
+  PARTIALLY_REPRODUCED: Direction matches but at least one numeric criterion misses.
+  NOT_REPRODUCED: The selective D0 failure pattern disappears.
+  INVALID: A validity check, oracle isolation, or frozen-bank check fails.

@@ -133,15 +133,14 @@ class OracleAbundanceTest(unittest.TestCase):
 
 class NuisanceResolvedConfigTest(unittest.TestCase):
     nuisance = {
-        "d0": (None, 0.0),
-        "d1": ("donor_shift_scale", 0.35),
-        "d2": ("donor_component_shift_scale", 0.12),
-        "d3": ("donor_mixture_logit_scale", 0.65),
-        "d4": ("shared_component_base_logit_scale", 0.70),
-        "d5": ("donor_shared_component_logit_scale", 0.70),
+        "d0": ("donor_shift_scale", 0.35),
+        "d1": ("donor_component_shift_scale", 0.12),
+        "d2": ("donor_mixture_logit_scale", 0.65),
+        "d3": ("shared_component_base_logit_scale", 0.70),
+        "d4": ("donor_shared_component_logit_scale", 0.70),
     }
 
-    def test_d_stages_differ_from_d0_only_in_selected_nuisance(self):
+    def test_d_stages_enable_exactly_one_selected_nuisance(self):
         root = Path(__file__).resolve().parents[1]
         configs = {
             stage: merge_train_config(
@@ -149,7 +148,9 @@ class NuisanceResolvedConfigTest(unittest.TestCase):
             )
             for stage in self.nuisance
         }
-        base = configs["d0"]
+        base = merge_train_config(
+            root / "configs" / "train_learnability_d_base.yaml"
+        )
         nuisance_keys = {
             key for key, _ in self.nuisance.values() if key is not None
         }
@@ -173,6 +174,61 @@ class NuisanceResolvedConfigTest(unittest.TestCase):
                 },
             }
             self.assertEqual(comparable, base)
+
+
+class A6000DDPResolvedConfigTest(unittest.TestCase):
+    stages = (
+        "a", "b", "c", "c0", "c1", "c2", "c3", "c4", "c5", "c4_n", "c4_d",
+        "d0", "d1", "d2", "d3", "d4",
+    )
+
+    def test_requested_stages_use_four_rank_effective_batch_eight(self):
+        root = Path(__file__).resolve().parents[1]
+        for stage in self.stages:
+            with self.subTest(stage=stage):
+                config = merge_train_config(
+                    root / "configs" / f"train_learnability_{stage}.yaml"
+                )
+                self.assertEqual(config["trainer"]["devices"], 4)
+                self.assertEqual(config["trainer"]["strategy"], "ddp")
+                self.assertEqual(config["data"]["episode_batch_size"], 2)
+                self.assertEqual(
+                    config["data"]["dataset_kwargs"]["shape_group_size"], 2
+                )
+                checkpoint = config["callbacks"]["checkpoint"]
+                self.assertEqual(checkpoint["save_top_k"], 1)
+                self.assertFalse(checkpoint["save_last"])
+                self.assertEqual(checkpoint["selection_start_epoch"], 5)
+
+    def test_frozen_protocol_matches_resolved_configs(self):
+        root = Path(__file__).resolve().parents[1]
+        import yaml
+
+        protocol = yaml.safe_load(
+            (root / "experiments" / "v18_learnability_protocol.yaml").read_text()
+        )
+        self.assertEqual(protocol["training"]["seeds"], [42, 43, 44])
+        self.assertEqual(protocol["training"]["effective_episode_batch"], 8)
+        self.assertEqual(protocol["evaluation"]["frozen_evaluation_episodes"], 8192)
+        for display_stage, stage_spec in protocol["stages"].items():
+            with self.subTest(stage=display_stage):
+                config = merge_train_config(root / stage_spec["config"])
+                self.assertEqual(config["trainer"]["max_epochs"], stage_spec["max_epochs"])
+                self.assertEqual(
+                    config["callbacks"]["checkpoint"]["monitor"],
+                    stage_spec.get("checkpoint_metric", "val_ce_loss"),
+                )
+                bank = protocol["banks"][stage_spec["evaluation_bank"]]
+                if bank.get("independent_evaluation") is False:
+                    continue
+                self.assertEqual(
+                    config["data"]["test_dataset_kwargs"]["episodes_per_epoch"],
+                    bank["evaluation_episodes"],
+                )
+                self.assertEqual(
+                    config["data"]["test_dataset_kwargs"]["seed"],
+                    bank["evaluation_seed"],
+                )
 
 
 if __name__ == "__main__":

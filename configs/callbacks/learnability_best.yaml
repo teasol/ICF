@@ -1,0 +1,13 @@
+checkpoint:
+  enabled: true
+  dirpath: checkpoints/learnability_ladder
+  filename: "{epoch:03d}-{val_ce_loss:.4f}"
+  monitor: val_ce_loss
+  mode: min
+  save_top_k: 1
+  save_last: false
+  selection_start_epoch: 5
+
+lr_monitor:
+  enabled: true
+  logging_interval: epoch

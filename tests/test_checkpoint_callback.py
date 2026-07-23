@@ -64,6 +64,40 @@ class AlwaysSaveLastModelCheckpointTest(unittest.TestCase):
             self.assertEqual(checkpoint["epoch"], 2)
             self.assertEqual(callback.best_model_score.item(), 0.0)
 
+    def test_checkpoint_selection_ignores_ineligible_early_epochs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            callback = AlwaysSaveLastModelCheckpoint(
+                dirpath=directory,
+                filename="{epoch:03d}-{val_loss:.4f}",
+                monitor="val_loss",
+                mode="min",
+                save_top_k=1,
+                save_last=False,
+                selection_start_epoch=2,
+            )
+            loader = DataLoader(TensorDataset(torch.ones(1, 1)), batch_size=1)
+            trainer = L.Trainer(
+                accelerator="cpu",
+                devices=1,
+                max_epochs=3,
+                logger=False,
+                callbacks=[callback],
+                enable_checkpointing=True,
+                enable_model_summary=False,
+                enable_progress_bar=False,
+                limit_train_batches=1,
+                limit_val_batches=1,
+                num_sanity_val_steps=0,
+            )
+            trainer.fit(
+                _WorseningValidationModule(),
+                train_dataloaders=loader,
+                val_dataloaders=loader,
+            )
+
+            self.assertEqual(callback.best_model_score.item(), 2.0)
+            self.assertIn("epoch=002", callback.best_model_path)
+
 
 if __name__ == "__main__":
     unittest.main()

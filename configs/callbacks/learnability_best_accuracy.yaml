@@ -1,11 +1,13 @@
 checkpoint:
   enabled: true
-  dirpath: checkpoints
+  dirpath: checkpoints/learnability_ladder
   filename: "{epoch:03d}-{val_accuracy:.4f}"
   monitor: val_accuracy
   mode: max
-  save_top_k: 3
-  save_last: true
+  save_top_k: 1
+  save_last: false
+  selection_start_epoch: 5
+
 lr_monitor:
   enabled: true
   logging_interval: epoch

@@ -2,6 +2,7 @@ seed: 42
 ckpt_path:
 data: learnability_manifold
 data_overrides:
+  episode_batch_size: 2
   dataset_kwargs:
     manifold_mode: nonlinear
     donor_shift_scale: 0.35
@@ -9,12 +10,16 @@ data_overrides:
     donor_mixture_logit_scale: 0.65
     shared_component_base_logit_scale: 0.70
     donor_shared_component_logit_scale: 0.70
+    shape_group_size: 2
+  test_dataset_kwargs:
+    episodes_per_epoch: 8192
+    seed: 84042
 model: default
 optimizer: adamw_learnability_5e4
 scheduler: warmup_reduce_on_plateau_medium
-trainer: medium_ddp8
+trainer: learnability_long_ddp4
 logger: wandb
-callbacks: default
+callbacks: learnability_best
 model_kwargs:
   training_targets_per_episode: [5, 12]
   fixed_training_queries: false
