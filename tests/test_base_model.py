@@ -799,6 +799,38 @@ class BaseModelTest(unittest.TestCase):
             auxiliary["context_class_counts"], torch.tensor([4, 4])
         )
 
+    def test_gated_distance_relation_mode(self) -> None:
+        model = BaseModel(
+            input_dim=8,
+            meta_hidden_dim=16,
+            num_classes=2,
+            covariance_relation={
+                "enabled": True,
+                "mode": "gated_distance",
+                "granularity": "subspace",
+                "subspace_rank": 1,
+            },
+        ).eval()
+        logits = model(self.x, self.y, self.mask_index)
+        self.assertEqual(logits.shape, (2, 2))
+        self.assertTrue(torch.isfinite(logits).all())
+
+    def test_learned_head_relation_mode(self) -> None:
+        model = BaseModel(
+            input_dim=8,
+            meta_hidden_dim=16,
+            num_classes=2,
+            covariance_relation={
+                "enabled": True,
+                "mode": "learned_head",
+                "granularity": "subspace",
+                "subspace_rank": 1,
+            },
+        ).eval()
+        logits = model(self.x, self.y, self.mask_index)
+        self.assertEqual(logits.shape, (2, 2))
+        self.assertTrue(torch.isfinite(logits).all())
+
 
 if __name__ == "__main__":
     unittest.main()

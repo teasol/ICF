@@ -1758,7 +1758,11 @@ class StructuredPopulationMetaClassifier(nn.Module):
             for value in relation_config.get("kernel_scales", (0.5, 1.0, 2.0))
         )
         valid_relation_modes = {
-            "prototype_cosine", "standardized_distance", "multiscale_rbf"
+            "prototype_cosine",
+            "standardized_distance",
+            "multiscale_rbf",
+            "gated_distance",
+            "learned_head",
         }
         if self.covariance_relation_granularity not in {"bag", "slot", "subspace"}:
             raise ValueError("covariance relation granularity must be bag, slot, or subspace.")
@@ -1782,6 +1786,15 @@ class StructuredPopulationMetaClassifier(nn.Module):
             or any(value <= 0 for value in self.covariance_relation_kernel_scales)
         ):
             raise ValueError("covariance relation kernel_scales must be positive.")
+        if self.covariance_relation_mode == "gated_distance":
+            self.covariance_relation_gate_a = nn.Parameter(torch.tensor(5.0))
+            self.covariance_relation_gate_b = nn.Parameter(torch.tensor(0.5))
+        elif self.covariance_relation_mode == "learned_head":
+            self.covariance_relation_head = nn.Sequential(
+                nn.Linear(4, 32),
+                nn.GELU(),
+                nn.Linear(32, self.num_classes),
+            )
         self.minimum_population_residual_scale = float(
             minimum_population_residual_scale
         )
@@ -1978,7 +1991,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 F.normalize(query_z, dim=-1, eps=self.covariance_relation_eps),
                 F.normalize(prototypes, dim=-1, eps=self.covariance_relation_eps),
             )
-        elif self.covariance_relation_mode == "standardized_distance":
+        elif self.covariance_relation_mode in {"standardized_distance", "gated_distance"}:
             differences = context_z.unsqueeze(2) - prototypes.unsqueeze(1)
             dispersions = torch.stack(
                 [
@@ -1995,6 +2008,33 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 query_z.unsqueeze(2) - prototypes.unsqueeze(1)
             ).square().mean(dim=-1)
             class_scores = -distances / dispersions.unsqueeze(1)
+            if self.covariance_relation_mode == "gated_distance":
+                gate = torch.sigmoid(
+                    self.covariance_relation_gate_a * (separation.unsqueeze(1) - self.covariance_relation_gate_b)
+                )
+                class_scores = gate.unsqueeze(-1) * class_scores
+        elif self.covariance_relation_mode == "learned_head":
+            differences = context_z.unsqueeze(2) - prototypes.unsqueeze(1)
+            dispersions = torch.stack(
+                [
+                    (
+                        differences[:, :, class_index].square().mean(dim=-1)
+                        * class_masks[class_index]
+                    ).sum(dim=-1)
+                    / class_masks[class_index].sum(dim=-1)
+                    for class_index in range(self.num_classes)
+                ],
+                dim=-1,
+            ).clamp_min(self.covariance_relation_eps)
+            distances = (
+                query_z.unsqueeze(2) - prototypes.unsqueeze(1)
+            ).square().mean(dim=-1)
+            d0 = distances[:, :, 0] / dispersions[:, 0].unsqueeze(1)
+            d1 = distances[:, :, 1] / dispersions[:, 1].unsqueeze(1)
+            delta_d = d0 - d1
+            sep_feat = separation.unsqueeze(1).expand_as(d0)
+            feats = torch.stack([d0, d1, delta_d, sep_feat], dim=-1)
+            class_scores = self.covariance_relation_head(feats)
         else:
             distances = (
                 query_z.unsqueeze(2) - context_z.unsqueeze(1)

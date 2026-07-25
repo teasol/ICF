@@ -104,16 +104,25 @@ State와 covariance가 context–query 관계에서 학습 가능한 representat
 5. 후보는 짧은 동일 validation bank diagnostic으로 선별한 뒤 100-epoch run은 한 후보에만 사용한다.
 6. 비교 기준은 현재 best checkpoint와 동일한 overall/task별 metric이다.
 
-### 다음 agent가 먼저 할 구체적 작업
+### 완료된 진단 및 아키텍처 후보 구현 (Phase 1 & 2)
 
-1. Epoch 52 checkpoint에서 state/covariance task의 branch별 logit correlation과 calibration을 진단한다.
-2. Covariance relation이 final logit에 고정 scale로 더해질 때 base covariance ridge와 중복 또는 충돌하는지 측정한다.
-3. 다음 세 범주의 후보 중 가장 작은 변경부터 설계한다.
-   - trainable gate conditioned on context-only class separation
-   - CSP-projected feature를 learned relation head에 입력
-   - state/covariance task에 공유 가능한 normalized context–query kernel feature
-4. 기존 branch 제거 또는 architecture version 증가 전 diagnostic-only로 신호를 확인한다.
-5. 후보 선택 후 short run과 full-size BF16 smoke를 수행한다.
+1. **Epoch 52 Best Checkpoint 진단 스크립트 실행 (`scripts/diagnose_v19_branches.py`)**:
+   - `Covariance` task에서 `CovRel (CSP relation)`의 AUROC가 0.6270으로 `CovRidge (0.5700)` 대비 가장 강한 성능을 제공함 확인.
+   - `CovRidge`와 `CovRel` 간의 Logit 상관관계는 $r \approx 0.494$로 적절한 상보적 정보 제공 확인.
+   - Context Class Separation Margin이 평균 1.1885로 안정적으로 잘 조건화되어 있음을 확인.
+2. **구조 후보 구현 및 Unit Test/Smoke Test 완료**:
+   - **Candidate A (`gated_distance`)**: Context class margin 기반 dynamic gating 구현.
+   - **Candidate B (`learned_head`)**: CSP projection 저차원 feature $[d_0, d_1, d_0 - d_1, \text{sep}]$를 2-layer MLP head로 분류.
+   - Config: `configs/train_v19_candidate_a_gated.yaml`, `configs/train_v19_candidate_b_head.yaml`
+   - unit test 100% 통과 및 B200 GPU BF16 1-epoch smoke test 완료.
+
+### 다음 구체적 작업 (Phase 3 Short Training)
+
+1. Candidate A와 Candidate B에 대해 8-epoch short training 실행 및 결과 비교:
+   ```bash
+   scripts/launch_interactive_training.sh v19_candidate_a_gated configs/train_v19_candidate_a_gated.yaml
+   ```
+2. Short training에서 overall CE/AUROC 및 State/Covariance task 개선도를 검증하여 100-epoch 승격 후보 최종 선별.
 
 ## 7. 보존 artifact
 
