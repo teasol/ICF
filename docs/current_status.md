@@ -116,13 +116,28 @@ State와 covariance가 context–query 관계에서 학습 가능한 representat
    - Config: `configs/train_v19_candidate_a_gated.yaml`, `configs/train_v19_candidate_b_head.yaml`
    - unit test 100% 통과 및 B200 GPU BF16 1-epoch smoke test 완료.
 
-### 다음 구체적 작업 (Phase 3 Short Training)
+### 완료된 20-Epoch Short Training 결과 (Phase 3)
 
-1. Candidate A와 Candidate B에 대해 8-epoch short training 실행 및 결과 비교:
-   ```bash
-   scripts/launch_interactive_training.sh v19_candidate_a_gated configs/train_v19_candidate_a_gated.yaml
-   ```
-2. Short training에서 overall CE/AUROC 및 State/Covariance task 개선도를 검증하여 100-epoch 승격 후보 최종 선별.
+1. **Candidate A (Context-Gated CSP Relation) 20-Epoch 학습 완료**:
+   - Run ID: `20260726_v19_candidate_a_gated_20e` (W&B: <https://wandb.ai/teasol/ICF/runs/isb85jld>)
+   - Checkpoint: `checkpoints/20260726_v19_candidate_a_gated_20e/v19_candidate_a_gated/epoch=008-val_ce_loss=0.5965.ckpt`
+   - **Best Validation CE Loss**: **0.5965** (8 epoch 만에 기존 100-epoch baseline 0.5966 경신)
+   - **Overall AUROC**: **0.7423** (기존 baseline 0.7299 대비 상승)
+   - **Task별 AUROC 비교 (Baseline 100e Epoch 52 vs Candidate A Epoch 8)**:
+     - **Composition**: 0.8010 $\to$ **0.8044** (+0.0034)
+     - **State**: 0.6299 $\to$ **0.6427** (+0.0128)
+     - **Covariance**: 0.6085 $\to$ **0.6193** (+0.0108)
+     - **Interaction**: 0.7581 $\to$ **0.7605** (+0.0024)
+     - **Combined**: 0.7876 $\to$ **0.8042** (+0.0166)
+
+2. **Candidate B (CSP Learned Head) 20-Epoch 학습 진행 중**:
+   - Run ID: `20260726_v19_candidate_b_head_20e`
+   - Config: `configs/train_v19_candidate_b_short20.yaml`
+   - B200 GPU 1장에서 20-epoch 백그라운드 학습 진행 중.
+
+### 다음 구체적 작업
+
+Candidate B 20-epoch 학습 완료 후 Candidate A와 동일한 validation bank에서 5개 task별 AUROC/CE를 진단/비교하여 우승 후보를 최종 선별하고 100-epoch 승격 여부를 결정함.
 
 ## 7. 보존 artifact
 
