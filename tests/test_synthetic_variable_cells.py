@@ -103,6 +103,28 @@ class VariableCellCountTest(unittest.TestCase):
         self.assertEqual(len(collated), 4)
         torch.testing.assert_close(collated[3], abundance)
 
+    def test_diagnostic_instance_mask_is_not_batch_metadata_and_is_aligned(self) -> None:
+        dataset = SyntheticEpisodeDataset(
+            episodes_per_epoch=1, seed=53, generation_device="cpu",
+            num_bags=12, num_cells=48, latent_dim=4, output_dim=8,
+            mlp_hidden_dim=8, mlp_num_layers=2,
+            shared_component_probability=1.0,
+            continuous_response_probability=1.0,
+            response_task_probabilities=(0.0, 0.0, 1.0, 0.0, 0.0),
+            response_covariance_effect_scale=(0.5, 0.5), balanced=True,
+        )
+        batch = dataset[0]
+        episode = dataset.diagnostic_episode(0)
+        self.assertEqual(len(batch), 2)
+        torch.testing.assert_close(batch[0], episode.x)
+        torch.testing.assert_close(batch[1], episode.y)
+        self.assertIsNotNone(episode.responsive_instance_mask)
+        mask = episode.responsive_instance_mask
+        self.assertFalse(mask.requires_grad)
+        torch.testing.assert_close(
+            mask.float().mean(dim=1), episode.oracle_response_abundance
+        )
+
     def test_disabled_curriculum_uses_validation_difficulty(self) -> None:
         dataset = SyntheticEpisodeDataset(
             episodes_per_epoch=1,

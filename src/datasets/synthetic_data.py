@@ -12,6 +12,13 @@ from torch.utils.data import Dataset
 
 
 _MANIFOLD_DECOMPOSITION_LOCK = Lock()
+RESPONSE_TASK_NAMES = (
+    "composition",
+    "state",
+    "covariance",
+    "interaction",
+    "combined",
+)
 
 
 @dataclass(frozen=True)
@@ -30,6 +37,9 @@ class SyntheticEpisode:
     effect_scale_multiplier: float = 1.0
     rare_response: bool = False
     oracle_population_features: torch.Tensor | None = None
+    # Diagnostic-only instance membership. SyntheticEpisodeDataset never
+    # exposes this field in training or evaluation batches.
+    responsive_instance_mask: torch.Tensor | None = None
 
     @property
     def flipped_y(self) -> torch.Tensor:
@@ -588,6 +598,11 @@ class SyntheticManifoldGenerator:
                 if oracle_population_features is not None
                 else None
             ),
+            responsive_instance_mask=(
+                effect_mask[permutation].squeeze(-1).detach()
+                if effect_mask is not None
+                else None
+            ),
         )
 
     def sample_num_cells(
@@ -632,13 +647,7 @@ class SyntheticManifoldGenerator:
                 generator=generator,
             ).item()
         )
-        return (
-            "composition",
-            "state",
-            "covariance",
-            "interaction",
-            "combined",
-        )[task_index]
+        return RESPONSE_TASK_NAMES[task_index]
 
     def _sample_response_score(
         self,
@@ -864,6 +873,7 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         effect_scale_start: float | tuple[float, float] = (1.0, 1.0),
         effect_scale_end: float | tuple[float, float] = (1.0, 1.0),
         return_oracle_diagnostics: bool = False,
+        return_task_metadata: bool = False,
         **generator_kwargs: Any,
     ) -> None:
         if episodes_per_epoch < 1:
@@ -893,6 +903,7 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         self.shape_group_size = int(shape_group_size)
         self.effect_scale_end = effect_scale_end
         self.return_oracle_diagnostics = bool(return_oracle_diagnostics)
+        self.return_task_metadata = bool(return_task_metadata)
         self._sample_count = 0
         self.episode_generator = SyntheticManifoldGenerator(**generator_kwargs)
 
@@ -1025,15 +1036,50 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         )
         return self._format_episode(episode)
 
+    def diagnostic_episode(self, index: int) -> SyntheticEpisode:
+        """Return a fixed episode with oracle fields for diagnostic scripts only."""
+        if self.seed is None:
+            raise ValueError("diagnostic_episode requires a fixed dataset seed.")
+        device = torch.device(self.generation_device)
+        episode_index = (
+            index % self.fixed_episode_count
+            if self.fixed_episode_count is not None
+            else index
+        )
+        sample_seed = self.seed + episode_index
+        shape_generator = torch.Generator(device=device).manual_seed(sample_seed)
+        num_bags = self.episode_generator.sample_num_bags(shape_generator, device=device)
+        num_cells = self.episode_generator.sample_num_cells(shape_generator, device=device)
+        generator = torch.Generator(device=device).manual_seed(sample_seed)
+        effect_scale_multiplier = self._sample_effect_scale(
+            generator, device, 0, final_difficulty=True
+        )
+        return self.episode_generator.sample_episode(
+            generator, device=device,
+            effect_scale_multiplier=effect_scale_multiplier,
+            num_bags=num_bags, num_cells=num_cells,
+        )
+
     def _format_episode(self, episode: SyntheticEpisode) -> tuple[torch.Tensor, ...]:
-        if not self.return_oracle_diagnostics:
-            return episode.x, episode.y
-        abundance = episode.oracle_response_abundance
-        if abundance is None:
-            raise RuntimeError(
-                "Oracle abundance diagnostics require a responsive component."
+        fields: list[torch.Tensor] = [episode.x, episode.y]
+        if self.return_oracle_diagnostics:
+            abundance = episode.oracle_response_abundance
+            if abundance is None:
+                raise RuntimeError(
+                    "Oracle abundance diagnostics require a responsive component."
+                )
+            fields.append(abundance.detach())
+        if self.return_task_metadata:
+            if episode.response_task not in RESPONSE_TASK_NAMES:
+                raise RuntimeError("Task diagnostics require a known response task.")
+            fields.append(
+                torch.tensor(
+                    RESPONSE_TASK_NAMES.index(episode.response_task),
+                    dtype=torch.long,
+                    device=episode.y.device,
+                )
             )
-        return episode.x, episode.y, abundance.detach()
+        return tuple(fields)
 
     def _sample_effect_scale(
         self,

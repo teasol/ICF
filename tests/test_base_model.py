@@ -232,6 +232,61 @@ class StructuredEpisodePopulationAggregatorTest(unittest.TestCase):
             )
 
 
+    def test_local_geometry_is_shift_and_instance_order_invariant(self) -> None:
+        torch.manual_seed(230)
+        aggregator = StructuredEpisodePopulationAggregator(
+            input_dim=8, num_slots=4, context_samples_per_bag=8,
+            covariance_sketch_dim=8,
+        ).eval()
+        raw = torch.randn(2, 24, 8)
+        centered, _, _ = aggregator._bag_view(raw)
+        expected = aggregator._local_geometry_sketch(
+            centered, neighbor_counts=(4, 8)
+        )
+        shift = torch.randn(2, 1, 8)
+        shifted, _, _ = aggregator._bag_view(raw + shift)
+        permutation = torch.randperm(raw.shape[1])
+        actual = aggregator._local_geometry_sketch(
+            shifted[:, permutation], neighbor_counts=(4, 8)
+        )
+        for name in expected:
+            self.assertTrue(torch.isfinite(actual[name]).all())
+            torch.testing.assert_close(expected[name], actual[name], atol=2e-5, rtol=2e-5)
+
+    def test_spherical_kmeans_anchors_are_context_order_invariant(self) -> None:
+        torch.manual_seed(231)
+        aggregator = StructuredEpisodePopulationAggregator(
+            input_dim=8, num_slots=4, context_samples_per_bag=8
+        ).eval()
+        bags = [torch.randn(24 + index, 8) for index in range(4)]
+        context_mask = torch.ones(4, dtype=torch.bool)
+        expected = aggregator._context_spherical_kmeans_anchors(
+            bags, context_mask, num_slots=4
+        )
+        permutation = torch.tensor([2, 0, 3, 1])
+        actual = aggregator._context_spherical_kmeans_anchors(
+            [bags[index][torch.randperm(len(bags[index]))] for index in permutation],
+            context_mask, num_slots=4,
+        )
+        torch.testing.assert_close(expected, actual, atol=2e-5, rtol=2e-5)
+
+    def test_slot_spectral_descriptor_is_rotation_invariant(self) -> None:
+        aggregator = StructuredEpisodePopulationAggregator(
+            input_dim=8, num_slots=4, num_density_slots=3,
+            context_samples_per_bag=8, covariance_sketch_dim=8,
+        )
+        aggregator.slot_covariance_descriptor = "spectral"
+        delta = torch.randn(2, 31, 8)
+        assignment = torch.softmax(torch.randn(2, 31, 4), dim=-1)
+        orthogonal, _ = torch.linalg.qr(torch.randn(8, 8))
+        expected, reliability = aggregator._slot_covariance_sketch(assignment, delta)
+        actual, rotated_reliability = aggregator._slot_covariance_sketch(
+            assignment, delta @ orthogonal
+        )
+        torch.testing.assert_close(expected, actual, atol=2e-4, rtol=2e-4)
+        torch.testing.assert_close(reliability, rotated_reliability)
+
+
 class SetCrossAttentionMetaClassifierTest(unittest.TestCase):
     def setUp(self) -> None:
         torch.manual_seed(2)
@@ -340,6 +395,9 @@ class StructuredPopulationMetaClassifierTest(unittest.TestCase):
             "tails": torch.randn(8, 3, 8),
             "slot_metadata": torch.randn(8, 4, 2),
             "covariance_sketch": torch.randn(8, 36),
+            "slot_covariance_sketch": torch.randn(8, 4, 12),
+            "slot_covariance_reliability": torch.rand(8, 4).add(0.1),
+            "covariance_matrix": torch.eye(6).repeat(8, 1, 1),
         }
         self.query = {
             "global_summary": torch.randn(3, 8),
@@ -347,6 +405,9 @@ class StructuredPopulationMetaClassifierTest(unittest.TestCase):
             "tails": torch.randn(3, 3, 8),
             "slot_metadata": torch.randn(3, 4, 2),
             "covariance_sketch": torch.randn(3, 36),
+            "slot_covariance_sketch": torch.randn(3, 4, 12),
+            "slot_covariance_reliability": torch.rand(3, 4).add(0.1),
+            "covariance_matrix": torch.eye(6).repeat(3, 1, 1),
         }
         self.query_instances = [torch.randn(13 + index, 8) for index in range(3)]
         self.labels = torch.tensor([0, 1, 0, 1, 0, 1, 0, 1])
@@ -369,11 +430,19 @@ class StructuredPopulationMetaClassifierTest(unittest.TestCase):
             **self.context,
             "slots": self.context["slots"][:, permutation],
             "slot_metadata": self.context["slot_metadata"][:, permutation],
+            "slot_covariance_sketch": self.context["slot_covariance_sketch"][:, permutation],
+            "slot_covariance_reliability": self.context[
+                "slot_covariance_reliability"
+            ][:, permutation],
         }
         query = {
             **self.query,
             "slots": self.query["slots"][:, permutation],
             "slot_metadata": self.query["slot_metadata"][:, permutation],
+            "slot_covariance_sketch": self.query["slot_covariance_sketch"][:, permutation],
+            "slot_covariance_reliability": self.query[
+                "slot_covariance_reliability"
+            ][:, permutation],
         }
         actual = self.classifier(context, self.labels, query, self.query_instances)
         torch.testing.assert_close(expected, actual, atol=1e-6, rtol=1e-6)
@@ -450,6 +519,139 @@ class StructuredPopulationMetaClassifierTest(unittest.TestCase):
         F.cross_entropy(logits, torch.tensor([0, 1, 0])).backward()
         self.assertTrue(torch.isfinite(context["tails"].grad).all())
         self.assertTrue(all(torch.isfinite(bag.grad).all() for bag in query_instances))
+
+
+    def test_covariance_relation_candidates_are_offset_and_scale_invariant(self) -> None:
+        offset = torch.randn(1, self.context["covariance_sketch"].shape[-1])
+        for mode in ("prototype_cosine", "standardized_distance", "multiscale_rbf"):
+            self.classifier.covariance_relation_mode = mode
+            expected, _ = self.classifier._covariance_relation_scores(
+                self.context["covariance_sketch"], self.labels,
+                self.query["covariance_sketch"],
+            )
+            actual, _ = self.classifier._covariance_relation_scores(
+                3.5 * (self.context["covariance_sketch"] + offset), self.labels,
+                3.5 * (self.query["covariance_sketch"] + offset),
+            )
+            torch.testing.assert_close(expected, actual, atol=2e-5, rtol=2e-5)
+
+    def test_covariance_relation_label_swap_flips_logits(self) -> None:
+        for mode in ("prototype_cosine", "standardized_distance", "multiscale_rbf"):
+            self.classifier.covariance_relation_mode = mode
+            expected, _ = self.classifier._covariance_relation_scores(
+                self.context["covariance_sketch"], self.labels,
+                self.query["covariance_sketch"],
+            )
+            swapped, _ = self.classifier._covariance_relation_scores(
+                self.context["covariance_sketch"], 1 - self.labels,
+                self.query["covariance_sketch"],
+            )
+            torch.testing.assert_close(expected, swapped.flip(-1), atol=1e-6, rtol=1e-6)
+
+    def test_covariance_relation_outer_batch_matches_single_episode(self) -> None:
+        for mode in ("prototype_cosine", "standardized_distance", "multiscale_rbf"):
+            self.classifier.covariance_relation_mode = mode
+            expected, expected_separation = self.classifier._covariance_relation_scores(
+                self.context["covariance_sketch"], self.labels,
+                self.query["covariance_sketch"],
+            )
+            actual, actual_separation = self.classifier._covariance_relation_scores(
+                self.context["covariance_sketch"].repeat(2, 1, 1),
+                self.labels.repeat(2, 1),
+                self.query["covariance_sketch"].repeat(2, 1, 1),
+            )
+            torch.testing.assert_close(actual[0], expected)
+            torch.testing.assert_close(actual[1], expected)
+            torch.testing.assert_close(actual_separation[0], expected_separation)
+
+    def test_covariance_relation_requires_both_context_classes(self) -> None:
+        with self.assertRaisesRegex(ValueError, "every class"):
+            self.classifier._covariance_relation_scores(
+                self.context["covariance_sketch"], torch.zeros_like(self.labels),
+                self.query["covariance_sketch"],
+            )
+
+    def test_covariance_relation_has_finite_input_gradients(self) -> None:
+        context = self.context["covariance_sketch"].clone().requires_grad_()
+        query = self.query["covariance_sketch"].clone().requires_grad_()
+        for mode in ("prototype_cosine", "standardized_distance", "multiscale_rbf"):
+            self.classifier.covariance_relation_mode = mode
+            logits, _ = self.classifier._covariance_relation_scores(
+                context, self.labels, query
+            )
+            self.assertTrue(torch.isfinite(logits).all())
+            gradients = torch.autograd.grad(
+                logits.square().mean(), (context, query), retain_graph=True
+            )
+            self.assertTrue(all(torch.isfinite(value).all() for value in gradients))
+
+    def test_slot_covariance_relation_is_slot_permutation_invariant(self) -> None:
+        context = self.context["slot_covariance_sketch"]
+        context_reliability = self.context["slot_covariance_reliability"]
+        query = self.query["slot_covariance_sketch"]
+        query_reliability = self.query["slot_covariance_reliability"]
+        for mode in ("prototype_cosine", "standardized_distance", "multiscale_rbf"):
+            self.classifier.covariance_relation_mode = mode
+            for routing in ("reliability_mean", "context_top1", "context_top3", "context_softmax"):
+                self.classifier.covariance_relation_slot_routing = routing
+                expected, _ = self.classifier._slot_covariance_relation_scores(
+                    context, context_reliability, self.labels, query, query_reliability
+                )
+                permutation = torch.randperm(context.shape[1])
+                actual, _ = self.classifier._slot_covariance_relation_scores(
+                    context[:, permutation], context_reliability[:, permutation],
+                    self.labels, query[:, permutation], query_reliability[:, permutation]
+                )
+                torch.testing.assert_close(expected, actual, atol=1e-6, rtol=1e-6)
+
+    def test_slot_covariance_relation_label_swap_flips_logits(self) -> None:
+        expected, _ = self.classifier._slot_covariance_relation_scores(
+            self.context["slot_covariance_sketch"],
+            self.context["slot_covariance_reliability"], self.labels,
+            self.query["slot_covariance_sketch"],
+            self.query["slot_covariance_reliability"],
+        )
+        swapped, _ = self.classifier._slot_covariance_relation_scores(
+            self.context["slot_covariance_sketch"],
+            self.context["slot_covariance_reliability"], 1 - self.labels,
+            self.query["slot_covariance_sketch"],
+            self.query["slot_covariance_reliability"],
+        )
+        torch.testing.assert_close(expected, swapped.flip(-1), atol=1e-6, rtol=1e-6)
+
+    def test_covariance_subspace_uses_context_only_and_is_finite(self) -> None:
+        torch.manual_seed(241)
+        matrices = torch.randn(11, 6, 6)
+        covariance = matrices @ matrices.transpose(-1, -2) / 6
+        context = covariance[:8].requires_grad_()
+        query = covariance[8:].requires_grad_()
+        for whiten in (False, True):
+            context_feature, query_feature, eigenvalues = (
+                self.classifier._covariance_subspace_features(
+                    context, self.labels, query, rank=2, whiten=whiten
+                )
+            )
+            self.assertEqual(query_feature.shape, (3, 2))
+            self.assertTrue(torch.isfinite(context_feature).all())
+            self.assertTrue(torch.isfinite(query_feature).all())
+            self.assertTrue(torch.isfinite(eigenvalues).all())
+            gradients = torch.autograd.grad(
+                query_feature.square().mean(), (context, query), retain_graph=True
+            )
+            self.assertTrue(all(torch.isfinite(value).all() for value in gradients))
+
+    def test_zero_relation_residual_preserves_existing_logits(self) -> None:
+        self.classifier.covariance_relation_enabled = False
+        expected = self.classifier(
+            self.context, self.labels, self.query, self.query_instances
+        )
+        self.classifier.covariance_relation_enabled = True
+        self.classifier.covariance_relation_diagnostic_only = False
+        self.classifier.covariance_relation_residual_scale = 0.0
+        actual = self.classifier(
+            self.context, self.labels, self.query, self.query_instances
+        )
+        torch.testing.assert_close(expected, actual, atol=0.0, rtol=0.0)
 
 
 class BaseModelTest(unittest.TestCase):

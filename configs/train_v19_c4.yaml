@@ -1,0 +1,2 @@
+base_config: train_learnability_c4.yaml
+trainer: learnability_d20

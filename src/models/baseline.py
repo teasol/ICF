@@ -487,6 +487,8 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         self.covariance_sketch_dim = int(covariance_sketch_dim)
         self.covariance_mode = str(covariance_mode)
         self.covariance_shrinkage = float(covariance_shrinkage)
+        self.slot_covariance_descriptor = "correlation"
+        self.emit_covariance_matrix = False
         candidate_index = torch.arange(
             1, self.context_samples_per_bag + 1, dtype=torch.float32
         )[:, None]
@@ -598,6 +600,139 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             return log_feature.to(centered_delta.dtype)
         return torch.cat((raw_feature, log_feature), dim=-1).to(centered_delta.dtype)
 
+    def _projected_covariance_matrix(
+        self, centered_delta: torch.Tensor, dimension: int = 32
+    ) -> torch.Tensor:
+        dimension = min(int(dimension), self.covariance_sketch_dim)
+        projected = centered_delta.float() @ self._covariance_projection[:, :dimension].float()
+        return torch.einsum("...ni,...nj->...ij", projected, projected) / projected.shape[-2]
+
+    def _slot_covariance_sketch(
+        self,
+        assignment: torch.Tensor,
+        centered_delta: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Measure local covariance inside aligned population slots."""
+        measurement_dim = min(16, self.covariance_sketch_dim)
+        values = centered_delta.float()
+        bag_rms = values.square().mean(dim=(-2, -1), keepdim=True).sqrt().clamp_min(1e-6)
+        projection = self._covariance_projection[:, :measurement_dim].float()
+        projected = (values / bag_rms) @ projection
+        weights = assignment.float()
+        mass = weights.sum(dim=-2).clamp_min(1e-6)
+        means = torch.einsum("...ns,...nd->...sd", weights, projected)
+        means = means / mass.unsqueeze(-1)
+        differences = projected.unsqueeze(-2) - means.unsqueeze(-3)
+        covariance = torch.einsum(
+            "...ns,...nsi,...nsj->...sij", weights, differences, differences
+        ) / mass.unsqueeze(-1).unsqueeze(-1)
+        diagonal = covariance.diagonal(dim1=-2, dim2=-1).clamp_min(1e-6)
+        inverse_scale = diagonal.rsqrt()
+        correlation = covariance * inverse_scale.unsqueeze(-1) * inverse_scale.unsqueeze(-2)
+        row, column = torch.triu_indices(
+            measurement_dim, measurement_dim, offset=1, device=values.device
+        )
+        if self.slot_covariance_descriptor == "correlation":
+            descriptor = torch.cat(
+                (diagonal.log(), correlation[..., row, column]), dim=-1
+            )
+        elif self.slot_covariance_descriptor == "spectral":
+            eigenvalues = torch.linalg.eigvalsh(covariance.float()).clamp_min(1e-6)
+            trace = eigenvalues.sum(dim=-1, keepdim=True).clamp_min(1e-6)
+            normalized = eigenvalues / trace
+            log_shape = eigenvalues.log()
+            log_shape = log_shape - log_shape.mean(dim=-1, keepdim=True)
+            entropy = -(normalized * normalized.clamp_min(1e-8).log()).sum(
+                dim=-1, keepdim=True
+            )
+            top_fraction = normalized[..., -1:]
+            anisotropy = eigenvalues[..., -1:] / eigenvalues.mean(
+                dim=-1, keepdim=True
+            ).clamp_min(1e-6)
+            effective_rank = entropy.exp() / measurement_dim
+            descriptor = torch.cat(
+                (normalized, log_shape, top_fraction, anisotropy, entropy, effective_rank),
+                dim=-1,
+            )
+        else:
+            raise ValueError(
+                "slot covariance descriptor must be correlation or spectral."
+            )
+        reliability = mass / (mass + 5.0)
+        return descriptor.to(centered_delta.dtype), reliability.to(centered_delta.dtype)
+
+
+    def _local_geometry_sketch(
+        self,
+        instances: torch.Tensor,
+        neighbor_counts: Sequence[int] = (4, 8, 16),
+    ) -> dict[str, torch.Tensor]:
+        """Summarize order-invariant local geometry without component slots."""
+        if instances.ndim != 3:
+            raise ValueError("instances must be [bags, instances, features].")
+        counts = tuple(sorted({int(value) for value in neighbor_counts}))
+        if len(counts) < 2 or counts[0] < 2 or instances.shape[1] < 3:
+            raise ValueError(
+                "neighbor counts require at least two settings and three instances."
+            )
+        effective_counts = tuple(
+            min(value, instances.shape[1] - 1) for value in counts
+        )
+        projection_dim = min(16, self.covariance_sketch_dim)
+        projection = self._covariance_projection[:, :projection_dim].float()
+        quantiles = torch.tensor(
+            (0.10, 0.25, 0.50, 0.75, 0.90),
+            device=instances.device,
+            dtype=torch.float32,
+        )
+        distance_features = []
+        anisotropy_features = []
+        for bag in instances:
+            projected = F.normalize(
+                bag.float() @ projection, dim=-1, eps=1e-6
+            )
+            similarity = projected @ projected.T
+            similarity.fill_diagonal_(float("-inf"))
+            nearest = similarity.topk(effective_counts[-1], dim=-1).indices
+            neighbor_values = projected[nearest]
+            center_values = projected.unsqueeze(1)
+            squared_distance = (neighbor_values - center_values).square().sum(dim=-1)
+            bag_distance = []
+            for count in effective_counts:
+                local = squared_distance[:, :count]
+                local_mean = local.mean(dim=-1)
+                local_std = local.std(dim=-1, unbiased=False)
+                bag_distance.extend(
+                    (torch.quantile(local_mean, quantiles),
+                     torch.quantile(local_std, quantiles))
+                )
+            distance_features.append(torch.cat(bag_distance))
+
+            local_difference = neighbor_values[:, : effective_counts[1]] - center_values
+            local_covariance = torch.einsum(
+                "nki,nkj->nij", local_difference, local_difference
+            ) / effective_counts[1]
+            eigenvalues = torch.linalg.eigvalsh(local_covariance).clamp_min(1e-8)
+            normalized = eigenvalues / eigenvalues.sum(dim=-1, keepdim=True).clamp_min(1e-8)
+            top_fraction = normalized[:, -1]
+            entropy = -(normalized * normalized.clamp_min(1e-8).log()).sum(dim=-1)
+            effective_rank = entropy.exp() / projection_dim
+            anisotropy_features.append(
+                torch.cat(
+                    (
+                        torch.quantile(top_fraction, quantiles),
+                        torch.quantile(effective_rank, quantiles),
+                    )
+                )
+            )
+        distance = torch.stack(distance_features).to(instances.dtype)
+        anisotropy = torch.stack(anisotropy_features).to(instances.dtype)
+        return {
+            "distance": distance,
+            "anisotropy": anisotropy,
+            "combined": torch.cat((distance, anisotropy), dim=-1),
+        }
+
 
     def _population_candidates(self, bag: torch.Tensor) -> torch.Tensor:
         """Build stable, order-invariant soft candidates in centered space."""
@@ -682,6 +817,58 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         return torch.cat((density, rare), dim=0).to(candidates.dtype)
 
 
+    def _context_spherical_kmeans_anchors(
+        self,
+        bags: list[torch.Tensor],
+        context_mask: torch.Tensor,
+        num_slots: int,
+        refinement_steps: int = 12,
+    ) -> torch.Tensor:
+        """Cluster context-wide population candidates into component anchors."""
+        if num_slots < 1:
+            raise ValueError("num_slots must be positive.")
+        candidates = torch.cat(
+            [
+                self._population_candidates(bag)
+                for bag, is_context in zip(bags, context_mask.tolist())
+                if is_context
+            ],
+            dim=0,
+        )
+        if candidates.shape[0] < num_slots:
+            raise ValueError("Context does not contain enough anchor candidates.")
+        normalized = F.normalize(candidates.float(), dim=-1, eps=1e-6)
+        global_center = F.normalize(normalized.mean(dim=0, keepdim=True), dim=-1)
+        first = (normalized * global_center).sum(dim=-1).argmax()
+        selected = [first]
+        nearest_similarity = normalized @ normalized[first]
+        for _ in range(1, num_slots):
+            index = nearest_similarity.argmin()
+            selected.append(index)
+            nearest_similarity = torch.maximum(
+                nearest_similarity, normalized @ normalized[index]
+            )
+        anchors = normalized[torch.stack(selected)]
+        for _ in range(refinement_steps):
+            similarity = normalized @ anchors.T
+            assignment = similarity.argmax(dim=-1)
+            updated = []
+            for slot_index in range(num_slots):
+                members = normalized[assignment == slot_index]
+                if members.numel() == 0:
+                    updated.append(anchors[slot_index])
+                else:
+                    updated.append(
+                        F.normalize(members.mean(dim=0), dim=-1, eps=1e-6)
+                    )
+            new_anchors = torch.stack(updated)
+            if torch.allclose(new_anchors, anchors, atol=1e-5, rtol=1e-5):
+                anchors = new_anchors
+                break
+            anchors = new_anchors
+        return anchors.to(candidates.dtype)
+
+
     def _forward_dense(
         self,
         instances: torch.Tensor,
@@ -689,6 +876,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         return_auxiliary: bool,
         global_summary: torch.Tensor | None = None,
         covariance_sketch: torch.Tensor | None = None,
+        centered_delta: torch.Tensor | None = None,
     ) -> (
         dict[str, torch.Tensor]
         | tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]
@@ -725,6 +913,11 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             dim=1
         ) / mass
         metadata = torch.stack((proportion.log(), dispersion), dim=-1)
+        if centered_delta is None:
+            centered_delta = instances - instances.mean(dim=-2, keepdim=True)
+        slot_covariance_sketch, slot_covariance_reliability = (
+            self._slot_covariance_sketch(assignment, centered_delta)
+        )
 
         rare_count = min(
             num_instances,
@@ -792,6 +985,13 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             "tails": torch.stack(tail_tokens, dim=1),
             "slot_metadata": metadata,
             "covariance_sketch": covariance_sketch,
+            "slot_covariance_sketch": slot_covariance_sketch,
+            "slot_covariance_reliability": slot_covariance_reliability,
+            "covariance_matrix": (
+                self._projected_covariance_matrix(centered_delta)
+                if self.emit_covariance_matrix
+                else centered_delta.new_zeros((num_bags, 1, 1))
+            ),
         }
         if not return_auxiliary:
             return representation
@@ -842,6 +1042,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 return_auxiliary,
                 global_summary=torch.stack(global_summaries),
                 covariance_sketch=torch.stack(covariance_sketches),
+                centered_delta=torch.stack(centered_deltas),
             )
             if return_auxiliary:
                 representation, auxiliary = result
@@ -850,11 +1051,13 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
 
         slot_tokens: list[torch.Tensor] = []
         tail_tokens: list[torch.Tensor] = []
+        slot_covariance_sketches: list[torch.Tensor] = []
+        slot_covariance_reliabilities: list[torch.Tensor] = []
         proportions: list[torch.Tensor] = []
         dispersions: list[torch.Tensor] = []
         slot_means: list[torch.Tensor] = []
         selected_counts: list[list[int]] = []
-        for bag in bags:
+        for bag, centered_delta in zip(bags, centered_deltas):
             normalized = F.normalize(bag.float(), dim=-1)
             similarity = normalized @ anchors.float().T
             assignment = torch.softmax(
@@ -877,6 +1080,15 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 dim=0
             ) / mass
             metadata = torch.stack((proportion.log(), dispersion), dim=-1)
+            slot_covariance_sketch, slot_covariance_reliability = (
+                self._slot_covariance_sketch(
+                    assignment.unsqueeze(0), centered_delta.unsqueeze(0)
+                )
+            )
+            slot_covariance_sketches.append(slot_covariance_sketch.squeeze(0))
+            slot_covariance_reliabilities.append(
+                slot_covariance_reliability.squeeze(0)
+            )
 
             rare_states: list[torch.Tensor] = []
             rare_count = min(
@@ -954,6 +1166,18 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 ]
             ),
             "covariance_sketch": torch.stack(covariance_sketches),
+            "slot_covariance_sketch": torch.stack(slot_covariance_sketches),
+            "slot_covariance_reliability": torch.stack(
+                slot_covariance_reliabilities
+            ),
+            "covariance_matrix": (
+                torch.stack([
+                    self._projected_covariance_matrix(delta)
+                    for delta in centered_deltas
+                ])
+                if self.emit_covariance_matrix
+                else centered_deltas[0].new_zeros((len(centered_deltas), 1, 1))
+            ),
         }
         if not return_auxiliary:
             return representation
@@ -1462,6 +1686,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
         fusion_residual_scale: float = 0.10,
         covariance_ridge_logit_scale: float = 2.0,
         covariance_residual_scale: float = 0.25,
+        covariance_relation: dict[str, object] | None = None,
         num_classes: int = 2,
     ) -> None:
         super().__init__()
@@ -1498,6 +1723,65 @@ class StructuredPopulationMetaClassifier(nn.Module):
         self.routing_temperature = float(routing_temperature)
         self.class_memory_tokens = int(class_memory_tokens)
         self.rare_evidence_fractions = rare_fractions
+        relation_config = dict(covariance_relation or {})
+        self.covariance_relation_enabled = bool(relation_config.get("enabled", False))
+        self.covariance_relation_mode = str(
+            relation_config.get("mode", "prototype_cosine")
+        )
+        self.covariance_relation_granularity = str(
+            relation_config.get("granularity", "bag")
+        )
+        self.covariance_relation_slot_routing = str(
+            relation_config.get("slot_routing", "reliability_mean")
+        )
+        self.covariance_relation_routing_temperature = float(
+            relation_config.get("routing_temperature", 0.1)
+        )
+        self.covariance_relation_subspace_rank = int(
+            relation_config.get("subspace_rank", 1)
+        )
+        self.covariance_relation_subspace_whiten = bool(
+            relation_config.get("subspace_whiten", True)
+        )
+        self.covariance_relation_subspace_shrinkage = float(
+            relation_config.get("subspace_shrinkage", 0.1)
+        )
+        self.covariance_relation_diagnostic_only = bool(
+            relation_config.get("diagnostic_only", True)
+        )
+        self.covariance_relation_residual_scale = float(
+            relation_config.get("residual_scale", 0.02)
+        )
+        self.covariance_relation_eps = float(relation_config.get("eps", 1e-6))
+        self.covariance_relation_kernel_scales = tuple(
+            float(value)
+            for value in relation_config.get("kernel_scales", (0.5, 1.0, 2.0))
+        )
+        valid_relation_modes = {
+            "prototype_cosine", "standardized_distance", "multiscale_rbf"
+        }
+        if self.covariance_relation_granularity not in {"bag", "slot", "subspace"}:
+            raise ValueError("covariance relation granularity must be bag, slot, or subspace.")
+        if self.covariance_relation_slot_routing not in {
+            "reliability_mean", "context_top1", "context_top3", "context_softmax"
+        }:
+            raise ValueError("unsupported covariance relation slot routing.")
+        if self.covariance_relation_routing_temperature <= 0:
+            raise ValueError("covariance relation routing_temperature must be positive.")
+        if self.covariance_relation_mode not in valid_relation_modes:
+            raise ValueError(
+                "covariance relation mode must be one of "
+                f"{sorted(valid_relation_modes)}."
+            )
+        if self.covariance_relation_eps <= 0:
+            raise ValueError("covariance relation eps must be positive.")
+        if not 0 <= self.covariance_relation_residual_scale < 1:
+            raise ValueError("covariance relation residual_scale must be in [0, 1).")
+        if (
+            not self.covariance_relation_kernel_scales
+            or any(value <= 0 for value in self.covariance_relation_kernel_scales)
+        ):
+            raise ValueError("covariance relation kernel_scales must be positive.")
         self.minimum_population_residual_scale = float(
             minimum_population_residual_scale
         )
@@ -1638,15 +1922,330 @@ class StructuredPopulationMetaClassifier(nn.Module):
             nn.Linear(hidden_dim, 1),
         )
 
+    def _normalize_covariance_relation(
+        self,
+        context_covariance: torch.Tensor,
+        query_covariance: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Normalize descriptors using labelled context statistics only."""
+        context32 = context_covariance.float()
+        query32 = query_covariance.float()
+        center = context32.mean(dim=-2, keepdim=True)
+        scale = torch.sqrt(
+            (context32 - center).square().mean(dim=(-2, -1), keepdim=True)
+            + self.covariance_relation_eps
+        )
+        return (context32 - center) / scale, (query32 - center) / scale
+
+    def _covariance_relation_scores(
+        self,
+        context_covariance: torch.Tensor,
+        context_labels: torch.Tensor,
+        query_covariance: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compare query descriptors with labelled context distributions."""
+        context_z, query_z = self._normalize_covariance_relation(
+            context_covariance, query_covariance
+        )
+        batched = context_z.ndim == 3
+        if not batched:
+            context_z = context_z.unsqueeze(0)
+            query_z = query_z.unsqueeze(0)
+            context_labels = context_labels.unsqueeze(0)
+        class_masks = [
+            (context_labels == class_index).to(context_z.dtype)
+            for class_index in range(self.num_classes)
+        ]
+        if any(torch.any(mask.sum(dim=-1) == 0) for mask in class_masks):
+            raise ValueError(
+                "Covariance relation diagnostics require every class in context."
+            )
+        prototypes = torch.stack(
+            [
+                torch.einsum("ec,ecd->ed", mask, context_z)
+                / mask.sum(dim=-1, keepdim=True)
+                for mask in class_masks
+            ],
+            dim=1,
+        )
+        separation = (
+            prototypes[:, 1] - prototypes[:, 0]
+        ).square().mean(dim=-1).sqrt()
+
+        if self.covariance_relation_mode == "prototype_cosine":
+            class_scores = torch.einsum(
+                "eqd,ecd->eqc",
+                F.normalize(query_z, dim=-1, eps=self.covariance_relation_eps),
+                F.normalize(prototypes, dim=-1, eps=self.covariance_relation_eps),
+            )
+        elif self.covariance_relation_mode == "standardized_distance":
+            differences = context_z.unsqueeze(2) - prototypes.unsqueeze(1)
+            dispersions = torch.stack(
+                [
+                    (
+                        differences[:, :, class_index].square().mean(dim=-1)
+                        * class_masks[class_index]
+                    ).sum(dim=-1)
+                    / class_masks[class_index].sum(dim=-1)
+                    for class_index in range(self.num_classes)
+                ],
+                dim=-1,
+            ).clamp_min(self.covariance_relation_eps)
+            distances = (
+                query_z.unsqueeze(2) - prototypes.unsqueeze(1)
+            ).square().mean(dim=-1)
+            class_scores = -distances / dispersions.unsqueeze(1)
+        else:
+            distances = (
+                query_z.unsqueeze(2) - context_z.unsqueeze(1)
+            ).square().mean(dim=-1)
+            pairwise = (
+                context_z.unsqueeze(2) - context_z.unsqueeze(1)
+            ).square().mean(dim=-1)
+            context_count = context_z.shape[1]
+            upper = torch.triu_indices(
+                context_count, context_count, offset=1, device=context_z.device
+            )
+            base_temperature = pairwise[:, upper[0], upper[1]].median(dim=-1).values
+            base_temperature = base_temperature.detach().clamp_min(
+                self.covariance_relation_eps
+            )
+            scale_scores = []
+            for kernel_scale in self.covariance_relation_kernel_scales:
+                kernel = torch.exp(
+                    -distances
+                    / (base_temperature[:, None, None] * kernel_scale)
+                )
+                class_kernel_scores = torch.stack(
+                    [
+                        torch.einsum("eqc,ec->eq", kernel, mask)
+                        / mask.sum(dim=-1).unsqueeze(-1)
+                        for mask in class_masks
+                    ],
+                    dim=-1,
+                )
+                scale_scores.append(
+                    class_kernel_scores.clamp_min(
+                        self.covariance_relation_eps
+                    ).log()
+                )
+            class_scores = torch.stack(scale_scores).mean(dim=0)
+
+        margin = class_scores[..., 1] - class_scores[..., 0]
+        margin_rms = margin.square().mean(dim=-1, keepdim=True).sqrt().clamp_min(
+            self.covariance_relation_eps
+        )
+        bounded_margin = torch.tanh(margin / margin_rms)
+        logits = torch.stack((-0.5 * bounded_margin, 0.5 * bounded_margin), dim=-1)
+        if not batched:
+            return logits.squeeze(0), separation.squeeze(0)
+        return logits, separation
+
+    def _slot_covariance_relation_scores(
+        self,
+        context_covariance: torch.Tensor,
+        context_reliability: torch.Tensor,
+        context_labels: torch.Tensor,
+        query_covariance: torch.Tensor,
+        query_reliability: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Compare slot-local covariance relative to context class structure."""
+        batched = context_covariance.ndim == 4
+        if not batched:
+            context_covariance = context_covariance.unsqueeze(0)
+            context_reliability = context_reliability.unsqueeze(0)
+            context_labels = context_labels.unsqueeze(0)
+            query_covariance = query_covariance.unsqueeze(0)
+            query_reliability = query_reliability.unsqueeze(0)
+        context32 = context_covariance.float()
+        query32 = query_covariance.float()
+        reliability = context_reliability.float().clamp_min(self.covariance_relation_eps)
+        normalization_weight = reliability / reliability.sum(dim=1, keepdim=True)
+        center = (normalization_weight.unsqueeze(-1) * context32).sum(dim=1, keepdim=True)
+        scale = torch.sqrt(
+            (
+                normalization_weight.unsqueeze(-1)
+                * (context32 - center).square()
+            ).sum(dim=1, keepdim=True).mean(dim=-1, keepdim=True)
+            + self.covariance_relation_eps
+        )
+        context_z = (context32 - center) / scale
+        query_z = (query32 - center) / scale
+        class_weights = []
+        prototypes = []
+        for class_index in range(self.num_classes):
+            mask = (context_labels == class_index).float().unsqueeze(-1)
+            weights = mask * reliability
+            if torch.any(weights.sum(dim=1) == 0):
+                raise ValueError(
+                    "Slot covariance relation requires every class in context."
+                )
+            weights = weights / weights.sum(dim=1, keepdim=True)
+            class_weights.append(weights)
+            prototypes.append((weights.unsqueeze(-1) * context_z).sum(dim=1))
+        prototypes = torch.stack(prototypes, dim=1)
+        separation_per_slot = (
+            prototypes[:, 1] - prototypes[:, 0]
+        ).square().mean(dim=-1).sqrt()
+
+        if self.covariance_relation_mode == "prototype_cosine":
+            class_scores = torch.einsum(
+                "eqsd,ecsd->eqcs",
+                F.normalize(query_z, dim=-1, eps=self.covariance_relation_eps),
+                F.normalize(prototypes, dim=-1, eps=self.covariance_relation_eps),
+            )
+        elif self.covariance_relation_mode == "standardized_distance":
+            differences = context_z.unsqueeze(2) - prototypes.unsqueeze(1)
+            dispersions = torch.stack(
+                [
+                    (
+                        class_weights[class_index].unsqueeze(-1)
+                        * differences[:, :, class_index].square()
+                    ).sum(dim=1).mean(dim=-1)
+                    for class_index in range(self.num_classes)
+                ],
+                dim=1,
+            ).clamp_min(self.covariance_relation_eps)
+            distances = (
+                query_z.unsqueeze(2) - prototypes.unsqueeze(1)
+            ).square().mean(dim=-1)
+            class_scores = -distances / dispersions.unsqueeze(1)
+        else:
+            distances = (
+                query_z.unsqueeze(2) - context_z.unsqueeze(1)
+            ).square().mean(dim=-1)
+            pairwise = (
+                context_z.unsqueeze(2) - context_z.unsqueeze(1)
+            ).square().mean(dim=-1)
+            count = context_z.shape[1]
+            upper = torch.triu_indices(count, count, offset=1, device=context_z.device)
+            temperature = pairwise[:, upper[0], upper[1]].median(dim=1).values
+            temperature = temperature.detach().clamp_min(self.covariance_relation_eps)
+            scale_scores = []
+            for kernel_scale in self.covariance_relation_kernel_scales:
+                kernel = torch.exp(
+                    -distances / (temperature[:, None, None, :] * kernel_scale)
+                )
+                scores = torch.stack(
+                    [
+                        torch.einsum("eqcs,ecs->eqs", kernel, weights)
+                        for weights in class_weights
+                    ],
+                    dim=2,
+                )
+                scale_scores.append(scores.clamp_min(self.covariance_relation_eps).log())
+            class_scores = torch.stack(scale_scores).mean(dim=0)
+
+        slot_margin = class_scores[:, :, 1] - class_scores[:, :, 0]
+        margin_rms = slot_margin.square().mean(dim=(-2, -1), keepdim=True).sqrt()
+        slot_margin = torch.tanh(
+            slot_margin / margin_rms.clamp_min(self.covariance_relation_eps)
+        )
+        query_weights = query_reliability.float().clamp_min(0)
+        if self.covariance_relation_slot_routing == "context_top1":
+            routing = torch.zeros_like(separation_per_slot)
+            routing.scatter_(1, separation_per_slot.argmax(dim=-1, keepdim=True), 1.0)
+            query_weights = query_weights * routing.unsqueeze(1)
+        elif self.covariance_relation_slot_routing == "context_top3":
+            count = min(3, separation_per_slot.shape[-1])
+            routing = torch.zeros_like(separation_per_slot)
+            routing.scatter_(1, separation_per_slot.topk(count, dim=-1).indices, 1.0)
+            query_weights = query_weights * routing.unsqueeze(1)
+        elif self.covariance_relation_slot_routing == "context_softmax":
+            routing = torch.softmax(
+                separation_per_slot / self.covariance_relation_routing_temperature,
+                dim=-1,
+            )
+            query_weights = query_weights * routing.unsqueeze(1)
+        query_weights = query_weights / query_weights.sum(dim=-1, keepdim=True).clamp_min(
+            self.covariance_relation_eps
+        )
+        margin = (query_weights * slot_margin).sum(dim=-1)
+        logits = torch.stack((-0.5 * margin, 0.5 * margin), dim=-1)
+        mean_reliability = reliability.mean(dim=1)
+        separation = (
+            mean_reliability * separation_per_slot
+        ).sum(dim=-1) / mean_reliability.sum(dim=-1).clamp_min(
+            self.covariance_relation_eps
+        )
+        if not batched:
+            return logits.squeeze(0), separation.squeeze(0)
+        return logits, separation
+
+    def _covariance_subspace_features(
+        self,
+        context_covariance: torch.Tensor,
+        context_labels: torch.Tensor,
+        query_covariance: torch.Tensor,
+        rank: int,
+        whiten: bool,
+        shrinkage: float = 0.1,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Extract a context-labelled low-rank covariance subspace."""
+        if context_covariance.ndim == 4 and query_covariance.ndim == 4:
+            results = [
+                self._covariance_subspace_features(
+                    context_covariance[index], context_labels[index],
+                    query_covariance[index], rank, whiten, shrinkage,
+                )
+                for index in range(context_covariance.shape[0])
+            ]
+            return tuple(torch.stack(values) for values in zip(*results))
+        if context_covariance.ndim != 3 or query_covariance.ndim != 3:
+            raise ValueError(
+                "covariance tensors must be [bags, dim, dim] or batched."
+            )
+        if context_covariance.shape[1:] != query_covariance.shape[1:]:
+            raise ValueError("context and query covariance dimensions must match.")
+        dimension = context_covariance.shape[-1]
+        if not 1 <= rank <= dimension:
+            raise ValueError("rank must be in [1, covariance dimension].")
+        class_means = []
+        for class_index in range(self.num_classes):
+            members = context_covariance[context_labels == class_index].float()
+            if members.numel() == 0:
+                raise ValueError("Every class must occur in context covariance.")
+            class_means.append(members.mean(dim=0))
+        delta = class_means[1] - class_means[0]
+        if whiten:
+            pooled = context_covariance.float().mean(dim=0)
+            trace_scale = pooled.diagonal().mean().clamp_min(
+                self.covariance_relation_eps
+            )
+            pooled = (1.0 - shrinkage) * pooled + shrinkage * trace_scale * torch.eye(
+                dimension, device=pooled.device, dtype=pooled.dtype
+            )
+            values, vectors = torch.linalg.eigh(pooled)
+            whitening = (vectors * values.clamp_min(1e-6).rsqrt().unsqueeze(0)) @ vectors.T
+            operator = whitening @ delta @ whitening
+        else:
+            whitening = torch.eye(
+                dimension, device=delta.device, dtype=delta.dtype
+            )
+            operator = delta
+        eigenvalues, eigenvectors = torch.linalg.eigh(operator)
+        selected = eigenvalues.abs().topk(rank).indices
+        filters = whitening @ eigenvectors[:, selected]
+        context_variance = torch.einsum(
+            "di,bdk,ki->bi", filters, context_covariance.float(), filters
+        ).clamp_min(self.covariance_relation_eps)
+        query_variance = torch.einsum(
+            "di,bdk,ki->bi", filters, query_covariance.float(), filters
+        ).clamp_min(self.covariance_relation_eps)
+        return context_variance.log(), query_variance.log(), eigenvalues[selected]
+
     def _validate_representation(
         self,
         representation: dict[str, torch.Tensor],
         name: str,
     ) -> None:
-        if set(representation) != {"global_summary", "slots", "tails", "slot_metadata", "covariance_sketch"}:
-            raise ValueError(
-                f"{name} must contain global_summary, slots, tails, slot_metadata, and covariance_sketch."
-            )
+        expected_keys = {
+            "global_summary", "slots", "tails", "slot_metadata",
+            "covariance_sketch", "slot_covariance_sketch",
+            "slot_covariance_reliability", "covariance_matrix",
+        }
+        if set(representation) != expected_keys:
+            raise ValueError(f"{name} has invalid structured representation keys.")
         global_summary = representation["global_summary"]
         slots = representation["slots"]
         tails = representation["tails"]
@@ -2148,6 +2747,50 @@ class StructuredPopulationMetaClassifier(nn.Module):
         )
         covariance_logits = covariance_ridge_scale * covariance_ridge_logits
         covariance_residual_scale = torch.sigmoid(self.covariance_residual_logit)
+        if self.covariance_relation_enabled:
+            if self.covariance_relation_granularity == "slot":
+                covariance_relation_logits, covariance_relation_class_separation = (
+                    self._slot_covariance_relation_scores(
+                        context["slot_covariance_sketch"],
+                        context["slot_covariance_reliability"], context_labels,
+                        query["slot_covariance_sketch"],
+                        query["slot_covariance_reliability"],
+                    )
+                )
+            elif self.covariance_relation_granularity == "subspace":
+                with torch.autocast(
+                    device_type=context["covariance_matrix"].device.type,
+                    enabled=False,
+                ):
+                    context_feature, query_feature, selected_eigenvalues = (
+                        self._covariance_subspace_features(
+                            context["covariance_matrix"].float(), context_labels,
+                            query["covariance_matrix"].float(),
+                            rank=self.covariance_relation_subspace_rank,
+                            whiten=self.covariance_relation_subspace_whiten,
+                            shrinkage=self.covariance_relation_subspace_shrinkage,
+                        )
+                    )
+                covariance_relation_logits, covariance_relation_class_separation = (
+                    self._covariance_relation_scores(
+                        context_feature, context_labels, query_feature
+                    )
+                )
+            else:
+                covariance_relation_logits, covariance_relation_class_separation = (
+                    self._covariance_relation_scores(
+                        context["covariance_sketch"],
+                        context_labels,
+                        query["covariance_sketch"],
+                    )
+                )
+        else:
+            covariance_relation_logits = covariance_logits.new_zeros(
+                covariance_logits.shape
+            )
+            covariance_relation_class_separation = covariance_logits.new_zeros(
+                covariance_logits.shape[0]
+            )
         population_attention_scale = torch.sigmoid(
             self.population_attention_residual_logit
         )
@@ -2174,6 +2817,10 @@ class StructuredPopulationMetaClassifier(nn.Module):
             tail_scale,
         )
         logits = logits + covariance_residual_scale * covariance_logits
+        if self.covariance_relation_enabled and not self.covariance_relation_diagnostic_only:
+            logits = logits + (
+                self.covariance_relation_residual_scale * covariance_relation_logits
+            )
         if not return_auxiliary:
             return logits
         episodes = context_labels.shape[0]
@@ -2186,6 +2833,19 @@ class StructuredPopulationMetaClassifier(nn.Module):
             "covariance_ridge_logits": covariance_ridge_logits,
             "covariance_ridge_scale": covariance_ridge_scale.expand(episodes),
             "covariance_residual_scale": covariance_residual_scale.expand(episodes),
+            "covariance_relation_enabled": torch.tensor(
+                self.covariance_relation_enabled, device=logits.device
+            ).expand(episodes),
+            "covariance_relation_logits": covariance_relation_logits,
+            "covariance_relation_class_separation": (
+                covariance_relation_class_separation
+            ),
+            "covariance_relation_residual_scale": torch.full(
+                (episodes,),
+                self.covariance_relation_residual_scale,
+                device=logits.device,
+                dtype=logits.dtype,
+            ),
             "abundance_ridge_scale": abundance_ridge_scale.expand(episodes),
             "population_attention_logits": population_attention_logits,
             "population_attention_residual_scale": (
@@ -2254,6 +2914,48 @@ class StructuredPopulationMetaClassifier(nn.Module):
         )
         covariance_logits = covariance_ridge_scale * covariance_ridge_logits
         covariance_residual_scale = torch.sigmoid(self.covariance_residual_logit)
+        if self.covariance_relation_enabled:
+            if self.covariance_relation_granularity == "slot":
+                covariance_relation_logits, covariance_relation_class_separation = (
+                    self._slot_covariance_relation_scores(
+                        context["slot_covariance_sketch"],
+                        context["slot_covariance_reliability"], context_labels,
+                        query["slot_covariance_sketch"],
+                        query["slot_covariance_reliability"],
+                    )
+                )
+            elif self.covariance_relation_granularity == "subspace":
+                with torch.autocast(
+                    device_type=context["covariance_matrix"].device.type,
+                    enabled=False,
+                ):
+                    context_feature, query_feature, selected_eigenvalues = (
+                        self._covariance_subspace_features(
+                            context["covariance_matrix"].float(), context_labels,
+                            query["covariance_matrix"].float(),
+                            rank=self.covariance_relation_subspace_rank,
+                            whiten=self.covariance_relation_subspace_whiten,
+                            shrinkage=self.covariance_relation_subspace_shrinkage,
+                        )
+                    )
+                covariance_relation_logits, covariance_relation_class_separation = (
+                    self._covariance_relation_scores(
+                        context_feature, context_labels, query_feature
+                    )
+                )
+            else:
+                covariance_relation_logits, covariance_relation_class_separation = (
+                    self._covariance_relation_scores(
+                        context["covariance_sketch"],
+                        context_labels,
+                        query["covariance_sketch"],
+                    )
+                )
+        else:
+            covariance_relation_logits = covariance_logits.new_zeros(
+                covariance_logits.shape
+            )
+            covariance_relation_class_separation = covariance_logits.new_zeros(())
         population_attention_scale = torch.sigmoid(
             self.population_attention_residual_logit
         )
@@ -2280,6 +2982,10 @@ class StructuredPopulationMetaClassifier(nn.Module):
             tail_scale,
         )
         logits = logits + covariance_residual_scale * covariance_logits
+        if self.covariance_relation_enabled and not self.covariance_relation_diagnostic_only:
+            logits = logits + (
+                self.covariance_relation_residual_scale * covariance_relation_logits
+            )
         if not return_auxiliary:
             return logits
         return logits, {
@@ -2291,6 +2997,18 @@ class StructuredPopulationMetaClassifier(nn.Module):
             "covariance_ridge_logits": covariance_ridge_logits,
             "covariance_ridge_scale": covariance_ridge_scale,
             "covariance_residual_scale": covariance_residual_scale,
+            "covariance_relation_enabled": torch.tensor(
+                self.covariance_relation_enabled, device=logits.device
+            ),
+            "covariance_relation_logits": covariance_relation_logits,
+            "covariance_relation_class_separation": (
+                covariance_relation_class_separation
+            ),
+            "covariance_relation_residual_scale": torch.as_tensor(
+                self.covariance_relation_residual_scale,
+                device=logits.device,
+                dtype=logits.dtype,
+            ),
             "abundance_ridge_scale": abundance_ridge_scale,
             "population_attention_logits": population_attention_logits,
             "population_attention_residual_scale": population_attention_scale,
@@ -2347,6 +3065,7 @@ class BaseModel(nn.Module):
         meta_fusion_residual_scale: float = 0.10,
         meta_covariance_ridge_logit_scale: float = 2.0,
         meta_covariance_residual_scale: float = 0.25,
+        covariance_relation: dict[str, object] | None = None,
         num_classes: int = 2,
     ) -> None:
         super().__init__()
@@ -2370,6 +3089,14 @@ class BaseModel(nn.Module):
             covariance_mode=aggregator_covariance_mode,
             covariance_shrinkage=aggregator_covariance_shrinkage,
         )
+        relation_config = dict(covariance_relation or {})
+        self.aggregator.slot_covariance_descriptor = str(
+            relation_config.get("descriptor", "correlation")
+        )
+        self.aggregator.emit_covariance_matrix = bool(
+            relation_config.get("enabled", False)
+            and relation_config.get("granularity") == "subspace"
+        )
         self.meta_classifier = StructuredPopulationMetaClassifier(
             token_dim=self.input_dim,
             hidden_dim=meta_hidden_dim,
@@ -2390,6 +3117,7 @@ class BaseModel(nn.Module):
             fusion_residual_scale=meta_fusion_residual_scale,
             covariance_ridge_logit_scale=meta_covariance_ridge_logit_scale,
             covariance_residual_scale=meta_covariance_residual_scale,
+            covariance_relation=covariance_relation,
             num_classes=self.num_classes,
         )
         self.register_buffer(
@@ -2458,6 +3186,7 @@ class BaseModel(nn.Module):
             return_auxiliary=False,
             global_summary=global_summary,
             covariance_sketch=covariance_sketch,
+            centered_delta=centered_delta,
         )
         representation = {
             name: tokens.reshape(episodes, num_bags, *tokens.shape[1:])

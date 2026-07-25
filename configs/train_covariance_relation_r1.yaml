@@ -1,0 +1,10 @@
+base_config: train_v19_medium.yaml
+model_overrides:
+  covariance_relation:
+    enabled: true
+    mode: prototype_cosine
+    granularity: slot
+    diagnostic_only: true
+    residual_scale: 0.02
+    eps: 1.0e-6
+    kernel_scales: [0.5, 1.0, 2.0]

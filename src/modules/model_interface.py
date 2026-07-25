@@ -10,8 +10,21 @@ import lightning as L
 import torch
 import torch.nn.functional as F
 
+from src.datasets.synthetic_data import RESPONSE_TASK_NAMES
+
 
 class ModelInterface(L.LightningModule):
+    _TASK_METRICS = (
+        "ce_loss",
+        "accuracy",
+        "balanced_accuracy",
+        "auroc",
+        "majority_accuracy",
+        "empirical_prior_ce",
+        "positive_recall",
+        "negative_recall",
+    )
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__()
         self.save_hyperparameters()
@@ -155,6 +168,47 @@ class ModelInterface(L.LightningModule):
     def validation_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
         return self._evaluation_step(batch, "val")
 
+    def on_validation_epoch_start(self) -> None:
+        self._validation_task_sums: torch.Tensor | None = None
+        self._validation_task_query_counts: torch.Tensor | None = None
+        self._validation_task_episode_counts: torch.Tensor | None = None
+
+    def on_validation_epoch_end(self) -> None:
+        sums = self._validation_task_sums
+        query_counts = self._validation_task_query_counts
+        episode_counts = self._validation_task_episode_counts
+        if sums is None or query_counts is None or episode_counts is None:
+            return
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            for tensor in (sums, query_counts, episode_counts):
+                torch.distributed.all_reduce(tensor)
+        for task_index, task_name in enumerate(RESPONSE_TASK_NAMES):
+            count = query_counts[task_index]
+            if count.item() == 0:
+                continue
+            for metric_index, metric_name in enumerate(self._TASK_METRICS):
+                self.log(
+                    f"val/{task_name}/{metric_name}",
+                    sums[task_index, metric_index] / count,
+                    on_step=False,
+                    on_epoch=True,
+                    sync_dist=False,
+                )
+            self.log(
+                f"val/{task_name}/episodes",
+                episode_counts[task_index],
+                on_step=False,
+                on_epoch=True,
+                sync_dist=False,
+            )
+            self.log(
+                f"val/{task_name}/queries",
+                count,
+                on_step=False,
+                on_epoch=True,
+                sync_dist=False,
+            )
+
     def test_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
         return self._evaluation_step(batch, "test")
 
@@ -164,7 +218,7 @@ class ModelInterface(L.LightningModule):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> dict[str, torch.Tensor]:
-        x, y, mask_index, _ = self._unpack_evaluation_batch(batch, "prediction")
+        x, y, mask_index, _, _ = self._unpack_evaluation_batch(batch, "prediction")
         logits = self.model(x, y, mask_index)
         probabilities = torch.softmax(logits, dim=-1)
         return {
@@ -175,7 +229,9 @@ class ModelInterface(L.LightningModule):
         }
 
     def _evaluation_step(self, batch: Any, stage: str) -> torch.Tensor:
-        x, y, mask_index, oracle_abundance = self._unpack_evaluation_batch(batch, stage)
+        x, y, mask_index, oracle_abundance, task_index = (
+            self._unpack_evaluation_batch(batch, stage)
+        )
         logits, auxiliary = self.model(x, y, mask_index, return_auxiliary=True)
         loss, terms = self._losses_from_output(logits, auxiliary, y[mask_index])
         self.log(
@@ -188,6 +244,27 @@ class ModelInterface(L.LightningModule):
             sync_dist=True,
         )
         self._log_loss_components(stage, terms, mask_index.numel())
+        if stage == "val":
+            for name in (
+                "covariance_relation_auroc",
+                "covariance_relation_balanced_accuracy",
+                "covariance_relation_ce",
+                "covariance_relation_logit_std",
+                "covariance_relation_class_separation",
+            ):
+                if name in terms:
+                    self.log(
+                        f"val/{name}",
+                        terms[name],
+                        on_step=False,
+                        on_epoch=True,
+                        batch_size=mask_index.numel(),
+                        sync_dist=True,
+                    )
+        if stage == "val" and task_index is not None:
+            self._accumulate_validation_task_metrics(
+                task_index, terms, mask_index.numel()
+            )
         if oracle_abundance is not None:
             oracle_terms = self._oracle_abundance_diagnostics(
                 oracle_abundance, y, mask_index, terms["auroc"]
@@ -202,6 +279,38 @@ class ModelInterface(L.LightningModule):
                     sync_dist=True,
                 )
         return loss
+
+    def _accumulate_validation_task_metrics(
+        self,
+        task_index: torch.Tensor,
+        terms: dict[str, torch.Tensor],
+        query_count: int,
+    ) -> None:
+        index = int(task_index.item())
+        if not 0 <= index < len(RESPONSE_TASK_NAMES):
+            raise ValueError(f"Unknown response task index: {index}.")
+        device = terms["ce_loss"].device
+        if self._validation_task_sums is None:
+            self._validation_task_sums = torch.zeros(
+                len(RESPONSE_TASK_NAMES),
+                len(self._TASK_METRICS),
+                device=device,
+                dtype=torch.float64,
+            )
+            self._validation_task_query_counts = torch.zeros(
+                len(RESPONSE_TASK_NAMES), device=device, dtype=torch.float64
+            )
+            self._validation_task_episode_counts = torch.zeros(
+                len(RESPONSE_TASK_NAMES), device=device, dtype=torch.float64
+            )
+        assert self._validation_task_query_counts is not None
+        assert self._validation_task_episode_counts is not None
+        values = torch.stack(
+            [terms[name].detach().double() for name in self._TASK_METRICS]
+        )
+        self._validation_task_sums[index] += values * query_count
+        self._validation_task_query_counts[index] += query_count
+        self._validation_task_episode_counts[index] += 1
 
     def _log_loss_components(
         self,
@@ -224,26 +333,39 @@ class ModelInterface(L.LightningModule):
     def _unpack_evaluation_batch(
         batch: Any,
         stage: str,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
-        if len(batch) not in (3, 4):
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor | None,
+        torch.Tensor | None,
+    ]:
+        if not 3 <= len(batch) <= 5:
             raise ValueError(
                 f"A {stage} batch must contain (x, y, mask_index) and optional "
-                "oracle metadata."
+                "oracle/task metadata."
             )
         x, y, mask_index = batch[:3]
         index = torch.as_tensor(mask_index, device=y.device, dtype=torch.long).flatten()
         if index.numel() == 0:
             raise ValueError(f"A {stage} episode must contain at least one query.")
         oracle_abundance = None
-        if len(batch) == 4:
-            oracle_abundance = (
-                torch.as_tensor(batch[3], device=y.device, dtype=torch.float32)
-                .flatten()
-                .detach()
-            )
-            if oracle_abundance.shape != y.shape:
-                raise ValueError("Oracle abundance must contain one scalar per bag.")
-        return x, y, index, oracle_abundance
+        task_index = None
+        for metadata in batch[3:]:
+            value = torch.as_tensor(metadata, device=y.device).detach()
+            if value.numel() == 1 and not value.is_floating_point():
+                if task_index is not None:
+                    raise ValueError("A batch can contain only one task index.")
+                task_index = value.long().reshape(())
+                continue
+            abundance = value.float().flatten()
+            if abundance.shape != y.shape or oracle_abundance is not None:
+                raise ValueError(
+                    "Oracle abundance must contain one scalar per bag and task "
+                    "metadata must be one integer scalar."
+                )
+            oracle_abundance = abundance
+        return x, y, index, oracle_abundance, task_index
 
     def _sample_training_queries(
         self,
@@ -354,6 +476,28 @@ class ModelInterface(L.LightningModule):
             "main_loss": main_loss,
         }
         terms.update(self._binary_query_diagnostics(logits, targets))
+        relation_logits = auxiliary.get("covariance_relation_logits")
+        relation_enabled = auxiliary.get("covariance_relation_enabled", False)
+        if relation_logits is not None and bool(torch.as_tensor(relation_enabled).any()):
+            relation_diagnostics = self._binary_query_diagnostics(
+                relation_logits, targets
+            )
+            terms["covariance_relation_ce"] = F.cross_entropy(
+                relation_logits, targets
+            )
+            terms["covariance_relation_accuracy"] = (
+                relation_logits.argmax(dim=-1) == targets
+            ).float().mean()
+            terms["covariance_relation_balanced_accuracy"] = relation_diagnostics[
+                "balanced_accuracy"
+            ]
+            terms["covariance_relation_auroc"] = relation_diagnostics["auroc"]
+            terms["covariance_relation_logit_std"] = relation_logits.float().std(
+                unbiased=False
+            )
+            terms["covariance_relation_class_separation"] = auxiliary[
+                "covariance_relation_class_separation"
+            ].float().mean()
 
         population_weights = auxiliary["population_slot_weights"].float()
         routing_entropy = (

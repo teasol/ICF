@@ -52,12 +52,16 @@ def collate_synthetic_training_episode(samples: list[Any]):
         return samples[0]
     x = torch.stack([sample[0] for sample in samples])
     y = torch.stack([sample[1] for sample in samples])
-    if len(samples[0]) == 2:
+    field_count = len(samples[0])
+    if any(len(sample) != field_count for sample in samples):
+        raise ValueError("Synthetic episode samples must have matching fields.")
+    if field_count == 2:
         return x, y
-    if len(samples[0]) != 3 or any(len(sample) != 3 for sample in samples):
-        raise ValueError("Synthetic episode samples must have two or three fields.")
-    oracle_abundance = torch.stack([sample[2] for sample in samples])
-    return x, y, oracle_abundance
+    extras = tuple(
+        torch.stack([sample[field] for sample in samples])
+        for field in range(2, field_count)
+    )
+    return x, y, *extras
 
 
 class _CudaPrefetchIterator:
@@ -124,9 +128,7 @@ def collate_synthetic_evaluation_episode(samples: list[Any]):
             "A synthetic evaluation episode needs context bags and a query."
         )
     mask_index = candidates[:num_queries]
-    if len(episode) == 2:
-        return x, y, mask_index
-    return x, y, mask_index, episode[2]
+    return x, y, mask_index, *episode[2:]
 
 
 class DataInterface(LightningDataModule):

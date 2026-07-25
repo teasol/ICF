@@ -1,0 +1,3 @@
+base_config: train_learnability_c5.yaml
+optimizer: adamw_learnability_5e4
+trainer: learnability_d20
