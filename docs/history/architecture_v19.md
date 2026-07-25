@@ -62,4 +62,4 @@ global_summary: centered_spread
 use_raw_mean_branch: false
 ```
 
-성능과 수치 합격 기준은 `docs/v19_acceptance_protocol.md`에 고정한다.
+성능과 수치 합격 기준은 [`v19_acceptance_protocol.md`](v19_acceptance_protocol.md)에 고정한다.
