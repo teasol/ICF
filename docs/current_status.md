@@ -6,7 +6,7 @@ Last updated: 2026-07-26
 
 ## 1. 한 줄 상태
 
-Architecture v19의 bag-centered representation과 whitened CSP rank-1 covariance relation을 확정했고, B200 1장에서 100-epoch medium synthetic pretraining을 정상 완료했다. 현재 실행 중인 학습은 없으며 다음 구조 변경을 결정하는 단계다.
+Architecture v19 기반 Context-Gated CSP Relation (Candidate A)의 20-epoch short training이 NVIDIA B200 1장에서 현재 실행 중이다 (`20260726_v19_candidate_a_gated_20e`).
 
 ## 2. 코드 상태
 
