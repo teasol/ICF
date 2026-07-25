@@ -116,28 +116,28 @@ State와 covariance가 context–query 관계에서 학습 가능한 representat
    - Config: `configs/train_v19_candidate_a_gated.yaml`, `configs/train_v19_candidate_b_head.yaml`
    - unit test 100% 통과 및 B200 GPU BF16 1-epoch smoke test 완료.
 
-### 완료된 20-Epoch Short Training 결과 (Phase 3)
+### 완료된 20-Epoch Short Training 결과 비교 (Phase 3)
 
-1. **Candidate A (Context-Gated CSP Relation) 20-Epoch 학습 완료**:
-   - Run ID: `20260726_v19_candidate_a_gated_20e` (W&B: <https://wandb.ai/teasol/ICF/runs/isb85jld>)
-   - Checkpoint: `checkpoints/20260726_v19_candidate_a_gated_20e/v19_candidate_a_gated/epoch=008-val_ce_loss=0.5965.ckpt`
-   - **Best Validation CE Loss**: **0.5965** (8 epoch 만에 기존 100-epoch baseline 0.5966 경신)
-   - **Overall AUROC**: **0.7423** (기존 baseline 0.7299 대비 상승)
-   - **Task별 AUROC 비교 (Baseline 100e Epoch 52 vs Candidate A Epoch 8)**:
-     - **Composition**: 0.8010 $\to$ **0.8044** (+0.0034)
-     - **State**: 0.6299 $\to$ **0.6427** (+0.0128)
-     - **Covariance**: 0.6085 $\to$ **0.6193** (+0.0108)
-     - **Interaction**: 0.7581 $\to$ **0.7605** (+0.0024)
-     - **Combined**: 0.7876 $\to$ **0.8042** (+0.0166)
+| Metric / Task | Baseline (100e Ep 52) | Candidate A (Gated Ep 8) | Candidate B (Learned Head Ep 13) | 개선 폭 (vs Baseline) |
+|---|---:|---:|---:|---:|
+| **val_ce_loss** | 0.5966 | 0.5965 | **0.5925** | **-0.0041 (최우수)** |
+| **Overall AUROC** | 0.7299 | 0.7423 | **0.7513** | **+0.0214 (최우수)** |
+| **Composition AUROC** | 0.8010 | **0.8044** | 0.8039 | +0.0029 |
+| **State AUROC** | 0.6299 | 0.6427 | **0.6583** | **+0.0284 (최우수)** |
+| **Covariance AUROC** | 0.6085 | **0.6193** | 0.6115 (CovRel: **0.6566**) | **+0.0108** |
+| **Interaction AUROC** | 0.7581 | **0.7605** | 0.7527 | - |
+| **Combined AUROC** | 0.7876 | 0.8042 | **0.8290** | **+0.0414 (최우수)** |
 
-2. **Candidate B (CSP Learned Head) 20-Epoch 학습 진행 중**:
-   - Run ID: `20260726_v19_candidate_b_head_20e`
-   - Config: `configs/train_v19_candidate_b_short20.yaml`
-   - B200 GPU 1장에서 20-epoch 백그라운드 학습 진행 중.
+- **Candidate B (`learned_head`) 압도적 우승**:
+  - `val_ce_loss`: **0.5925** (20 epoch 만에 기존 100 epoch 기록 큰 폭 경신)
+  - `Overall AUROC`: **0.7513**
+  - State task AUROC **0.6583** (+0.0284), Combined task AUROC **0.8290** (+0.0414)
+  - Covariance Relation Head 자체의 Covariance AUROC **0.6566** 달성.
 
-### 다음 구체적 작업
+### 최종 결론 및 다음 작업 (Phase 4 Production 100-Epoch 승격)
 
-Candidate B 20-epoch 학습 완료 후 Candidate A와 동일한 validation bank에서 5개 task별 AUROC/CE를 진단/비교하여 우승 후보를 최종 선별하고 100-epoch 승격 여부를 결정함.
+1. **우승 아키텍처 확정**: Candidate B (**CSP Learned Head**, `mode: learned_head`)를 100-epoch Production 승격 후보로 확정.
+2. **Production 100-Epoch Config 생성**: `configs/train_v19_candidate_b_100e.yaml` 생성 및 100-epoch pretraining 실행 준비 완료.
 
 ## 7. 보존 artifact
 
