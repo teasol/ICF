@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-28 12:31:00 KST`  
-**Latest Commit**: `4adc889` (`fix(config): update base_config path to train_v21_medium.yaml in train_v21_large_context_pretrain.yaml`)  
+**Last updated**: `2026-07-28 12:57:00 KST`  
+**Latest Commit**: `e6ce48b` (`feat(model): integrate 4d batched forwarding and chunked feature extraction for large context pretraining`)  
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)  
 **Architecture Version**: `21` (`architecture_version = 21`)  
 **Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 완벽 해결하기 위한 Single Source of Truth (SSOT) living document.
