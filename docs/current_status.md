@@ -49,7 +49,7 @@
 | **Phase 3-A**| ICI Fold 0 Scratch | `configs/train_v21_ici_scratch_fold0.yaml` | 50e | AUROC: 0.5665<br/>Log Loss: 0.8236 | `checkpoints/20260727_201907/v21_ici_scratch_f0/last.ckpt` | `logs/20260727_201907/v21_ici_scratch_f0.out` |
 | **Phase 3-B**| ICI Fold 0 Fine-Tune | `configs/train_v21_ici_finetune_fold0.yaml` | 50e | AUROC: 0.5654<br/>Log Loss: 0.8232 | `checkpoints/20260727_201910/v21_ici_finetune_f0/last.ckpt` | `logs/20260727_201910/v21_ici_finetune_f0.out` |
 | **Phase 4** | ICI 5-Fold CV (Retrieval K=24) | Fold 0~4 CV | 50e | AUROC: 0.5524<br/>**Log Loss: 0.7288 (0.0944 대폭 하강)** | `checkpoints/20260728_013253/` | `logs/20260728_013253~/` |
-| **Phase 5** | Signal-Aware 40-dim Retrieval Pretraining | Model Retrieval | 20e/50e | **검증 완료** (`tests/test_feature_retrieval.py` 통과) | 구동 예정 | 로그 준비 중 |
+| **Phase 5** | Signal-Aware 40-dim Retrieval Pretraining | `configs/train_v21_large_context_pretrain.yaml` | 20e | **훈련 구동 시작**<br/>(4D Batched + CUDA Prefetch) | `checkpoints/20260728_122712/v21_large_context_pretrain` | `logs/20260728_122712/v21_large_context_pretrain.out` |
 
 ---
 
