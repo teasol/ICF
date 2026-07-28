@@ -1,0 +1,6 @@
+base_config: train_v20_medium_capacity.yaml
+data_overrides:
+  episode_batch_size: 4
+trainer:
+  max_epochs: 20
+  accumulate_grad_batches: 2

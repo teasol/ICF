@@ -1,0 +1,19 @@
+base_config: train_v20_medium.yaml
+model_kwargs:
+  aggregator_num_slots: 36
+  meta_hidden_dim: 1024
+  meta_num_heads: 16
+  meta_num_set_layers: 6
+  meta_relation_hidden_dim: 1024
+  meta_ridge_dim: 256
+model_overrides:
+  covariance_relation:
+    enabled: true
+    mode: learned_head
+    granularity: subspace
+    subspace_rank: 2
+    subspace_whiten: true
+    subspace_shrinkage: 0.1
+    diagnostic_only: false
+    residual_scale: 0.50
+    eps: 1.0e-6

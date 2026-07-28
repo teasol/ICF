@@ -1,0 +1,37 @@
+base_config: train_medium.yaml
+optimizer: adamw_learnability_5e4
+data_overrides:
+  retrieval_k: 24
+  episode_batch_size: 4
+  dataset_kwargs:
+    latent_dim: 64
+    output_dim: 512
+    num_bags: [50, 100]
+    num_cells: [500, 1500]
+    donor_shift_scale: 0.70
+    donor_component_shift_scale: 0.25
+    observation_noise: 0.05
+    rare_response_probability: 0.25
+    rare_response_fraction: [0.005, 0.03]
+    class_separation: [0.2, 0.8]
+    response_task_probabilities: [0.20, 0.20, 0.20, 0.20, 0.20]
+    return_task_metadata: true
+trainer:
+  accumulate_grad_batches: 2
+  max_epochs: 50
+model_kwargs:
+  input_dim: 512
+  ranking_loss_weight: 0.10
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0
+model_overrides:
+  covariance_relation:
+    enabled: true
+    mode: learned_head
+    granularity: subspace
+    subspace_rank: 2
+    subspace_whiten: true
+    subspace_shrinkage: 0.25
+    diagnostic_only: false
+    residual_scale: 0.50
+    eps: 1.0e-6

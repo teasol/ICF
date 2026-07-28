@@ -1,0 +1,3 @@
+base_config: train_v20_hard_realworld.yaml
+trainer:
+  max_epochs: 20

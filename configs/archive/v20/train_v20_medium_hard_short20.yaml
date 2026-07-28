@@ -1,0 +1,10 @@
+base_config: train_v20_hard_realworld.yaml
+model_kwargs:
+  aggregator_num_slots: 24
+  meta_hidden_dim: 512
+  meta_num_heads: 8
+  meta_num_set_layers: 3
+  meta_relation_hidden_dim: 512
+  meta_ridge_dim: 128
+trainer:
+  max_epochs: 20
