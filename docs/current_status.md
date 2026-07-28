@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-28 14:05:00 KST`  
-**Latest Commit**: `8f256dd` (`fix(model): use the per-slot 3-stat structure in the 40-dim descriptor`)  
+**Last updated**: `2026-07-28 14:52:00 KST`  
+**Latest Commit**: `5fa6e70` (`fix(training): wire signal-aware retrieval into the 4D training path`)  
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)  
 **Architecture Version**: `21` (`architecture_version = 21`)  
 **Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 완벽 해결하기 위한 Single Source of Truth (SSOT) living document.
@@ -50,7 +50,7 @@
 | **Phase 3-A**| ICI Fold 0 Scratch | `configs/train_v21_ici_scratch_fold0.yaml` | 50e | AUROC: 0.5665<br/>Log Loss: 0.8236 | `checkpoints/20260727_201907/v21_ici_scratch_f0/last.ckpt` | `logs/20260727_201907/v21_ici_scratch_f0.out` |
 | **Phase 3-B**| ICI Fold 0 Fine-Tune | `configs/train_v21_ici_finetune_fold0.yaml` | 50e | AUROC: 0.5654<br/>Log Loss: 0.8232 | `checkpoints/20260727_201910/v21_ici_finetune_f0/last.ckpt` | `logs/20260727_201910/v21_ici_finetune_f0.out` |
 | **Phase 4** | ICI 5-Fold CV (Retrieval K=24) | Fold 0~4 CV | 50e | AUROC: 0.5524<br/>**Log Loss: 0.7288 (0.0944 대폭 하강)** | `checkpoints/20260728_013253/` | `logs/20260728_013253~/` |
-| **Phase 5** | Signal-Aware Large Context Pretraining | `configs/train_v21_large_context_pretrain.yaml` | 20e | **크래시 후 재구동 대기 중**<br/>(원인 진단 및 수정 완료, 아래 4-③ 참고) | `checkpoints/20260728_123047/v21_large_context_pretrain` (미생성) | `logs/20260728_123047/v21_large_context_pretrain.out` (crash log) |
+| **Phase 5** | Signal-Aware Large Context Pretraining | `configs/train_v21_large_context_pretrain.yaml` | 20e | **훈련 정상 구동 중** (6번째 재시도 만에 성공, 아래 4-④ 참고)<br/>Epoch 0: `val_loss: 0.606`<br/>Epoch 1: `val_loss: 0.631` (완료)<br/>Epoch 2 진행 중, GPU util ~87-91%, 메모리 150~179GiB/183GiB 범위에서 변동(episode 크기 랜덤 샘플링 때문, 여유 폭이 크지 않으니 다음 세션에서 계속 관찰 필요) | `checkpoints/20260728_144957/v21_large_context_pretrain` | `logs/20260728_144957/v21_large_context_pretrain.out` |
 
 ---
 
@@ -72,7 +72,20 @@
 * **Phase 5 크래시 원인 (수정 완료)**: `configs/train_v21_medium.yaml` 등 루트 config 4개(`train_v21_medium.yaml`, `train_v21_medium_retrieved.yaml`, `train_v21_hard_realworld.yaml`, `train_v21_hard_retrieved.yaml`)의 `base_config`가 이관 전 경로인 `train_medium.yaml`을 참조하고 있었음. 커밋 `2a21195`에서 실제 파일을 `configs/archive/v18_v19/train_medium.yaml`로 옮기며 테스트 fallback만 갱신하고 이 4개 config는 갱신하지 않아, Phase 5 (및 이를 상속하는 Phase 1/1-R/2/2-R 전체)가 `FileNotFoundError`로 즉시 크래시함. `logs/20260728_122712/`, `logs/20260728_123047/` 두 차례 실행 모두 1분 내 실패. **해당 4개 config의 `base_config` 경로를 `archive/v18_v19/train_medium.yaml`로 수정하여 정상 로드 확인 완료** (커밋 `e6ce48b`에 반영됨). Phase 5는 아직 재구동 전이며 GPU는 현재 idle.
 * **동시 세션 프로세스 행(Hang) 및 중복 실행**: 점검 중 `tests/test_large_context_pretrain.py`를 실행하는 python 프로세스가 여러 차례 반복적으로 재생성되어 load average가 최대 72까지 급등함 (nproc=72). 다른 위치(연구실/집/노트북) 세션이 같은 시간대에 동일 테스트를 반복 구동한 것으로 추정됨. 확인 후 강제 종료(`kill -9`) 처리하여 현재는 python/torchrun 프로세스 없이 idle 상태로 정리됨. **다중 위치 동시 접속 시 프로세스 충돌 가능성에 유의할 것.**
 * **✅ 해결됨: 40-dim Feature Retrieval 구현 갭 (2026-07-28 14:05 KST)**: `extract_bag_features`가 실제로는 `global_summary`+`tails` 평균을 concat한 1024-dim을 반환하고 있었고(설계된 40차원/40토큰 재사용 미구현), `tests/test_large_context_pretrain.py`의 관련 assertion이 완화되어 이 gap을 잡아내지 못하던 문제를 발견함. **최종 조치**: 위 4-②에 기술된 대로 aggregator의 기존 40-token 요약(`_all_structured_tokens`)을 재사용하도록 구현(2차 검토 끝에 확정), anchor 안정성 문제도 함께 수정. `test_feature_retrieval.py`/`test_large_context_pretrain.py`의 관련 assertion을 새 `[bags,40,512]` shape와 `torch.allclose` 엄격 비교로 갱신함. **검증**: (a) 단독 스크립트로 16 bags 기준 dense vs chunked(chunk_size=8) 결과가 최대 절대오차 4.5e-8로 사실상 동일함을 확인, `retrieve_context_indices` 및 4D 배치 경로 모두 정상 동작 확인. (b) unittest로 `test_chunked_extract_bag_features`(96 bags, `torch.allclose` 엄격 검사)와 `test_collator_formatting` PASS 확인. (c) `test_feature_retrieval.test_extract_bag_features`(30 bags, shape만 검증)는 아래 CPU 지연 이슈로 280초 내 결과 미출력 — 순수 shape 검증이라 로직 문제 아님, 다음 세션에서 GPU 또는 긴 타임아웃으로 재확인 권장.
-* **⚠ 신규 발견 (미해결, 별도 조치 필요): CPU 실행 시 심각한 지연 / `test_4d_batched_forward` 응답 없음**: `tests/test_large_context_pretrain.py` 전체(discover 또는 파일 단위)를 CPU 환경에서 실행하면 `test_4d_batched_forward`(커밋 `e6ce48b`에서 추가된 4D 배치 forward 테스트, 40-dim 이슈와는 무관)에서 180초 타임아웃 내 결과가 출력되지 않음. 별도로 `extract_bag_features`만 단독 호출해 스케일링을 측정한 결과, 동일 모델이 CPU에서 4 bag/10 cell도 최소 ~7초, 30 bag/100 cell 조합은 90초를 넘기는 등 **bag/cell 크기에 따라 비선형적으로 느려짐**을 확인함 (시스템 자체는 유휴 상태, load average 6~9 수준이라 동시 세션 경합 때문은 아님). 무한루프인지 단순 CPU 미가속 지연인지는 이번 세션에서 확정하지 못함 — Target Hardware가 B200 GPU임에도 현재 유닛테스트들이 모델을 `.cuda()`로 옮기지 않고 순수 CPU에서 forward를 실행하고 있는 것이 근본 원인일 가능성이 높음 (attention/covariance eigh/QR 연산이 CPU에서 특히 느림). 과거 세션들에서 관측된 "여러 시간 CPU 점유 후 미완료" 프로세스들도 이 문제와 같은 현상일 가능성이 있음. **다음 세션 확인 필요**: (a) 테스트를 GPU(`CUDA_VISIBLE_DEVICES=0`)에서 실행하거나, (b) `test_4d_batched_forward`를 더 긴 타임아웃(예: 10분+)으로 단독 실행해 실제로 종료되는지, 종료된다면 몇 초가 걸리는지 확인.
+* **⚠ 미해결 (별도 조치 필요, Phase 5 성공과 무관): CPU 실행 시 심각한 지연 / `test_4d_batched_forward` 응답 없음**: `tests/test_large_context_pretrain.py` 전체(discover 또는 파일 단위)를 CPU 환경에서 실행하면 `test_4d_batched_forward`(커밋 `e6ce48b`에서 추가된 4D 배치 forward 테스트)에서 180초 타임아웃 내 결과가 출력되지 않음. 별도로 `extract_bag_features`만 단독 호출해 스케일링을 측정한 결과, 동일 모델이 CPU에서 4 bag/10 cell도 최소 ~7초, 30 bag/100 cell 조합은 90초를 넘기는 등 **bag/cell 크기에 따라 비선형적으로 느려짐**을 확인함. Target Hardware가 B200 GPU임에도 유닛테스트들이 모델을 `.cuda()`로 옮기지 않고 순수 CPU에서 forward를 실행하는 것이 근본 원인일 가능성이 높음. **다음 세션 확인 필요**: 테스트를 GPU에서 실행하거나 더 긴 타임아웃으로 단독 실행해 실제 종료 여부/소요 시간 확인.
+
+### ④ Phase 5 학습 파이프라인 완전 가동 (2026-07-28 14:28~14:52 KST)
+
+Config를 고친 뒤에도 학습이 5차례 연속 크래시했고, 매번 근본 원인이 달랐음. 순서대로:
+
+1. **`num_candidate_bags_pretrain` 죽은 config 키**: `SyntheticManifoldGenerator`/`SyntheticEpisodeDataset` 어디에도 구현되지 않은 파라미터가 `dataset_kwargs`에 있어 `TypeError`로 즉시 크래시. 코드 전체에서 이 키를 쓰는 곳이 config 한 줄뿐임을 확인 후 제거 (`num_bags: [60,100]`가 이미 동일 역할 수행).
+2. **DataLoader worker의 CUDA fork 충돌**: `generation_device: cuda` + `num_workers: 4` 조합에서 `torch.Generator(device='cuda')`가 forked worker 안에서 `CUDA error: initialization error` 발생. `generation_device=='cuda'`일 때 `num_workers=0`으로 강제하도록 `DataInterface._episode_dataloader` 수정 (기존 in-process `CudaPrefetchDataLoader`가 이미 오버랩을 제공하므로 multi-process worker는 GPU 메모리만 낭비 — 실제로 worker 4개가 100GiB+ 점유하는 것을 확인).
+3. **pin_memory 충돌**: `generation_device=cuda`로 이미 GPU에 생성된 텐서를 `pin_memory()`하려다 `RuntimeError`. CUDA 생성 dataset에는 자동으로 `pin_memory=False` 적용.
+4. **`retrieve_context_indices`의 gradient graph 누수**: `torch.no_grad()` 없이 실행되어, index 선택에만 쓰이는 거대한 중간 계산(anchor·chunk별 forward_dense)이 backward 시점까지 GPU에 유지됨 → step이 진행될수록 메모리 누적 → OOM. `_retrieve_context_indices_impl` 헬퍼 메서드로 분리하고 `torch.no_grad()`로 감싸 해결.
+5. **(가장 근본적) `training_step`이 retrieval을 아예 호출하지 않음**: 4D 배치 입력(Phase 5가 사용하는 형태) 시 `training_step`이 `self.model.forward_episode_batch(...)`를 직접 호출하는데, 이 메서드엔 `retrieval_k` 파라미터 자체가 없어 `episodes * num_bags`(최대 32×100=3200) bag을 **전부** 한 번에 dense aggregator forward에 통과시킴. `retrieve_context_indices`/`extract_bag_features`를 아무리 고쳐도 이 경로가 호출 안 되니 매번 동일하게 OOM. **조치**: `training_step`에서 `forward_episode_batch` 호출 전에 `retrieval_k>0`이면 `self.model.retrieve_context_indices(...)`를 먼저 호출해 N을 `retrieval_k + query_count`로 줄이도록 통합. `retrieval_k`/`retrieval_chunk_size`는 `model_kwargs`에 추가하고 `ModelInterface._build_model`의 pop-list에 등록(다른 training-only hparam과 동일 패턴).
+   - **부수 발견**: 4D retrieval 경로의 `mask_index_b`가 query 1개만 가정하고 있었음(`torch.tensor([len(selected_context_idx)])`). 이 config는 `training_targets_per_episode: [5, 12]`로 episode당 query가 여러 개라 실제로는 틀린 결과를 만들고 있었음. 3D 경로처럼 query 개수만큼의 range로 수정.
+
+**검증**: 위 5개 수정 후 `training_step`을 GPU에서 직접 호출하는 표준 스크립트로 실제 config의 worst-case 크기(E=32, N=100, cells=1000)에서 4 step 반복 → peak 메모리 90~99GiB에서 안정(성장 없음). 실제 `launch_interactive_training.sh`로 재구동 → **Epoch 0 128/128 step 완주 (`val_loss: 0.606`, `train_loss: 0.747`)**, Epoch 1 진행 중, GPU util ~87%, 메모리 157~170GiB 부근에서 안정.
 
 ---
 
@@ -83,5 +96,5 @@
 1. **`test_4d_batched_forward` CPU 지연/무응답 원인 확인 (§4-③ 참고)**: GPU(`CUDA_VISIBLE_DEVICES=0`)에서 재현 여부 확인하거나, 10분+ 타임아웃으로 단독 실행해 실제 종료 여부와 소요 시간 측정. 무한루프가 아니라 단순 CPU 미가속 지연이라면 Phase 5 재구동 자체는 막지 않음 (실제 학습은 GPU에서 수행되므로).
 2. **단위 테스트 전체 실행 및 검증 완료 확인**:
    - `timeout 600s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"` (All tests PASS 확인, `test_feature_retrieval.py`, `test_large_context_pretrain.py` 포함. 반드시 timeout 적용하여 행 발생 시 자동 종료되도록 할 것. 1번 이슈로 인해 이번 세션에서는 전체 discover 대신 개별 스크립트 검증만 수행함)
-3. **Phase 5 Large Context + Signal-Aware Retrieval Pretraining 재구동**:
-   - Config 경로 버그와 40-dim 구현 갭 모두 수정 완료. `scripts/launch_interactive_training.sh` 사용 구동 및 `logs/` 점검 후 본 문서(`current_status.md`) 업데이트.
+3. **Phase 5 학습 진행 상황 점검**: 커밋 `5fa6e70`으로 `logs/20260728_144957/v21_large_context_pretrain.out` 구동 중 (PID는 세션마다 다르므로 로그 디렉토리 최신 여부로 확인). 20 epoch까지 완주하는지, GPU 메모리가 183GiB 한도 내에서 계속 안정적인지(§4-④ 참고 — 150~179GiB 범위에서 변동 확인했으나 여유가 크지 않음) 확인하고 최종 `val_ce_loss` 수치를 본 문서에 기록할 것.
+4. **(선택) `data_overrides.num_workers: 4` config 값 정리**: `DataInterface._episode_dataloader`가 `generation_device=='cuda'`일 때 자동으로 `num_workers=0`을 강제하므로 현재 설정값은 무시됨. 혼동 방지를 위해 config에서 `num_workers: 4` 줄을 제거하거나 주석을 남기는 것을 고려.
