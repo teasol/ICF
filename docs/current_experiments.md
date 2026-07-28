@@ -103,6 +103,21 @@
   ```
 - **주의**: `--ckpt-path`는 Lightning `trainer.fit(ckpt_path=...)` 풀 리쥼(전체 옵티마이저/스케줄러/`current_epoch` 상태 복원)이므로, 각 fold는 Phase 5 체크포인트의 epoch(14)부터 이어서 fold config의 `max_epochs: 50`까지(즉 36 epoch만) 학습함 — Phase 4도 동일한 방식(Phase 2-R epoch 12부터 이어서 38 epoch)으로 수행되었으므로 비교 가능.
 - **Run Kind**: `v21_ici_finetune_phase6_f{0..4}`
-- **시작**: 2026-07-28 17:57:10 KST, 5-fold 모두 정상 기동 확인 (체크포인트 restore 로그 확인 완료)
+- **시작**: 2026-07-28 17:57:10 KST, 5-fold 모두 정상 기동 및 50 epoch 완주 (에러 없음)
 - **로그 파일**: `logs/20260728_1757{10,12,14,16,18}/v21_ici_finetune_phase6_f{0..4}.out`
-- **다음 세션 확인 필요**: 5-fold 완주 후 AUROC/Log Loss를 Phase 4(AUROC `0.5524`, Log Loss `0.7288`)와 비교하여 `current_status.md`/`current_experiments.md`에 결과 기록.
+- **평가 명령어** (Phase 4와 동일 프로토콜, `scripts/test.py`):
+  ```bash
+  python scripts/test.py \
+    --checkpoints \
+      checkpoints/20260728_175710/v21_ici_finetune_phase6_f0/last.ckpt \
+      checkpoints/20260728_175712/v21_ici_finetune_phase6_f1/last.ckpt \
+      checkpoints/20260728_175714/v21_ici_finetune_phase6_f2/last.ckpt \
+      checkpoints/20260728_175716/v21_ici_finetune_phase6_f3/last.ckpt \
+      checkpoints/20260728_175718/v21_ici_finetune_phase6_f4/last.ckpt \
+    --config configs/train_v21_ici_finetune_fold0.yaml \
+    --precision bf16-mixed --retrieval-k 24 --validation-only \
+    --output predictions/ici_predictions_v21_phase6_5fold.pt
+  ```
+- **결과 (가설과 반대)**: **AUROC: 0.5081** (Phase 4 `0.5524` 대비 악화), **Log Loss: 0.9596** (Phase 4 `0.7288` 대비 대폭 악화), `p1_std: 0.2874` (Phase 4 `0.1664` 대비 과신 심화).
+- **원인 가설**: 사전학습(모델 내부 Signal-Aware retrieval)과 미세조정(fine-tune config가 물려받은 외부 Naive Retrieval collator, `data.retrieval_k: 24`)의 context 선별 분포 불일치. 상세는 [`current_status.md`](current_status.md) §4-⑥ 참고.
+- **예측 결과 파일**: `predictions/ici_predictions_v21_phase6_5fold.pt`
