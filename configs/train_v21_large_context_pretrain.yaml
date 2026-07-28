@@ -3,6 +3,7 @@ base_config: train_medium.yaml
 optimizer: adamw_learnability_5e4
 
 data_overrides:
+  episode_batch_size: 32
   retrieval_k: 24
   use_signal_aware_retrieval: true
   dataset_kwargs:

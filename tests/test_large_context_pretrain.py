@@ -10,7 +10,6 @@ from src.modules.data_interface import SignalAwarePretrainEpisodeCollator
 class TestLargeContextPretraining(unittest.TestCase):
     def setUp(self):
         self.model = BaseModel(
-            architecture_version=21,
             input_dim=512,
             meta_hidden_dim=256,
             num_classes=2,
