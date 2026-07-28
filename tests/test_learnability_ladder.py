@@ -144,7 +144,7 @@ class NuisanceResolvedConfigTest(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         configs = {
             stage: merge_train_config(
-                root / "configs" / f"train_learnability_{stage}.yaml"
+                root / "configs" / "archive" / "v18_v19" / f"train_learnability_{stage}.yaml"
             )
             for stage in self.nuisance
         }
