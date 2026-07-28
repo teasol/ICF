@@ -1,9 +1,13 @@
 # Architecture v21 Large Context Signal-Aware Pre-training Config
-base_config: train_medium.yaml
+base_config: train_v21_medium.yaml
 optimizer: adamw_learnability_5e4
 
 data_overrides:
   episode_batch_size: 32
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  cuda_prefetch: true
   retrieval_k: 24
   use_signal_aware_retrieval: true
   dataset_kwargs:
