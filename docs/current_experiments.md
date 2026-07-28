@@ -1,6 +1,6 @@
 # Current experiments
 
-**Last updated**: `2026-07-28 21:20:00 KST`  
+**Last updated**: `2026-07-29 07:15:00 KST`  
 **Architecture Version**: `21` (`architecture_version = 21`)
 
 이 문서는 Architecture v21 평가에 사용되는 합성 데이터 파라미터, 실세계 ICI 데이터셋 24-Donor Retrieval 프로토콜, 그리고 5단계 검증 로드맵의 실행 명령어와 실증 수치를 시분초 단위로 명시적으로 설명합니다.
@@ -9,15 +9,20 @@
 
 ## 1. Class-Balanced 24-Donor Retrieval Protocol (ICI Real Data)
 
-실제 면역관문억제제(ICI) 87명 환자 단일세포 데이터셋 평가 시 69명 다수 Context의 배치 효과(donor_shift_scale: 0.70) 오염을 막기 위해 **Query 1명당 24명 맞춤형 선별 알고리즘**을 수행함:
+실제 면역관문억제제(ICI) 87명 환자 단일세포 데이터셋 평가 시 69명 다수 Context의 배치 효과(donor_shift_scale: 0.70) 오염을 막기 위해 **설계상으로는 Query 1명당 24명 맞춤형 선별 알고리즘**을 수행하기로 했음:
+
+> [!WARNING]
+> **실제 구현은 이 "Query 1명당 맞춤형" 설계를 지키지 않음** (2026-07-29 확인). 아래 ①②는 모두 **한 번의 호출에 들어온 17~18명 query 전원에게 동일한 공용 context 24명**을 적용함 — ①은 첫 번째 query만 기준으로, ②는 전체 query를 평균내어 선별. 측정 결과 이 공용 context는 각 query가 개별 선별했을 top-24와 평균 61.1%만 겹치며, 특히 반응자(y=1)에서 ~50%로 더 어긋남. 상세 및 대안 구현(`retrieve_context_indices_per_query`)은 [`current_status.md`](current_status.md) §4-⑧ 가설2 참고.
 
 ### ① Naive Retrieval Protocol (`src/modules/data_interface.py`)
 - 1,000개 세포의 단순 평균(Mean) 및 표준편차(Spread) 기반 1024차원 Cosine Similarity 사용.
 - $Y=0$ (NR) 상위 12명 + $Y=1$ (R) 상위 12명 선별 ($K=24$).
+- ⚠ 기준 query: `evaluation_x[0]` — **첫 번째 query 1명**만 사용 ([`data_interface.py:85`](../src/modules/data_interface.py#L85)).
 
 ### ② Model-Level 40-token Signal-Aware Retrieval Protocol (`src/models/baseline.py`)
 - 모델 내부 Aggregator가 분류기 입력용으로 이미 계산해 두는 40-token 구조화 요약(`_all_structured_tokens`: 1 global + 12 slots×3종 + 3 tail, 각 512-dim)을 재사용, flatten 후 Cosine Similarity 계산.
 - 배경 노이즈가 아닌 세포 반응 신호(density slot, top-1%/5%/15% rare evidence, covariance sketch 정보가 이미 인코딩된 표현) 기준 Class-Balanced Top-24 Context 선별.
+- ⚠ 기준 query: `bag_features[query_index].mean(dim=0)` — **전체 query의 평균** ([`baseline.py:3440`](../src/models/baseline.py#L3440)).
 
 ---
 
@@ -93,7 +98,7 @@
 
 ---
 
-### Phase 6: ICI 5-Fold CV Fine-Tuning from Phase 5 Signal-Aware Pretrain (진행 중)
+### Phase 6: ICI 5-Fold CV Fine-Tuning from Phase 5 Signal-Aware Pretrain (완료)
 - **목표**: Phase 4(Naive Retrieval 사전학습 기반, Log Loss `0.7288`)와 동일한 ICI 5-Fold 미세조정 프로토콜을 Phase 5 체크포인트에 적용하여, Signal-Aware Retrieval 사전학습이 실데이터 성능을 추가로 개선하는지 확인.
 - **Pretrained Checkpoint**: `checkpoints/20260728_144957/v21_large_context_pretrain/epoch=014-val_ce_loss=0.5940.ckpt`
 - **실행 스크립트**: `scripts/launch_phase6_5fold.sh` (`launch_phase4_5fold.sh`와 동일 패턴, `PRETRAINED_CKPT`만 Phase 5 체크포인트로 교체)
@@ -143,5 +148,45 @@
     --output predictions/ici_predictions_v21_phase6b_5fold.pt
   ```
 - **결과 (Phase 6 대비 개선, Phase 4에는 여전히 미달)**: **AUROC: 0.5481** (Phase 6 `0.5081`→`0.5481`), **Log Loss: 0.8672** (Phase 6 `0.9596`→`0.8672`), Accuracy: 0.5747 (Phase 4 `0.5287`보다도 높음), `p1_std: 0.2545`.
-- **결론**: context 선별 방식 불일치는 Phase 5/6 성능 저하의 원인 일부였을 뿐 전부는 아님. Phase 4(Naive Retrieval 사전학습)가 AUROC/Log Loss 기준 3개 실험 중 여전히 최선. 상세는 [`current_status.md`](current_status.md) §4-⑦ 참고.
+- **결론 (⚠ Phase 6c/통계 검정에서 뒤집힘)**: 당시엔 "Phase 4가 최선"으로 기록했으나, 아래 Phase 6c 및 [`current_status.md`](current_status.md) §4-⑧의 bootstrap 검정 결과 Phase 4/6b/6c 차이는 통계적으로 구분 불가능함.
 - **예측 결과 파일**: `predictions/ici_predictions_v21_phase6b_5fold.pt`
+
+---
+
+### Phase 6c: ICI 5-Fold CV Fine-Tune, Retrieval 완전 비활성 (Full Context 대조군)
+- **목표**: "retrieval 자체가 ICI에서 이득이 있는가"를 직접 검증. Phase 5 체크포인트를 retrieval 없이(전체 ~69명 context 그대로) 미세조정.
+- **Config**: `configs/train_v21_ici_finetune_fullcontext_fold{0..4}.yaml` (신규, `data.retrieval_k` 제거만 하여 `EvaluationEpisodeCollator`로 폴백)
+- **실행 스크립트**: `scripts/launch_phase6c_5fold.sh`
+- **평가 명령어**:
+  ```bash
+  python scripts/test.py \
+    --checkpoints \
+      checkpoints/20260729_062833/v21_ici_finetune_phase6c_f0/last.ckpt \
+      checkpoints/20260729_062835/v21_ici_finetune_phase6c_f1/last.ckpt \
+      checkpoints/20260729_062837/v21_ici_finetune_phase6c_f2/last.ckpt \
+      checkpoints/20260729_062839/v21_ici_finetune_phase6c_f3/last.ckpt \
+      checkpoints/20260729_062841/v21_ici_finetune_phase6c_f4/last.ckpt \
+    --config configs/train_v21_ici_finetune_fullcontext_fold0.yaml \
+    --precision bf16-mixed --validation-only \
+    --output predictions/ici_predictions_v21_phase6c_5fold.pt
+  ```
+- **결과**: **AUROC: 0.5454**, **Log Loss: 0.7921**, **Accuracy: 0.6092**, `p1_std: 0.2337`.
+- **핵심 결론**: retrieval을 켠 Phase 6b(AUROC 0.5481 / LL 0.8672 / Acc 0.5747)와 비교하면 **AUROC는 사실상 동일한데 Log Loss와 Accuracy는 retrieval을 껐을 때가 더 좋음**. ICI 규모(fold당 context ~69명)에서 24명 retrieval은 가용 labeled context의 65%를 버리면서 얻는 것이 없음.
+- **예측 결과 파일**: `predictions/ici_predictions_v21_phase6c_5fold.pt`
+
+---
+
+### 통계적 유의성 검정 (2026-07-29): 위 비교들이 검출력이 있는가?
+
+n=87 (positive 37) 단일 코호트에서 5,000회 bootstrap:
+
+| 실험 | AUROC | 95% CI |
+|---|---:|---|
+| Phase 4 (Naive 사전학습 + Naive retrieval) | 0.5524 | [0.424, 0.677] |
+| Phase 6 (SA 사전학습 + Naive retrieval, 불일치) | 0.5081 | [0.383, 0.635] |
+| Phase 6b (SA 사전학습 + SA retrieval) | 0.5481 | [0.421, 0.674] |
+| Phase 6c (SA 사전학습 + retrieval 없음) | 0.5454 | [0.419, 0.674] |
+
+- **모든 CI가 0.5(무작위)를 포함**하고 서로 거의 완전히 겹침.
+- Paired bootstrap 승률: Phase 4 vs 6b = 0.53, Phase 4 vs 6c = 0.55 (동전 던지기). 유일하게 일관된 차이는 Phase 6(불일치)이 나쁘다는 것(0.78~0.81).
+- **함의**: 현재 평가 세팅으로는 아키텍처 변경의 효과를 검증할 수 없음. 반복 seed·외부 코호트·CI 리포팅 도입이 선행되어야 함. 상세는 [`current_status.md`](current_status.md) §4-⑧ 참고.

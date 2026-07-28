@@ -3477,6 +3477,102 @@ class BaseModel(nn.Module):
         )
         return final_x, final_y, final_mask
 
+    def retrieve_context_indices_per_query(
+        self,
+        x: torch.Tensor | Sequence[torch.Tensor],
+        y: torch.Tensor,
+        mask_index: torch.Tensor | Sequence[int] | int,
+        retrieval_k: int = 24,
+        chunk_size: int = 32,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Retrieve an independent top-K context for each query bag.
+
+        `retrieve_context_indices` shares one retrieved context across every
+        query bag present in the same call, built from the *mean* of all
+        query summaries. When several queries span both classes at once (as
+        in ICI evaluation, where every held-out fold member is a simultaneous
+        query), averaging their summaries washes out exactly the rare-signal
+        distinction retrieval is meant to preserve -- the same averaging
+        failure mode that motivated moving off Naive Retrieval in the first
+        place, just one level up (across bags instead of across cells). This
+        selects context per query independently, matching the "1 query -> 24
+        donors" design, at the cost of one retrieved context per query
+        instead of one shared context per call. Returns a dense
+        [queries, retrieval_k+1, cells, dim] episode batch (one query per
+        "episode", query last), consumable by `forward_episode_batch`.
+        """
+        with torch.no_grad():
+            num_bags = len(y)
+            query_index = self._normalize_mask_index(
+                mask_index, num_bags=num_bags, device=y.device
+            )
+            is_context = torch.ones(num_bags, dtype=torch.bool, device=y.device)
+            is_context[query_index] = False
+            context_indices_all = torch.nonzero(is_context, as_tuple=False).flatten()
+
+            bag_features = self.extract_bag_features(x, chunk_size=chunk_size)
+            bag_features = bag_features.reshape(bag_features.shape[0], -1)
+            context_features = bag_features[context_indices_all]
+            context_y = y[context_indices_all]
+            observed_classes = torch.unique(context_y, sorted=True)
+            k_per_class = max(1, retrieval_k // 2)
+            is_tensor_x = isinstance(x, torch.Tensor)
+
+            episodes_x, episodes_y = [], []
+            for query_position in query_index.tolist():
+                query_summary = bag_features[query_position].unsqueeze(0)
+                sims = F.cosine_similarity(query_summary, context_features, dim=-1)
+
+                selected_idx: list[int] = []
+                for class_idx in observed_classes:
+                    class_positions = torch.nonzero(
+                        context_y == class_idx, as_tuple=False
+                    ).flatten()
+                    if class_positions.numel() == 0:
+                        continue
+                    k_for_class = min(k_per_class, class_positions.numel())
+                    top_k_local = torch.topk(sims[class_positions], k=k_for_class).indices
+                    selected_idx.extend(
+                        context_indices_all[class_positions[top_k_local]].cpu().tolist()
+                    )
+                if len(selected_idx) < retrieval_k and context_indices_all.numel() > len(
+                    selected_idx
+                ):
+                    remaining = [
+                        idx
+                        for idx in context_indices_all.tolist()
+                        if idx not in selected_idx
+                    ]
+                    needed = retrieval_k - len(selected_idx)
+                    selected_idx.extend(remaining[:needed])
+
+                selected_tensor = torch.tensor(
+                    selected_idx, dtype=torch.long, device=y.device
+                )
+                if is_tensor_x:
+                    episode_x = torch.cat(
+                        [x[selected_tensor], x[query_position].unsqueeze(0)], dim=0
+                    )
+                else:
+                    episode_x = torch.stack(
+                        [x[i] for i in selected_tensor.tolist()] + [x[query_position]]
+                    )
+                episode_y = torch.cat(
+                    [y[selected_tensor], y[query_position].unsqueeze(0)]
+                )
+                episodes_x.append(episode_x)
+                episodes_y.append(episode_y)
+
+            batched_x = torch.stack(episodes_x)
+            batched_y = torch.stack(episodes_y)
+            batched_mask = torch.full(
+                (len(query_index), 1),
+                batched_x.shape[1] - 1,
+                dtype=torch.long,
+                device=y.device,
+            )
+            return batched_x, batched_y, batched_mask
+
     def forward(
         self,
         x: torch.Tensor | Sequence[torch.Tensor],
