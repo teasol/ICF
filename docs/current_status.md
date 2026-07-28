@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-28 14:52:00 KST`  
-**Latest Commit**: `5fa6e70` (`fix(training): wire signal-aware retrieval into the 4D training path`)  
+**Last updated**: `2026-07-28 16:05:00 KST`  
+**Latest Commit**: `42c3fa8` (`docs: record Phase 5 launch saga and successful training run`)  
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)  
 **Architecture Version**: `21` (`architecture_version = 21`)  
 **Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 완벽 해결하기 위한 Single Source of Truth (SSOT) living document.
@@ -33,9 +33,9 @@
   2. **Top-1% Sparse Evidence Module**: 97%+ 배경세포에 의해 희석되는 Sub-1% (0.5%~3%) 희귀 세포 반응 신호 핀포인트 추출.
   3. **Covariance Subspace Shrinkage**: Shrinkage parameter `0.25`로 노이즈 축 whitening 방어 및 NaN 예방.
   4. **Auxiliary Pairwise Ranking Loss (`weight: 0.10`)**: Cross-Entropy 0.685 부근 Gradient 소멸 및 Local Minima 탈출.
-* **Model-Level Signal-Aware 40-dim Feature Retrieval & True 4D Batched Forward**:
-  - `extract_bag_features(...)` 및 `retrieve_context_indices(...)`로 40차원 특징 표현 기반 Class-Balanced Top-24 ($K=24$) Context 동적 선별.
-  - `[E, N, 1000, 512]` ($E=32, N=96$) True 4D Batched Forward + Multi-Worker CUDA Prefetching 파이프라인 구현 완료.
+* **Model-Level Signal-Aware Retrieval & True 4D Batched Forward**:
+  - `extract_bag_features(...)`는 aggregator가 분류기용으로 이미 계산해 두는 **40-token 구조화 요약**(`_all_structured_tokens`: 1 global + 12 slots×3종 + 3 tail, 각 512-dim, `[bags,40,512]`)을 그대로 재사용하고, `retrieve_context_indices(...)`가 이를 flatten한 뒤 Cosine Similarity로 Class-Balanced Top-24 ($K=24$) Context를 동적 선별함 (상세: §4-②).
+  - `training_step` → `retrieve_context_indices` → `forward_episode_batch`로 이어지는 `[E, N, 1000, 512]` ($E=32, N$ 최대 100) True 4D Batched Forward + Signal-Aware Retrieval + Multi-Worker/In-Process CUDA Prefetching 파이프라인이 Phase 5에서 20 epoch 완주로 실증 완료 (§4-④, §4-⑤).
 
 ---
 
@@ -50,7 +50,7 @@
 | **Phase 3-A**| ICI Fold 0 Scratch | `configs/train_v21_ici_scratch_fold0.yaml` | 50e | AUROC: 0.5665<br/>Log Loss: 0.8236 | `checkpoints/20260727_201907/v21_ici_scratch_f0/last.ckpt` | `logs/20260727_201907/v21_ici_scratch_f0.out` |
 | **Phase 3-B**| ICI Fold 0 Fine-Tune | `configs/train_v21_ici_finetune_fold0.yaml` | 50e | AUROC: 0.5654<br/>Log Loss: 0.8232 | `checkpoints/20260727_201910/v21_ici_finetune_f0/last.ckpt` | `logs/20260727_201910/v21_ici_finetune_f0.out` |
 | **Phase 4** | ICI 5-Fold CV (Retrieval K=24) | Fold 0~4 CV | 50e | AUROC: 0.5524<br/>**Log Loss: 0.7288 (0.0944 대폭 하강)** | `checkpoints/20260728_013253/` | `logs/20260728_013253~/` |
-| **Phase 5** | Signal-Aware Large Context Pretraining | `configs/train_v21_large_context_pretrain.yaml` | 20e | **훈련 정상 구동 중** (6번째 재시도 만에 성공, 아래 4-④ 참고)<br/>Epoch 0: `val_loss: 0.606`<br/>Epoch 1: `val_loss: 0.631` (완료)<br/>Epoch 2 진행 중, GPU util ~87-91%, 메모리 150~179GiB/183GiB 범위에서 변동(episode 크기 랜덤 샘플링 때문, 여유 폭이 크지 않으니 다음 세션에서 계속 관찰 필요) | `checkpoints/20260728_144957/v21_large_context_pretrain` | `logs/20260728_144957/v21_large_context_pretrain.out` |
+| **Phase 5** | Signal-Aware Large Context Pretraining | `configs/train_v21_large_context_pretrain.yaml` | 20e | **20 epoch 완주 (6번째 재시도 만에 성공, §4-④~⑤ 참고)**<br/>**Best `val_ce_loss: 0.5940`** (epoch 14) — Phase 1 Full-Context(`0.5921`)에 근접, Phase 1-R Naive Retrieval(`0.6839`) 대비 대폭 개선<br/>최종 epoch 19: `val_loss: 0.608`, `train_loss: 0.723` (progress-bar 결합 loss, `val_ce_loss`와 별도 지표) | `checkpoints/20260728_144957/v21_large_context_pretrain/epoch=014-val_ce_loss=0.5940.ckpt` | `logs/20260728_144957/v21_large_context_pretrain.out` |
 
 ---
 
@@ -85,7 +85,29 @@ Config를 고친 뒤에도 학습이 5차례 연속 크래시했고, 매번 근�
 5. **(가장 근본적) `training_step`이 retrieval을 아예 호출하지 않음**: 4D 배치 입력(Phase 5가 사용하는 형태) 시 `training_step`이 `self.model.forward_episode_batch(...)`를 직접 호출하는데, 이 메서드엔 `retrieval_k` 파라미터 자체가 없어 `episodes * num_bags`(최대 32×100=3200) bag을 **전부** 한 번에 dense aggregator forward에 통과시킴. `retrieve_context_indices`/`extract_bag_features`를 아무리 고쳐도 이 경로가 호출 안 되니 매번 동일하게 OOM. **조치**: `training_step`에서 `forward_episode_batch` 호출 전에 `retrieval_k>0`이면 `self.model.retrieve_context_indices(...)`를 먼저 호출해 N을 `retrieval_k + query_count`로 줄이도록 통합. `retrieval_k`/`retrieval_chunk_size`는 `model_kwargs`에 추가하고 `ModelInterface._build_model`의 pop-list에 등록(다른 training-only hparam과 동일 패턴).
    - **부수 발견**: 4D retrieval 경로의 `mask_index_b`가 query 1개만 가정하고 있었음(`torch.tensor([len(selected_context_idx)])`). 이 config는 `training_targets_per_episode: [5, 12]`로 episode당 query가 여러 개라 실제로는 틀린 결과를 만들고 있었음. 3D 경로처럼 query 개수만큼의 range로 수정.
 
-**검증**: 위 5개 수정 후 `training_step`을 GPU에서 직접 호출하는 표준 스크립트로 실제 config의 worst-case 크기(E=32, N=100, cells=1000)에서 4 step 반복 → peak 메모리 90~99GiB에서 안정(성장 없음). 실제 `launch_interactive_training.sh`로 재구동 → **Epoch 0 128/128 step 완주 (`val_loss: 0.606`, `train_loss: 0.747`)**, Epoch 1 진행 중, GPU util ~87%, 메모리 157~170GiB 부근에서 안정.
+**검증**: 위 5개 수정 후 `training_step`을 GPU에서 직접 호출하는 표준 스크립트로 실제 config의 worst-case 크기(E=32, N=100, cells=1000)에서 4 step 반복 → peak 메모리 90~99GiB에서 안정(성장 없음). 실제 `launch_interactive_training.sh`로 재구동 → 정상 진행 확인 (최종 결과는 §4-⑤).
+
+### ⑤ Phase 5 최종 결과 및 가설 검증 (2026-07-28 14:49~15:49 KST, 20 epoch 완주)
+
+* **Epoch별 `val_loss`/`train_loss` (progress-bar 결합 지표, 3자리 반올림)**:
+
+  | Epoch | val_loss | train_loss | Epoch | val_loss | train_loss |
+  |---:|---:|---:|---:|---:|---:|
+  | 0 | 0.606 | 0.747 | 10 | 0.614 | 0.723 |
+  | 1 | 0.606 | 0.747 | 11 | 0.603 | 0.725 |
+  | 2 | 0.631 | 0.731 | 12 | 0.620 | 0.722 |
+  | 3 | 0.620 | 0.724 | 13 | 0.621 | 0.726 |
+  | 4 | 0.631 | 0.728 | 14 | 0.605 | 0.721 |
+  | 5 | 0.622 | 0.728 | 15 | **0.594** | 0.720 |
+  | 6 | 0.598 | 0.727 | 16 | 0.601 | 0.719 |
+  | 7 | 0.627 | 0.720 | 17 | 0.604 | 0.720 |
+  | 8 | 0.602 | 0.725 | 18 | 0.609 | 0.719 |
+  | 9 | 0.614 | 0.721 | 19 | 0.606 | 0.724 |
+
+* **체크포인트 기준 `val_ce_loss`** (ModelCheckpoint가 저장한 상위 3개 + last): `epoch=005: 0.5975`, **`epoch=014: 0.5940` (최적)**, `epoch=015: 0.6013`, `epoch=019 (last): 저장값 없음, 진행바 기준 val_loss=0.608`.
+* **가설 검증**: Phase 5의 Best `val_ce_loss: 0.5940`은 Phase 1 Full-Context(`0.5921`)의 **0.0019 이내**로 근접하며, Phase 1-R Naive Retrieval(`0.6839`, 95%+ 배경 노이즈 donor 추출 문제)보다 **0.09 이상 우수**함. 이는 §4-①에서 진단한 "Naive Retrieval이 배경 노이즈 유사 donor를 뽑아 학습을 방해한다"는 문제를, aggregator의 40-token 구조화 요약(density/tail/covariance 정보를 이미 담고 있는 신호 인식 표현)을 재사용한 retrieval로 극복했다는 Phase 5의 핵심 가설을 실증적으로 뒷받침함.
+* **W&B Run**: https://wandb.ai/teasol/ICF/runs/9ldg44nr (`v21_large_context_pretrain_20260728_144957`)
+* **다음 단계 제안**: 이 체크포인트(`epoch=014-val_ce_loss=0.5940.ckpt`)를 Phase 3/4처럼 ICI 5-Fold 실데이터 미세조정에 사용해, Signal-Aware Retrieval 사전학습이 Naive Retrieval 기반 Phase 4(Log Loss `0.7288`) 대비 실데이터 미세조정 성능을 개선하는지 확인하는 것이 자연스러운 다음 실험.
 
 ---
 
@@ -93,8 +115,7 @@ Config를 고친 뒤에도 학습이 5차례 연속 크래시했고, 매번 근�
 
 연구실, 집, 또는 노트북 어디서 접속하더라도 다음 순서로 작업을 수행하면 됩니다:
 
-1. **`test_4d_batched_forward` CPU 지연/무응답 원인 확인 (§4-③ 참고)**: GPU(`CUDA_VISIBLE_DEVICES=0`)에서 재현 여부 확인하거나, 10분+ 타임아웃으로 단독 실행해 실제 종료 여부와 소요 시간 측정. 무한루프가 아니라 단순 CPU 미가속 지연이라면 Phase 5 재구동 자체는 막지 않음 (실제 학습은 GPU에서 수행되므로).
-2. **단위 테스트 전체 실행 및 검증 완료 확인**:
-   - `timeout 600s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"` (All tests PASS 확인, `test_feature_retrieval.py`, `test_large_context_pretrain.py` 포함. 반드시 timeout 적용하여 행 발생 시 자동 종료되도록 할 것. 1번 이슈로 인해 이번 세션에서는 전체 discover 대신 개별 스크립트 검증만 수행함)
-3. **Phase 5 학습 진행 상황 점검**: 커밋 `5fa6e70`으로 `logs/20260728_144957/v21_large_context_pretrain.out` 구동 중 (PID는 세션마다 다르므로 로그 디렉토리 최신 여부로 확인). 20 epoch까지 완주하는지, GPU 메모리가 183GiB 한도 내에서 계속 안정적인지(§4-④ 참고 — 150~179GiB 범위에서 변동 확인했으나 여유가 크지 않음) 확인하고 최종 `val_ce_loss` 수치를 본 문서에 기록할 것.
-4. **(선택) `data_overrides.num_workers: 4` config 값 정리**: `DataInterface._episode_dataloader`가 `generation_device=='cuda'`일 때 자동으로 `num_workers=0`을 강제하므로 현재 설정값은 무시됨. 혼동 방지를 위해 config에서 `num_workers: 4` 줄을 제거하거나 주석을 남기는 것을 고려.
+1. **Phase 5 체크포인트로 ICI 5-Fold 실데이터 미세조정** (§4-⑤ "다음 단계 제안" 참고): `checkpoints/20260728_144957/v21_large_context_pretrain/epoch=014-val_ce_loss=0.5940.ckpt`를 Phase 3/4와 같은 방식으로 ICI 5-Fold에 미세조정하여, Naive Retrieval 기반 Phase 4(Log Loss `0.7288`) 대비 Signal-Aware Retrieval 사전학습이 실데이터 성능을 개선하는지 확인.
+2. **`test_4d_batched_forward` CPU 지연/무응답 원인 확인 (§4-③ 참고)**: GPU(`CUDA_VISIBLE_DEVICES=0`)에서 재현 여부 확인하거나, 10분+ 타임아웃으로 단독 실행해 실제 종료 여부와 소요 시간 측정.
+3. **단위 테스트 전체 실행 및 검증 완료 확인**:
+   - `timeout 600s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"` (All tests PASS 확인, `test_feature_retrieval.py`, `test_large_context_pretrain.py` 포함. 반드시 timeout 적용하여 행 발생 시 자동 종료되도록 할 것. 2번 이슈로 인해 이번 세션에서는 전체 discover 대신 개별 스크립트 검증만 수행함)

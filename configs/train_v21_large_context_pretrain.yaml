@@ -4,6 +4,11 @@ optimizer: adamw_learnability_5e4
 
 data_overrides:
   episode_batch_size: 32
+  # num_workers/pin_memory are forced to 0/false by DataInterface whenever
+  # dataset_kwargs.generation_device == "cuda" (inherited from configs/data/medium.yaml) --
+  # multi-process workers would each hold their own CUDA context and add
+  # nothing over the in-process CudaPrefetchDataLoader below. Left here only
+  # to document intent for CPU-generating configs that copy this file.
   num_workers: 4
   pin_memory: true
   persistent_workers: true
