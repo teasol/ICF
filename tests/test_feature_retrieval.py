@@ -25,8 +25,11 @@ class TestFeatureRetrieval(unittest.TestCase):
         # 30 bags, 100 cells, 512 dim
         x = torch.randn(30, 100, 512)
         features = self.model.extract_bag_features(x)
-        self.assertEqual(features.ndim, 2)
+        # [bags, 40 structured tokens (1 global + 12x3 slot + 3 tail), token_dim]
+        self.assertEqual(features.ndim, 3)
         self.assertEqual(features.shape[0], 30)
+        self.assertEqual(features.shape[1], 40)
+        self.assertEqual(features.shape[2], 512)
 
     def test_retrieve_context_indices(self):
         x = torch.randn(30, 100, 512)

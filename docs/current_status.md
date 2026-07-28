@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-28 13:35:00 KST`  
-**Latest Commit**: `e6ce48b` (`feat(model): integrate 4d batched forwarding and chunked feature extraction for large context pretraining`)  
+**Last updated**: `2026-07-28 14:05:00 KST`  
+**Latest Commit**: `8f256dd` (`fix(model): use the per-slot 3-stat structure in the 40-dim descriptor`)  
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)  
 **Architecture Version**: `21` (`architecture_version = 21`)  
 **Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 완벽 해결하기 위한 Single Source of Truth (SSOT) living document.
@@ -61,23 +61,17 @@
 * Single-cell 면역 데이터는 95%+가 공통 배경 세포이고 반응 신호는 <1%~5% 희귀 세포에 쏠려 있어, Naive Retrieval이 반응 유사 donor가 아닌 **95% 배경 노이즈가 유사한 donor**를 추출함.
 * 이로 인해 사전학습 시 모델에 노이즈 donor가 주어지면서 `val_ce_loss`가 `0.5921`에서 `0.6839`로 상향 튐.
 
-### ② 해결 설계: 40-dim Bag Feature Signal-Aware Retrieval
-* Aggregator 내부에서 추출하는 **40차원 특징 표현 ($Z \in \mathbb{R}^{40}$)**:
-  1. 12-dim Density Slots (세포 밀도 및 sub-population 분포)
-  2. Top-1% / 5% / 15% Rare Evidence Tail Features
-  3. Subspace Covariance Sketch Features
-  4. Centered-Spread Scale Features
-* 모델 내부 Aggregator가 추출한 40차원 특징 $Z$의 Cosine Similarity 기반으로 Class-Balanced Top-24 Context Donor를 동적 추출하도록 모델 레이어 통합 설계 (`extract_bag_features`, `retrieve_context_indices`).
-* **실제 구현 (2026-07-28 수정, §4-③ 참고)**: `src/models/baseline.py`의 `extract_bag_features`가 아래와 같이 정확히 40-dim을 반환하도록 구현됨. 초기 구현안(density 12 + tail 12 + covariance 8 + scale 8)은 세션 중 리뷰를 거쳐, 슬롯당 center/spread/rare 3종 통계(`slot_statistic_count = 3`, `representation["slots"]`)를 직접 반영하는 형태로 교체됨 —
-  **36-dim**: 슬롯 12개 × [center_norm, spread_norm, rare_deviation_norm] (각 슬롯의 center/spread/rare 512-dim 토큰을 L2-norm/편차-norm으로 압축, `aggregator_num_slots=12` 기본값과 정확히 대응) +
-  **4-dim**: `tails`(top-1%/5%/15% rare fraction) 3개 평균 norm 1개 + `covariance_sketch` 절대값 평균 1개 + `global_summary`(studentization spread) 평균 1개 + 표준편차 1개.
-  36+4=40.
+### ② 해결 설계: 40-token Aggregator Summary 재사용 Signal-Aware Retrieval
+* **최종 구현 (2026-07-28)**: `extract_bag_features`는 aggregator가 분류기(`StructuredPopulationMetaClassifier`)를 위해 **이미 계산해 두는** 40-token 구조화 요약(`_all_structured_tokens`: 1 global + 12 slots × 3종(center/spread/rare) + 3 tail = 40개 토큰, 각 512-dim, shape `[bags, 40, 512]`)을 **그대로 재사용**함. 별도의 손으로 압축한 scalar feature를 새로 만들지 않음.
+  - 세션 중 두 차례 반복 수정 이력: (a) 최초 구현은 density/tail/covariance/scale을 손으로 압축한 flat 40-dim vector였으나, aggregator가 이미 만들어 둔 40-token 요약을 재사용하는 게 아니라 별개의 새 40x512를 만드는 셈이라는 지적을 받아 폐기. (b) 슬롯당 3종 통계(center/spread/rare norm)로 압축한 36+4-dim 버전도 마찬가지로 "새로 만드는" 방향이라 폐기. 최종적으로 (c) `_all_structured_tokens`을 직접 재사용하는 현재 버전으로 확정.
+  - **Anchor 안정성 이슈 및 조치**: `_all_structured_tokens`를 그대로 쓰면, population anchor(슬롯 중심)가 `context_mask`(= 그 호출에 함께 들어온 bag 집합)에 의존하기 때문에 청크(chunk) 구성에 따라 같은 bag의 descriptor가 달라지는 문제가 발견됨 (chunk_size=8 vs 0 비교 시 cosine similarity 평균이 0.474까지 하락, 최솟값 음수). **조치**: `extract_bag_features`가 anchor를 항상 전체 pool(`x`/`context_mask` 전체)에서 한 번만 계산(`self.aggregator._context_anchors`)하고, 청크는 오직 `_forward_dense` 호출을 나누는 메모리 최적화로만 사용하도록 재구현. 수정 후 chunked vs dense 결과가 최대 절대오차 4.5e-8, cosine similarity 1.0으로 완전히 일치함을 확인.
+* `retrieve_context_indices`는 이 `[bags,40,512]`를 flatten(`[bags, 40*512]`)한 뒤 cosine similarity로 Class-Balanced Top-12 NR + Top-12 R ($K=24$) donor를 동적 추출함.
 
 ### ③ 세션 인시던트 진단 및 조치 (2026-07-28 12:30~13:10 KST)
 
 * **Phase 5 크래시 원인 (수정 완료)**: `configs/train_v21_medium.yaml` 등 루트 config 4개(`train_v21_medium.yaml`, `train_v21_medium_retrieved.yaml`, `train_v21_hard_realworld.yaml`, `train_v21_hard_retrieved.yaml`)의 `base_config`가 이관 전 경로인 `train_medium.yaml`을 참조하고 있었음. 커밋 `2a21195`에서 실제 파일을 `configs/archive/v18_v19/train_medium.yaml`로 옮기며 테스트 fallback만 갱신하고 이 4개 config는 갱신하지 않아, Phase 5 (및 이를 상속하는 Phase 1/1-R/2/2-R 전체)가 `FileNotFoundError`로 즉시 크래시함. `logs/20260728_122712/`, `logs/20260728_123047/` 두 차례 실행 모두 1분 내 실패. **해당 4개 config의 `base_config` 경로를 `archive/v18_v19/train_medium.yaml`로 수정하여 정상 로드 확인 완료** (커밋 `e6ce48b`에 반영됨). Phase 5는 아직 재구동 전이며 GPU는 현재 idle.
 * **동시 세션 프로세스 행(Hang) 및 중복 실행**: 점검 중 `tests/test_large_context_pretrain.py`를 실행하는 python 프로세스가 여러 차례 반복적으로 재생성되어 load average가 최대 72까지 급등함 (nproc=72). 다른 위치(연구실/집/노트북) 세션이 같은 시간대에 동일 테스트를 반복 구동한 것으로 추정됨. 확인 후 강제 종료(`kill -9`) 처리하여 현재는 python/torchrun 프로세스 없이 idle 상태로 정리됨. **다중 위치 동시 접속 시 프로세스 충돌 가능성에 유의할 것.**
-* **✅ 해결됨: 40-dim Feature Retrieval 구현 갭 (2026-07-28 13:35 KST)**: `extract_bag_features`가 실제로는 `global_summary`+`tails` 평균을 concat한 1024-dim을 반환하고 있었고(설계된 40-dim 분해 미구현), `tests/test_large_context_pretrain.py`의 관련 assertion(`assertEqual(shape[1], 40)`)이 `assertGreater(shape[1], 0)`으로 완화되어 이 gap을 잡아내지 못하던 문제를 발견함. **조치**: 위 4-②에 기술된 실제 40-dim descriptor(density 12 + tail evidence 12 + covariance summary 8 + scale summary 8)를 `extract_bag_features`에 구현하고, 완화됐던 assertion을 `assertEqual(shape[1], 40)`으로 원복함. **검증**: 단독 스크립트로 (a) `chunk_size=0` 시 `shape[1]==40` 확인, (b) `chunk_size=32` 청크 분할 시에도 동일 shape 및 dense 대비 평균 cosine similarity 0.998(최소 0.996) 확인 (기존 테스트 임계값 0.5 대비 크게 상회), (c) `retrieve_context_indices`가 새 40-dim descriptor로 정상 동작함을 확인. 단, 아래 항목 참고 — 이 검증은 unittest suite 전체가 아닌 단독 스크립트로 수행함.
+* **✅ 해결됨: 40-dim Feature Retrieval 구현 갭 (2026-07-28 14:05 KST)**: `extract_bag_features`가 실제로는 `global_summary`+`tails` 평균을 concat한 1024-dim을 반환하고 있었고(설계된 40차원/40토큰 재사용 미구현), `tests/test_large_context_pretrain.py`의 관련 assertion이 완화되어 이 gap을 잡아내지 못하던 문제를 발견함. **최종 조치**: 위 4-②에 기술된 대로 aggregator의 기존 40-token 요약(`_all_structured_tokens`)을 재사용하도록 구현(2차 검토 끝에 확정), anchor 안정성 문제도 함께 수정. `test_feature_retrieval.py`/`test_large_context_pretrain.py`의 관련 assertion을 새 `[bags,40,512]` shape와 `torch.allclose` 엄격 비교로 갱신함. **검증**: (a) 단독 스크립트로 16 bags 기준 dense vs chunked(chunk_size=8) 결과가 최대 절대오차 4.5e-8로 사실상 동일함을 확인, `retrieve_context_indices` 및 4D 배치 경로 모두 정상 동작 확인. (b) unittest로 `test_chunked_extract_bag_features`(96 bags, `torch.allclose` 엄격 검사)와 `test_collator_formatting` PASS 확인. (c) `test_feature_retrieval.test_extract_bag_features`(30 bags, shape만 검증)는 아래 CPU 지연 이슈로 280초 내 결과 미출력 — 순수 shape 검증이라 로직 문제 아님, 다음 세션에서 GPU 또는 긴 타임아웃으로 재확인 권장.
 * **⚠ 신규 발견 (미해결, 별도 조치 필요): CPU 실행 시 심각한 지연 / `test_4d_batched_forward` 응답 없음**: `tests/test_large_context_pretrain.py` 전체(discover 또는 파일 단위)를 CPU 환경에서 실행하면 `test_4d_batched_forward`(커밋 `e6ce48b`에서 추가된 4D 배치 forward 테스트, 40-dim 이슈와는 무관)에서 180초 타임아웃 내 결과가 출력되지 않음. 별도로 `extract_bag_features`만 단독 호출해 스케일링을 측정한 결과, 동일 모델이 CPU에서 4 bag/10 cell도 최소 ~7초, 30 bag/100 cell 조합은 90초를 넘기는 등 **bag/cell 크기에 따라 비선형적으로 느려짐**을 확인함 (시스템 자체는 유휴 상태, load average 6~9 수준이라 동시 세션 경합 때문은 아님). 무한루프인지 단순 CPU 미가속 지연인지는 이번 세션에서 확정하지 못함 — Target Hardware가 B200 GPU임에도 현재 유닛테스트들이 모델을 `.cuda()`로 옮기지 않고 순수 CPU에서 forward를 실행하고 있는 것이 근본 원인일 가능성이 높음 (attention/covariance eigh/QR 연산이 CPU에서 특히 느림). 과거 세션들에서 관측된 "여러 시간 CPU 점유 후 미완료" 프로세스들도 이 문제와 같은 현상일 가능성이 있음. **다음 세션 확인 필요**: (a) 테스트를 GPU(`CUDA_VISIBLE_DEVICES=0`)에서 실행하거나, (b) `test_4d_batched_forward`를 더 긴 타임아웃(예: 10분+)으로 단독 실행해 실제로 종료되는지, 종료된다면 몇 초가 걸리는지 확인.
 
 ---

@@ -3270,55 +3270,26 @@ class BaseModel(nn.Module):
             return_auxiliary=return_auxiliary,
         )
 
-    @staticmethod
-    def _slot_statistic_features(slots: torch.Tensor) -> torch.Tensor:
-        """Per-slot [center_norm, spread_norm, rare_deviation_norm], flattened to (num_slots * 3) dims.
-
-        `slots` is `representation["slots"]`, shape [bags, num_slots, 3, dim]
-        holding the center/spread/rare population tokens computed per slot
-        (see `slot_statistic_count = 3` and `slot_tokens` in `_forward_dense`).
-        """
-        values = slots.float()
-        center, spread, rare = values.unbind(dim=-2)
-        center_norm = center.norm(dim=-1)
-        spread_norm = spread.norm(dim=-1)
-        rare_deviation_norm = (rare - center).norm(dim=-1)
-        stacked = torch.stack((center_norm, spread_norm, rare_deviation_norm), dim=-1)
-        return stacked.flatten(start_dim=-2).to(slots.dtype)
-
-    @staticmethod
-    def _compact_evidence_summary(
-        tails: torch.Tensor, covariance_sketch: torch.Tensor, global_summary: torch.Tensor
-    ) -> torch.Tensor:
-        """4-dim [tail evidence norm, covariance magnitude, scale mean, scale std]."""
-        tail_evidence = tails.float().norm(dim=-1).mean(dim=-1)
-        covariance_magnitude = covariance_sketch.float().abs().mean(dim=-1)
-        scale = global_summary.float()
-        scale_mean = scale.mean(dim=-1)
-        scale_std = scale.std(dim=-1, unbiased=False)
-        return torch.stack(
-            (tail_evidence, covariance_magnitude, scale_mean, scale_std), dim=-1
-        ).to(global_summary.dtype)
-
     def extract_bag_features(
         self,
         x: torch.Tensor | Sequence[torch.Tensor],
         context_mask: torch.Tensor | None = None,
         chunk_size: int = 0,
     ) -> torch.Tensor:
-        """Extract the 40-dim Signal-Aware Bag Descriptor Z used for retrieval.
+        """Return the aggregator's existing 40-token structured summary per bag.
 
-        Z = concat(
-            36-dim per-slot statistics: for each of the 12 population slots,
-                [center_norm, spread_norm, rare_deviation_norm] compressed
-                from the slot's center/spread/rare tokens (`slot_statistic_count
-                = 3`, see `representation["slots"]`),
-            4-dim compact evidence summary: [tail evidence norm (mean over
-                the top-1%/5%/15% tail fractions), covariance sketch
-                magnitude, centered-spread scale mean, centered-spread scale
-                std],
-        ), matching the default aggregator config (12 slots) documented in
-        current_architecture.md.
+        This reuses `StructuredPopulationMetaClassifier._all_structured_tokens`
+        (1 global + 12x3 slot + 3 tail tokens = 40 tokens, each `token_dim`-dim)
+        exactly as the classifier already computes it for every bag -- no
+        separate hand-crafted feature vector is built for retrieval. Shape:
+        [bags, 40, token_dim].
+
+        Population anchors (the slot centers cells get assigned to) are
+        always built once from the entire `x`/`context_mask`, then reused
+        across chunks. `chunk_size` only bounds how many bags run through the
+        dense forward pass at once (a memory/compute knob) -- it must never
+        change which anchors a bag is scored against, or the same bag would
+        get a different descriptor purely because of how it was batched.
         """
         if isinstance(x, torch.Tensor):
             num_bags = x.shape[0]
@@ -3327,28 +3298,40 @@ class BaseModel(nn.Module):
             num_bags = len(x)
             device = x[0].device
 
-        if chunk_size > 0 and num_bags > chunk_size:
-            feature_chunks: list[torch.Tensor] = []
-            for start_idx in range(0, num_bags, chunk_size):
-                end_idx = min(start_idx + chunk_size, num_bags)
-                chunk_x = x[start_idx:end_idx] if isinstance(x, torch.Tensor) else x[start_idx:end_idx]
-                chunk_mask = context_mask[start_idx:end_idx] if context_mask is not None else None
-                feat = self.extract_bag_features(chunk_x, context_mask=chunk_mask, chunk_size=0)
-                feature_chunks.append(feat)
-            return torch.cat(feature_chunks, dim=0)
-
         if context_mask is None:
             context_mask = torch.ones(num_bags, dtype=torch.bool, device=device)
-        representation = self.aggregator(x, context_mask=context_mask)
 
-        slot_features = self._slot_statistic_features(representation["slots"])
-        compact_summary = self._compact_evidence_summary(
-            representation["tails"],
-            representation["covariance_sketch"],
-            representation["global_summary"],
-        )
+        if chunk_size <= 0 or chunk_size >= num_bags or not isinstance(x, torch.Tensor):
+            representation = self.aggregator(x, context_mask=context_mask)
+            return self.meta_classifier._all_structured_tokens(representation)
 
-        return torch.cat((slot_features, compact_summary), dim=-1)
+        # Precompute shared population anchors from the full pool so chunked
+        # and dense extraction agree exactly (not just approximately).
+        raw_bags = self.aggregator._normalize_bags(x)
+        prepared = [self.aggregator._bag_view(bag) for bag in raw_bags]
+        bags = [item[0] for item in prepared]
+        global_summaries = [item[1] for item in prepared]
+        centered_deltas = [item[2] for item in prepared]
+        covariance_sketches = [
+            self.aggregator._covariance_sketch(delta) for delta in centered_deltas
+        ]
+        anchors = self.aggregator._context_anchors(bags, context_mask)
+
+        feature_chunks: list[torch.Tensor] = []
+        for start_idx in range(0, num_bags, chunk_size):
+            end_idx = min(start_idx + chunk_size, num_bags)
+            chunk_representation = self.aggregator._forward_dense(
+                torch.stack(bags[start_idx:end_idx]),
+                anchors,
+                False,
+                global_summary=torch.stack(global_summaries[start_idx:end_idx]),
+                covariance_sketch=torch.stack(covariance_sketches[start_idx:end_idx]),
+                centered_delta=torch.stack(centered_deltas[start_idx:end_idx]),
+            )
+            feature_chunks.append(
+                self.meta_classifier._all_structured_tokens(chunk_representation)
+            )
+        return torch.cat(feature_chunks, dim=0)
 
     def retrieve_context_indices(
         self,
@@ -3367,9 +3350,10 @@ class BaseModel(nn.Module):
             E, N, num_instances, feature_dim = x.shape
             device = x.device
             
-            # Flatten to [E*N, instances, feature_dim] to compute 40-dim features efficiently
+            # Flatten to [E*N, instances, feature_dim] to compute bag features efficiently
             x_flat = x.view(E * N, num_instances, feature_dim)
             bag_features_flat = self.extract_bag_features(x_flat, chunk_size=chunk_size)
+            bag_features_flat = bag_features_flat.reshape(bag_features_flat.shape[0], -1)
             bag_features = bag_features_flat.view(E, N, -1)
 
             res_x, res_y, res_masks = [], [], []
@@ -3424,6 +3408,7 @@ class BaseModel(nn.Module):
         context_indices = torch.nonzero(is_context, as_tuple=False).flatten()
 
         bag_features = self.extract_bag_features(x, chunk_size=chunk_size)
+        bag_features = bag_features.reshape(bag_features.shape[0], -1)
         query_summary = bag_features[query_index].mean(dim=0, keepdim=True)
         context_features = bag_features[context_indices]
         context_y = y[context_indices]

@@ -23,19 +23,18 @@ class TestLargeContextPretraining(unittest.TestCase):
         input_dim = 512
         x = torch.randn(num_bags, num_cells, input_dim)
 
-        # Standard extraction
+        # Standard extraction: [bags, 40 structured tokens, token_dim]
         features_dense = self.model.extract_bag_features(x, chunk_size=0)
         self.assertEqual(features_dense.shape[0], num_bags)
         self.assertEqual(features_dense.shape[1], 40)
+        self.assertEqual(features_dense.shape[2], input_dim)
 
-        # Chunked extraction (chunk_size = 32)
+        # Chunked extraction (chunk_size = 32). Population anchors are shared
+        # across chunks (built once from the full pool), so chunked and dense
+        # extraction must match exactly, not just approximately.
         features_chunked = self.model.extract_bag_features(x, chunk_size=32)
-        self.assertEqual(features_chunked.shape[0], num_bags)
-        self.assertEqual(features_chunked.shape[1], features_dense.shape[1])
-
-        # Check positive cosine similarity between chunked and dense features per bag
-        sims = torch.nn.functional.cosine_similarity(features_dense, features_chunked, dim=-1)
-        self.assertGreater(sims.mean().item(), 0.5)
+        self.assertEqual(features_chunked.shape, features_dense.shape)
+        self.assertTrue(torch.allclose(features_dense, features_chunked, atol=1e-4, rtol=1e-4))
 
     def test_large_candidate_pool_retrieval(self):
         num_bags = 96

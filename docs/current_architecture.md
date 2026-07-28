@@ -55,22 +55,22 @@ $$\mathcal{L}_{Ranking} = \max(0, \gamma - (P_1(Q^+) - P_1(Q^-)))$$
 
 ---
 
-## 3. 모델 내장 40차원 Feature 기반 Signal-Aware Retrieval Layer
+## 3. 모델 내장 40-token Aggregator Summary 재사용 Signal-Aware Retrieval Layer
 
-### ① 40차원 Bag Feature Extractor ($Z \in \mathbb{R}^{40}$)
-BagPFN 아키텍처 내부 Aggregator는 Bag 표현을 다음 4가지 축으로 분해하여 40차원 특징 벡터 $Z$로 압축합니다:
-1. **12-dim Density Slots**: 세포 밀도 및 sub-population 분포
-2. **Tail Evidence Features**: Top-1% / 5% / 15% 희귀 세포 반응 신호
-3. **Subspace Covariance Sketch**: 세포 간 상관관계 및 covariance 구조
-4. **Centered-Spread Scale**: 세포 확산 척도
+### ① 40-token Bag Summary ($[bags, 40, 512]$)
+BagPFN Aggregator(`StructuredEpisodePopulationAggregator`)는 각 Bag을 분류기 입력용으로 이미 **40개의 512-dim 토큰**으로 요약합니다 (`StructuredPopulationMetaClassifier._all_structured_tokens`):
+1. **1 global token**: bag 전체의 centered-spread scale 요약 (`global_summary`)
+2. **36 slot tokens**: population slot 12개 × center/spread/rare 3종 통계 (`slot_statistic_count = 3`, `representation["slots"]`)
+3. **3 tail tokens**: Top-1% / 5% / 15% 희귀 세포 반응 신호 (`representation["tails"]`)
+
+Retrieval은 이 **이미 계산되어 있는 요약을 그대로 재사용**하며, 별도의 손으로 압축한 feature vector를 새로 만들지 않습니다.
 
 ### ② Model-Level Retrieval Method
-- `extract_bag_features(x)`: 각 Donor Bag의 40차원 $Z$ 특징 벡터 추출. Aggregator의 `representation` dict에서 다음을 concat:
-  - **36-dim**: `slots`(population slot 12개 × center/spread/rare 3종 512-dim 토큰, `slot_statistic_count = 3`)를 슬롯당 `[center_norm, spread_norm, rare_deviation_norm]` 3-stat으로 압축 (12×3=36, `aggregator_num_slots=12` 기본값과 대응).
-  - **4-dim**: `tails`(top-1%/5%/15% rare fraction) 평균 norm 1개 + `covariance_sketch` 절대값 평균 1개 + `global_summary`(centered-spread scale) 평균 1개 + 표준편차 1개.
-- `retrieve_context_indices(x, y, mask_index, retrieval_k)`: Query $Z_Q$와 Context donor $Z_{C_i}$ 간의 Cosine Similarity를 계산하여, 클래스 균형(Class-Balanced) Top-12 NR + Top-12 R ($K=24$) donor 동적 추출.
+- `extract_bag_features(x)`: `self.aggregator(x, ...)`로 얻은 `representation`을 `self.meta_classifier._all_structured_tokens(representation)`에 그대로 통과시켜 `[bags, 40, 512]`를 반환.
+  - **Anchor 안정성**: Population anchor(슬롯 중심)는 그 호출에 함께 들어온 bag 집합(`context_mask`)에 의존하므로, `chunk_size`로 나눠 여러 번 호출하면 anchor가 청크마다 달라져 같은 bag의 descriptor가 흔들리는 문제가 있었음. `extract_bag_features`는 이제 anchor를 항상 전체 `x`에서 **한 번만** 계산(`self.aggregator._context_anchors`)하고, `chunk_size`는 오직 `_forward_dense` 호출을 나누는 메모리 최적화로만 사용함 — chunked/dense 결과가 최대 절대오차 4.5e-8로 사실상 동일함을 확인.
+- `retrieve_context_indices(x, y, mask_index, retrieval_k)`: `extract_bag_features`의 `[bags,40,512]`를 `[bags, 40×512]`로 flatten한 뒤 Query $Z_Q$와 Context donor $Z_{C_i}$ 간 Cosine Similarity를 계산하여, 클래스 균형(Class-Balanced) Top-12 NR + Top-12 R ($K=24$) donor 동적 추출.
 - `forward(..., retrieval_k=24)`: 모델 순전파 내에 Signal-Aware Retrieval을 직접 내장.
-- **검증**: (2026-07-28) 최초에는 `extract_bag_features`가 실제로 1024-dim(`global_summary`+`tails` 평균 concat)을 반환하던 구현 갭이 있었고, 1차 수정안(density 12 + tail 12 + covariance 8 + scale 8)은 `slots` 텐서(슬롯당 3종 통계)를 전혀 사용하지 않는다는 리뷰 지적에 따라 위 36+4 구성으로 교체됨. `shape[1] == 40` 및 `chunk_size` 분할 시 dense 대비 평균 cosine similarity 0.998 확인. 자세한 조치 이력은 [`current_status.md`](current_status.md) §4-③ 참고.
+- **수정 이력**: 최초 구현은 `extract_bag_features`가 실제로 1024-dim(`global_summary`+`tails` 평균 concat)을 반환하던 갭이 있었고, 이후 두 차례(density/tail/covariance/scale 압축 → 슬롯 3-stat 압축)의 hand-crafted feature 시도는 모두 "aggregator가 이미 만든 요약을 재사용"하는 것이 아니라 별도의 새 표현을 만드는 방향이라는 지적에 따라 폐기됨. 자세한 이력은 [`current_status.md`](current_status.md) §4-② 참고.
 
 ---
 
@@ -94,7 +94,7 @@ final_logits = base_logits
 ```text
 Total Trainable Parameters : 6,614,248 (약 6.6M)
 Token Dimension           : 512
-Aggregator Output Tokens  : 40 tokens (1 global + 12 slots + 8 density slots + 12 tail slots + 7 branch tokens)
+Aggregator Output Tokens  : 40 tokens (1 global + 36 slot (12 slots x center/spread/rare) + 3 tail)
 Meta Hidden Dimension     : 256
 Attention Heads           : 8
 Set Layers                : 1
