@@ -1,6 +1,6 @@
 # Current experiments
 
-**Last updated**: `2026-07-28 16:05:00 KST`  
+**Last updated**: `2026-07-28 17:59:00 KST`  
 **Architecture Version**: `21` (`architecture_version = 21`)
 
 이 문서는 Architecture v21 평가에 사용되는 합성 데이터 파라미터, 실세계 ICI 데이터셋 24-Donor Retrieval 프로토콜, 그리고 5단계 검증 로드맵의 실행 명령어와 실증 수치를 시분초 단위로 명시적으로 설명합니다.
@@ -90,4 +90,19 @@
 - **W&B**: https://wandb.ai/teasol/ICF/runs/9ldg44nr
 - **검증 단원**: `tests/test_feature_retrieval.py`, `tests/test_large_context_pretrain.py`
 - **주요 이슈 진단 및 조치**: 6번째 재시도 만에 성공 (config 오류, DataLoader CUDA fork 충돌, pin_memory 충돌, retrieval gradient 누수, `training_step`이 retrieval을 호출하지 않던 근본 문제 등 5건). 상세 경위는 [`current_status.md`](current_status.md) §4-④~⑤ 참고.
-- **다음 단계**: 이 체크포인트로 ICI 5-Fold 미세조정(Phase 3/4 방식) 수행하여 실데이터 성능 개선 여부 확인 예정.
+
+---
+
+### Phase 6: ICI 5-Fold CV Fine-Tuning from Phase 5 Signal-Aware Pretrain (진행 중)
+- **목표**: Phase 4(Naive Retrieval 사전학습 기반, Log Loss `0.7288`)와 동일한 ICI 5-Fold 미세조정 프로토콜을 Phase 5 체크포인트에 적용하여, Signal-Aware Retrieval 사전학습이 실데이터 성능을 추가로 개선하는지 확인.
+- **Pretrained Checkpoint**: `checkpoints/20260728_144957/v21_large_context_pretrain/epoch=014-val_ce_loss=0.5940.ckpt`
+- **실행 스크립트**: `scripts/launch_phase6_5fold.sh` (`launch_phase4_5fold.sh`와 동일 패턴, `PRETRAINED_CKPT`만 Phase 5 체크포인트로 교체)
+- **실행 명령어**:
+  ```bash
+  scripts/launch_phase6_5fold.sh
+  ```
+- **주의**: `--ckpt-path`는 Lightning `trainer.fit(ckpt_path=...)` 풀 리쥼(전체 옵티마이저/스케줄러/`current_epoch` 상태 복원)이므로, 각 fold는 Phase 5 체크포인트의 epoch(14)부터 이어서 fold config의 `max_epochs: 50`까지(즉 36 epoch만) 학습함 — Phase 4도 동일한 방식(Phase 2-R epoch 12부터 이어서 38 epoch)으로 수행되었으므로 비교 가능.
+- **Run Kind**: `v21_ici_finetune_phase6_f{0..4}`
+- **시작**: 2026-07-28 17:57:10 KST, 5-fold 모두 정상 기동 확인 (체크포인트 restore 로그 확인 완료)
+- **로그 파일**: `logs/20260728_1757{10,12,14,16,18}/v21_ici_finetune_phase6_f{0..4}.out`
+- **다음 세션 확인 필요**: 5-fold 완주 후 AUROC/Log Loss를 Phase 4(AUROC `0.5524`, Log Loss `0.7288`)와 비교하여 `current_status.md`/`current_experiments.md`에 결과 기록.

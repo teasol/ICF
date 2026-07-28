@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-28 16:05:00 KST`  
+**Last updated**: `2026-07-28 17:59:00 KST`  
 **Latest Commit**: `42c3fa8` (`docs: record Phase 5 launch saga and successful training run`)  
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)  
 **Architecture Version**: `21` (`architecture_version = 21`)  
@@ -51,6 +51,7 @@
 | **Phase 3-B**| ICI Fold 0 Fine-Tune | `configs/train_v21_ici_finetune_fold0.yaml` | 50e | AUROC: 0.5654<br/>Log Loss: 0.8232 | `checkpoints/20260727_201910/v21_ici_finetune_f0/last.ckpt` | `logs/20260727_201910/v21_ici_finetune_f0.out` |
 | **Phase 4** | ICI 5-Fold CV (Retrieval K=24) | Fold 0~4 CV | 50e | AUROC: 0.5524<br/>**Log Loss: 0.7288 (0.0944 대폭 하강)** | `checkpoints/20260728_013253/` | `logs/20260728_013253~/` |
 | **Phase 5** | Signal-Aware Large Context Pretraining | `configs/train_v21_large_context_pretrain.yaml` | 20e | **20 epoch 완주 (6번째 재시도 만에 성공, §4-④~⑤ 참고)**<br/>**Best `val_ce_loss: 0.5940`** (epoch 14) — Phase 1 Full-Context(`0.5921`)에 근접, Phase 1-R Naive Retrieval(`0.6839`) 대비 대폭 개선<br/>최종 epoch 19: `val_loss: 0.608`, `train_loss: 0.723` (progress-bar 결합 loss, `val_ce_loss`와 별도 지표) | `checkpoints/20260728_144957/v21_large_context_pretrain/epoch=014-val_ce_loss=0.5940.ckpt` | `logs/20260728_144957/v21_large_context_pretrain.out` |
+| **Phase 6** | ICI 5-Fold CV Fine-Tune (Phase 5 체크포인트 기반) | `configs/train_v21_ici_finetune_fold{0..4}.yaml` (`scripts/launch_phase6_5fold.sh`) | 50e (resume epoch 14부터) | **진행 중** (2026-07-28 17:57 KST 5-fold 모두 기동, checkpoint restore 확인 완료). 목표: Phase 4(AUROC `0.5524`, Log Loss `0.7288`) 대비 개선 여부 확인 | `checkpoints/20260728_1757{10,12,14,16,18}/v21_ici_finetune_phase6_f{0..4}/` | `logs/20260728_1757{10,12,14,16,18}/v21_ici_finetune_phase6_f{0..4}.out` |
 
 ---
 
@@ -115,7 +116,7 @@ Config를 고친 뒤에도 학습이 5차례 연속 크래시했고, 매번 근�
 
 연구실, 집, 또는 노트북 어디서 접속하더라도 다음 순서로 작업을 수행하면 됩니다:
 
-1. **Phase 5 체크포인트로 ICI 5-Fold 실데이터 미세조정** (§4-⑤ "다음 단계 제안" 참고): `checkpoints/20260728_144957/v21_large_context_pretrain/epoch=014-val_ce_loss=0.5940.ckpt`를 Phase 3/4와 같은 방식으로 ICI 5-Fold에 미세조정하여, Naive Retrieval 기반 Phase 4(Log Loss `0.7288`) 대비 Signal-Aware Retrieval 사전학습이 실데이터 성능을 개선하는지 확인.
+1. **[진행 중] Phase 5 체크포인트로 ICI 5-Fold 실데이터 미세조정** (§4-⑤ "다음 단계 제안" 참고): `scripts/launch_phase6_5fold.sh`로 2026-07-28 17:57 KST 5-fold 모두 기동 완료 (Phase 4와 동일 패턴, `PRETRAINED_CKPT`만 Phase 5 체크포인트로 교체). **다음 세션 확인 필요**: 5-fold 완주 후 AUROC/Log Loss를 Phase 4(AUROC `0.5524`, Log Loss `0.7288`)와 비교하여 결과를 §3 표와 `current_experiments.md`에 기록.
 2. **`test_4d_batched_forward` CPU 지연/무응답 원인 확인 (§4-③ 참고)**: GPU(`CUDA_VISIBLE_DEVICES=0`)에서 재현 여부 확인하거나, 10분+ 타임아웃으로 단독 실행해 실제 종료 여부와 소요 시간 측정.
 3. **단위 테스트 전체 실행 및 검증 완료 확인**:
    - `timeout 600s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"` (All tests PASS 확인, `test_feature_retrieval.py`, `test_large_context_pretrain.py` 포함. 반드시 timeout 적용하여 행 발생 시 자동 종료되도록 할 것. 2번 이슈로 인해 이번 세션에서는 전체 discover 대신 개별 스크립트 검증만 수행함)
