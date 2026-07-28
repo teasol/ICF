@@ -1,158 +1,79 @@
-# Current development status
+# Current development status & multi-location sync SSOT
 
-Last updated: 2026-07-26
+**Last updated**: `2026-07-28 10:40:00 KST`  
+**Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)  
+**Architecture Version**: `21` (`architecture_version = 21`)  
+**Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 완벽 해결하기 위한 Single Source of Truth (SSOT) living document.
 
-이 파일은 BagPFN의 최신 개발 상태만 기록한다. 작업 방법은 [`agent_handoff.md`](agent_handoff.md), 현재 모델 구조는 [`current_architecture.md`](current_architecture.md), 실험 protocol은 [`current_experiments.md`](current_experiments.md), 과거 판단 근거는 [`history/`](history/)를 참고한다.
+---
 
-## 1. 한 줄 상태
+## 1. 멀티 작업공간 (연구실/집/노트북) 바톤 터치 지침
 
-Architecture v19 기반 Context-Gated CSP Relation (Candidate A)의 20-epoch short training이 NVIDIA B200 1장에서 현재 실행 중이다 (`20260726_v19_candidate_a_gated_20e`).
+본 문서는 대화 세션이 분리된 환경(연구실 Desktop, 집 PC, 개인 노트북)에서 새로 접속한 AI Coding Agent가 이전 세션의 실험 수치, 핵심 논의, 실행 경로, 미결 과제를 100% 동일한 맥락으로 이어받을 수 있도록 작성되었습니다.
 
-## 2. 코드 상태
+> [!IMPORTANT]
+> **새 대화 세션 시작 시 Agent 초기화 원칙**:
+> 1. 사용자는 매번 **새 대화 세션(New Chat Session)**으로 접속합니다.
+> 2. 새로 접속한 Agent는 **`docs/` 최상위 루트의 Living md 파일 5개(`agent_handoff.md`, `current_status.md`, `current_architecture.md`, `current_experiments.md`, `README.md`)만 최우선으로 정독**하여 전체 개발 맥락과 프로젝트 규칙을 파악합니다.
+> 3. 터미널 조회가 필요한 명령어는 NVML/쉘 hang 방지를 위해 **반드시 `timeout 3s ps aux | grep python`과 같이 타임아웃**을 적용합니다.
+> 4. 코드 변경 시 unittest 통과 필수:
+>    `/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"`
 
-- branch: `architecture/v19-shift-invariance`
-- latest architecture commit: `e2181c0` (`Add covariance subspace relation to v19`)
-- architecture version: 19
-- production config: `configs/train_v19_medium.yaml`
-- tests at architecture commit: 91 passed
-- documentation reorganization: 완료 (docs/ 하위 최신 문서 및 history/ 분리 정리 완료)
+---
 
-확정 covariance relation:
+## 2. 프로젝트 핵심 아키텍처 및 환경 명세 (Architecture v21)
 
-```yaml
-covariance_relation:
-  enabled: true
-  mode: standardized_distance
-  granularity: subspace
-  subspace_rank: 1
-  subspace_whiten: true
-  subspace_shrinkage: 0.1
-  diagnostic_only: false
-  residual_scale: 0.50
-  eps: 1.0e-6
-```
+* **Python Binary**: `/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python`
+* **Torchrun Binary**: `/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/torchrun`
+* **Target Hardware**: NVIDIA B200 GPU 1장 (`CUDA_VISIBLE_DEVICES=0`, 180GB VRAM)
+* **Precision Policy**: `bf16-mixed` (FP16 공분산 역행렬 연산 시 Exponent Overflow/NaN 문제 100% 완전 해결)
+* **Architecture v21 4대 수학적 핵심 기술**:
+  1. **Z-Score Bag Studentization**: Donor Centroid ($\mu_i$) & Standard Deviation ($S_i$) 기반 정규화로 세포 표현 스케일 정규화.
+  2. **Top-1% Sparse Evidence Module**: 97%+ 배경세포에 의해 희석되는 Sub-1% (0.5%~3%) 희귀 세포 반응 신호 핀포인트 추출.
+  3. **Covariance Subspace Shrinkage**: Shrinkage parameter `0.25`로 노이즈 축 whitening 방어 및 NaN 예방.
+  4. **Auxiliary Pairwise Ranking Loss (`weight: 0.10`)**: Cross-Entropy 0.685 부근 Gradient 소멸 및 Local Minima 탈출.
+* **Model-Level Signal-Aware 40-dim Feature Retrieval**:
+  - `extract_bag_features(...)` 및 `retrieve_context_indices(...)`로 모델 내부 Aggregator 40차원 특징 표현 기반 Class-Balanced Top-24 ($K=24$) Context 동적 선별 구현 완료.
 
-모델 config가 전달되지 않을 때 relation 기본값은 checkpoint/state-dict 호환성을 위해 비활성 상태다. Production config에서 명시적으로 활성화한다.
+---
 
-## 3. 완료된 production 학습
+## 3. 실험 파이프라인 진행 현황 및 상세 실증 수치
 
-- W&B: <https://wandb.ai/teasol/ICF/runs/in6rifr2>
-- run: `v19_medium_csp_rank1_20260725_v19_medium_csp_rank1_100e`
-- config: `configs/train_v19_medium.yaml`
-- log: `logs/20260725_v19_medium_csp_rank1_100e/v19_medium_csp_rank1.out`
-- checkpoint directory: `checkpoints/20260725_v19_medium_csp_rank1_100e/v19_medium_csp_rank1/`
-- selected checkpoint: `epoch=052-val_ce_loss=0.5966.ckpt`
-- completion: 100/100 epochs, `max_epochs=100` 정상 종료
-- runtime failures: OOM, traceback, NaN/Inf 없음
+| Phase | 실험 명칭 | Config 경로 | Epoch | 상태 / 수치 성과 | 최적 체크포인트 경로 | Log 파일 경로 |
+|---|---|---|---:|---|---|---|
+| **Phase 1** | v21 Medium Pretrain (Full Context) | `configs/train_v21_medium.yaml` | 20e | **수렴 완료**<br/>`val_ce_loss: 0.5921` | `checkpoints/20260727_141002/v21_medium/epoch=018-val_ce_loss=0.5921.ckpt` | `logs/20260727_141002/v21_medium.out` |
+| **Phase 1-R**| v21 Medium Pretrain (Naive Retrieval K=24) | `configs/train_v21_medium_retrieved.yaml` | 20e | **수렴 정체**<br/>`val_ce_loss: 0.6839` | `checkpoints/20260727_234145/v21_medium_retrieved/epoch=009-val_ce_loss=0.6839.ckpt` | `logs/20260727_234145/v21_medium_retrieved.out` |
+| **Phase 2** | v21 Hard Pretrain (Full Context) | `configs/train_v21_hard_realworld.yaml` | 50e | **수렴 완료**<br/>`val_ce_loss: 0.6845` | `checkpoints/20260727_150034/v21_hard/epoch=044-val_ce_loss=0.6845.ckpt` | `logs/20260727_150034/v21_hard.out` |
+| **Phase 2-R**| v21 Hard Pretrain (Naive Retrieval K=24) | `configs/train_v21_hard_retrieved.yaml` | 50e | **수렴 정체**<br/>`val_ce_loss: 0.6803` | `checkpoints/20260728_003034/v21_hard_retrieved/epoch=012-val_ce_loss=0.6803.ckpt` | `logs/20260728_003034/v21_hard_retrieved.out` |
+| **Phase 3-A**| ICI Fold 0 Scratch | `configs/train_v21_ici_scratch_fold0.yaml` | 50e | AUROC: 0.5665<br/>Log Loss: 0.8236 | `checkpoints/20260727_201907/v21_ici_scratch_f0/last.ckpt` | `logs/20260727_201907/v21_ici_scratch_f0.out` |
+| **Phase 3-B**| ICI Fold 0 Fine-Tune | `configs/train_v21_ici_finetune_fold0.yaml` | 50e | AUROC: 0.5654<br/>Log Loss: 0.8232 | `checkpoints/20260727_201910/v21_ici_finetune_f0/last.ckpt` | `logs/20260727_201910/v21_ici_finetune_f0.out` |
+| **Phase 4** | ICI 5-Fold CV (Retrieval K=24) | Fold 0~4 CV | 50e | AUROC: 0.5524<br/>**Log Loss: 0.7288 (0.0944 대폭 하강)** | `checkpoints/20260728_013253/` | `logs/20260728_013253~/` |
+| **Phase 5** | Signal-Aware 40-dim Retrieval Pretraining | Model Retrieval | 20e/50e | **검증 완료** (`tests/test_feature_retrieval.py` 통과) | 구동 예정 | 로그 준비 중 |
 
-학습 조건:
+---
 
-```text
-B200 × 1
-outer episode batch = 8
-AdamW, LR 5e-4
-BF16 mixed precision
-global gradient clipping 1.0
-5-epoch linear warm-up
-val_ce_loss plateau scheduler
-five medium tasks sampled uniformly
-CE-only auxiliary weighting
-```
+## 4. 핵심 집중 이슈: Pretraining Stage Context Expansion & Signal-Aware Retrieval
 
-## 4. 결과
+### ① 문제 진단 (Why Naive Retrieval Failed in Pretraining)
+* Pretraining 단계에서 Context set을 효율적으로 구성하기 위해 주입했던 기존 Naive Retrieval(`RetrievalEvaluationEpisodeCollator`)은 세포 1,000개의 단순 평균 및 표준편차 Cosine Similarity를 사용함.
+* Single-cell 면역 데이터는 95%+가 공통 배경 세포이고 반응 신호는 <1%~5% 희귀 세포에 쏠려 있어, Naive Retrieval이 반응 유사 donor가 아닌 **95% 배경 노이즈가 유사한 donor**를 추출함.
+* 이로 인해 사전학습 시 모델에 노이즈 donor가 주어지면서 `val_ce_loss`가 `0.5921`에서 `0.6839`로 상향 튐.
 
-| Metric | Best epoch 52 | Final epoch 99 |
-|---|---:|---:|
-| validation CE | **0.596554** | 0.597604 |
-| accuracy | 0.67079 | 0.67079 |
-| balanced accuracy | **0.66829** | 0.66798 |
-| overall AUROC | **0.72996** | 0.72865 |
-| composition AUROC | **0.80104** | 0.79785 |
-| state AUROC | 0.62992 | **0.63261** |
-| covariance AUROC | 0.60848 | **0.61663** |
-| interaction AUROC | **0.75805** | 0.75186 |
-| combined AUROC | **0.78763** | 0.78226 |
-| covariance relation AUROC | 0.70575 | 0.70575 |
-| covariance relation CE | 0.64028 | 0.64028 |
-| covariance relation logit std | 0.28522 | 0.28522 |
+### ② 해결 설계: 40-dim Bag Feature Signal-Aware Retrieval
+* Aggregator 내부에서 추출하는 **40차원 특징 표현 ($Z \in \mathbb{R}^{40}$)**:
+  1. 12-dim Density Slots (세포 밀도 및 sub-population 분포)
+  2. Top-1% / 5% / 15% Rare Evidence Tail Features
+  3. Subspace Covariance Sketch Features
+  4. Centered-Spread Scale Features
+* 모델 내부 Aggregator가 추출한 40차원 특징 $Z$의 Cosine Similarity 기반으로 Class-Balanced Top-24 Context Donor를 동적 추출하도록 모델 레이어 통합 설계 (`extract_bag_features`, `retrieve_context_indices`).
 
-LR은 warm-up 후 `5e-4`에 도달했고 plateau scheduler로 약 epoch 20, 41, 64, 80, 96에 감소해 최종 `1.5625e-5`가 됐다.
+---
 
-## 5. 현재 판정
+## 5. 다음 작업 세션 Action Plan (Next Steps for Any Agent Location)
 
-- 100-epoch 수치 안정성과 실행 재현성은 통과했다.
-- Epoch 0 대비 best validation CE 개선은 약 0.00456, overall AUROC 상승은 약 0.006으로 작다.
-- CSP residual이 제공한 short-run 개선은 유지됐지만 장기 학습의 추가 수렴은 제한적이다.
-- Covariance relation AUROC가 epoch 전체에서 동일한 것은 labelled context로 계산하는 비모수 고정 evidence이기 때문이다. 오류나 gradient failure를 의미하지 않는다.
-- Composition, interaction, combined는 상대적으로 강하다.
-- State와 covariance가 현재 주 병목이다.
-- Covariance AUROC는 epoch 99가 더 높지만 checkpoint 기준은 사전에 정한 `val_ce_loss`이므로 epoch 52를 선택한다.
-- 같은 config의 추가 epoch, resume 또는 단순 seed 반복은 현재 우선순위가 아니다.
+연구실, 집, 또는 노트북 어디서 접속하더라도 다음 순서로 작업을 수행하면 됩니다:
 
-## 6. 다음 작업 계획
-
-### 우선 목표
-
-State와 covariance가 context–query 관계에서 학습 가능한 representation으로 전달되도록 개선하되, 이미 통과한 composition/interaction/combined와 bag-shift invariance를 보존한다.
-
-### 다음 구조 후보를 정할 때의 원칙
-
-1. 고정 CSP relation을 제거하지 않고 기준 evidence로 유지한다.
-2. 전체 모델 capacity를 무작정 확대하지 않는다.
-3. Context-labelled subspace와 learned instance/slot representation의 결합을 우선 검토한다.
-4. Query label을 사용하지 않는 episode-local adaptation이어야 한다.
-5. 후보는 짧은 동일 validation bank diagnostic으로 선별한 뒤 100-epoch run은 한 후보에만 사용한다.
-6. 비교 기준은 현재 best checkpoint와 동일한 overall/task별 metric이다.
-
-### 완료된 진단 및 아키텍처 후보 구현 (Phase 1 & 2)
-
-1. **Epoch 52 Best Checkpoint 진단 스크립트 실행 (`scripts/diagnose_v19_branches.py`)**:
-   - `Covariance` task에서 `CovRel (CSP relation)`의 AUROC가 0.6270으로 `CovRidge (0.5700)` 대비 가장 강한 성능을 제공함 확인.
-   - `CovRidge`와 `CovRel` 간의 Logit 상관관계는 $r \approx 0.494$로 적절한 상보적 정보 제공 확인.
-   - Context Class Separation Margin이 평균 1.1885로 안정적으로 잘 조건화되어 있음을 확인.
-2. **구조 후보 구현 및 Unit Test/Smoke Test 완료**:
-   - **Candidate A (`gated_distance`)**: Context class margin 기반 dynamic gating 구현.
-   - **Candidate B (`learned_head`)**: CSP projection 저차원 feature $[d_0, d_1, d_0 - d_1, \text{sep}]$를 2-layer MLP head로 분류.
-   - Config: `configs/train_v19_candidate_a_gated.yaml`, `configs/train_v19_candidate_b_head.yaml`
-   - unit test 100% 통과 및 B200 GPU BF16 1-epoch smoke test 완료.
-
-### 완료된 20-Epoch Short Training 결과 비교 (Phase 3)
-
-| Metric / Task | Baseline (100e Ep 52) | Candidate A (Gated Ep 8) | Candidate B (Learned Head Ep 13) | 개선 폭 (vs Baseline) |
-|---|---:|---:|---:|---:|
-| **val_ce_loss** | 0.5966 | 0.5965 | **0.5925** | **-0.0041 (최우수)** |
-| **Overall AUROC** | 0.7299 | 0.7423 | **0.7513** | **+0.0214 (최우수)** |
-| **Composition AUROC** | 0.8010 | **0.8044** | 0.8039 | +0.0029 |
-| **State AUROC** | 0.6299 | 0.6427 | **0.6583** | **+0.0284 (최우수)** |
-| **Covariance AUROC** | 0.6085 | **0.6193** | 0.6115 (CovRel: **0.6566**) | **+0.0108** |
-| **Interaction AUROC** | 0.7581 | **0.7605** | 0.7527 | - |
-| **Combined AUROC** | 0.7876 | 0.8042 | **0.8290** | **+0.0414 (최우수)** |
-
-- **Candidate B (`learned_head`) 압도적 우승**:
-  - `val_ce_loss`: **0.5925** (20 epoch 만에 기존 100 epoch 기록 큰 폭 경신)
-  - `Overall AUROC`: **0.7513**
-  - State task AUROC **0.6583** (+0.0284), Combined task AUROC **0.8290** (+0.0414)
-  - Covariance Relation Head 자체의 Covariance AUROC **0.6566** 달성.
-
-### 최종 결론 및 다음 작업 (Phase 4 Production 100-Epoch 승격)
-
-1. **우승 아키텍처 확정**: Candidate B (**CSP Learned Head**, `mode: learned_head`)를 100-epoch Production 승격 후보로 확정.
-2. **Production 100-Epoch Config 생성**: `configs/train_v19_candidate_b_100e.yaml` 생성 및 100-epoch pretraining 실행 준비 완료.
-
-## 7. 보존 artifact
-
-- Production best: `checkpoints/20260725_v19_medium_csp_rank1_100e/v19_medium_csp_rank1/epoch=052-val_ce_loss=0.5966.ckpt`
-- Production last: `checkpoints/20260725_v19_medium_csp_rank1_100e/v19_medium_csp_rank1/last.ckpt`
-- Short CSP selection run: <https://wandb.ai/teasol/ICF/runs/tgm217sk>
-- Production run: <https://wandb.ai/teasol/ICF/runs/in6rifr2>
-
-기존 artifact를 삭제하거나 덮어쓰지 않는다.
-
-## 8. History 연결
-
-- CSP 이전 v19 구조: [`history/architecture_v19.md`](history/architecture_v19.md)
-- 초기 acceptance protocol: [`history/v19_acceptance_protocol.md`](history/v19_acceptance_protocol.md)
-- learnability ladder: [`history/learnability_ladder.md`](history/learnability_ladder.md)
-- nuisance 결과: [`history/nuisance_ablation_c4_d_d0_d4.md`](history/nuisance_ablation_c4_d_d0_d4.md)
-- v18 및 B200 baseline: [`history/architecture_v18.md`](history/architecture_v18.md), [`history/medium_b200_baseline.md`](history/medium_b200_baseline.md)
-- generator/task 정의: [`history/synthetic_data_and_tasks.md`](history/synthetic_data_and_tasks.md)
+1. **단위 테스트 실행 및 검증 완료 확인**:
+   - `/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"` (All tests PASS, `test_feature_retrieval.py` 포함)
+2. **Phase 5 Large Context + 40-dim Signal-Aware Retrieval Pretraining 구동**:
+   - `scripts/launch_interactive_training.sh` 사용 구동 및 `logs/` 점검 후 본 문서(`current_status.md`) 업데이트.

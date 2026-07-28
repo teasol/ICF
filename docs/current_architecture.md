@@ -1,219 +1,111 @@
 # Current architecture
 
-Last updated: 2026-07-26  
-Code baseline: architecture v19, commit `e2181c0`
+**Last updated**: `2026-07-28 10:30:00 KST`  
+**Code baseline**: Architecture Version `21` (`architecture_version = 21`)
 
-이 문서는 현재 production config가 실제로 사용하는 모델 구조를 설명한다. 개발 상태와 다음 작업은 [`current_status.md`](current_status.md), 실험 protocol은 [`current_experiments.md`](current_experiments.md)를 참고한다.
+이 문서는 현재 production config 및 코드베이스가 실제로 사용하는 Architecture v21 모델 구조, 수학적 계약 및 40차원 Signal-Aware Retrieval 레이어를 명시적으로 설명합니다. 최신 개발 상태는 [`current_status.md`](current_status.md), 실험 프로토콜은 [`current_experiments.md`](current_experiments.md)를 참고합니다.
 
-## 1. 문제 정의와 입출력
+---
 
-한 episode는 labelled context bags와 query bags로 구성된다. Bag은 variable-length instance set이며 각 instance의 입력 차원은 512다. 모델은 context label만 이용해 episode-local class representation을 만들고 query bag의 binary class logits를 출력한다.
+## 1. 입출력 텐서 계약 (Input / Output Specification)
 
-```text
-input
-  outer episodes E
-  context instances [E, context bags, instances, 512]
-  context labels    [E, context bags]
-  query instances   [E, query bags, instances, 512]
-
-output
-  query logits      [E, query bags, 2]
-```
-
-Query label은 forward, normalization, class memory, ridge 및 covariance subspace fitting에 사용하지 않는다.
-
-## 2. Bag-centered representation
-
-각 bag에 공통으로 더해지는 translation을 제거한다.
-
-```python
-bag_mean = x.mean(dim=-2, keepdim=True)
-centered_delta = x - bag_mean
-centered_x = F.normalize(centered_delta, dim=-1, eps=1e-6)
-global_spread = torch.sqrt(centered_delta.square().mean(dim=-2) + 1e-6)
-```
-
-Production 설정:
-
-```yaml
-bag_centered_representation: true
-global_summary: centered_spread
-use_raw_mean_branch: false
-```
-
-- `centered_x`: anchor, slot assignment, structured token과 tail evidence에 사용
-- `centered_delta`: scale/covariance 구조 계산에 사용
-- `global_spread`: raw mean을 대체하는 translation-invariant global summary
-- raw bag mean과 raw coordinate: diagnostic 이외의 classification 경로에서 사용하지 않음
-
-## 3. Structured population aggregator
-
-현재 주요 설정:
+한 episode는 Class-Balanced 24-Donor Retrieval (또는 Model-Level 40-dim Signal-Aware Retrieval)로 선별된 context bags ($K=24$, Top-12 NR + Top-12 R)와 query bags로 구성됩니다. 각 instance (단일 세포)의 특징 차원은 $D = 512$입니다.
 
 ```text
-input dimension: 512
-population slots: 12
-initial density slots: 8
-context samples per bag: 32
-assignment temperature: 0.1
-density refinement: 4 steps, temperature 0.15
-within-slot rare fraction: 0.05
-tail fractions: 0.01, 0.05, 0.15
+input:
+  outer episodes E        (훈련 시 E=8 또는 E=16, 추론 시 E=1)
+  context instances       [E, context_bags=24, instances=1000, 512]
+  context labels          [E, context_bags=24] (Y \in {0, 1})
+  query instances         [E, query_bags=1, instances=1000, 512]
+
+output:
+  query logits            [E, query_bags=1, num_classes=2]
 ```
 
-Aggregator는 context에서 episode anchor를 만들고 각 bag의 local population을 soft assignment한다. Bag-local slots는 context reference slots에 entropic Sinkhorn transport로 정렬된다. 이 과정은 population identity를 episode 안에서 유지하면서 bag permutation과 instance permutation에 불변이어야 한다.
+Query label은 representation, normalization, class memory, ridge 또는 covariance subspace fitting 경로에 절대로 흐르지 않습니다.
 
-Bag당 token 구조:
+---
+
+## 2. Architecture v21 4대 수학적 개혁 명세
+
+### ① Z-Score Bag Studentization (분산 스케일 정규화)
+각 Donor Bag $i$의 세포 표현 $x_{i, j} \in \mathbb{R}^{512}$에 대해 Donor Centroid $\mu_i$와 Standard Deviation $S_i$를 구하여 스튜던트화 정규화를 적용함:
+
+$$\mu_i = \frac{1}{N_i} \sum_{j=1}^{N_i} x_{i, j}, \quad S_i = \sqrt{\frac{1}{N_i} \sum_{j=1}^{N_i} (x_{i, j} - \mu_i)^2 + 1e-6}$$
+
+$$\tilde{x}_{i, j} = \frac{x_{i, j} - \mu_i}{S_i + 1e-5}$$
+
+### ② Top-k Sparse Evidence Tokenization (Sub-1% 희귀세포 핀포인트 추출)
+97%+ 비반응 배경세포에 의해 0.5%~3% 희귀 세포 신호가 희석되는 현상을 방지함:
+- Bag 중심 $\mu_i$로부터 이상 거리(Outlier Distance) $d_{i, j} = \|\tilde{x}_{i, j}\|_2$ 산출.
+- 상위 1% ($k = \max(1, \lceil 0.01 \cdot N_i \rceil)$) 세포 인스턴스 $X_i^{sparse} \in \mathbb{R}^{k \times 512}$ 선별.
+- Class Memories $M_c \in \mathbb{R}^{8 \times 512}$ ($c \in \{0, 1\}$)와 Direct Cross-Attention 수행 후 residual logit 결합.
+
+### ③ Covariance Subspace Shrinkage (노이즈 방어)
+- SNR-Adaptive Covariance Subspace Fitting의 Shrinkage 파라미터를 **`subspace_shrinkage: 0.25`**로 정밀화.
+- Whitening 연산 시 NaN 발생 시 안전하게 Identity Fallback 구동.
+- 백색화 변환 거리 vector $[d_0, d_1, d_0 - d_1, \text{sep}]$를 2-layer MLP Learned Head로 연결.
+
+### ④ Auxiliary Pairwise Ranking Loss (`weight: 0.10`)
+- Cross-Entropy 0.685 부근 Gradient 소멸 극복:
+
+$$\mathcal{L}_{total} = \mathcal{L}_{CE} + 0.10 \cdot \mathcal{L}_{Ranking}$$
+
+$$\mathcal{L}_{Ranking} = \max(0, \gamma - (P_1(Q^+) - P_1(Q^-)))$$
+
+---
+
+## 3. 모델 내장 40차원 Feature 기반 Signal-Aware Retrieval Layer
+
+### ① 40차원 Bag Feature Extractor ($Z \in \mathbb{R}^{40}$)
+BagPFN 아키텍처 내부 Aggregator는 Bag 표현을 다음 4가지 축으로 분해하여 40차원 특징 벡터 $Z$로 압축합니다:
+1. **12-dim Density Slots**: 세포 밀도 및 sub-population 분포
+2. **Tail Evidence Features**: Top-1% / 5% / 15% 희귀 세포 반응 신호
+3. **Subspace Covariance Sketch**: 세포 간 상관관계 및 covariance 구조
+4. **Centered-Spread Scale**: 세포 확산 척도
+
+### ② Model-Level Retrieval Method
+- `extract_bag_features(x)`: 각 Donor Bag의 40차원 $Z$ 특징 벡터 추출.
+- `retrieve_context_indices(x, y, mask_index, retrieval_k)`: Query $Z_Q$와 Context donor $Z_{C_i}$ 간의 Cosine Similarity를 계산하여, 클래스 균형(Class-Balanced) Top-12 NR + Top-12 R ($K=24$) donor 동적 추출.
+- `forward(..., retrieval_k=24)`: 모델 순전파 내에 Signal-Aware Retrieval을 직접 내장.
+
+---
+
+## 4. Main Classification Branches & Logit Fusion
 
 ```text
-global spread token                         1
-12 slots × (center, spread, rare state)    36
-novelty-tail tokens                         3
-                                           --
-total                                      40
+final_logits = base_logits
+             + sparse_evidence_scale * sparse_memory_logits
+             + covariance_residual_scale * covariance_ridge
+             + residual_scale * covariance_relation_learned_head
 ```
 
-Slot metadata에는 identity-aligned log abundance와 dispersion이 들어간다. Abundance는 soft assignment mass에서 계산한다.
+* `sparse_evidence_scale`: 0.10
+* `covariance_residual_scale`: 0.25
+* `residual_scale` (CSP Head): 0.50
 
-## 4. Covariance representations
+---
 
-현재 두 covariance 경로가 함께 존재한다.
-
-### 4.1 Covariance sketch ridge
-
-- centered representation을 64차원 covariance sketch로 요약
-- production mode: correlation
-- shrinkage: 0.1
-- context-only class-balanced ridge로 query covariance logit 계산
-- learned bounded residual scale로 final logit에 추가
-
-### 4.2 Whitened CSP rank-1 relation
-
-CSP 경로를 위해 `centered_delta`를 고정 projection으로 최대 32차원에 투영하고 bag별 covariance matrix를 만든다.
+## 5. 모델 스펙 파라미터 (Model Parameter Specs)
 
 ```text
-projected instances: [instances, 32]
-covariance matrix:   [32, 32]
+Total Trainable Parameters : 6,614,248 (약 6.6M)
+Token Dimension           : 512
+Aggregator Output Tokens  : 40 tokens (1 global + 12 slots + 8 density slots + 12 tail slots + 7 branch tokens)
+Meta Hidden Dimension     : 256
+Attention Heads           : 8
+Set Layers                : 1
+Ridge Dimension           : 64
+Precision                 : bf16-mixed
+Architecture Version      : 21
 ```
 
-각 outer episode에서 labelled context만 사용한다.
+---
 
-1. Class별 context covariance mean `C0`, `C1` 계산
-2. `delta = C1 - C0`
-3. Context pooled covariance에 shrinkage 0.1 적용
-4. FP32 eigendecomposition으로 pooled covariance whitening
-5. Whitened `delta`에서 절대 eigenvalue가 가장 큰 rank-1 direction 선택
-6. 같은 filter로 context/query covariance를 scalar feature로 투영
-7. Context 통계만 사용해 feature 정규화
-8. Class prototype까지의 squared distance를 class dispersion으로 표준화
-9. `score(class 1) - score(class 0)`을 relation logit으로 사용
+## 6. Source of Truth 파일
 
-CSP와 eigendecomposition은 BF16 autocast 밖의 FP32에서 수행한다. 이 경로는 episode-local non-parametric evidence이며 trainable parameter를 추가하지 않는다.
-
-Production config:
-
-```yaml
-covariance_relation:
-  enabled: true
-  mode: standardized_distance
-  granularity: subspace
-  subspace_rank: 1
-  subspace_whiten: true
-  subspace_shrinkage: 0.1
-  diagnostic_only: false
-  residual_scale: 0.50
-  eps: 1.0e-6
-```
-
-## 5. Meta-classification branches
-
-### Global-shape branch
-
-`global_spread`를 입력으로 사용하는 episode별 class-balanced ridge와 attention residual이다. Raw mean은 사용하지 않는다.
-
-### Population branch
-
-Identity-aligned slot abundance/dispersion을 flatten해 class-balanced ridge에 넣는다. Learned population class-memory attention은 bounded residual로 결합한다.
-
-### Tail branch
-
-Context structured tokens에서 class당 8개의 class-memory token을 만든다. Centered query instance와 class memory similarity를 계산하고 top fractions `0.01, 0.05, 0.10, 0.20`의 evidence를 pooling한다.
-
-### Interaction branch
-
-Global-shape, population, tail evidence의 원값, pairwise product와 absolute difference를 작은 learned scorer에 입력한다. Sigmoid-bounded fusion scale로 더한다.
-
-### Covariance branches
-
-기존 covariance-sketch ridge와 CSP relation은 위 네 경로 뒤에 별도 residual로 추가된다.
-
-## 6. Final logit
-
-현재 production forward의 개념적 계산:
-
-```text
-base = global_shape
-     + population_scale * population
-     + tail_scale * tail
-     + fusion_scale * interaction
-
-final = base
-      + covariance_residual_scale * covariance_ridge
-      + 0.50 * covariance_relation
-```
-
-Population, tail, fusion, covariance ridge scale은 learned/bounded parameter다. `0.50` CSP scale은 config의 고정 hyperparameter다. `diagnostic_only=true`이면 CSP metric은 계산하지만 final logit에는 추가하지 않는다.
-
-## 7. Model capacity와 주요 차원
-
-```text
-trainable parameters: 약 6.6M
-token dimension: 512
-meta hidden dimension: 256
-attention heads: 8
-set layers: 1
-ridge projection dimension: 64
-class memory tokens: 8 per class
-classes: 2
-outer episode batch: production에서 8
-```
-
-여러 episode는 모델 내부 outer-batch 축에서 함께 계산한다. 각 episode의 context-only ridge/CSP fitting은 서로 독립적이다.
-
-## 8. Training objective
-
-현재 production 학습은 query CE를 사용한다.
-
-```yaml
-ranking_loss_weight: 0.0
-routing_sparsity_weight: 0.0
-routing_balance_weight: 0.0
-```
-
-Diagnostic metric과 oracle metadata는 모델 입력 또는 loss가 아니다.
-
-## 9. Invariance 및 compatibility contract
-
-반드시 유지해야 하는 조건:
-
-- bag별 common translation에 대한 centered representation/final-logit 불변성
-- instance permutation과 bag permutation 불변성
-- context label permutation에 대한 class-logit equivariance
-- query label leakage 없음
-- 40-token shape와 outer-batch shape 유지
-- dense와 variable-length bag 경로 일치
-- logits, loss, gradient와 parameter finite
-- architecture version은 19
-- v18 또는 version metadata 없는 checkpoint load 거부
-
-Relation config를 전달하지 않은 모델 생성자의 기본 relation은 비활성이다. 이는 기존 v19 state-dict compatibility를 불필요하게 깨지 않기 위한 것이며 production config는 relation을 명시적으로 활성화한다.
-
-## 10. Source of truth
-
-- Aggregator와 meta-classifier: `src/models/baseline.py`
-- Config wiring/version: `BaseModel` in `src/models/baseline.py`
-- Loss와 metric: `src/modules/model_interface.py`
-- Production resolved entry: `configs/train_v19_medium.yaml`
-- Architecture tests: `tests/test_base_model.py`
-
-이 문서와 코드가 다르면 resolved config와 실제 코드를 우선하고 문서를 즉시 갱신한다.
+- Backbone & Version: `src/models/baseline.py` (`architecture_version = 21`)
+- Data Interface & Collators: `src/modules/data_interface.py`
+- Multi-task Loss & Metrics: `src/modules/model_interface.py`
+- Resolved Production Entry: `configs/train_v21_medium.yaml`
+- Architecture Verification Suites: `tests/test_base_model.py`, `tests/test_feature_retrieval.py`

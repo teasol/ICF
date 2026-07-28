@@ -1,33 +1,45 @@
 # Documentation map
 
-문서는 역할에 따라 세 영역으로 나눈다.
+**Last updated**: `2026-07-28 10:45:00 KST`  
+**Architecture Version**: `21` (`architecture_version = 21`)
 
-## 처음 프로젝트를 맡은 agent
+문서는 **새 대화 세션으로 접속하는 Agent가 최우선으로 읽는 Living 문서 5개(`docs/` 루트)**와 **과거 기록/딥다이브 분석서(`docs/history/`)**로 이원화하여 관리합니다.
 
-[`agent_handoff.md`](agent_handoff.md)를 먼저 읽는다. 저장소 진입 순서, 실행 환경, 변경 금지 조건, 핵심 코드와 검증 명령을 담는다.
+---
 
-## 현재 문서
+## 1. 새 세션 접속 Agent가 최우선으로 정독하는 Living 문서 (Docs Root)
 
-- [`current_status.md`](current_status.md): 현재 상태, 최신 결과, 진행 중인 작업과 다음 결정
-- [`current_architecture.md`](current_architecture.md): production 모델의 실제 representation, branch와 final logit
-- [`current_experiments.md`](current_experiments.md): 현재 synthetic task, 학습·평가 protocol과 후보 승격 절차
+사용자가 매번 새 채팅 세션으로 접속할 때, 새로 시작한 Agent는 아래 `docs/` 최상위 루트의 Living md 파일 5개를 우선 정독하고 **Git commit log/diff**를 조회하여 작업 맥락을 동기화합니다:
 
-## 과거 기록
+1. [`agent_handoff.md`](agent_handoff.md): 새 세션 Agent 초기화 수칙, Git 기반 워크플로우, 실행 환경, 타임아웃, 테스트 검증, Docs/Config 정리 규칙
+2. [`current_status.md`](current_status.md): 개발 현황, 최신 실증 수치, 최근 Git 커밋 내역, Naive vs Signal-Aware Retrieval 진단, Next Action Plan (SSOT)
+3. [`current_architecture.md`](current_architecture.md): Architecture v21 4대 수학적 개혁, 40차원 Signal-Aware Retrieval 레이어, Logit Fusion 수식
+4. [`current_experiments.md`](current_experiments.md): Phase 1~5 실험 프로토콜, 실행 명령어 및 체크포인트/로그 실증 수치
+5. [`README.md`](README.md): 문서 맵 및 갱신/아카이빙 가이드라인
 
-[`history/`](history/)는 설계 및 실험 판단의 근거다. 현재 실행 지침이 아니며 과거 threshold, alias, config와 현재 상태가 다를 수 있다.
+---
 
+## 2. 과거 기록 및 딥다이브 분석서 (History & Deep-Dive Archives)
+
+[`docs/history/`](history/)는 과거 설계, 특정 시점의 딥다이브 분석 및 실험 판단 근거 자료를 보관합니다. 현재 실행 지침이 아니며 `docs/` 최상위 루트를 깨끗하게 유지하기 위해 하위로 아카이빙되었습니다:
+
+- [`history/retrieval_architecture_analysis.md`](history/retrieval_architecture_analysis.md): Naive Cosine Retrieval 실패 원인 상세 분석 및 40차원 Signal-Aware Retrieval 2-Pass Streaming 설계
+- [`history/v20_scalability_plan.md`](history/v20_scalability_plan.md): v20/v21 아키텍처 Scalability 검증 및 Hard Real-World 문제 프로토콜
 - [`history/architecture_v18.md`](history/architecture_v18.md): v18 구조
 - [`history/architecture_v19.md`](history/architecture_v19.md): CSP 확정 전 v19 centered 구조
 - [`history/v19_acceptance_protocol.md`](history/v19_acceptance_protocol.md): 초기 v19 acceptance 기준
+- [`history/candidate_a_b_comparison.md`](history/candidate_a_b_comparison.md): Candidate A vs B 20-epoch short training 및 v20 선정 결과
 - [`history/learnability_ladder.md`](history/learnability_ladder.md): ladder 설계와 단계 정의
 - [`history/nuisance_ablation_c4_d_d0_d4.md`](history/nuisance_ablation_c4_d_d0_d4.md): nuisance ablation 결과
 - [`history/medium_b200_baseline.md`](history/medium_b200_baseline.md): B200 medium baseline
 - [`history/synthetic_data_and_tasks.md`](history/synthetic_data_and_tasks.md): synthetic generator와 task 정의
 
-## 갱신 규칙
+---
 
-- 반복해서 따라야 하는 작업 규칙은 `agent_handoff.md`에 둔다.
-- 지금 무엇을 하고 있는지와 최신 결과는 `current_status.md`에만 둔다.
-- 현재 모델 계산 구조는 `current_architecture.md`, 실험 protocol은 `current_experiments.md`에 둔다.
-- 완료되어 현재 판단 근거로만 남는 내용은 `history/`로 이동한다.
-- 동일한 수치나 상태를 여러 최신 문서에 중복 기록하지 않는다.
+## 3. 갱신 및 관리 수칙 (Maintenance Rules)
+
+- **Living 문서 유지**: `docs/` 최상위 루트에는 오직 5개의 Living 문서만 유지합니다.
+- **Git 커밋 동기화**: 세션 핸드오프 시 작업을 남김없이 커밋하고 커밋 내역/diff를 `agent_handoff.md` 및 `current_status.md`에 반영합니다.
+- **아카이빙 규칙**: 특정 버전 딥다이브 보고서나 계획 문서는 완료 시 즉시 `docs/history/`로 이관하여 `docs/` 루트를 단순하고 가독성 높게 유지합니다.
+- **Config 루트 관리**: `configs/` 루트에는 활성화된 Architecture v21 entry point 10개만 남기고 구버전(v18~v20)은 `configs/archive/`로 관리합니다.
+- **단일 출처화**: 동일한 수치나 진행 상태를 중복해 기록하지 않으며, 상태는 `current_status.md`에만 기록합니다.
