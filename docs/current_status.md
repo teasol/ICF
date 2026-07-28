@@ -68,11 +68,10 @@
   3. Subspace Covariance Sketch Features
   4. Centered-Spread Scale Features
 * 모델 내부 Aggregator가 추출한 40차원 특징 $Z$의 Cosine Similarity 기반으로 Class-Balanced Top-24 Context Donor를 동적 추출하도록 모델 레이어 통합 설계 (`extract_bag_features`, `retrieve_context_indices`).
-* **실제 구현 (2026-07-28 수정, §4-③ 참고)**: `src/models/baseline.py`의 `extract_bag_features`가 위 4개 카테고리를 실제로 조합하여 정확히 40-dim을 반환하도록 구현됨 —
-  `slot_metadata[..., 0]` (12개 슬롯의 log-비율, `aggregator_num_slots=12` 기본값과 정확히 대응) +
-  `tails` 텐서의 fraction별(1%/5%/15%, 3개) [norm, mean, std, peak] 4-stat 요약 (3×4=12) +
-  `covariance_sketch`의 8-stat quantile 요약([mean, std, min, max, q10, q25, q75, q90]) +
-  `global_summary`(studentization spread)의 동일한 8-stat quantile 요약. 12+12+8+8=40.
+* **실제 구현 (2026-07-28 수정, §4-③ 참고)**: `src/models/baseline.py`의 `extract_bag_features`가 아래와 같이 정확히 40-dim을 반환하도록 구현됨. 초기 구현안(density 12 + tail 12 + covariance 8 + scale 8)은 세션 중 리뷰를 거쳐, 슬롯당 center/spread/rare 3종 통계(`slot_statistic_count = 3`, `representation["slots"]`)를 직접 반영하는 형태로 교체됨 —
+  **36-dim**: 슬롯 12개 × [center_norm, spread_norm, rare_deviation_norm] (각 슬롯의 center/spread/rare 512-dim 토큰을 L2-norm/편차-norm으로 압축, `aggregator_num_slots=12` 기본값과 정확히 대응) +
+  **4-dim**: `tails`(top-1%/5%/15% rare fraction) 3개 평균 norm 1개 + `covariance_sketch` 절대값 평균 1개 + `global_summary`(studentization spread) 평균 1개 + 표준편차 1개.
+  36+4=40.
 
 ### ③ 세션 인시던트 진단 및 조치 (2026-07-28 12:30~13:10 KST)
 

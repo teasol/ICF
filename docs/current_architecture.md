@@ -65,14 +65,12 @@ BagPFN 아키텍처 내부 Aggregator는 Bag 표현을 다음 4가지 축으로 
 4. **Centered-Spread Scale**: 세포 확산 척도
 
 ### ② Model-Level Retrieval Method
-- `extract_bag_features(x)`: 각 Donor Bag의 40차원 $Z$ 특징 벡터 추출. 구체적으로 aggregator의 `representation` dict에서
-  `slot_metadata[..., 0]` (12개 population slot의 log-mass, `aggregator_num_slots=12` 기본값과 대응),
-  `tails` (top-1%/5%/15% 3개 fraction 각각의 [norm, mean, std, peak] 4-stat, 총 12-dim),
-  `covariance_sketch`의 8-stat quantile 요약(mean/std/min/max/q10/q25/q75/q90),
-  `global_summary`(centered-spread scale)의 동일 8-stat quantile 요약을 concat하여 12+12+8+8=40 차원을 구성함.
+- `extract_bag_features(x)`: 각 Donor Bag의 40차원 $Z$ 특징 벡터 추출. Aggregator의 `representation` dict에서 다음을 concat:
+  - **36-dim**: `slots`(population slot 12개 × center/spread/rare 3종 512-dim 토큰, `slot_statistic_count = 3`)를 슬롯당 `[center_norm, spread_norm, rare_deviation_norm]` 3-stat으로 압축 (12×3=36, `aggregator_num_slots=12` 기본값과 대응).
+  - **4-dim**: `tails`(top-1%/5%/15% rare fraction) 평균 norm 1개 + `covariance_sketch` 절대값 평균 1개 + `global_summary`(centered-spread scale) 평균 1개 + 표준편차 1개.
 - `retrieve_context_indices(x, y, mask_index, retrieval_k)`: Query $Z_Q$와 Context donor $Z_{C_i}$ 간의 Cosine Similarity를 계산하여, 클래스 균형(Class-Balanced) Top-12 NR + Top-12 R ($K=24$) donor 동적 추출.
 - `forward(..., retrieval_k=24)`: 모델 순전파 내에 Signal-Aware Retrieval을 직접 내장.
-- **검증**: (2026-07-28) 이전에는 `extract_bag_features`가 실제로 1024-dim(`global_summary`+`tails` 평균 concat)을 반환하던 구현 갭이 있었으나 위와 같이 수정하여 `shape[1] == 40`을 만족함을 확인. `chunk_size` 분할 시에도 dense 대비 평균 cosine similarity 0.998로 안정적임. 자세한 조치 이력은 [`current_status.md`](current_status.md) §4-③ 참고.
+- **검증**: (2026-07-28) 최초에는 `extract_bag_features`가 실제로 1024-dim(`global_summary`+`tails` 평균 concat)을 반환하던 구현 갭이 있었고, 1차 수정안(density 12 + tail 12 + covariance 8 + scale 8)은 `slots` 텐서(슬롯당 3종 통계)를 전혀 사용하지 않는다는 리뷰 지적에 따라 위 36+4 구성으로 교체됨. `shape[1] == 40` 및 `chunk_size` 분할 시 dense 대비 평균 cosine similarity 0.998 확인. 자세한 조치 이력은 [`current_status.md`](current_status.md) §4-③ 참고.
 
 ---
 

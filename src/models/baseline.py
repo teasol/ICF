@@ -3271,29 +3271,34 @@ class BaseModel(nn.Module):
         )
 
     @staticmethod
-    def _quantile_summary(values: torch.Tensor) -> torch.Tensor:
-        """Collapse the last dim to [mean, std, min, max, q10, q25, q75, q90] (8 dims)."""
-        values_f = values.float()
-        quantiles = torch.tensor(
-            (0.10, 0.25, 0.75, 0.90), device=values.device, dtype=torch.float32
-        )
-        mean = values_f.mean(dim=-1, keepdim=True)
-        std = values_f.std(dim=-1, unbiased=False, keepdim=True)
-        minimum = values_f.min(dim=-1, keepdim=True).values
-        maximum = values_f.max(dim=-1, keepdim=True).values
-        q = torch.quantile(values_f, quantiles, dim=-1).movedim(0, -1)
-        return torch.cat((mean, std, minimum, maximum, q), dim=-1).to(values.dtype)
+    def _slot_statistic_features(slots: torch.Tensor) -> torch.Tensor:
+        """Per-slot [center_norm, spread_norm, rare_deviation_norm], flattened to (num_slots * 3) dims.
+
+        `slots` is `representation["slots"]`, shape [bags, num_slots, 3, dim]
+        holding the center/spread/rare population tokens computed per slot
+        (see `slot_statistic_count = 3` and `slot_tokens` in `_forward_dense`).
+        """
+        values = slots.float()
+        center, spread, rare = values.unbind(dim=-2)
+        center_norm = center.norm(dim=-1)
+        spread_norm = spread.norm(dim=-1)
+        rare_deviation_norm = (rare - center).norm(dim=-1)
+        stacked = torch.stack((center_norm, spread_norm, rare_deviation_norm), dim=-1)
+        return stacked.flatten(start_dim=-2).to(slots.dtype)
 
     @staticmethod
-    def _tail_evidence_features(tails: torch.Tensor) -> torch.Tensor:
-        """Per tail-fraction [norm, mean, std, peak] summary, flattened to (fractions * 4) dims."""
-        values = tails.float()
-        norm = values.norm(dim=-1)
-        mean = values.mean(dim=-1)
-        std = values.std(dim=-1, unbiased=False)
-        peak = values.abs().amax(dim=-1)
-        stacked = torch.stack((norm, mean, std, peak), dim=-1)
-        return stacked.flatten(start_dim=-2).to(tails.dtype)
+    def _compact_evidence_summary(
+        tails: torch.Tensor, covariance_sketch: torch.Tensor, global_summary: torch.Tensor
+    ) -> torch.Tensor:
+        """4-dim [tail evidence norm, covariance magnitude, scale mean, scale std]."""
+        tail_evidence = tails.float().norm(dim=-1).mean(dim=-1)
+        covariance_magnitude = covariance_sketch.float().abs().mean(dim=-1)
+        scale = global_summary.float()
+        scale_mean = scale.mean(dim=-1)
+        scale_std = scale.std(dim=-1, unbiased=False)
+        return torch.stack(
+            (tail_evidence, covariance_magnitude, scale_mean, scale_std), dim=-1
+        ).to(global_summary.dtype)
 
     def extract_bag_features(
         self,
@@ -3304,16 +3309,16 @@ class BaseModel(nn.Module):
         """Extract the 40-dim Signal-Aware Bag Descriptor Z used for retrieval.
 
         Z = concat(
-            12-dim density slot log-mass (`slot_metadata[..., 0]`, one per
-                population slot),
-            12-dim top-1%/5%/15% rare tail evidence (norm/mean/std/peak per
-                tail fraction),
-            8-dim covariance sketch summary (quantile summary of
-                `covariance_sketch`),
-            8-dim centered-spread scale summary (quantile summary of
-                `global_summary`),
-        ), matching the default aggregator config (12 slots, 3 tail
-        fractions) documented in current_architecture.md.
+            36-dim per-slot statistics: for each of the 12 population slots,
+                [center_norm, spread_norm, rare_deviation_norm] compressed
+                from the slot's center/spread/rare tokens (`slot_statistic_count
+                = 3`, see `representation["slots"]`),
+            4-dim compact evidence summary: [tail evidence norm (mean over
+                the top-1%/5%/15% tail fractions), covariance sketch
+                magnitude, centered-spread scale mean, centered-spread scale
+                std],
+        ), matching the default aggregator config (12 slots) documented in
+        current_architecture.md.
         """
         if isinstance(x, torch.Tensor):
             num_bags = x.shape[0]
@@ -3336,14 +3341,14 @@ class BaseModel(nn.Module):
             context_mask = torch.ones(num_bags, dtype=torch.bool, device=device)
         representation = self.aggregator(x, context_mask=context_mask)
 
-        density = representation["slot_metadata"][..., 0]
-        tail_evidence = self._tail_evidence_features(representation["tails"])
-        covariance_summary = self._quantile_summary(representation["covariance_sketch"])
-        scale_summary = self._quantile_summary(representation["global_summary"])
-
-        return torch.cat(
-            (density, tail_evidence, covariance_summary, scale_summary), dim=-1
+        slot_features = self._slot_statistic_features(representation["slots"])
+        compact_summary = self._compact_evidence_summary(
+            representation["tails"],
+            representation["covariance_sketch"],
+            representation["global_summary"],
         )
+
+        return torch.cat((slot_features, compact_summary), dim=-1)
 
     def retrieve_context_indices(
         self,
