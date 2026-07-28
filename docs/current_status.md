@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-28 11:20:00 KST`  
-**Latest Commit**: `67b75d8` (`feat(config): scale episode_batch_size to E=32 based on GPU throughput benchmark`)  
+**Last updated**: `2026-07-28 12:31:00 KST`  
+**Latest Commit**: `4adc889` (`fix(config): update base_config path to train_v21_medium.yaml in train_v21_large_context_pretrain.yaml`)  
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)  
 **Architecture Version**: `21` (`architecture_version = 21`)  
 **Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 완벽 해결하기 위한 Single Source of Truth (SSOT) living document.
@@ -33,8 +33,9 @@
   2. **Top-1% Sparse Evidence Module**: 97%+ 배경세포에 의해 희석되는 Sub-1% (0.5%~3%) 희귀 세포 반응 신호 핀포인트 추출.
   3. **Covariance Subspace Shrinkage**: Shrinkage parameter `0.25`로 노이즈 축 whitening 방어 및 NaN 예방.
   4. **Auxiliary Pairwise Ranking Loss (`weight: 0.10`)**: Cross-Entropy 0.685 부근 Gradient 소멸 및 Local Minima 탈출.
-* **Model-Level Signal-Aware 40-dim Feature Retrieval**:
-  - `extract_bag_features(...)` 및 `retrieve_context_indices(...)`로 모델 내부 Aggregator 40차원 특징 표현 기반 Class-Balanced Top-24 ($K=24$) Context 동적 선별 구현 완료.
+* **Model-Level Signal-Aware 40-dim Feature Retrieval & True 4D Batched Forward**:
+  - `extract_bag_features(...)` 및 `retrieve_context_indices(...)`로 40차원 특징 표현 기반 Class-Balanced Top-24 ($K=24$) Context 동적 선별.
+  - `[E, N, 1000, 512]` ($E=32, N=96$) True 4D Batched Forward + Multi-Worker CUDA Prefetching 파이프라인 구현 완료.
 
 ---
 
@@ -49,7 +50,7 @@
 | **Phase 3-A**| ICI Fold 0 Scratch | `configs/train_v21_ici_scratch_fold0.yaml` | 50e | AUROC: 0.5665<br/>Log Loss: 0.8236 | `checkpoints/20260727_201907/v21_ici_scratch_f0/last.ckpt` | `logs/20260727_201907/v21_ici_scratch_f0.out` |
 | **Phase 3-B**| ICI Fold 0 Fine-Tune | `configs/train_v21_ici_finetune_fold0.yaml` | 50e | AUROC: 0.5654<br/>Log Loss: 0.8232 | `checkpoints/20260727_201910/v21_ici_finetune_f0/last.ckpt` | `logs/20260727_201910/v21_ici_finetune_f0.out` |
 | **Phase 4** | ICI 5-Fold CV (Retrieval K=24) | Fold 0~4 CV | 50e | AUROC: 0.5524<br/>**Log Loss: 0.7288 (0.0944 대폭 하강)** | `checkpoints/20260728_013253/` | `logs/20260728_013253~/` |
-| **Phase 5** | Signal-Aware 40-dim Retrieval Pretraining | `configs/train_v21_large_context_pretrain.yaml` | 20e | **훈련 구동 시작**<br/>(4D Batched + CUDA Prefetch) | `checkpoints/20260728_122712/v21_large_context_pretrain` | `logs/20260728_122712/v21_large_context_pretrain.out` |
+| **Phase 5** | Signal-Aware Large Context Pretraining | `configs/train_v21_large_context_pretrain.yaml` | 20e | **훈련 백그라운드 구동 중**<br/>(4D Batched + CUDA Prefetch) | `checkpoints/20260728_123047/v21_large_context_pretrain` | `logs/20260728_123047/v21_large_context_pretrain.out` |
 
 ---
 
