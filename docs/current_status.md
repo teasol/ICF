@@ -1,6 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-28 10:40:00 KST`  
+**Last updated**: `2026-07-28 10:51:00 KST`  
+**Latest Commit**: `4e7a70e` (`test: update config path for archived learnability configs`)  
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)  
 **Architecture Version**: `21` (`architecture_version = 21`)  
 **Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 완벽 해결하기 위한 Single Source of Truth (SSOT) living document.
