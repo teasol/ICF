@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-28 12:57:00 KST`  
+**Last updated**: `2026-07-28 13:10:00 KST`  
 **Latest Commit**: `e6ce48b` (`feat(model): integrate 4d batched forwarding and chunked feature extraction for large context pretraining`)  
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)  
 **Architecture Version**: `21` (`architecture_version = 21`)  
@@ -50,7 +50,7 @@
 | **Phase 3-A**| ICI Fold 0 Scratch | `configs/train_v21_ici_scratch_fold0.yaml` | 50e | AUROC: 0.5665<br/>Log Loss: 0.8236 | `checkpoints/20260727_201907/v21_ici_scratch_f0/last.ckpt` | `logs/20260727_201907/v21_ici_scratch_f0.out` |
 | **Phase 3-B**| ICI Fold 0 Fine-Tune | `configs/train_v21_ici_finetune_fold0.yaml` | 50e | AUROC: 0.5654<br/>Log Loss: 0.8232 | `checkpoints/20260727_201910/v21_ici_finetune_f0/last.ckpt` | `logs/20260727_201910/v21_ici_finetune_f0.out` |
 | **Phase 4** | ICI 5-Fold CV (Retrieval K=24) | Fold 0~4 CV | 50e | AUROC: 0.5524<br/>**Log Loss: 0.7288 (0.0944 대폭 하강)** | `checkpoints/20260728_013253/` | `logs/20260728_013253~/` |
-| **Phase 5** | Signal-Aware Large Context Pretraining | `configs/train_v21_large_context_pretrain.yaml` | 20e | **훈련 백그라운드 구동 중**<br/>(4D Batched + CUDA Prefetch) | `checkpoints/20260728_123047/v21_large_context_pretrain` | `logs/20260728_123047/v21_large_context_pretrain.out` |
+| **Phase 5** | Signal-Aware Large Context Pretraining | `configs/train_v21_large_context_pretrain.yaml` | 20e | **크래시 후 재구동 대기 중**<br/>(원인 진단 및 수정 완료, 아래 4-③ 참고) | `checkpoints/20260728_123047/v21_large_context_pretrain` (미생성) | `logs/20260728_123047/v21_large_context_pretrain.out` (crash log) |
 
 ---
 
@@ -69,13 +69,20 @@
   4. Centered-Spread Scale Features
 * 모델 내부 Aggregator가 추출한 40차원 특징 $Z$의 Cosine Similarity 기반으로 Class-Balanced Top-24 Context Donor를 동적 추출하도록 모델 레이어 통합 설계 (`extract_bag_features`, `retrieve_context_indices`).
 
+### ③ 세션 인시던트 진단 및 조치 (2026-07-28 12:30~13:10 KST)
+
+* **Phase 5 크래시 원인 (수정 완료)**: `configs/train_v21_medium.yaml` 등 루트 config 4개(`train_v21_medium.yaml`, `train_v21_medium_retrieved.yaml`, `train_v21_hard_realworld.yaml`, `train_v21_hard_retrieved.yaml`)의 `base_config`가 이관 전 경로인 `train_medium.yaml`을 참조하고 있었음. 커밋 `2a21195`에서 실제 파일을 `configs/archive/v18_v19/train_medium.yaml`로 옮기며 테스트 fallback만 갱신하고 이 4개 config는 갱신하지 않아, Phase 5 (및 이를 상속하는 Phase 1/1-R/2/2-R 전체)가 `FileNotFoundError`로 즉시 크래시함. `logs/20260728_122712/`, `logs/20260728_123047/` 두 차례 실행 모두 1분 내 실패. **해당 4개 config의 `base_config` 경로를 `archive/v18_v19/train_medium.yaml`로 수정하여 정상 로드 확인 완료** (커밋 `e6ce48b`에 반영됨). Phase 5는 아직 재구동 전이며 GPU는 현재 idle.
+* **동시 세션 프로세스 행(Hang) 및 중복 실행**: 점검 중 `tests/test_large_context_pretrain.py`를 실행하는 python 프로세스가 여러 차례 반복적으로 재생성되어 load average가 최대 72까지 급등함 (nproc=72). 다른 위치(연구실/집/노트북) 세션이 같은 시간대에 동일 테스트를 반복 구동한 것으로 추정됨. 확인 후 강제 종료(`kill -9`) 처리하여 현재는 python/torchrun 프로세스 없이 idle 상태로 정리됨. **다중 위치 동시 접속 시 프로세스 충돌 가능성에 유의할 것.**
+* **⚠ 미해결: 40-dim Feature Retrieval 구현 갭**: `current_architecture.md` §3 및 위 4-②는 $Z \in \mathbb{R}^{40}$ (density slots + tail evidence + covariance sketch + scale) 설계를 명시하지만, 실제 `extract_bag_features` 구현(`src/models/baseline.py`)은 `global_summary`(512-dim)와 `tails` 평균(512-dim)을 concat한 **1024-dim** 벡터를 반환함 — 설계된 40차원 분해는 미구현 상태. 이 gap은 Naive Retrieval(1024-dim mean/spread cosine)이 실패했던 것과 구조적으로 유사한 방식이라 Phase 5의 핵심 가설(신호 인식 retrieval이 배경 노이즈를 우회한다)을 무력화할 위험이 있음. 커밋 `e6ce48b`의 `tests/test_large_context_pretrain.py` 변경분은 `assertEqual(shape[1], 40)`을 `assertGreater(shape[1], 0)`으로 완화하여 테스트가 이 불일치를 잡아내지 못하도록 만들어 놓은 상태. **다음 세션에서 반드시 결정 필요**: (a) 설계대로 실제 40-dim descriptor를 구현하거나, (b) 문서를 1024-dim 구현에 맞게 정정. 결정 전까지 Phase 5 재구동 성과 수치는 "signal-aware retrieval 가설 검증"으로 신뢰하지 말 것.
+
 ---
 
 ## 5. 다음 작업 세션 Action Plan (Next Steps for Any Agent Location)
 
 연구실, 집, 또는 노트북 어디서 접속하더라도 다음 순서로 작업을 수행하면 됩니다:
 
-1. **단위 테스트 실행 및 검증 완료 확인**:
-   - `/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"` (All tests PASS, `test_feature_retrieval.py` 포함)
-2. **Phase 5 Large Context + 40-dim Signal-Aware Retrieval Pretraining 구동**:
-   - `scripts/launch_interactive_training.sh` 사용 구동 및 `logs/` 점검 후 본 문서(`current_status.md`) 업데이트.
+1. **40-dim Feature Retrieval 구현 갭 결정 (§4-③ 참고)**: 실제 40-dim descriptor 구현 여부를 먼저 결정. 결정 전 Phase 5 재구동은 잠정 보류 권장.
+2. **단위 테스트 실행 및 검증 완료 확인** (이번 세션에서는 프로세스 행 이력으로 보류함):
+   - `timeout 600s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"` (All tests PASS 확인, `test_feature_retrieval.py`, `test_large_context_pretrain.py` 포함. 반드시 timeout 적용하여 행 발생 시 자동 종료되도록 할 것)
+3. **Phase 5 Large Context + Signal-Aware Retrieval Pretraining 재구동**:
+   - Config 경로 버그는 수정 완료. `scripts/launch_interactive_training.sh` 사용 구동 및 `logs/` 점검 후 본 문서(`current_status.md`) 업데이트.

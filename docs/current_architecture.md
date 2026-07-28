@@ -1,6 +1,6 @@
 # Current architecture
 
-**Last updated**: `2026-07-28 10:30:00 KST`  
+**Last updated**: `2026-07-28 13:10:00 KST`  
 **Code baseline**: Architecture Version `21` (`architecture_version = 21`)
 
 이 문서는 현재 production config 및 코드베이스가 실제로 사용하는 Architecture v21 모델 구조, 수학적 계약 및 40차원 Signal-Aware Retrieval 레이어를 명시적으로 설명합니다. 최신 개발 상태는 [`current_status.md`](current_status.md), 실험 프로토콜은 [`current_experiments.md`](current_experiments.md)를 참고합니다.
@@ -68,6 +68,9 @@ BagPFN 아키텍처 내부 Aggregator는 Bag 표현을 다음 4가지 축으로 
 - `extract_bag_features(x)`: 각 Donor Bag의 40차원 $Z$ 특징 벡터 추출.
 - `retrieve_context_indices(x, y, mask_index, retrieval_k)`: Query $Z_Q$와 Context donor $Z_{C_i}$ 간의 Cosine Similarity를 계산하여, 클래스 균형(Class-Balanced) Top-12 NR + Top-12 R ($K=24$) donor 동적 추출.
 - `forward(..., retrieval_k=24)`: 모델 순전파 내에 Signal-Aware Retrieval을 직접 내장.
+
+> [!WARNING]
+> **⚠ 구현 갭 (2026-07-28 세션 확인)**: 현재 `src/models/baseline.py`의 `extract_bag_features` 실제 구현은 위 40-dim 설계(density slots / tail evidence / covariance sketch / scale)를 따르지 않고, `global_summary`(512-dim)와 `tails` 평균(512-dim)을 concat한 **1024-dim** 벡터를 반환함. 설계된 진짜 40-dim descriptor는 미구현 상태이며, 자세한 내용과 조치 필요 사항은 [`current_status.md`](current_status.md) §4-③ 참고.
 
 ---
 
