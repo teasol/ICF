@@ -11,7 +11,6 @@ data_overrides:
   retrieval_k: 24
   use_signal_aware_retrieval: true
   dataset_kwargs:
-    num_candidate_bags_pretrain: 96
     response_task_probabilities: [0.20, 0.20, 0.20, 0.20, 0.20]
     return_task_metadata: true
 
@@ -19,6 +18,7 @@ model_kwargs:
   ranking_loss_weight: 0.10
   routing_sparsity_weight: 0.0
   routing_balance_weight: 0.0
+  retrieval_k: 24
 
 model_overrides:
   covariance_relation:

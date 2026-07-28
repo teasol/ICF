@@ -107,6 +107,20 @@ class ModelInterface(L.LightningModule):
                 for episode_y in y[1:]
             ]
             mask_index = torch.stack(masks)
+            retrieval_k = self.hparams.get("retrieval_k", 0)
+            if retrieval_k > 0:
+                # forward_episode_batch runs every bag in the candidate pool
+                # through the dense aggregator with no reduction, so a large
+                # pretraining pool (N candidates per episode) must be cut down
+                # to the retrieved context here -- otherwise E*N bags all go
+                # through one batched forward and OOM.
+                x, y, mask_index = self.model.retrieve_context_indices(
+                    x,
+                    y,
+                    mask_index,
+                    retrieval_k=retrieval_k,
+                    chunk_size=self.hparams.get("retrieval_chunk_size", 32),
+                )
             logits, batched_auxiliary = self.model.forward_episode_batch(
                 x, y, mask_index, return_auxiliary=True
             )
@@ -701,6 +715,8 @@ class ModelInterface(L.LightningModule):
             "ranking_loss_weight",
             "routing_sparsity_weight",
             "routing_balance_weight",
+            "retrieval_k",
+            "retrieval_chunk_size",
             "fixed_training_queries",
         ):
             kwargs.pop(key, None)

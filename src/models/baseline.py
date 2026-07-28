@@ -3345,6 +3345,26 @@ class BaseModel(nn.Module):
             query_index = self._normalize_mask_index(mask_index, num_bags=len(y) if y.ndim == 1 else y.shape[1], device=y.device)
             return x, y, query_index
 
+        # This entire computation only decides which bag *indices* to keep;
+        # the returned x/y are plain slices of the original input, not
+        # functions of the descriptor's gradient graph. Without no_grad, the
+        # autograd engine retains every chunk's intermediate aggregator
+        # activations (anchors, slot assignments, etc.) until backward(),
+        # which for a large candidate pool (E*N bags chunked many times)
+        # blew up to 100+ GiB and OOM'd although each chunk alone is small.
+        with torch.no_grad():
+            return self._retrieve_context_indices_impl(
+                x, y, mask_index, retrieval_k, chunk_size
+            )
+
+    def _retrieve_context_indices_impl(
+        self,
+        x: torch.Tensor | Sequence[torch.Tensor],
+        y: torch.Tensor,
+        mask_index: torch.Tensor | Sequence[int] | int,
+        retrieval_k: int,
+        chunk_size: int,
+    ) -> tuple[torch.Tensor | Sequence[torch.Tensor], torch.Tensor, torch.Tensor]:
         if isinstance(x, torch.Tensor) and x.ndim == 4:
             # 4D Batched Episode Input: [E, N, instances, features]
             E, N, num_instances, feature_dim = x.shape
@@ -3393,7 +3413,15 @@ class BaseModel(nn.Module):
                 selected_context_tensor = torch.tensor(selected_context_idx, dtype=torch.long, device=device)
                 final_x_b = torch.cat([x_b[selected_context_tensor], x_b[q_idx_b]], dim=0)
                 final_y_b = torch.cat([y_b[selected_context_tensor], y_b[q_idx_b]], dim=0)
-                mask_index_b = torch.tensor([len(selected_context_idx)], dtype=torch.long, device=device)
+                # Query bags occupy every position after the selected context
+                # (not just one), matching the 3D path below -- q_idx_b can
+                # hold multiple indices (training_targets_per_episode > 1).
+                mask_index_b = torch.arange(
+                    len(selected_context_idx),
+                    len(selected_context_idx) + q_idx_b.numel(),
+                    dtype=torch.long,
+                    device=device,
+                )
 
                 res_x.append(final_x_b)
                 res_y.append(final_y_b)

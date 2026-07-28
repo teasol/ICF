@@ -470,7 +470,19 @@ class DataInterface(LightningDataModule):
         split: str,
         collate_fn: Any,
     ) -> DataLoader[Any]:
-        num_workers: int = self.hparams.get("num_workers", 0)
+        # A dataset that generates directly on CUDA (dataset_kwargs
+        # generation_device="cuda") gains nothing from multiprocessing
+        # workers -- there is still only one physical GPU -- while each
+        # worker adds its own CUDA context and its own prefetched batches,
+        # which multiplies GPU memory usage (observed: 4 workers alone held
+        # 100+ GiB) and starves the main process's forward/backward pass.
+        # The existing CudaPrefetchDataLoader already overlaps generation
+        # with training via an in-process background CUDA stream, so
+        # multi-process workers are only used for CPU-side generation.
+        generates_on_cuda = torch.device(
+            getattr(dataset, "generation_device", "cpu")
+        ).type == "cuda"
+        num_workers: int = 0 if generates_on_cuda else self.hparams.get("num_workers", 0)
         persistent_workers = (
             self.hparams.get("persistent_workers", False) and num_workers > 0
         )
@@ -481,15 +493,27 @@ class DataInterface(LightningDataModule):
             if split == "train" and use_prefetch
             else DataLoader
         )
+        # Worker processes that generate data on CUDA cannot fork from a
+        # process that has already initialized a CUDA context --
+        # torch.Generator(device="cuda") raises "CUDA error: initialization
+        # error" inside a forked worker. "spawn" starts fresh interpreters
+        # instead, avoiding the conflict. Moot when generates_on_cuda forces
+        # num_workers=0 above, but kept for CPU-generating multi-worker runs.
+        multiprocessing_context = "spawn" if num_workers > 0 else None
+        # pin_memory only applies to dense CPU tensors; a CUDA-generating
+        # dataset hands the loader CUDA tensors already, which pin_memory()
+        # cannot pin.
+        pin_memory = self.hparams.get("pin_memory", True) and not generates_on_cuda
         return loader_cls(
             dataset,
             batch_size=batch_size,
             shuffle=self.hparams.get(f"{split}_shuffle", split == "train"),
             num_workers=num_workers,
-            pin_memory=self.hparams.get("pin_memory", True),
+            pin_memory=pin_memory,
             drop_last=False,
             persistent_workers=persistent_workers,
             collate_fn=collate_fn,
+            multiprocessing_context=multiprocessing_context,
         )
 
     def _dataset_class(self, dataset_src: str) -> type[Dataset[Any]]:
