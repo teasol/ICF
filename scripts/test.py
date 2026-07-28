@@ -161,7 +161,7 @@ def binary_metrics(result: dict[str, Any]) -> dict[str, float | int]:
         .mean()
         .item()
     )
-    return {
+    metrics: dict[str, float | int] = {
         "accuracy": accuracy(result),
         "balanced_accuracy": balanced_accuracy,
         "auroc": auroc,
@@ -174,13 +174,55 @@ def binary_metrics(result: dict[str, Any]) -> dict[str, float | int]:
         "probability_min": float(probability.min().item()),
         "probability_max": float(probability.max().item()),
     }
+    low, high = auroc_confidence_interval(probability, target)
+    metrics["auroc_ci_low"] = low
+    metrics["auroc_ci_high"] = high
+    return metrics
+
+
+def auroc_confidence_interval(
+    probability: torch.Tensor,
+    target: torch.Tensor,
+    samples: int = 2000,
+    seed: int = 0,
+) -> tuple[float, float]:
+    """Bootstrap 95% CI for AUROC.
+
+    Reported alongside every point estimate on purpose. On this cohort (n=87)
+    the interval is roughly +/-0.13 wide, and a whole line of architecture work
+    was pursued on the strength of 0.04-AUROC gaps that this interval shows to
+    be indistinguishable from noise.
+    """
+    positive = int((target == 1).sum())
+    if positive == 0 or positive == target.numel():
+        return float("nan"), float("nan")
+    generator = torch.Generator().manual_seed(seed)
+    count = target.numel()
+    values = []
+    for _ in range(samples):
+        index = torch.randint(0, count, (count,), generator=generator)
+        resampled = target[index]
+        if resampled.sum() in (0, count):
+            continue
+        scores = probability[index]
+        pos = scores[resampled == 1]
+        neg = scores[resampled == 0]
+        comparisons = pos[:, None] - neg[None, :]
+        values.append(
+            ((comparisons > 0).float() + 0.5 * (comparisons == 0).float()).mean().item()
+        )
+    if not values:
+        return float("nan"), float("nan")
+    spread = torch.tensor(values)
+    return spread.quantile(0.025).item(), spread.quantile(0.975).item()
 
 
 def format_metrics(metrics: dict[str, float | int]) -> str:
     return (
         f"accuracy={metrics['accuracy']:.4f}, "
         f"balanced_accuracy={metrics['balanced_accuracy']:.4f}, "
-        f"AUROC={metrics['auroc']:.4f}, "
+        f"AUROC={metrics['auroc']:.4f} "
+        f"[{metrics['auroc_ci_low']:.3f}, {metrics['auroc_ci_high']:.3f}], "
         f"log_loss={metrics['log_loss']:.4f}, "
         f"predicted_positive={metrics['num_predicted_positive']}/"
         f"{metrics['num_samples']}, "

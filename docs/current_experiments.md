@@ -10,19 +10,57 @@
 
 ---
 
-## 0. 결과를 보고하기 전에 반드시 지킬 것
+## 0. 평가 프로토콜 (실험 시작 전 반드시 읽을 것)
 
-ICI 코호트는 n=87 (positive 37)입니다. 이 규모에서 AUROC의 95% 신뢰구간 폭은 **약 ±0.13**이며, v21 시대에 비교하던 0.004~0.04 수준의 차이는 **전부 노이즈였습니다** (paired bootstrap 승률 0.52~0.55). 상세: [`history/v21_retrieval_investigation.md`](history/v21_retrieval_investigation.md) §4-⑧.
+### ① 이 코호트가 검출할 수 있는 효과 크기
 
-따라서 **점추정치만 보고하지 말고 반드시 CI를 함께 보고**합니다:
+ICI 코호트는 n=87 (positive 37 / negative 50)입니다. `scripts/power_analysis.py`로 측정한 검정력 (baseline AUROC 0.55, 모델 간 상관 ρ=0.7 — 실제 Phase 6b vs 6c의 Pearson ρ=0.737에서 추정):
 
-```bash
-python scripts/compare_predictions.py \
-  predictions/<run_a>.pt \
-  predictions/<run_b>.pt
+| 실제 AUROC 향상 | 검출 확률(power) |
+|---:|---:|
+| +0.02 | 15% |
+| +0.05 | 26% |
+| +0.10 | 66% |
+| **+0.15** | **92%** |
+| +0.20 | 99% |
+
+> [!IMPORTANT]
+> **+0.13~0.15 AUROC 이상을 기대할 수 없는 실험은 이 코호트에서 돌릴 가치가 없습니다.** 그보다 작은 효과는 있어도 못 찾습니다(power < 80%). v21 시대에 쫓던 0.004~0.04 차이는 검출 확률이 15~26%로, 사실상 동전 던지기였습니다.
+>
+> 이 표가 뜻하는 것: 아키텍처를 조금씩 바꿔가며 ICI AUROC로 우열을 가리는 방식 자체가 **이 코호트에서는 작동하지 않습니다.** 큰 효과를 노리거나, 코호트를 키우거나, 합성 데이터처럼 n을 늘릴 수 있는 곳에서 판단해야 합니다.
+
+재현: `python scripts/power_analysis.py`
+
+### ② 세 가지 수치를 구분해서 볼 것
+
+`scripts/evaluate_protocol.py`는 서로 다른 질문에 답하는 세 수치를 보고합니다:
+
+| 수치 | 무엇을 재는가 | seed를 늘리면? |
+|---|---|---|
+| per-seed AUROC | 한 partition에서의 5-fold CV 결과 (87명 전원) | — |
+| across-seed mean ± SD | partition/학습 재현성. SD가 크면 단일 seed 숫자는 못 믿음 | SD는 그대로, 평균의 표준오차는 감소 |
+| pooled bootstrap CI | **코호트 자체의 표본 오차** | **줄어들지 않음** — 같은 87명을 재사용하므로 |
+
+**핵심**: seed를 5개로 늘려도 CI는 좁아지지 않습니다. 87명이라는 한계는 사람을 더 모아야만 풀립니다. seed 확장은 "이 숫자가 partition 운에 좌우되는가"를 답할 뿐입니다.
+
+### ③ 사용 가능한 자원 (v21 시대에는 1/5만 사용했음)
+
+- **seed partition 5개**: `SEED42`, `SEED1234`, `SEED2026`, `SEED271828`, `SEED314159`. 각각 87명 전원을 5-fold로 정확히 한 번씩 덮는 독립 분할입니다 (CV0 기준 seed 간 val donor 겹침 1~5/18). **v21 실험은 전부 SEED42 하나만 썼습니다.**
+- **외부 코호트**: `data/ICI_GSE285888_scConcept_512.pt` (26명, R 15 / NR 11). `ICIDataset(state='external')`로 로드되며 `scripts/test.py`가 `--validation-only` 없이 실행될 때 평가됩니다. **v21 실험은 이것도 쓰지 않았습니다.** 유일하게 진짜 독립적인 읽기이므로 CV 결과와 절대 합치지 말 것.
+
+### ④ 보고 형식
+
+`scripts/test.py`는 이제 모든 AUROC에 bootstrap 95% CI를 **자동으로** 붙여 출력합니다 (점추정치만 보고하는 것이 구조적으로 어렵게 만듦):
+
+```
+Fold 0 validation: accuracy=0.6092, AUROC=0.5454 [0.422, 0.664], log_loss=0.7921, ...
 ```
 
-출력: 각 run의 AUROC + bootstrap 95% CI, 그리고 pair별 승률(0.5 = 구분 불가).
+두 run을 비교할 때는 paired bootstrap 승률을 함께 봅니다 (0.5 = 구분 불가):
+
+```bash
+python scripts/compare_predictions.py predictions/<run_a>.pt predictions/<run_b>.pt
+```
 
 ---
 
@@ -57,30 +95,43 @@ v21의 K=24 retrieval을 제거한 근거는 [`current_status.md`](current_statu
 - **Config**: `configs/train_v22_hard_realworld.yaml`
 - **참고 기준선 (v21 Phase 2)**: `val_ce_loss: 0.6845` @ 50 epoch.
 
-### Stage 3: ICI 실데이터 5-Fold CV
-- **Config**: `configs/train_v22_ici_finetune_fold{0..4}.yaml` (fine-tune), `configs/train_v22_ici_scratch_fold0.yaml` (scratch 대조군)
-- **실행**:
-  ```bash
-  # 사전학습 체크포인트에서 미세조정
-  PRETRAINED_CKPT=/abs/path/to/v22_pretrain.ckpt scripts/launch_ici_5fold.sh
+### Stage 3: ICI 실데이터 — 다중 seed 5-Fold CV + 외부 코호트
 
-  # 또는 scratch부터
-  scripts/launch_ici_5fold.sh
+- **Config**: `configs/train_v22_ici_finetune.yaml` (fine-tune), `configs/train_v22_ici_scratch.yaml` (scratch 대조군).
+  fold와 seed는 config에 박아두지 않고 **`--cv` / `--seed`로 주입**합니다 (per-fold config 5개를 두던 방식은 폐기). config의 `seed: 42` / `cv: 0`은 아무것도 지정하지 않았을 때의 기본값일 뿐입니다.
+
+- **실행 (전체 sweep: 5 seed × 5 fold = 25 run)**:
+  ```bash
+  # scratch
+  scripts/launch_ici_protocol.sh
+
+  # v22 사전학습 체크포인트에서 미세조정
+  PRETRAINED_CKPT=/abs/path/to/v22_pretrain.ckpt scripts/launch_ici_protocol.sh
+
+  # 일부만
+  SEEDS="42 1234" scripts/launch_ici_protocol.sh
   ```
-- **평가**:
+  seed 내부의 5 fold는 동시 실행하고, seed끼리는 순차 실행합니다 (GPU 25중 점유 방지). run 목록은 `logs/v22_ici_sweep_manifest.tsv`에 기록됩니다.
+
+- **seed별 평가** (manifest의 체크포인트 경로 사용):
   ```bash
   python scripts/test.py \
-    --checkpoints \
-      checkpoints/<ts0>/v22_ici_finetune_f0/last.ckpt \
-      checkpoints/<ts1>/v22_ici_finetune_f1/last.ckpt \
-      checkpoints/<ts2>/v22_ici_finetune_f2/last.ckpt \
-      checkpoints/<ts3>/v22_ici_finetune_f3/last.ckpt \
-      checkpoints/<ts4>/v22_ici_finetune_f4/last.ckpt \
-    --config configs/train_v22_ici_finetune_fold0.yaml \
+    --checkpoints <해당 seed의 fold0..4 last.ckpt 5개> \
+    --config configs/train_v22_ici_finetune.yaml \
     --precision bf16-mixed --validation-only \
-    --output predictions/ici_predictions_v22_5fold.pt
+    --output predictions/v22_ici_seed<SEED>.pt
   ```
-- **참고 기준선 (v21 Phase 6c, 동일한 no-retrieval 구성)**: AUROC 0.5454 / Log Loss 0.7921 / Accuracy 0.6092.
+  `--validation-only`를 빼면 외부 코호트(GSE285888) 추론까지 수행하고 fold 앙상블 결과를 함께 저장합니다.
+
+- **집계**:
+  ```bash
+  python scripts/evaluate_protocol.py \
+    --predictions predictions/v22_ici_seed*.pt \
+    --external predictions/v22_ici_external.pt
+  ```
+
+- **참고 기준선 (v21 Phase 6c, 동일한 no-retrieval 구성, SEED42 단일)**: AUROC 0.5454 [0.422, 0.664] / Log Loss 0.7921 / Accuracy 0.6092.
+  §0-①에 따라 v22가 이보다 **+0.13 이상** 좋지 않으면 이 코호트에서는 "개선됐다"고 말할 수 없습니다.
 
 ---
 
@@ -113,4 +164,17 @@ timeout 1500s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest disco
 - `tests/test_base_model.py` — aggregator/meta-classifier 계약, `architecture_version == 22`
 - `tests/test_model_interface.py` — 손실 항, 체크포인트 버전 게이트 (v21 거부 / v22 수용)
 - `tests/test_batched_episode_forward.py` — 4D batched forward가 에피소드별 독립 forward와 일치하는지 (v21 retrieval 스위트 대체)
+- `tests/test_evaluation_protocol.py` — AUROC/Log Loss/bootstrap CI 정확성, **"n이 작으면 CI가 넓어진다"는 프로토콜의 핵심 전제** 검증
 - `tests/test_ici_dataset.py`, `tests/test_synthetic_variable_cells.py`, `tests/test_scheduler.py`, `tests/test_checkpoint_callback.py`, `tests/test_learnability_ladder.py`
+
+---
+
+## 5. 평가 도구 요약
+
+| 스크립트 | 용도 |
+|---|---|
+| `scripts/power_analysis.py` | 실험 전: 이 코호트가 검출 가능한 효과 크기 확인 |
+| `scripts/launch_ici_protocol.sh` | 5 seed × 5 fold sweep 실행 |
+| `scripts/test.py` | 체크포인트 → 예측 파일 (AUROC에 CI 자동 부착) |
+| `scripts/evaluate_protocol.py` | 다중 seed 집계 + 외부 코호트 보고 |
+| `scripts/compare_predictions.py` | 두 run 비교 (CI + paired bootstrap 승률) |

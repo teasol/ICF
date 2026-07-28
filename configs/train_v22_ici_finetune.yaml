@@ -8,6 +8,8 @@ data:
   drop_last: false
   dataset_kwargs:
     root_dir: data/ICI_CVOnly_scConcept_512
+    # seed / cv are swept per run via --seed / --cv (scripts/launch_ici_protocol.sh).
+    # These defaults only apply when a run supplies neither.
     seed: 42
     target_cells: 1000
     all_cell_mean: false

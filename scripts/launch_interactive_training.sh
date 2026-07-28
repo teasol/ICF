@@ -23,6 +23,10 @@ NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 
 CKPT_PATH="${CKPT_PATH:-}"
+# Optional cross-validation fold. When set, it overrides dataset_kwargs.cv from
+# the config, so one config plus a SEED/CV sweep covers the whole grid instead
+# of needing a checked-in config per fold.
+CV="${CV:-}"
 RUN_TIME="${ICF_RUN_TIME:-$(date +%Y%m%d_%H%M%S)}"
 LOG_ROOT="${ICF_LOG_ROOT:-${PROJECT_ROOT}/logs}"
 CHECKPOINT_ROOT="${ICF_CHECKPOINT_ROOT:-${PROJECT_ROOT}/checkpoints}"
@@ -55,6 +59,7 @@ if [[ "${ICF_DETACHED_WORKER:-0}" != "1" && "${ICF_FOREGROUND:-0}" != "1" ]]; th
         "CUDA_DEVICES=${CUDA_DEVICES}"
         "NPROC_PER_NODE=${NPROC_PER_NODE}"
         "CKPT_PATH=${CKPT_PATH}"
+        "CV=${CV}"
     )
     nohup setsid env "${DETACHED_ENV[@]}" "$0" "${RUN_KIND}" "${DEFAULT_CONFIG}" \
         >"${LAUNCH_LOG}" 2>&1 < /dev/null &
@@ -93,6 +98,9 @@ TRAIN_ARGS=(
 )
 if [[ -n "${CKPT_PATH}" ]]; then
     TRAIN_ARGS+=(--ckpt-path "${CKPT_PATH}")
+fi
+if [[ -n "${CV}" ]]; then
+    TRAIN_ARGS+=(--cv "${CV}")
 fi
 
 echo "Starting ${RUN_KIND} training on GPUs ${CUDA_DEVICES}."
