@@ -233,7 +233,8 @@ class ModelInterface(L.LightningModule):
         dataloader_idx: int = 0,
     ) -> dict[str, torch.Tensor]:
         x, y, mask_index, _, _ = self._unpack_evaluation_batch(batch, "prediction")
-        logits = self.model(x, y, mask_index)
+        retrieval_k = self.hparams.get("retrieval_k", 0)
+        logits = self.model(x, y, mask_index, retrieval_k=retrieval_k)
         probabilities = torch.softmax(logits, dim=-1)
         return {
             "target": y[mask_index],
@@ -246,7 +247,10 @@ class ModelInterface(L.LightningModule):
         x, y, mask_index, oracle_abundance, task_index = (
             self._unpack_evaluation_batch(batch, stage)
         )
-        logits, auxiliary = self.model(x, y, mask_index, return_auxiliary=True)
+        retrieval_k = self.hparams.get("retrieval_k", 0)
+        logits, auxiliary = self.model(
+            x, y, mask_index, return_auxiliary=True, retrieval_k=retrieval_k
+        )
         loss, terms = self._losses_from_output(logits, auxiliary, y[mask_index])
         self.log(
             f"{stage}_loss",
@@ -469,7 +473,10 @@ class ModelInterface(L.LightningModule):
         y: torch.Tensor,
         mask_index: torch.Tensor,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        logits, auxiliary = self.model(x, y, mask_index, return_auxiliary=True)
+        retrieval_k = self.hparams.get("retrieval_k", 0)
+        logits, auxiliary = self.model(
+            x, y, mask_index, return_auxiliary=True, retrieval_k=retrieval_k
+        )
         return self._losses_from_output(logits, auxiliary, y[mask_index])
 
     def _losses_from_output(

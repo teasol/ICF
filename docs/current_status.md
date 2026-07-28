@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-28 17:59:00 KST`  
+**Last updated**: `2026-07-28 21:20:00 KST`  
 **Latest Commit**: `42c3fa8` (`docs: record Phase 5 launch saga and successful training run`)  
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)  
 **Architecture Version**: `21` (`architecture_version = 21`)  
@@ -51,7 +51,8 @@
 | **Phase 3-B**| ICI Fold 0 Fine-Tune | `configs/train_v21_ici_finetune_fold0.yaml` | 50e | AUROC: 0.5654<br/>Log Loss: 0.8232 | `checkpoints/20260727_201910/v21_ici_finetune_f0/last.ckpt` | `logs/20260727_201910/v21_ici_finetune_f0.out` |
 | **Phase 4** | ICI 5-Fold CV (Retrieval K=24) | Fold 0~4 CV | 50e | AUROC: 0.5524<br/>**Log Loss: 0.7288 (0.0944 대폭 하강)** | `checkpoints/20260728_013253/` | `logs/20260728_013253~/` |
 | **Phase 5** | Signal-Aware Large Context Pretraining | `configs/train_v21_large_context_pretrain.yaml` | 20e | **20 epoch 완주 (6번째 재시도 만에 성공, §4-④~⑤ 참고)**<br/>**Best `val_ce_loss: 0.5940`** (epoch 14) — Phase 1 Full-Context(`0.5921`)에 근접, Phase 1-R Naive Retrieval(`0.6839`) 대비 대폭 개선<br/>최종 epoch 19: `val_loss: 0.608`, `train_loss: 0.723` (progress-bar 결합 loss, `val_ce_loss`와 별도 지표) | `checkpoints/20260728_144957/v21_large_context_pretrain/epoch=014-val_ce_loss=0.5940.ckpt` | `logs/20260728_144957/v21_large_context_pretrain.out` |
-| **Phase 6** | ICI 5-Fold CV Fine-Tune (Phase 5 체크포인트 기반) | `configs/train_v21_ici_finetune_fold{0..4}.yaml` (`scripts/launch_phase6_5fold.sh`) | 50e (resume epoch 14부터) | **완료, 그러나 가설과 반대 방향**<br/>**AUROC: 0.5081, Log Loss: 0.9596** (Phase 4 대비 AUROC `0.0443` 하락, Log Loss `0.2308` 악화, `p1_std` 0.166→0.287로 과신 심화). §4-⑥ 원인 분석 참고 | `checkpoints/20260728_1757{10,12,14,16,18}/v21_ici_finetune_phase6_f{0..4}/` | `logs/20260728_1757{10,12,14,16,18}/v21_ici_finetune_phase6_f{0..4}.out` |
+| **Phase 6** | ICI 5-Fold CV Fine-Tune (Phase 5 체크포인트, 외부 Naive Retrieval 미세조정 — 불일치) | `configs/train_v21_ici_finetune_fold{0..4}.yaml` (`scripts/launch_phase6_5fold.sh`) | 50e (resume epoch 14부터) | **완료, 가설과 반대 방향**<br/>AUROC: 0.5081, Log Loss: 0.9596 (Phase 4 대비 악화). §4-⑥ 원인 분석 참고 | `checkpoints/20260728_1757{10,12,14,16,18}/v21_ici_finetune_phase6_f{0..4}/` | `logs/20260728_1757{10,12,14,16,18}/v21_ici_finetune_phase6_f{0..4}.out` |
+| **Phase 6b** | ICI 5-Fold CV Fine-Tune (Phase 5 체크포인트, 모델 내부 Signal-Aware 미세조정 — 일치) | `configs/train_v21_ici_finetune_signalaware_fold{0..4}.yaml` (`scripts/launch_phase6b_5fold.sh`) | 50e (resume epoch 14부터) | **완료**<br/>AUROC: 0.5481, Log Loss: 0.8672, Accuracy: 0.5747 (Phase 6 대비 개선, Phase 4에는 여전히 못 미침). §4-⑦ 참고 | `checkpoints/20260728_2052{37,39,41,43,45}/v21_ici_finetune_phase6b_f{0..4}/` | `logs/20260728_2052{37,39,41,43,45}/v21_ici_finetune_phase6b_f{0..4}.out` |
 
 ---
 
@@ -129,13 +130,32 @@ Config를 고친 뒤에도 학습이 5차례 연속 크래시했고, 매번 근�
   - 결과적으로 모델은 사전학습 때 한 번도 본 적 없는 분포(Naive Retrieval이 선별한, 배경 노이즈가 유사한 24명 context)를 미세조정 때 처음 마주하게 되어, 오히려 Naive Retrieval로 사전학습된 Phase 2-R 체크포인트(Phase 4의 기반)보다 적응이 어려웠을 가능성이 높음.
 * **다음 세션 결정 필요 (사용자 논의 후 진행)**: 미세조정 시에도 모델 내부 Signal-Aware retrieval(`extract_bag_features`/`retrieve_context_indices`)을 사용하도록 ICI fine-tune config 및 `scripts/test.py` 평가 경로를 맞춰 재실험할지 여부. 현재 `BaseModel.forward`(단일 episode 경로, ICI처럼 `episode_dataset: false`인 non-episode 데이터에도 쓰이는지)와 `retrieval_k`가 `data:` 섹션이 아닌 `model_kwargs`로 전달되어야 하는지 등 배선 확인이 선행되어야 함.
 
+### ⑦ Phase 6b: Context 선별 방식을 사전학습과 통일 (2026-07-28 20:49~21:15 KST)
+
+* **가설(§4-⑥)에 따른 조치**: 미세조정 시에도 모델 내부 Signal-Aware retrieval을 쓰도록 배선 수정.
+  - `src/modules/model_interface.py`: `_episode_losses`(3D training 경로), `_evaluation_step`, `predict_step` 세 곳 모두 `self.model(...)` 호출에 `retrieval_k=self.hparams.get("retrieval_k", 0)`를 명시적으로 전달하도록 수정 (기존에는 이 세 경로 모두 `retrieval_k`를 아예 전달하지 않아 `BaseModel.forward`의 기본값 `0`으로 항상 retrieval이 꺼져 있었음 — 4D 배치 경로에만 있던 배선이 3D/non-episode 경로엔 없었던 것).
+  - `configs/train_v21_ici_finetune_signalaware_fold{0..4}.yaml` 5개 신규 생성 (기존 `train_v21_ici_finetune_fold{0..4}.yaml`를 보존하기 위해 복사본으로 작업): `data.retrieval_k: 24`(외부 Naive Retrieval collator) 삭제 → `EvaluationEpisodeCollator`로 폴백되어 전체 train cohort가 후보 pool로 모델에 그대로 전달됨. 대신 `model_kwargs.retrieval_k: 24` 추가 → 모델이 내부적으로 Signal-Aware 방식으로 24명 선별.
+  - `scripts/launch_phase6b_5fold.sh` 신규 생성 (Phase 6와 동일 Phase 5 체크포인트, config만 signalaware 버전으로 교체).
+  - **검증**: fold0 단독 스모크 테스트로 크래시 없음 확인 후 5-fold 전체 실행 → 5-fold 모두 50 epoch(체크포인트 epoch 14부터 이어서) 정상 완주.
+* **결과 (`predictions/ici_predictions_v21_phase6b_5fold.pt`)**:
+
+  | 지표 | Phase 4 (Naive/Naive) | Phase 6 (Signal-Aware pretrain / Naive finetune, 불일치) | Phase 6b (Signal-Aware/Signal-Aware, 일치) |
+  |---|---:|---:|---:|
+  | AUROC | **0.5524** | 0.5081 | 0.5481 |
+  | Log Loss | **0.7288** | 0.9596 | 0.8672 |
+  | Accuracy | 0.5287 | 0.5057 | **0.5747** |
+  | `p1_std` | **0.1664** | 0.2874 | 0.2545 |
+
+* **해석**: 사전학습/미세조정의 context 선별 방식을 통일하자 Phase 6 대비 확실히 개선됨(AUROC `0.5081→0.5481`, Log Loss `0.9596→0.8672`, Accuracy는 Phase 4보다도 개선) — §4-⑥의 "context 선별 분포 불일치" 가설이 문제의 **일부**였음을 뒷받침함. 그러나 Phase 4(Naive Retrieval 기반)의 AUROC/Log Loss를 여전히 넘어서지 못함. 즉 **분포 불일치가 gap의 전부는 아니며**, 다른 요인(예: 합성 데이터와 실제 ICI 데이터 간 근본적 도메인 차이, Phase 5가 학습한 candidate-pool 규모(N=60~100)와 ICI 실데이터 규모(~70명)의 차이, 또는 Signal-Aware retrieval 자체가 87명 규모의 실데이터에서는 아직 이점이 없을 가능성)가 남아있음.
+* **결론**: 현재까지의 3개 실험(Phase 4/6/6b) 중 **Phase 4(Naive Retrieval 사전학습)가 AUROC/Log Loss 기준 여전히 최선**. Signal-Aware Retrieval 사전학습(Phase 5/6/6b 계열)은 합성 데이터 사전학습 손실은 더 낮지만 실데이터 전이 성능은 아직 Naive Retrieval을 능가하지 못함 — 추가 조사 또는 여기서 이 방향 실험을 종료할지는 다음 세션에서 사용자와 논의 필요.
+
 ---
 
 ## 5. 다음 작업 세션 Action Plan (Next Steps for Any Agent Location)
 
 연구실, 집, 또는 노트북 어디서 접속하더라도 다음 순서로 작업을 수행하면 됩니다:
 
-1. **[완료, 결과는 가설과 반대] Phase 6 원인 분석 및 대응 방향 결정 필요** (§4-⑥ 참고): Phase 5 체크포인트로 미세조정한 결과가 Phase 4(Naive Retrieval 사전학습)보다 오히려 나빠짐 (AUROC `0.5524`→`0.5081`, Log Loss `0.7288`→`0.9596`). 유력한 원인 가설(§4-⑥)은 "사전학습 시 context 선별 방식(모델 내부 Signal-Aware `retrieve_context_indices`)과 미세조정 시 context 선별 방식(외부 `data_interface.py`의 Naive Retrieval collator, `retrieval_k: 24`)이 서로 다른 분포라 전이가 실패했다"는 것. 다음 세션에서 미세조정 시에도 모델 내부 Signal-Aware retrieval을 쓰도록 config/eval 경로를 맞추는 실험이 필요한지 사용자와 논의 후 진행할 것.
+1. **[완료, Phase 4가 여전히 최선] Signal-Aware Retrieval 사전학습 계열(Phase 5/6/6b) 추가 진행 여부 결정 필요** (§4-⑥~⑦ 참고): Phase 6(불일치 context 선별)이 Phase 4보다 나빠져 원인 가설(사전학습-미세조정 context 선별 방식 불일치)을 세워 Phase 6b(일치시킨 버전)로 재실험함. Phase 6b는 Phase 6보다 개선됐지만(AUROC `0.5081→0.5481`, Log Loss `0.9596→0.8672`) 여전히 Phase 4(AUROC `0.5524`, Log Loss `0.7288`)에는 못 미침. 즉 불일치는 원인의 일부였을 뿐 전부는 아니었음. 다음 세션에서: (a) 이 방향(Signal-Aware Retrieval 사전학습)을 더 조사할지(예: candidate pool 규모를 ICI 실데이터 규모(~70명)에 맞춰 재사전학습), 아니면 (b) Naive Retrieval 기반 Phase 4를 현재 최선의 실데이터 파이프라인으로 확정하고 이 실험 계열을 종료할지 사용자와 논의 후 결정.
 2. **`test_4d_batched_forward` CPU 지연/무응답 원인 확인 (§4-③ 참고)**: GPU(`CUDA_VISIBLE_DEVICES=0`)에서 재현 여부 확인하거나, 10분+ 타임아웃으로 단독 실행해 실제 종료 여부와 소요 시간 측정.
 3. **단위 테스트 전체 실행 및 검증 완료 확인**:
    - `timeout 600s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"` (All tests PASS 확인, `test_feature_retrieval.py`, `test_large_context_pretrain.py` 포함. 반드시 timeout 적용하여 행 발생 시 자동 종료되도록 할 것. 2번 이슈로 인해 이번 세션에서는 전체 discover 대신 개별 스크립트 검증만 수행함)

@@ -1,6 +1,6 @@
 # Current experiments
 
-**Last updated**: `2026-07-28 17:59:00 KST`  
+**Last updated**: `2026-07-28 21:20:00 KST`  
 **Architecture Version**: `21` (`architecture_version = 21`)
 
 이 문서는 Architecture v21 평가에 사용되는 합성 데이터 파라미터, 실세계 ICI 데이터셋 24-Donor Retrieval 프로토콜, 그리고 5단계 검증 로드맵의 실행 명령어와 실증 수치를 시분초 단위로 명시적으로 설명합니다.
@@ -121,3 +121,27 @@
 - **결과 (가설과 반대)**: **AUROC: 0.5081** (Phase 4 `0.5524` 대비 악화), **Log Loss: 0.9596** (Phase 4 `0.7288` 대비 대폭 악화), `p1_std: 0.2874` (Phase 4 `0.1664` 대비 과신 심화).
 - **원인 가설**: 사전학습(모델 내부 Signal-Aware retrieval)과 미세조정(fine-tune config가 물려받은 외부 Naive Retrieval collator, `data.retrieval_k: 24`)의 context 선별 분포 불일치. 상세는 [`current_status.md`](current_status.md) §4-⑥ 참고.
 - **예측 결과 파일**: `predictions/ici_predictions_v21_phase6_5fold.pt`
+
+---
+
+### Phase 6b: ICI 5-Fold CV Fine-Tune, 모델 내부 Signal-Aware Retrieval로 통일
+- **목표**: Phase 6의 원인 가설(사전학습-미세조정 context 선별 방식 불일치) 검증. 미세조정 시에도 사전학습과 동일하게 모델 내부 `retrieve_context_indices`를 쓰도록 배선.
+- **코드 변경**: `src/modules/model_interface.py`의 `_episode_losses`/`_evaluation_step`/`predict_step` 세 곳에 `retrieval_k=self.hparams.get("retrieval_k", 0)` 전달 추가 (기존에는 4D 배치 경로에만 있고 3D/non-episode 경로엔 없었음).
+- **Config**: `configs/train_v21_ici_finetune_signalaware_fold{0..4}.yaml` (신규, 기존 finetune fold config를 보존하기 위해 복사 후 `data.retrieval_k` 삭제 + `model_kwargs.retrieval_k: 24` 추가)
+- **실행 스크립트**: `scripts/launch_phase6b_5fold.sh`
+- **평가 명령어**: `scripts/test.py`에 `--retrieval-k` 플래그를 주지 않음 (외부 Naive Retrieval을 다시 켜지 않기 위함 — 모델 내부 retrieval이 `model_kwargs.retrieval_k`를 통해 자동 적용됨)
+  ```bash
+  python scripts/test.py \
+    --checkpoints \
+      checkpoints/20260728_205237/v21_ici_finetune_phase6b_f0/last.ckpt \
+      checkpoints/20260728_205239/v21_ici_finetune_phase6b_f1/last.ckpt \
+      checkpoints/20260728_205241/v21_ici_finetune_phase6b_f2/last.ckpt \
+      checkpoints/20260728_205243/v21_ici_finetune_phase6b_f3/last.ckpt \
+      checkpoints/20260728_205245/v21_ici_finetune_phase6b_f4/last.ckpt \
+    --config configs/train_v21_ici_finetune_signalaware_fold0.yaml \
+    --precision bf16-mixed --validation-only \
+    --output predictions/ici_predictions_v21_phase6b_5fold.pt
+  ```
+- **결과 (Phase 6 대비 개선, Phase 4에는 여전히 미달)**: **AUROC: 0.5481** (Phase 6 `0.5081`→`0.5481`), **Log Loss: 0.8672** (Phase 6 `0.9596`→`0.8672`), Accuracy: 0.5747 (Phase 4 `0.5287`보다도 높음), `p1_std: 0.2545`.
+- **결론**: context 선별 방식 불일치는 Phase 5/6 성능 저하의 원인 일부였을 뿐 전부는 아님. Phase 4(Naive Retrieval 사전학습)가 AUROC/Log Loss 기준 3개 실험 중 여전히 최선. 상세는 [`current_status.md`](current_status.md) §4-⑦ 참고.
+- **예측 결과 파일**: `predictions/ici_predictions_v21_phase6b_5fold.pt`
