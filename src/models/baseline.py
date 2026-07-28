@@ -3274,6 +3274,7 @@ class BaseModel(nn.Module):
         self,
         x: torch.Tensor | Sequence[torch.Tensor],
         context_mask: torch.Tensor | None = None,
+        chunk_size: int = 0,
     ) -> torch.Tensor:
         """Extract internal 40-dim Bag Representation (global summary & tail evidence)."""
         if isinstance(x, torch.Tensor):
@@ -3282,6 +3283,17 @@ class BaseModel(nn.Module):
         else:
             num_bags = len(x)
             device = x[0].device
+
+        if chunk_size > 0 and num_bags > chunk_size:
+            feature_chunks: list[torch.Tensor] = []
+            for start_idx in range(0, num_bags, chunk_size):
+                end_idx = min(start_idx + chunk_size, num_bags)
+                chunk_x = x[start_idx:end_idx] if isinstance(x, torch.Tensor) else x[start_idx:end_idx]
+                chunk_mask = context_mask[start_idx:end_idx] if context_mask is not None else None
+                feat = self.extract_bag_features(chunk_x, context_mask=chunk_mask, chunk_size=0)
+                feature_chunks.append(feat)
+            return torch.cat(feature_chunks, dim=0)
+
         if context_mask is None:
             context_mask = torch.ones(num_bags, dtype=torch.bool, device=device)
         representation = self.aggregator(x, context_mask=context_mask)
@@ -3297,6 +3309,7 @@ class BaseModel(nn.Module):
         y: torch.Tensor,
         mask_index: torch.Tensor | Sequence[int] | int,
         retrieval_k: int = 24,
+        chunk_size: int = 32,
     ) -> tuple[torch.Tensor | Sequence[torch.Tensor], torch.Tensor, torch.Tensor]:
         if retrieval_k <= 0:
             query_index = self._normalize_mask_index(mask_index, num_bags=len(y), device=y.device)
@@ -3308,7 +3321,7 @@ class BaseModel(nn.Module):
         is_context[query_index] = False
         context_indices = torch.nonzero(is_context, as_tuple=False).flatten()
 
-        bag_features = self.extract_bag_features(x)
+        bag_features = self.extract_bag_features(x, chunk_size=chunk_size)
         query_summary = bag_features[query_index].mean(dim=0, keepdim=True)
         context_features = bag_features[context_indices]
         context_y = y[context_indices]

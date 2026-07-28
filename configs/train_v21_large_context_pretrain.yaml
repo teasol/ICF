@@ -1,0 +1,31 @@
+# Architecture v21 Large Context Signal-Aware Pre-training Config
+base_config: train_medium.yaml
+optimizer: adamw_learnability_5e4
+
+data_overrides:
+  retrieval_k: 24
+  use_signal_aware_retrieval: true
+  dataset_kwargs:
+    num_candidate_bags_pretrain: 96
+    response_task_probabilities: [0.20, 0.20, 0.20, 0.20, 0.20]
+    return_task_metadata: true
+
+model_kwargs:
+  ranking_loss_weight: 0.10
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0
+
+model_overrides:
+  covariance_relation:
+    enabled: true
+    mode: learned_head
+    granularity: subspace
+    subspace_rank: 1
+    subspace_whiten: true
+    subspace_shrinkage: 0.25
+    diagnostic_only: false
+    residual_scale: 0.50
+    eps: 1.0e-6
+
+trainer:
+  max_epochs: 20

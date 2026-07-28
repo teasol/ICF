@@ -219,6 +219,31 @@ class RetrievalSyntheticTrainingEpisodeCollator:
         return final_x, final_y, mask_index
 
 
+class SignalAwarePretrainEpisodeCollator:
+    """Pass large candidate pool (N=60~120+) bags to model for internal 40-dim Signal-Aware Retrieval."""
+
+    def __init__(self, retrieval_k: int = 24) -> None:
+        self.retrieval_k = retrieval_k
+
+    def __call__(self, samples: list[Any]):
+        episode = collate_synthetic_training_episode(samples)
+        x_full, y_full = episode[0], episode[1]
+
+        if x_full.dim() == 4:
+            res_masks = []
+            for b in range(x_full.shape[0]):
+                num_bags = x_full.shape[1]
+                # Default query is the last bag
+                mask_idx = torch.tensor([num_bags - 1], dtype=torch.long, device=x_full.device)
+                res_masks.append(mask_idx)
+            return x_full, y_full, torch.stack(res_masks), *episode[2:]
+        else:
+            num_bags = x_full.shape[0]
+            mask_idx = torch.tensor([num_bags - 1], dtype=torch.long, device=x_full.device)
+            return x_full, y_full, mask_idx, *episode[2:]
+
+
+
 class _CudaPrefetchIterator:
     """Generate the next CUDA batch while the current batch trains."""
 
@@ -329,11 +354,13 @@ class DataInterface(LightningDataModule):
     def train_dataloader(self) -> DataLoader[Any]:
         if self.hparams.get("episode_dataset", False):
             retrieval_k = self.hparams.get("retrieval_k", 0)
-            collate_fn = (
-                RetrievalSyntheticTrainingEpisodeCollator(retrieval_k=retrieval_k)
-                if retrieval_k > 0
-                else collate_synthetic_training_episode
-            )
+            use_signal_aware = self.hparams.get("use_signal_aware_retrieval", False)
+            if use_signal_aware and retrieval_k > 0:
+                collate_fn = SignalAwarePretrainEpisodeCollator(retrieval_k=retrieval_k)
+            elif retrieval_k > 0:
+                collate_fn = RetrievalSyntheticTrainingEpisodeCollator(retrieval_k=retrieval_k)
+            else:
+                collate_fn = collate_synthetic_training_episode
             return self._episode_dataloader(
                 self.train_dataset,
                 "train",
@@ -349,10 +376,13 @@ class DataInterface(LightningDataModule):
     def val_dataloader(self) -> DataLoader[Any]:
         if self.hparams.get("episode_dataset", False):
             retrieval_k = self.hparams.get("retrieval_k", 0)
-            collate_fn = (
-                RetrievalSyntheticTrainingEpisodeCollator(retrieval_k=retrieval_k)
-                if retrieval_k > 0
-                else collate_synthetic_evaluation_episode
+            use_signal_aware = self.hparams.get("use_signal_aware_retrieval", False)
+            if use_signal_aware and retrieval_k > 0:
+                collate_fn = SignalAwarePretrainEpisodeCollator(retrieval_k=retrieval_k)
+            elif retrieval_k > 0:
+                collate_fn = RetrievalSyntheticTrainingEpisodeCollator(retrieval_k=retrieval_k)
+            else:
+                collate_fn = collate_synthetic_evaluation_episode
             )
             return self._episode_dataloader(
                 self.val_dataset,
