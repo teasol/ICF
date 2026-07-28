@@ -3312,8 +3312,63 @@ class BaseModel(nn.Module):
         chunk_size: int = 32,
     ) -> tuple[torch.Tensor | Sequence[torch.Tensor], torch.Tensor, torch.Tensor]:
         if retrieval_k <= 0:
-            query_index = self._normalize_mask_index(mask_index, num_bags=len(y), device=y.device)
+            query_index = self._normalize_mask_index(mask_index, num_bags=len(y) if y.ndim == 1 else y.shape[1], device=y.device)
             return x, y, query_index
+
+        if isinstance(x, torch.Tensor) and x.ndim == 4:
+            # 4D Batched Episode Input: [E, N, instances, features]
+            E, N, num_instances, feature_dim = x.shape
+            device = x.device
+            
+            # Flatten to [E*N, instances, feature_dim] to compute 40-dim features efficiently
+            x_flat = x.view(E * N, num_instances, feature_dim)
+            bag_features_flat = self.extract_bag_features(x_flat, chunk_size=chunk_size)
+            bag_features = bag_features_flat.view(E, N, -1)
+
+            res_x, res_y, res_masks = [], [], []
+            for b in range(E):
+                x_b, y_b = x[b], y[b]
+                mask_b = mask_index[b] if isinstance(mask_index, torch.Tensor) and mask_index.ndim >= 1 else mask_index
+                q_idx_b = self._normalize_mask_index(mask_b, num_bags=N, device=device)
+                
+                is_ctx_b = torch.ones(N, dtype=torch.bool, device=device)
+                is_ctx_b[q_idx_b] = False
+                ctx_indices_b = torch.nonzero(is_ctx_b, as_tuple=False).flatten()
+
+                feat_b = bag_features[b]
+                q_summary_b = feat_b[q_idx_b].mean(dim=0, keepdim=True)
+                ctx_features_b = feat_b[ctx_indices_b]
+                ctx_y_b = y_b[ctx_indices_b]
+
+                sims_b = F.cosine_similarity(q_summary_b, ctx_features_b, dim=-1)
+                k_per_class = max(1, retrieval_k // 2)
+                selected_context_idx: list[int] = []
+                observed_classes = torch.unique(ctx_y_b, sorted=True)
+                for class_idx in observed_classes:
+                    class_mask = (ctx_y_b == class_idx)
+                    class_idxs_in_ctx = torch.nonzero(class_mask, as_tuple=False).flatten()
+                    if class_idxs_in_ctx.numel() == 0:
+                        continue
+                    class_sims = sims_b[class_idxs_in_ctx]
+                    k_for_class = min(k_per_class, class_idxs_in_ctx.numel())
+                    top_k_local = torch.topk(class_sims, k=k_for_class).indices
+                    selected_context_idx.extend(ctx_indices_b[class_idxs_in_ctx[top_k_local]].cpu().tolist())
+
+                if len(selected_context_idx) < retrieval_k and ctx_indices_b.numel() > len(selected_context_idx):
+                    remaining = [idx.item() for idx in ctx_indices_b if idx.item() not in selected_context_idx]
+                    needed = retrieval_k - len(selected_context_idx)
+                    selected_context_idx.extend(remaining[:needed])
+
+                selected_context_tensor = torch.tensor(selected_context_idx, dtype=torch.long, device=device)
+                final_x_b = torch.cat([x_b[selected_context_tensor], x_b[q_idx_b]], dim=0)
+                final_y_b = torch.cat([y_b[selected_context_tensor], y_b[q_idx_b]], dim=0)
+                mask_index_b = torch.tensor([len(selected_context_idx)], dtype=torch.long, device=device)
+
+                res_x.append(final_x_b)
+                res_y.append(final_y_b)
+                res_masks.append(mask_index_b)
+
+            return torch.stack(res_x), torch.stack(res_y), torch.stack(res_masks)
 
         num_bags = len(y)
         query_index = self._normalize_mask_index(mask_index, num_bags=num_bags, device=y.device)
@@ -3374,6 +3429,31 @@ class BaseModel(nn.Module):
             x, y, mask_index = self.retrieve_context_indices(
                 x, y, mask_index=mask_index, retrieval_k=retrieval_k
             )
+
+        if isinstance(x, torch.Tensor) and x.ndim == 4:
+            # 4D Batched Forward Mode
+            E, N, num_instances, feature_dim = x.shape
+            device = x.device
+            res_logits, res_aux = [], []
+            for b in range(E):
+                mask_b = mask_index[b] if isinstance(mask_index, torch.Tensor) and mask_index.ndim >= 1 else mask_index
+                res = self.forward(
+                    x[b], y[b], mask_index=mask_b, return_auxiliary=return_auxiliary, retrieval_k=0
+                )
+                if return_auxiliary:
+                    res_logits.append(res[0])
+                    res_aux.append(res[1])
+                else:
+                    res_logits.append(res)
+
+            logits_cat = torch.cat(res_logits, dim=0)
+            if return_auxiliary:
+                aux_combined = {
+                    k: torch.stack([aux[k] for aux in res_aux if k in aux])
+                    for k in res_aux[0].keys()
+                } if res_aux else {}
+                return logits_cat, aux_combined
+            return logits_cat
         if isinstance(x, torch.Tensor):
             if x.ndim != 3:
                 raise ValueError(

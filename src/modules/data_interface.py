@@ -475,9 +475,10 @@ class DataInterface(LightningDataModule):
             self.hparams.get("persistent_workers", False) and num_workers > 0
         )
         batch_size = self.hparams.get("episode_batch_size", 1) if split == "train" else 1
+        use_prefetch = self.hparams.get("cuda_prefetch", True) and torch.cuda.is_available()
         loader_cls = (
             CudaPrefetchDataLoader
-            if split == "train" and self.hparams.get("cuda_prefetch", False)
+            if split == "train" and use_prefetch
             else DataLoader
         )
         return loader_cls(
@@ -485,7 +486,7 @@ class DataInterface(LightningDataModule):
             batch_size=batch_size,
             shuffle=self.hparams.get(f"{split}_shuffle", split == "train"),
             num_workers=num_workers,
-            pin_memory=self.hparams.get("pin_memory", False),
+            pin_memory=self.hparams.get("pin_memory", True),
             drop_last=False,
             persistent_workers=persistent_workers,
             collate_fn=collate_fn,
