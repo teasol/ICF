@@ -3270,13 +3270,51 @@ class BaseModel(nn.Module):
             return_auxiliary=return_auxiliary,
         )
 
+    @staticmethod
+    def _quantile_summary(values: torch.Tensor) -> torch.Tensor:
+        """Collapse the last dim to [mean, std, min, max, q10, q25, q75, q90] (8 dims)."""
+        values_f = values.float()
+        quantiles = torch.tensor(
+            (0.10, 0.25, 0.75, 0.90), device=values.device, dtype=torch.float32
+        )
+        mean = values_f.mean(dim=-1, keepdim=True)
+        std = values_f.std(dim=-1, unbiased=False, keepdim=True)
+        minimum = values_f.min(dim=-1, keepdim=True).values
+        maximum = values_f.max(dim=-1, keepdim=True).values
+        q = torch.quantile(values_f, quantiles, dim=-1).movedim(0, -1)
+        return torch.cat((mean, std, minimum, maximum, q), dim=-1).to(values.dtype)
+
+    @staticmethod
+    def _tail_evidence_features(tails: torch.Tensor) -> torch.Tensor:
+        """Per tail-fraction [norm, mean, std, peak] summary, flattened to (fractions * 4) dims."""
+        values = tails.float()
+        norm = values.norm(dim=-1)
+        mean = values.mean(dim=-1)
+        std = values.std(dim=-1, unbiased=False)
+        peak = values.abs().amax(dim=-1)
+        stacked = torch.stack((norm, mean, std, peak), dim=-1)
+        return stacked.flatten(start_dim=-2).to(tails.dtype)
+
     def extract_bag_features(
         self,
         x: torch.Tensor | Sequence[torch.Tensor],
         context_mask: torch.Tensor | None = None,
         chunk_size: int = 0,
     ) -> torch.Tensor:
-        """Extract internal 40-dim Bag Representation (global summary & tail evidence)."""
+        """Extract the 40-dim Signal-Aware Bag Descriptor Z used for retrieval.
+
+        Z = concat(
+            12-dim density slot log-mass (`slot_metadata[..., 0]`, one per
+                population slot),
+            12-dim top-1%/5%/15% rare tail evidence (norm/mean/std/peak per
+                tail fraction),
+            8-dim covariance sketch summary (quantile summary of
+                `covariance_sketch`),
+            8-dim centered-spread scale summary (quantile summary of
+                `global_summary`),
+        ), matching the default aggregator config (12 slots, 3 tail
+        fractions) documented in current_architecture.md.
+        """
         if isinstance(x, torch.Tensor):
             num_bags = x.shape[0]
             device = x.device
@@ -3297,11 +3335,15 @@ class BaseModel(nn.Module):
         if context_mask is None:
             context_mask = torch.ones(num_bags, dtype=torch.bool, device=device)
         representation = self.aggregator(x, context_mask=context_mask)
-        global_tokens = representation["global_summary"]
-        tail_tokens = representation["tails"].mean(dim=-2) if "tails" in representation and representation["tails"].ndim == 3 else global_tokens
-        if global_tokens.ndim == 2 and tail_tokens.ndim == 2 and global_tokens.shape == tail_tokens.shape:
-            return torch.cat([global_tokens, tail_tokens], dim=-1)
-        return global_tokens
+
+        density = representation["slot_metadata"][..., 0]
+        tail_evidence = self._tail_evidence_features(representation["tails"])
+        covariance_summary = self._quantile_summary(representation["covariance_sketch"])
+        scale_summary = self._quantile_summary(representation["global_summary"])
+
+        return torch.cat(
+            (density, tail_evidence, covariance_summary, scale_summary), dim=-1
+        )
 
     def retrieve_context_indices(
         self,

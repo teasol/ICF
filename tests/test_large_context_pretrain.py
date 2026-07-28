@@ -26,7 +26,7 @@ class TestLargeContextPretraining(unittest.TestCase):
         # Standard extraction
         features_dense = self.model.extract_bag_features(x, chunk_size=0)
         self.assertEqual(features_dense.shape[0], num_bags)
-        self.assertGreater(features_dense.shape[1], 0)
+        self.assertEqual(features_dense.shape[1], 40)
 
         # Chunked extraction (chunk_size = 32)
         features_chunked = self.model.extract_bag_features(x, chunk_size=32)

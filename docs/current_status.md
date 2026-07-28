@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-28 13:10:00 KST`  
+**Last updated**: `2026-07-28 13:35:00 KST`  
 **Latest Commit**: `e6ce48b` (`feat(model): integrate 4d batched forwarding and chunked feature extraction for large context pretraining`)  
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)  
 **Architecture Version**: `21` (`architecture_version = 21`)  
@@ -68,12 +68,18 @@
   3. Subspace Covariance Sketch Features
   4. Centered-Spread Scale Features
 * 모델 내부 Aggregator가 추출한 40차원 특징 $Z$의 Cosine Similarity 기반으로 Class-Balanced Top-24 Context Donor를 동적 추출하도록 모델 레이어 통합 설계 (`extract_bag_features`, `retrieve_context_indices`).
+* **실제 구현 (2026-07-28 수정, §4-③ 참고)**: `src/models/baseline.py`의 `extract_bag_features`가 위 4개 카테고리를 실제로 조합하여 정확히 40-dim을 반환하도록 구현됨 —
+  `slot_metadata[..., 0]` (12개 슬롯의 log-비율, `aggregator_num_slots=12` 기본값과 정확히 대응) +
+  `tails` 텐서의 fraction별(1%/5%/15%, 3개) [norm, mean, std, peak] 4-stat 요약 (3×4=12) +
+  `covariance_sketch`의 8-stat quantile 요약([mean, std, min, max, q10, q25, q75, q90]) +
+  `global_summary`(studentization spread)의 동일한 8-stat quantile 요약. 12+12+8+8=40.
 
 ### ③ 세션 인시던트 진단 및 조치 (2026-07-28 12:30~13:10 KST)
 
 * **Phase 5 크래시 원인 (수정 완료)**: `configs/train_v21_medium.yaml` 등 루트 config 4개(`train_v21_medium.yaml`, `train_v21_medium_retrieved.yaml`, `train_v21_hard_realworld.yaml`, `train_v21_hard_retrieved.yaml`)의 `base_config`가 이관 전 경로인 `train_medium.yaml`을 참조하고 있었음. 커밋 `2a21195`에서 실제 파일을 `configs/archive/v18_v19/train_medium.yaml`로 옮기며 테스트 fallback만 갱신하고 이 4개 config는 갱신하지 않아, Phase 5 (및 이를 상속하는 Phase 1/1-R/2/2-R 전체)가 `FileNotFoundError`로 즉시 크래시함. `logs/20260728_122712/`, `logs/20260728_123047/` 두 차례 실행 모두 1분 내 실패. **해당 4개 config의 `base_config` 경로를 `archive/v18_v19/train_medium.yaml`로 수정하여 정상 로드 확인 완료** (커밋 `e6ce48b`에 반영됨). Phase 5는 아직 재구동 전이며 GPU는 현재 idle.
 * **동시 세션 프로세스 행(Hang) 및 중복 실행**: 점검 중 `tests/test_large_context_pretrain.py`를 실행하는 python 프로세스가 여러 차례 반복적으로 재생성되어 load average가 최대 72까지 급등함 (nproc=72). 다른 위치(연구실/집/노트북) 세션이 같은 시간대에 동일 테스트를 반복 구동한 것으로 추정됨. 확인 후 강제 종료(`kill -9`) 처리하여 현재는 python/torchrun 프로세스 없이 idle 상태로 정리됨. **다중 위치 동시 접속 시 프로세스 충돌 가능성에 유의할 것.**
-* **⚠ 미해결: 40-dim Feature Retrieval 구현 갭**: `current_architecture.md` §3 및 위 4-②는 $Z \in \mathbb{R}^{40}$ (density slots + tail evidence + covariance sketch + scale) 설계를 명시하지만, 실제 `extract_bag_features` 구현(`src/models/baseline.py`)은 `global_summary`(512-dim)와 `tails` 평균(512-dim)을 concat한 **1024-dim** 벡터를 반환함 — 설계된 40차원 분해는 미구현 상태. 이 gap은 Naive Retrieval(1024-dim mean/spread cosine)이 실패했던 것과 구조적으로 유사한 방식이라 Phase 5의 핵심 가설(신호 인식 retrieval이 배경 노이즈를 우회한다)을 무력화할 위험이 있음. 커밋 `e6ce48b`의 `tests/test_large_context_pretrain.py` 변경분은 `assertEqual(shape[1], 40)`을 `assertGreater(shape[1], 0)`으로 완화하여 테스트가 이 불일치를 잡아내지 못하도록 만들어 놓은 상태. **다음 세션에서 반드시 결정 필요**: (a) 설계대로 실제 40-dim descriptor를 구현하거나, (b) 문서를 1024-dim 구현에 맞게 정정. 결정 전까지 Phase 5 재구동 성과 수치는 "signal-aware retrieval 가설 검증"으로 신뢰하지 말 것.
+* **✅ 해결됨: 40-dim Feature Retrieval 구현 갭 (2026-07-28 13:35 KST)**: `extract_bag_features`가 실제로는 `global_summary`+`tails` 평균을 concat한 1024-dim을 반환하고 있었고(설계된 40-dim 분해 미구현), `tests/test_large_context_pretrain.py`의 관련 assertion(`assertEqual(shape[1], 40)`)이 `assertGreater(shape[1], 0)`으로 완화되어 이 gap을 잡아내지 못하던 문제를 발견함. **조치**: 위 4-②에 기술된 실제 40-dim descriptor(density 12 + tail evidence 12 + covariance summary 8 + scale summary 8)를 `extract_bag_features`에 구현하고, 완화됐던 assertion을 `assertEqual(shape[1], 40)`으로 원복함. **검증**: 단독 스크립트로 (a) `chunk_size=0` 시 `shape[1]==40` 확인, (b) `chunk_size=32` 청크 분할 시에도 동일 shape 및 dense 대비 평균 cosine similarity 0.998(최소 0.996) 확인 (기존 테스트 임계값 0.5 대비 크게 상회), (c) `retrieve_context_indices`가 새 40-dim descriptor로 정상 동작함을 확인. 단, 아래 항목 참고 — 이 검증은 unittest suite 전체가 아닌 단독 스크립트로 수행함.
+* **⚠ 신규 발견 (미해결, 별도 조치 필요): CPU 실행 시 심각한 지연 / `test_4d_batched_forward` 응답 없음**: `tests/test_large_context_pretrain.py` 전체(discover 또는 파일 단위)를 CPU 환경에서 실행하면 `test_4d_batched_forward`(커밋 `e6ce48b`에서 추가된 4D 배치 forward 테스트, 40-dim 이슈와는 무관)에서 180초 타임아웃 내 결과가 출력되지 않음. 별도로 `extract_bag_features`만 단독 호출해 스케일링을 측정한 결과, 동일 모델이 CPU에서 4 bag/10 cell도 최소 ~7초, 30 bag/100 cell 조합은 90초를 넘기는 등 **bag/cell 크기에 따라 비선형적으로 느려짐**을 확인함 (시스템 자체는 유휴 상태, load average 6~9 수준이라 동시 세션 경합 때문은 아님). 무한루프인지 단순 CPU 미가속 지연인지는 이번 세션에서 확정하지 못함 — Target Hardware가 B200 GPU임에도 현재 유닛테스트들이 모델을 `.cuda()`로 옮기지 않고 순수 CPU에서 forward를 실행하고 있는 것이 근본 원인일 가능성이 높음 (attention/covariance eigh/QR 연산이 CPU에서 특히 느림). 과거 세션들에서 관측된 "여러 시간 CPU 점유 후 미완료" 프로세스들도 이 문제와 같은 현상일 가능성이 있음. **다음 세션 확인 필요**: (a) 테스트를 GPU(`CUDA_VISIBLE_DEVICES=0`)에서 실행하거나, (b) `test_4d_batched_forward`를 더 긴 타임아웃(예: 10분+)으로 단독 실행해 실제로 종료되는지, 종료된다면 몇 초가 걸리는지 확인.
 
 ---
 
@@ -81,8 +87,8 @@
 
 연구실, 집, 또는 노트북 어디서 접속하더라도 다음 순서로 작업을 수행하면 됩니다:
 
-1. **40-dim Feature Retrieval 구현 갭 결정 (§4-③ 참고)**: 실제 40-dim descriptor 구현 여부를 먼저 결정. 결정 전 Phase 5 재구동은 잠정 보류 권장.
-2. **단위 테스트 실행 및 검증 완료 확인** (이번 세션에서는 프로세스 행 이력으로 보류함):
-   - `timeout 600s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"` (All tests PASS 확인, `test_feature_retrieval.py`, `test_large_context_pretrain.py` 포함. 반드시 timeout 적용하여 행 발생 시 자동 종료되도록 할 것)
+1. **`test_4d_batched_forward` CPU 지연/무응답 원인 확인 (§4-③ 참고)**: GPU(`CUDA_VISIBLE_DEVICES=0`)에서 재현 여부 확인하거나, 10분+ 타임아웃으로 단독 실행해 실제 종료 여부와 소요 시간 측정. 무한루프가 아니라 단순 CPU 미가속 지연이라면 Phase 5 재구동 자체는 막지 않음 (실제 학습은 GPU에서 수행되므로).
+2. **단위 테스트 전체 실행 및 검증 완료 확인**:
+   - `timeout 600s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"` (All tests PASS 확인, `test_feature_retrieval.py`, `test_large_context_pretrain.py` 포함. 반드시 timeout 적용하여 행 발생 시 자동 종료되도록 할 것. 1번 이슈로 인해 이번 세션에서는 전체 discover 대신 개별 스크립트 검증만 수행함)
 3. **Phase 5 Large Context + Signal-Aware Retrieval Pretraining 재구동**:
-   - Config 경로 버그는 수정 완료. `scripts/launch_interactive_training.sh` 사용 구동 및 `logs/` 점검 후 본 문서(`current_status.md`) 업데이트.
+   - Config 경로 버그와 40-dim 구현 갭 모두 수정 완료. `scripts/launch_interactive_training.sh` 사용 구동 및 `logs/` 점검 후 본 문서(`current_status.md`) 업데이트.
