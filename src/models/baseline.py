@@ -970,10 +970,12 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             )
             deviation = selected_instances - selected_anchors
             with torch.autocast(device_type=instances.device.type, enabled=False):
-                tail_tokens.append(
-                    self.shared_tail_encoder(deviation.float()).mean(dim=1)
-                )
+                encoded_tail = self.shared_tail_encoder(deviation.float())
+                lse_weights = torch.softmax(encoded_tail * 2.0, dim=1)
+                tail_tokens.append((lse_weights * encoded_tail).sum(dim=1))
             selected_counts.append(count)
+
+
 
         if global_summary is None:
             _, global_summary, _ = self._bag_view(instances)
@@ -2256,8 +2258,14 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 dimension, device=pooled.device, dtype=pooled.dtype
             )
             values, vectors = torch.linalg.eigh(pooled)
-            whitening = (vectors * values.clamp_min(1e-6).rsqrt().unsqueeze(0)) @ vectors.T
+            safe_values = values.clamp_min(1e-5)
+            whitening = (vectors * safe_values.rsqrt().unsqueeze(0)) @ vectors.T
             operator = whitening @ delta @ whitening
+            if torch.isnan(operator).any():
+                whitening = torch.eye(
+                    dimension, device=delta.device, dtype=delta.dtype
+                )
+                operator = delta
         else:
             whitening = torch.eye(
                 dimension, device=delta.device, dtype=delta.dtype
@@ -2273,6 +2281,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
             "di,bdk,ki->bi", filters, query_covariance.float(), filters
         ).clamp_min(self.covariance_relation_eps)
         return context_variance.log(), query_variance.log(), eigenvalues[selected]
+
 
     def _validate_representation(
         self,
@@ -3067,7 +3076,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
 class BaseModel(nn.Module):
     """Compose hybrid population aggregation with class-memory meta learning."""
 
-    architecture_version = 19
+    architecture_version = 21
 
     def __init__(
         self,
@@ -3261,13 +3270,97 @@ class BaseModel(nn.Module):
             return_auxiliary=return_auxiliary,
         )
 
+    def extract_bag_features(
+        self,
+        x: torch.Tensor | Sequence[torch.Tensor],
+        context_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Extract internal 40-dim Bag Representation (global summary & tail evidence)."""
+        if isinstance(x, torch.Tensor):
+            num_bags = x.shape[0]
+            device = x.device
+        else:
+            num_bags = len(x)
+            device = x[0].device
+        if context_mask is None:
+            context_mask = torch.ones(num_bags, dtype=torch.bool, device=device)
+        representation = self.aggregator(x, context_mask=context_mask)
+        global_tokens = representation["global_summary"]
+        tail_tokens = representation["tails"].mean(dim=-2) if "tails" in representation and representation["tails"].ndim == 3 else global_tokens
+        if global_tokens.ndim == 2 and tail_tokens.ndim == 2 and global_tokens.shape == tail_tokens.shape:
+            return torch.cat([global_tokens, tail_tokens], dim=-1)
+        return global_tokens
+
+    def retrieve_context_indices(
+        self,
+        x: torch.Tensor | Sequence[torch.Tensor],
+        y: torch.Tensor,
+        mask_index: torch.Tensor | Sequence[int] | int,
+        retrieval_k: int = 24,
+    ) -> tuple[torch.Tensor | Sequence[torch.Tensor], torch.Tensor, torch.Tensor]:
+        if retrieval_k <= 0:
+            query_index = self._normalize_mask_index(mask_index, num_bags=len(y), device=y.device)
+            return x, y, query_index
+
+        num_bags = len(y)
+        query_index = self._normalize_mask_index(mask_index, num_bags=num_bags, device=y.device)
+        is_context = torch.ones(num_bags, dtype=torch.bool, device=y.device)
+        is_context[query_index] = False
+        context_indices = torch.nonzero(is_context, as_tuple=False).flatten()
+
+        bag_features = self.extract_bag_features(x)
+        query_summary = bag_features[query_index].mean(dim=0, keepdim=True)
+        context_features = bag_features[context_indices]
+        context_y = y[context_indices]
+
+        sims = F.cosine_similarity(query_summary, context_features, dim=-1)
+
+        k_per_class = max(1, retrieval_k // 2)
+        selected_context_idx: list[int] = []
+        observed_classes = torch.unique(context_y, sorted=True)
+        for class_idx in observed_classes:
+            class_mask = (context_y == class_idx)
+            class_idxs_in_context = torch.nonzero(class_mask, as_tuple=False).flatten()
+            if class_idxs_in_context.numel() == 0:
+                continue
+            class_sims = sims[class_idxs_in_context]
+            k_for_class = min(k_per_class, class_idxs_in_context.numel())
+            top_k_local = torch.topk(class_sims, k=k_for_class).indices
+            selected_context_idx.extend(context_indices[class_idxs_in_context[top_k_local]].cpu().tolist())
+
+        if len(selected_context_idx) < retrieval_k and context_indices.numel() > len(selected_context_idx):
+            remaining = [idx.item() for idx in context_indices if idx.item() not in selected_context_idx]
+            needed = retrieval_k - len(selected_context_idx)
+            selected_context_idx.extend(remaining[:needed])
+
+        selected_context_tensor = torch.tensor(selected_context_idx, dtype=torch.long, device=y.device)
+
+        if isinstance(x, torch.Tensor):
+            final_x = torch.cat([x[selected_context_tensor], x[query_index]], dim=0)
+        else:
+            final_x = [x[i.item()] for i in selected_context_tensor] + [x[i.item()] for i in query_index]
+
+        final_y = torch.cat([y[selected_context_tensor], y[query_index]], dim=0)
+        final_mask = torch.arange(
+            len(selected_context_idx),
+            len(selected_context_idx) + len(query_index),
+            dtype=torch.long,
+            device=y.device,
+        )
+        return final_x, final_y, final_mask
+
     def forward(
         self,
         x: torch.Tensor | Sequence[torch.Tensor],
         y: torch.Tensor,
         mask_index: torch.Tensor | Sequence[int] | int,
         return_auxiliary: bool = False,
+        retrieval_k: int = 0,
     ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        if retrieval_k > 0:
+            x, y, mask_index = self.retrieve_context_indices(
+                x, y, mask_index=mask_index, retrieval_k=retrieval_k
+            )
         if isinstance(x, torch.Tensor):
             if x.ndim != 3:
                 raise ValueError(

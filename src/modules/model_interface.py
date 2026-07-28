@@ -1,4 +1,4 @@
-"""Lightning interface for the architecture-v19 class-memory classifier."""
+"""Lightning interface for the architecture-v20 class-memory classifier."""
 
 from __future__ import annotations
 

@@ -69,6 +69,12 @@ def parse_args() -> argparse.Namespace:
         default="16-mixed",
         help="Lightning inference precision (default: 16-mixed for RTX 2080 Ti).",
     )
+    parser.add_argument(
+        "--retrieval-k",
+        type=int,
+        default=0,
+        help="Class-balanced top-K context donor retrieval size (0 to disable).",
+    )
     return parser.parse_args()
 
 
@@ -211,6 +217,8 @@ def main() -> None:
     for fold, checkpoint in enumerate(checkpoints):
         config = merge_train_config(args.config.expanduser().resolve())
         config["seed"] = args.seed
+        if args.retrieval_k > 0:
+            config["data"]["retrieval_k"] = args.retrieval_k
         dataset_kwargs = config["data"].setdefault("dataset_kwargs", {})
         dataset_kwargs["seed"] = args.seed
         dataset_kwargs["cv"] = fold
