@@ -383,7 +383,6 @@ class DataInterface(LightningDataModule):
                 collate_fn = RetrievalSyntheticTrainingEpisodeCollator(retrieval_k=retrieval_k)
             else:
                 collate_fn = collate_synthetic_evaluation_episode
-            )
             return self._episode_dataloader(
                 self.val_dataset,
                 "val",
