@@ -32,8 +32,8 @@ def benchmark_vram():
     print(f"Configuration: Candidate Pool N={num_bags} bags | Cell Instances=1000 | Feature Dim=512 | Context Retrieval K={retrieval_k}", flush=True)
     print("-" * 80, flush=True)
 
-    # Episode batch scaling test: E = 16, 32, 64, 128
-    for outer_episodes in [16, 32, 64, 128]:
+    # Extreme Episode batch scaling test: E = 256, 512, 1024
+    for outer_episodes in [256, 512, 1024]:
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats(0)
 
