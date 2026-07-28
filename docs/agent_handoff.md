@@ -1,7 +1,7 @@
 # Agent handoff guide
 
 **Last updated**: `2026-07-28 10:45:00 KST`  
-**Architecture Version**: `21` (`architecture_version = 21`)
+**Architecture Version**: `22` (`architecture_version = 22`)
 
 이 문서는 BagPFN 저장소를 처음 맡은 coding agent가 안전하게 작업을 시작하기 위한 운영 및 핸드오프 지침입니다. 최신 개발 및 실험 진행 상황은 [`current_status.md`](current_status.md), 현재 모델 명세는 [`current_architecture.md`](current_architecture.md), 현재 실험 프로토콜은 [`current_experiments.md`](current_experiments.md)를 참고합니다.
 
@@ -19,7 +19,7 @@
 >    git log -n 5 --stat
 >    git diff HEAD~1 HEAD
 >    ```
-> 4. Living 문서 5개와 Git commit log/diff를 종합하여 현재 아키텍처 버전(v21), 코드 수정 내역, 완료된 실험 수치, 미결 과제 및 다음 Action Plan을 100% 동일한 맥락으로 완벽히 이어받아야 합니다.
+> 4. Living 문서 5개와 Git commit log/diff를 종합하여 현재 아키텍처 버전(v22), 코드 수정 내역, 완료된 실험 수치, 미결 과제 및 다음 Action Plan을 100% 동일한 맥락으로 완벽히 이어받아야 합니다.
 
 ---
 
@@ -93,10 +93,10 @@ scripts/launch_interactive_training.sh \
    - `docs/` 최상위 루트에는 새 Agent가 즉시 정독해야 하는 **핵심 Living 문서 5개만 존재**해야 합니다:
      - [`agent_handoff.md`](agent_handoff.md): 운영 규칙, 바이너리 경로, Git 수칙, Docs/Config 관리 지침
      - [`current_status.md`](current_status.md): 개발 현황, 최신 수치, Git 커밋 이력, 이슈 진단 및 Action Plan (SSOT)
-     - [`current_architecture.md`](current_architecture.md): Architecture v21 수학적 개혁 및 40-dim Retrieval 명세
+     - [`current_architecture.md`](current_architecture.md): Architecture v22 수학적 기술 명세 (retrieval 없음)
      - [`current_experiments.md`](current_experiments.md): Phase 1~5 실험 프로토콜 및 실증 성과 수치
      - [`README.md`](README.md): 전체 문서 맵 및 갱신 규칙
-   - 최상위 Living 문서 5개는 항상 서로 100% 일관된 맥락과 동일한 아키텍처 버전(v21)을 유지합니다.
+   - 최상위 Living 문서 5개는 항상 서로 100% 일관된 맥락과 동일한 아키텍처 버전(v22)을 유지합니다.
 
 2. **`docs/history/` 하위 아카이빙 규칙 (Historical & Deep-Dive Docs)**:
    - 특정 시점의 딥다이브 분석서, 옛 버전 아키텍처 설계안, 과거 벤치마크 플랜(예: `v20_scalability_plan.md`, `retrieval_architecture_analysis.md`, `architecture_v18.md` 등)은 **모두 `docs/history/` 하위 폴더로 이동하여 보관**합니다.
@@ -106,8 +106,8 @@ scripts/launch_interactive_training.sh \
 ## 7. Config 관리 및 아카이빙 규칙 (Config Organization Rules)
 
 1. **`configs/` 최상위 루트 유지 조건**:
-   - 현재 활성 파이프라인에서 직접 사용하는 **Architecture v21 entry point config만 `configs/` 최상위에 유지**합니다 (10개 내외).
-   - 예: `train_v21_medium.yaml`, `train_v21_hard_realworld.yaml`, `train_v21_ici_finetune_fold0.yaml`~`fold4.yaml` 등.
+   - 현재 활성 파이프라인에서 직접 사용하는 **Architecture v22 entry point config만 `configs/` 최상위에 유지**합니다 (10개 내외).
+   - 예: `train_v22_medium.yaml`, `train_v22_hard_realworld.yaml`, `train_v22_ici_finetune_fold0.yaml`~`fold4.yaml` 등.
 2. **구버전 Config 아카이빙 조건**:
    - 구버전 아키텍처(v18, v19, v20 등)의 config는 `configs/archive/v18_v19/`, `configs/archive/v20/` 하위 폴더로 즉시 이관합니다.
 3. **모듈형 Component 설정 분리**:

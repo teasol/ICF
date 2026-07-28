@@ -1,16 +1,13 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-29 07:15:00 KST`  
-**Latest Commit**: `42c3fa8` (`docs: record Phase 5 launch saga and successful training run`)  
-**Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)  
-**Architecture Version**: `21` (`architecture_version = 21`)  
-**Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 완벽 해결하기 위한 Single Source of Truth (SSOT) living document.
+**Last updated**: `2026-07-29 08:30:00 KST`
+**Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
+**Architecture Version**: `22` (`architecture_version = 22`)
+**Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 해결하기 위한 Single Source of Truth (SSOT) living document.
 
 ---
 
 ## 1. 멀티 작업공간 (연구실/집/노트북) 바톤 터치 지침
-
-본 문서는 대화 세션이 분리된 환경(연구실 Desktop, 집 PC, 개인 노트북)에서 새로 접속한 AI Coding Agent가 이전 세션의 실험 수치, 핵심 논의, 실행 경로, 미결 과제를 100% 동일한 맥락으로 이어받을 수 있도록 작성되었습니다.
 
 > [!IMPORTANT]
 > **새 대화 세션 시작 시 Agent 초기화 원칙**:
@@ -18,210 +15,92 @@
 > 2. 새로 접속한 Agent는 **`docs/` 최상위 루트의 Living md 파일 5개(`agent_handoff.md`, `current_status.md`, `current_architecture.md`, `current_experiments.md`, `README.md`)만 최우선으로 정독**하여 전체 개발 맥락과 프로젝트 규칙을 파악합니다.
 > 3. 터미널 조회가 필요한 명령어는 NVML/쉘 hang 방지를 위해 **반드시 `timeout 3s ps aux | grep python`과 같이 타임아웃**을 적용합니다.
 > 4. 코드 변경 시 unittest 통과 필수:
->    `/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"`
+>    `timeout 1500s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"`
 
 ---
 
-## 2. 프로젝트 핵심 아키텍처 및 환경 명세 (Architecture v21)
+## 2. 프로젝트 핵심 아키텍처 및 환경 명세 (Architecture v22)
 
 * **Python Binary**: `/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python`
 * **Torchrun Binary**: `/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/torchrun`
-* **Target Hardware**: NVIDIA B200 GPU 1장 (`CUDA_VISIBLE_DEVICES=0`, 180GB VRAM)
-* **Precision Policy**: `bf16-mixed` (FP16 공분산 역행렬 연산 시 Exponent Overflow/NaN 문제 100% 완전 해결)
-* **Architecture v21 4대 수학적 핵심 기술**:
-  1. **Z-Score Bag Studentization**: Donor Centroid ($\mu_i$) & Standard Deviation ($S_i$) 기반 정규화로 세포 표현 스케일 정규화.
-  2. **Top-1% Sparse Evidence Module**: 97%+ 배경세포에 의해 희석되는 Sub-1% (0.5%~3%) 희귀 세포 반응 신호 핀포인트 추출.
-  3. **Covariance Subspace Shrinkage**: Shrinkage parameter `0.25`로 노이즈 축 whitening 방어 및 NaN 예방.
-  4. **Auxiliary Pairwise Ranking Loss (`weight: 0.10`)**: Cross-Entropy 0.685 부근 Gradient 소멸 및 Local Minima 탈출.
-* **Model-Level Signal-Aware Retrieval & True 4D Batched Forward**:
-  - `extract_bag_features(...)`는 aggregator가 분류기용으로 이미 계산해 두는 **40-token 구조화 요약**(`_all_structured_tokens`: 1 global + 12 slots×3종 + 3 tail, 각 512-dim, `[bags,40,512]`)을 그대로 재사용하고, `retrieve_context_indices(...)`가 이를 flatten한 뒤 Cosine Similarity로 Class-Balanced Top-24 ($K=24$) Context를 동적 선별함 (상세: §4-②).
-  - `training_step` → `retrieve_context_indices` → `forward_episode_batch`로 이어지는 `[E, N, 1000, 512]` ($E=32, N$ 최대 100) True 4D Batched Forward + Signal-Aware Retrieval + Multi-Worker/In-Process CUDA Prefetching 파이프라인이 Phase 5에서 20 epoch 완주로 실증 완료 (§4-④, §4-⑤).
+* **Target Hardware**: NVIDIA B200 GPU 1장 (`CUDA_VISIBLE_DEVICES=0`, 183GB VRAM)
+* **Precision Policy**: `bf16-mixed`
+* **핵심 수학 기술 4종** (v19부터 이어져 v22에서도 그대로 유지):
+  1. **Z-Score Bag Studentization**: Donor Centroid/Std 기반 세포 표현 스케일 정규화.
+  2. **Top-1% Sparse Evidence Module**: 배경세포에 희석되는 희귀 반응 신호 핀포인트 추출.
+  3. **Covariance Subspace Shrinkage** (`subspace_shrinkage: 0.25`): 노이즈 축 whitening 방어 및 NaN 예방.
+  4. **Auxiliary Pairwise Ranking Loss** (`weight: 0.10`): CE 0.685 부근 gradient 소멸 탈출.
+* **Batched Multi-Episode Forward**: `forward_episode_batch` 및 `BaseModel.forward`의 4D 분기가 `[episodes, bags, cells, dim]`을 한 optimizer step에 처리 (v22에서도 유지). 검증: `tests/test_batched_episode_forward.py`.
+* **Retrieval 없음**: v22는 context 축소(retrieval) 계층이 **없습니다**. 에피소드의 전체 context bag이 그대로 aggregator에 들어갑니다. 제거 근거는 §4 참고.
 
 ---
 
-## 3. 실험 파이프라인 진행 현황 및 상세 실증 수치
+## 3. 실험 현황
 
-| Phase | 실험 명칭 | Config 경로 | Epoch | 상태 / 수치 성과 | 최적 체크포인트 경로 | Log 파일 경로 |
-|---|---|---|---:|---|---|---|
-| **Phase 1** | v21 Medium Pretrain (Full Context) | `configs/train_v21_medium.yaml` | 20e | **수렴 완료**<br/>`val_ce_loss: 0.5921` | `checkpoints/20260727_141002/v21_medium/epoch=018-val_ce_loss=0.5921.ckpt` | `logs/20260727_141002/v21_medium.out` |
-| **Phase 1-R**| v21 Medium Pretrain (Naive Retrieval K=24) | `configs/train_v21_medium_retrieved.yaml` | 20e | **수렴 정체**<br/>`val_ce_loss: 0.6839` | `checkpoints/20260727_234145/v21_medium_retrieved/epoch=009-val_ce_loss=0.6839.ckpt` | `logs/20260727_234145/v21_medium_retrieved.out` |
-| **Phase 2** | v21 Hard Pretrain (Full Context) | `configs/train_v21_hard_realworld.yaml` | 50e | **수렴 완료**<br/>`val_ce_loss: 0.6845` | `checkpoints/20260727_150034/v21_hard/epoch=044-val_ce_loss=0.6845.ckpt` | `logs/20260727_150034/v21_hard.out` |
-| **Phase 2-R**| v21 Hard Pretrain (Naive Retrieval K=24) | `configs/train_v21_hard_retrieved.yaml` | 50e | **수렴 정체**<br/>`val_ce_loss: 0.6803` | `checkpoints/20260728_003034/v21_hard_retrieved/epoch=012-val_ce_loss=0.6803.ckpt` | `logs/20260728_003034/v21_hard_retrieved.out` |
-| **Phase 3-A**| ICI Fold 0 Scratch | `configs/train_v21_ici_scratch_fold0.yaml` | 50e | AUROC: 0.5665<br/>Log Loss: 0.8236 | `checkpoints/20260727_201907/v21_ici_scratch_f0/last.ckpt` | `logs/20260727_201907/v21_ici_scratch_f0.out` |
-| **Phase 3-B**| ICI Fold 0 Fine-Tune | `configs/train_v21_ici_finetune_fold0.yaml` | 50e | AUROC: 0.5654<br/>Log Loss: 0.8232 | `checkpoints/20260727_201910/v21_ici_finetune_f0/last.ckpt` | `logs/20260727_201910/v21_ici_finetune_f0.out` |
-| **Phase 4** | ICI 5-Fold CV (Retrieval K=24) | Fold 0~4 CV | 50e | AUROC: 0.5524<br/>**Log Loss: 0.7288 (0.0944 대폭 하강)** | `checkpoints/20260728_013253/` | `logs/20260728_013253~/` |
-| **Phase 5** | Signal-Aware Large Context Pretraining | `configs/train_v21_large_context_pretrain.yaml` | 20e | **20 epoch 완주 (6번째 재시도 만에 성공, §4-④~⑤ 참고)**<br/>**Best `val_ce_loss: 0.5940`** (epoch 14) — Phase 1 Full-Context(`0.5921`)에 근접, Phase 1-R Naive Retrieval(`0.6839`) 대비 대폭 개선<br/>최종 epoch 19: `val_loss: 0.608`, `train_loss: 0.723` (progress-bar 결합 loss, `val_ce_loss`와 별도 지표) | `checkpoints/20260728_144957/v21_large_context_pretrain/epoch=014-val_ce_loss=0.5940.ckpt` | `logs/20260728_144957/v21_large_context_pretrain.out` |
-| **Phase 6** | ICI 5-Fold CV Fine-Tune (Phase 5 체크포인트, 외부 Naive Retrieval 미세조정 — 불일치) | `configs/train_v21_ici_finetune_fold{0..4}.yaml` (`scripts/launch_phase6_5fold.sh`) | 50e (resume epoch 14부터) | **완료, 가설과 반대 방향**<br/>AUROC: 0.5081, Log Loss: 0.9596 (Phase 4 대비 악화). §4-⑥ 원인 분석 참고 | `checkpoints/20260728_1757{10,12,14,16,18}/v21_ici_finetune_phase6_f{0..4}/` | `logs/20260728_1757{10,12,14,16,18}/v21_ici_finetune_phase6_f{0..4}.out` |
-| **Phase 6b** | ICI 5-Fold CV Fine-Tune (Phase 5 체크포인트, 모델 내부 Signal-Aware 미세조정 — 일치) | `configs/train_v21_ici_finetune_signalaware_fold{0..4}.yaml` (`scripts/launch_phase6b_5fold.sh`) | 50e (resume epoch 14부터) | **완료**<br/>AUROC: 0.5481 (95% CI [0.421, 0.674]), Log Loss: 0.8672, Accuracy: 0.5747. §4-⑦ 참고 | `checkpoints/20260728_2052{37,39,41,43,45}/v21_ici_finetune_phase6b_f{0..4}/` | `logs/20260728_2052{37,39,41,43,45}/v21_ici_finetune_phase6b_f{0..4}.out` |
-| **Phase 6c** | ICI 5-Fold CV Fine-Tune (Phase 5 체크포인트, **retrieval 완전 비활성** — 전체 ~69명 context) | `configs/train_v21_ici_finetune_fullcontext_fold{0..4}.yaml` (`scripts/launch_phase6c_5fold.sh`) | 50e (resume epoch 14부터) | **완료**<br/>AUROC: 0.5454 (95% CI [0.419, 0.674]), **Log Loss: 0.7921, Accuracy: 0.6092** (retrieval 켠 6b보다 calibration/accuracy 우수). §4-⑧ 가설1 참고 | `checkpoints/20260729_0628{33,35,37,39,41}/v21_ici_finetune_phase6c_f{0..4}/` | `logs/20260729_0628{33,35,37,39,41}/v21_ici_finetune_phase6c_f{0..4}.out` |
+> [!CAUTION]
+> **아래 수치들은 모두 v21 이하에서 측정된 것이며, v22 코드로 재현되지 않습니다.**
+> v22는 retrieval을 제거하고 `architecture_version`을 22로 올렸기 때문에 **기존 체크포인트는 전부 로드 불가**입니다 (`ModelInterface.on_load_checkpoint` 버전 게이트가 거부). 재사용하려면 v22로 재학습이 필요합니다.
 
----
+| Phase | 설명 | 지표 | 비고 |
+|---|---|---|---|
+| Phase 1 (v21) | Medium 합성 사전학습, full context | `val_ce_loss: 0.5921` | 20 epoch, 10,240 steps |
+| Phase 2 (v21) | Hard 합성 사전학습, full context | `val_ce_loss: 0.6845` | 50 epoch |
+| Phase 4 (v21) | ICI 5-fold, Naive retrieval | AUROC 0.5524 / LL 0.7288 | 95% CI [0.424, 0.677] |
+| Phase 6b (v21) | ICI 5-fold, Signal-Aware retrieval | AUROC 0.5481 / LL 0.8672 | 95% CI [0.421, 0.674] |
+| **Phase 6c (v21)** | **ICI 5-fold, retrieval 없음** | **AUROC 0.5454 / LL 0.7921 / Acc 0.6092** | 95% CI [0.419, 0.674] — v22 기본 구성에 해당 |
 
-## 4. 핵심 집중 이슈: Pretraining Stage Context Expansion & Signal-Aware Retrieval
-
-### ① 문제 진단 (Why Naive Retrieval Failed in Pretraining)
-* Pretraining 단계에서 Context set을 효율적으로 구성하기 위해 주입했던 기존 Naive Retrieval(`RetrievalEvaluationEpisodeCollator`)은 세포 1,000개의 단순 평균 및 표준편차 Cosine Similarity를 사용함.
-* Single-cell 면역 데이터는 95%+가 공통 배경 세포이고 반응 신호는 <1%~5% 희귀 세포에 쏠려 있어, Naive Retrieval이 반응 유사 donor가 아닌 **95% 배경 노이즈가 유사한 donor**를 추출함.
-* 이로 인해 사전학습 시 모델에 노이즈 donor가 주어지면서 `val_ce_loss`가 `0.5921`에서 `0.6839`로 상향 튐.
-
-### ② 해결 설계: 40-token Aggregator Summary 재사용 Signal-Aware Retrieval
-* **최종 구현 (2026-07-28)**: `extract_bag_features`는 aggregator가 분류기(`StructuredPopulationMetaClassifier`)를 위해 **이미 계산해 두는** 40-token 구조화 요약(`_all_structured_tokens`: 1 global + 12 slots × 3종(center/spread/rare) + 3 tail = 40개 토큰, 각 512-dim, shape `[bags, 40, 512]`)을 **그대로 재사용**함. 별도의 손으로 압축한 scalar feature를 새로 만들지 않음.
-  - 세션 중 두 차례 반복 수정 이력: (a) 최초 구현은 density/tail/covariance/scale을 손으로 압축한 flat 40-dim vector였으나, aggregator가 이미 만들어 둔 40-token 요약을 재사용하는 게 아니라 별개의 새 40x512를 만드는 셈이라는 지적을 받아 폐기. (b) 슬롯당 3종 통계(center/spread/rare norm)로 압축한 36+4-dim 버전도 마찬가지로 "새로 만드는" 방향이라 폐기. 최종적으로 (c) `_all_structured_tokens`을 직접 재사용하는 현재 버전으로 확정.
-  - **Anchor 안정성 이슈 및 조치**: `_all_structured_tokens`를 그대로 쓰면, population anchor(슬롯 중심)가 `context_mask`(= 그 호출에 함께 들어온 bag 집합)에 의존하기 때문에 청크(chunk) 구성에 따라 같은 bag의 descriptor가 달라지는 문제가 발견됨 (chunk_size=8 vs 0 비교 시 cosine similarity 평균이 0.474까지 하락, 최솟값 음수). **조치**: `extract_bag_features`가 anchor를 항상 전체 pool(`x`/`context_mask` 전체)에서 한 번만 계산(`self.aggregator._context_anchors`)하고, 청크는 오직 `_forward_dense` 호출을 나누는 메모리 최적화로만 사용하도록 재구현. 수정 후 chunked vs dense 결과가 최대 절대오차 4.5e-8, cosine similarity 1.0으로 완전히 일치함을 확인.
-* `retrieve_context_indices`는 이 `[bags,40,512]`를 flatten(`[bags, 40*512]`)한 뒤 cosine similarity로 Class-Balanced Top-12 NR + Top-12 R ($K=24$) donor를 동적 추출함.
-
-### ③ 세션 인시던트 진단 및 조치 (2026-07-28 12:30~13:10 KST)
-
-* **Phase 5 크래시 원인 (수정 완료)**: `configs/train_v21_medium.yaml` 등 루트 config 4개(`train_v21_medium.yaml`, `train_v21_medium_retrieved.yaml`, `train_v21_hard_realworld.yaml`, `train_v21_hard_retrieved.yaml`)의 `base_config`가 이관 전 경로인 `train_medium.yaml`을 참조하고 있었음. 커밋 `2a21195`에서 실제 파일을 `configs/archive/v18_v19/train_medium.yaml`로 옮기며 테스트 fallback만 갱신하고 이 4개 config는 갱신하지 않아, Phase 5 (및 이를 상속하는 Phase 1/1-R/2/2-R 전체)가 `FileNotFoundError`로 즉시 크래시함. `logs/20260728_122712/`, `logs/20260728_123047/` 두 차례 실행 모두 1분 내 실패. **해당 4개 config의 `base_config` 경로를 `archive/v18_v19/train_medium.yaml`로 수정하여 정상 로드 확인 완료** (커밋 `e6ce48b`에 반영됨). Phase 5는 아직 재구동 전이며 GPU는 현재 idle.
-* **동시 세션 프로세스 행(Hang) 및 중복 실행**: 점검 중 `tests/test_large_context_pretrain.py`를 실행하는 python 프로세스가 여러 차례 반복적으로 재생성되어 load average가 최대 72까지 급등함 (nproc=72). 다른 위치(연구실/집/노트북) 세션이 같은 시간대에 동일 테스트를 반복 구동한 것으로 추정됨. 확인 후 강제 종료(`kill -9`) 처리하여 현재는 python/torchrun 프로세스 없이 idle 상태로 정리됨. **다중 위치 동시 접속 시 프로세스 충돌 가능성에 유의할 것.**
-* **✅ 해결됨: 40-dim Feature Retrieval 구현 갭 (2026-07-28 14:05 KST)**: `extract_bag_features`가 실제로는 `global_summary`+`tails` 평균을 concat한 1024-dim을 반환하고 있었고(설계된 40차원/40토큰 재사용 미구현), `tests/test_large_context_pretrain.py`의 관련 assertion이 완화되어 이 gap을 잡아내지 못하던 문제를 발견함. **최종 조치**: 위 4-②에 기술된 대로 aggregator의 기존 40-token 요약(`_all_structured_tokens`)을 재사용하도록 구현(2차 검토 끝에 확정), anchor 안정성 문제도 함께 수정. `test_feature_retrieval.py`/`test_large_context_pretrain.py`의 관련 assertion을 새 `[bags,40,512]` shape와 `torch.allclose` 엄격 비교로 갱신함. **검증**: (a) 단독 스크립트로 16 bags 기준 dense vs chunked(chunk_size=8) 결과가 최대 절대오차 4.5e-8로 사실상 동일함을 확인, `retrieve_context_indices` 및 4D 배치 경로 모두 정상 동작 확인. (b) unittest로 `test_chunked_extract_bag_features`(96 bags, `torch.allclose` 엄격 검사)와 `test_collator_formatting` PASS 확인. (c) `test_feature_retrieval.test_extract_bag_features`(30 bags, shape만 검증)는 아래 CPU 지연 이슈로 280초 내 결과 미출력 — 순수 shape 검증이라 로직 문제 아님, 다음 세션에서 GPU 또는 긴 타임아웃으로 재확인 권장.
-* **⚠ 미해결 (별도 조치 필요, Phase 5 성공과 무관): CPU 실행 시 심각한 지연 / `test_4d_batched_forward` 응답 없음**: `tests/test_large_context_pretrain.py` 전체(discover 또는 파일 단위)를 CPU 환경에서 실행하면 `test_4d_batched_forward`(커밋 `e6ce48b`에서 추가된 4D 배치 forward 테스트)에서 180초 타임아웃 내 결과가 출력되지 않음. 별도로 `extract_bag_features`만 단독 호출해 스케일링을 측정한 결과, 동일 모델이 CPU에서 4 bag/10 cell도 최소 ~7초, 30 bag/100 cell 조합은 90초를 넘기는 등 **bag/cell 크기에 따라 비선형적으로 느려짐**을 확인함. Target Hardware가 B200 GPU임에도 유닛테스트들이 모델을 `.cuda()`로 옮기지 않고 순수 CPU에서 forward를 실행하는 것이 근본 원인일 가능성이 높음. **다음 세션 확인 필요**: 테스트를 GPU에서 실행하거나 더 긴 타임아웃으로 단독 실행해 실제 종료 여부/소요 시간 확인.
-
-### ④ Phase 5 학습 파이프라인 완전 가동 (2026-07-28 14:28~14:52 KST)
-
-Config를 고친 뒤에도 학습이 5차례 연속 크래시했고, 매번 근본 원인이 달랐음. 순서대로:
-
-1. **`num_candidate_bags_pretrain` 죽은 config 키**: `SyntheticManifoldGenerator`/`SyntheticEpisodeDataset` 어디에도 구현되지 않은 파라미터가 `dataset_kwargs`에 있어 `TypeError`로 즉시 크래시. 코드 전체에서 이 키를 쓰는 곳이 config 한 줄뿐임을 확인 후 제거 (`num_bags: [60,100]`가 이미 동일 역할 수행).
-2. **DataLoader worker의 CUDA fork 충돌**: `generation_device: cuda` + `num_workers: 4` 조합에서 `torch.Generator(device='cuda')`가 forked worker 안에서 `CUDA error: initialization error` 발생. `generation_device=='cuda'`일 때 `num_workers=0`으로 강제하도록 `DataInterface._episode_dataloader` 수정 (기존 in-process `CudaPrefetchDataLoader`가 이미 오버랩을 제공하므로 multi-process worker는 GPU 메모리만 낭비 — 실제로 worker 4개가 100GiB+ 점유하는 것을 확인).
-3. **pin_memory 충돌**: `generation_device=cuda`로 이미 GPU에 생성된 텐서를 `pin_memory()`하려다 `RuntimeError`. CUDA 생성 dataset에는 자동으로 `pin_memory=False` 적용.
-4. **`retrieve_context_indices`의 gradient graph 누수**: `torch.no_grad()` 없이 실행되어, index 선택에만 쓰이는 거대한 중간 계산(anchor·chunk별 forward_dense)이 backward 시점까지 GPU에 유지됨 → step이 진행될수록 메모리 누적 → OOM. `_retrieve_context_indices_impl` 헬퍼 메서드로 분리하고 `torch.no_grad()`로 감싸 해결.
-5. **(가장 근본적) `training_step`이 retrieval을 아예 호출하지 않음**: 4D 배치 입력(Phase 5가 사용하는 형태) 시 `training_step`이 `self.model.forward_episode_batch(...)`를 직접 호출하는데, 이 메서드엔 `retrieval_k` 파라미터 자체가 없어 `episodes * num_bags`(최대 32×100=3200) bag을 **전부** 한 번에 dense aggregator forward에 통과시킴. `retrieve_context_indices`/`extract_bag_features`를 아무리 고쳐도 이 경로가 호출 안 되니 매번 동일하게 OOM. **조치**: `training_step`에서 `forward_episode_batch` 호출 전에 `retrieval_k>0`이면 `self.model.retrieve_context_indices(...)`를 먼저 호출해 N을 `retrieval_k + query_count`로 줄이도록 통합. `retrieval_k`/`retrieval_chunk_size`는 `model_kwargs`에 추가하고 `ModelInterface._build_model`의 pop-list에 등록(다른 training-only hparam과 동일 패턴).
-   - **부수 발견**: 4D retrieval 경로의 `mask_index_b`가 query 1개만 가정하고 있었음(`torch.tensor([len(selected_context_idx)])`). 이 config는 `training_targets_per_episode: [5, 12]`로 episode당 query가 여러 개라 실제로는 틀린 결과를 만들고 있었음. 3D 경로처럼 query 개수만큼의 range로 수정.
-
-**검증**: 위 5개 수정 후 `training_step`을 GPU에서 직접 호출하는 표준 스크립트로 실제 config의 worst-case 크기(E=32, N=100, cells=1000)에서 4 step 반복 → peak 메모리 90~99GiB에서 안정(성장 없음). 실제 `launch_interactive_training.sh`로 재구동 → 정상 진행 확인 (최종 결과는 §4-⑤).
-
-### ⑤ Phase 5 최종 결과 및 가설 검증 (2026-07-28 14:49~15:49 KST, 20 epoch 완주)
-
-* **Epoch별 `val_loss`/`train_loss` (progress-bar 결합 지표, 3자리 반올림)**:
-
-  | Epoch | val_loss | train_loss | Epoch | val_loss | train_loss |
-  |---:|---:|---:|---:|---:|---:|
-  | 0 | 0.606 | 0.747 | 10 | 0.614 | 0.723 |
-  | 1 | 0.606 | 0.747 | 11 | 0.603 | 0.725 |
-  | 2 | 0.631 | 0.731 | 12 | 0.620 | 0.722 |
-  | 3 | 0.620 | 0.724 | 13 | 0.621 | 0.726 |
-  | 4 | 0.631 | 0.728 | 14 | 0.605 | 0.721 |
-  | 5 | 0.622 | 0.728 | 15 | **0.594** | 0.720 |
-  | 6 | 0.598 | 0.727 | 16 | 0.601 | 0.719 |
-  | 7 | 0.627 | 0.720 | 17 | 0.604 | 0.720 |
-  | 8 | 0.602 | 0.725 | 18 | 0.609 | 0.719 |
-  | 9 | 0.614 | 0.721 | 19 | 0.606 | 0.724 |
-
-* **체크포인트 기준 `val_ce_loss`** (ModelCheckpoint가 저장한 상위 3개 + last): `epoch=005: 0.5975`, **`epoch=014: 0.5940` (최적)**, `epoch=015: 0.6013`, `epoch=019 (last): 저장값 없음, 진행바 기준 val_loss=0.608`.
-* **가설 검증**: Phase 5의 Best `val_ce_loss: 0.5940`은 Phase 1 Full-Context(`0.5921`)의 **0.0019 이내**로 근접하며, Phase 1-R Naive Retrieval(`0.6839`, 95%+ 배경 노이즈 donor 추출 문제)보다 **0.09 이상 우수**함. 이는 §4-①에서 진단한 "Naive Retrieval이 배경 노이즈 유사 donor를 뽑아 학습을 방해한다"는 문제를, aggregator의 40-token 구조화 요약(density/tail/covariance 정보를 이미 담고 있는 신호 인식 표현)을 재사용한 retrieval로 극복했다는 Phase 5의 핵심 가설을 실증적으로 뒷받침함.
-* **W&B Run**: https://wandb.ai/teasol/ICF/runs/9ldg44nr (`v21_large_context_pretrain_20260728_144957`)
-* **다음 단계 제안**: 이 체크포인트(`epoch=014-val_ce_loss=0.5940.ckpt`)를 Phase 3/4처럼 ICI 5-Fold 실데이터 미세조정에 사용해, Signal-Aware Retrieval 사전학습이 Naive Retrieval 기반 Phase 4(Log Loss `0.7288`) 대비 실데이터 미세조정 성능을 개선하는지 확인하는 것이 자연스러운 다음 실험.
-
-### ⑥ Phase 6 결과: 실데이터 미세조정에서는 가설이 뒤집힘 (2026-07-28 17:57~18:0X KST)
-
-* **실행**: `scripts/launch_phase6_5fold.sh` (Phase 4와 완전히 동일한 5-fold 미세조정 config/protocol, `PRETRAINED_CKPT`만 Phase 5 체크포인트 `epoch=014-val_ce_loss=0.5940.ckpt`로 교체). 5-fold 모두 정상적으로 50 epoch(체크포인트의 epoch 14부터 이어서 36 epoch) 완주, 에러 없음.
-* **평가**: Phase 4와 동일한 `scripts/test.py --checkpoints ... --config configs/train_v21_ici_finetune_fold0.yaml --retrieval-k 24 --validation-only` 프로토콜로 5-fold 통합 검증 지표 계산 (`predictions/ici_predictions_v21_phase6_5fold.pt`).
-
-  | 지표 | Phase 4 (Naive Retrieval 사전학습 기반) | Phase 6 (Signal-Aware 사전학습 기반) | 변화 |
-  |---|---:|---:|---|
-  | AUROC | `0.5524` | `0.5081` | **`-0.0443` 악화** (0.5 무작위 수준에 근접) |
-  | Log Loss | `0.7288` | `0.9596` | **`+0.2308` 대폭 악화** |
-  | Accuracy | `0.5287` | `0.5057` | 악화 |
-  | `p1_std` (확률 분산) | `0.1664` | `0.2874` | 과신(overconfidence) 심화 — Log Loss 악화의 주 원인 |
-
-* **가설과 반대 결과**: Phase 5의 합성 데이터 `val_ce_loss`(`0.5940`)는 Phase 1 Full-Context(`0.5921`)에 근접할 만큼 우수했음에도, 실데이터(ICI) 미세조정 성능은 오히려 Phase 4(Naive Retrieval 사전학습)보다 나빠짐. 즉 **합성 데이터 사전학습 손실 개선이 실데이터 전이 성능 개선으로 이어지지 않음**.
-* **유력 원인 가설 (미검증)**: Phase 5 사전학습과 Phase 6 미세조정이 **서로 다른 context 선별 메커니즘**을 사용함.
-  - Phase 5 사전학습: `training_step` → `self.model.retrieve_context_indices(...)` (모델 내부, aggregator의 40-token 구조화 요약 기반 Signal-Aware Retrieval)로 candidate pool(N=60~100)에서 K=24 선별.
-  - Phase 6 미세조정: `configs/train_v21_ici_finetune_fold*.yaml`의 `data.retrieval_k: 24`는 **외부 `data_interface.py`의 Naive Retrieval collator**(1,000세포 단순 평균/표준편차 코사인 유사도, §1-①)를 사용 — Phase 4와 동일한 설정을 그대로 물려받았을 뿐, 모델 내부 Signal-Aware retrieval 경로가 아님.
-  - 결과적으로 모델은 사전학습 때 한 번도 본 적 없는 분포(Naive Retrieval이 선별한, 배경 노이즈가 유사한 24명 context)를 미세조정 때 처음 마주하게 되어, 오히려 Naive Retrieval로 사전학습된 Phase 2-R 체크포인트(Phase 4의 기반)보다 적응이 어려웠을 가능성이 높음.
-* **다음 세션 결정 필요 (사용자 논의 후 진행)**: 미세조정 시에도 모델 내부 Signal-Aware retrieval(`extract_bag_features`/`retrieve_context_indices`)을 사용하도록 ICI fine-tune config 및 `scripts/test.py` 평가 경로를 맞춰 재실험할지 여부. 현재 `BaseModel.forward`(단일 episode 경로, ICI처럼 `episode_dataset: false`인 non-episode 데이터에도 쓰이는지)와 `retrieval_k`가 `data:` 섹션이 아닌 `model_kwargs`로 전달되어야 하는지 등 배선 확인이 선행되어야 함.
-
-### ⑦ Phase 6b: Context 선별 방식을 사전학습과 통일 (2026-07-28 20:49~21:15 KST)
-
-* **가설(§4-⑥)에 따른 조치**: 미세조정 시에도 모델 내부 Signal-Aware retrieval을 쓰도록 배선 수정.
-  - `src/modules/model_interface.py`: `_episode_losses`(3D training 경로), `_evaluation_step`, `predict_step` 세 곳 모두 `self.model(...)` 호출에 `retrieval_k=self.hparams.get("retrieval_k", 0)`를 명시적으로 전달하도록 수정 (기존에는 이 세 경로 모두 `retrieval_k`를 아예 전달하지 않아 `BaseModel.forward`의 기본값 `0`으로 항상 retrieval이 꺼져 있었음 — 4D 배치 경로에만 있던 배선이 3D/non-episode 경로엔 없었던 것).
-  - `configs/train_v21_ici_finetune_signalaware_fold{0..4}.yaml` 5개 신규 생성 (기존 `train_v21_ici_finetune_fold{0..4}.yaml`를 보존하기 위해 복사본으로 작업): `data.retrieval_k: 24`(외부 Naive Retrieval collator) 삭제 → `EvaluationEpisodeCollator`로 폴백되어 전체 train cohort가 후보 pool로 모델에 그대로 전달됨. 대신 `model_kwargs.retrieval_k: 24` 추가 → 모델이 내부적으로 Signal-Aware 방식으로 24명 선별.
-  - `scripts/launch_phase6b_5fold.sh` 신규 생성 (Phase 6와 동일 Phase 5 체크포인트, config만 signalaware 버전으로 교체).
-  - **검증**: fold0 단독 스모크 테스트로 크래시 없음 확인 후 5-fold 전체 실행 → 5-fold 모두 50 epoch(체크포인트 epoch 14부터 이어서) 정상 완주.
-* **결과 (`predictions/ici_predictions_v21_phase6b_5fold.pt`)**:
-
-  | 지표 | Phase 4 (Naive/Naive) | Phase 6 (Signal-Aware pretrain / Naive finetune, 불일치) | Phase 6b (Signal-Aware/Signal-Aware, 일치) |
-  |---|---:|---:|---:|
-  | AUROC | **0.5524** | 0.5081 | 0.5481 |
-  | Log Loss | **0.7288** | 0.9596 | 0.8672 |
-  | Accuracy | 0.5287 | 0.5057 | **0.5747** |
-  | `p1_std` | **0.1664** | 0.2874 | 0.2545 |
-
-* **해석**: 사전학습/미세조정의 context 선별 방식을 통일하자 Phase 6 대비 확실히 개선됨(AUROC `0.5081→0.5481`, Log Loss `0.9596→0.8672`, Accuracy는 Phase 4보다도 개선) — §4-⑥의 "context 선별 분포 불일치" 가설이 문제의 **일부**였음을 뒷받침함. 그러나 Phase 4(Naive Retrieval 기반)의 AUROC/Log Loss를 여전히 넘어서지 못함. 즉 **분포 불일치가 gap의 전부는 아니며**, 다른 요인(예: 합성 데이터와 실제 ICI 데이터 간 근본적 도메인 차이, Phase 5가 학습한 candidate-pool 규모(N=60~100)와 ICI 실데이터 규모(~70명)의 차이, 또는 Signal-Aware retrieval 자체가 87명 규모의 실데이터에서는 아직 이점이 없을 가능성)가 남아있음.
-* **결론 (⚠ §4-⑧에서 뒤집힘)**: 당시에는 "Phase 4가 최선"이라고 기록했으나, §4-⑧의 통계 검정 결과 Phase 4/6b/6c 간 차이는 **통계적으로 구분 불가능한 노이즈**임이 밝혀짐. 아래 §4-⑧ 참고.
-
-### ⑧ 3대 가설 정밀 검증 (2026-07-29 06:28~07:10 KST)
-
-사용자 지시로 (1) retrieval 자체가 문제인지, (2) Signal-Aware retrieval 구현이 틀렸는지, (3) 사전학습이 부족한지를 각각 검증함.
-
-#### 가설 1: Retrieval 자체가 문제 → **ICI에서 retrieval은 이득이 전혀 없음 (확인)**
-
-* **Phase 6c 신규 실험**: Phase 5 체크포인트를 retrieval을 **완전히 끄고**(전체 ~69명 context 그대로) 미세조정. Config `configs/train_v21_ici_finetune_fullcontext_fold{0..4}.yaml`, 스크립트 `scripts/launch_phase6c_5fold.sh`. 5-fold 모두 50 epoch 완주.
-
-  | 지표 | Phase 6b (SA retrieval K=24) | **Phase 6c (retrieval 없음)** |
-  |---|---:|---:|
-  | AUROC | 0.5481 | 0.5454 |
-  | Log Loss | 0.8672 | **0.7921** |
-  | Accuracy | 0.5747 | **0.6092** |
-
-* **해석**: retrieval을 켜도 AUROC는 사실상 동일(0.5481 vs 0.5454, paired bootstrap 승률 0.52 = 동전 던지기)한데, **calibration(Log Loss)과 Accuracy는 오히려 retrieval을 껐을 때가 더 좋음**. 즉 ICI 실데이터에서 retrieval은 비용만 있고 이득이 없음.
-* **기계적 원인**: ICI는 전체 87명뿐이라 fold당 context가 ~69명. 여기서 24명만 고르는 것은 **가용 labeled context의 65%를 버리는 것**. Retrieval은 후보 pool이 클 때(또는 노이즈 donor가 실제로 해로울 때) 의미가 있는데, 69명 규모에서는 모델이 그냥 전부 attend하는 편이 낫다.
-
-#### 가설 2: Signal-Aware retrieval 구현 오류 → **문서화된 설계와 다름 (확인)**
-
-* `current_experiments.md` §1이 명시한 설계는 **"Query 1명당 24명 맞춤형 선별"**인데, **두 구현 모두 이를 지키지 않음**:
-  - Phase 4 외부 collator ([`data_interface.py:85`](../src/modules/data_interface.py#L85)): `evaluation_x[0]` — **첫 번째 query 1명**의 summary만 써서 고른 context를 17~18명 query 전원에게 공용으로 적용.
-  - Phase 6b 모델 내부 ([`baseline.py:3440`](../src/models/baseline.py#L3440)): `bag_features[query_index].mean(dim=0)` — **전체 query를 평균**낸 summary로 고른 context를 전원에게 공용 적용.
-* **정량 측정** (fold 0, 69 context + 18 query): 평균낸 query로 고른 공용 context는, 각 query가 **개별적으로 골랐을 top-24와 평균 61.1%만 겹침** (min 45.8%, max 79.2%). 즉 각 query 기준 약 39%의 donor가 "자기가 고르지 않았을 donor"로 대체됨.
-  - **더 심각한 비대칭**: 반응자(y=1) query의 overlap이 45.8~66.7%(대부분 ~50%)로, 비반응자(y=0)의 54.2~79.2%(대부분 ~67%)보다 **체계적으로 낮음**. 즉 소수 클래스이자 신호를 담고 있는 반응자가 가장 엉뚱한 context를 받고 있음.
-  - **아이러니**: 이것은 §4-①에서 Naive Retrieval을 폐기한 이유였던 "평균이 희귀 신호를 씻어낸다"는 실패 모드가, 세포 수준이 아니라 **bag 수준에서 그대로 재현**된 것.
-* **조치**: `BaseModel.retrieve_context_indices_per_query`를 신규 구현(query별 독립 top-K 선별, `[queries, K+1, cells, dim]` 반환).
-* **⚠ 단, eval-only 교체로는 개선되지 않음**: Phase 6b 체크포인트에 per-query retrieval을 평가 시에만 적용하니 AUROC 0.4773으로 **더 나빠짐**. 이는 해당 모델이 "평균낸 retrieval"로 **학습**되었기 때문에 생기는 train/eval 불일치 때문으로 보이며, 제대로 검증하려면 per-query retrieval로 재학습이 필요함 (미실행).
-
-#### 가설 3: 사전학습 부족 → **Phase 5는 Phase 1 대비 optimizer step이 1/4 (확인)**
-
-* **결정적 수치**:
-
-  | | steps/epoch | epochs | **총 optimizer step** |
-  |---|---:|---:|---:|
-  | Phase 1 (`train_v21_medium.yaml`) | 512 | 20 | **10,240** |
-  | Phase 5 (`train_v21_large_context_pretrain.yaml`) | 128 | 20 | **2,560** |
-
-* **원인**: Phase 5가 `episode_batch_size: 32`로 override(`configs/data/medium.yaml` 기본값은 8)했는데 `episodes_per_epoch: 4096`과 `max_epochs: 20`은 그대로 둠 → batch가 4배 커진 만큼 step이 4배 줄었고, learning rate(5e-4)는 동일. 즉 **같은 epoch 수 = 1/4의 학습량**.
-* **수렴 증거**: Phase 5의 `val_loss`는 0.606 → 0.608로 사실상 **평평하고 노이즈만**(0.594~0.631 진동, 추세 없음) = 아직 수렴 궤도에 오르지 못함. 반면 Phase 1은 0.667 → 0.644로 **단조 하강** 중이었고 epoch 20 시점에도 여전히 개선 중이었음.
-* **부수 발견 (또 하나의 배선 버그)**: Phase 5는 **validation을 retrieval 없이 수행**했음. `_evaluation_step`에 `retrieval_k`를 넘기는 수정(커밋 `7e378dc`)은 Phase 5 실행(2026-07-28 14:49) **이후**에 이루어졌기 때문. 따라서 Phase 5는 24-bag retrieved context로 **학습**하면서 60~100 bag 전체 pool로 **검증**했고, `ModelCheckpoint(monitor: val_ce_loss)`가 고른 `epoch=014` 체크포인트는 **정작 학습 모드가 아닌 full-context 성능 기준의 최적점**임. 즉 Phase 6/6b/6c가 모두 출발점으로 삼은 체크포인트 자체가 잘못 선택되었을 가능성이 있음.
-
-#### ⚠ 가장 중요한 발견: 지금까지의 모든 비교가 통계적으로 무의미했음
-
-* n=87 (positive 37)에서 5,000회 bootstrap으로 AUROC 신뢰구간을 계산:
-
-  | 실험 | AUROC | 95% CI |
-  |---|---:|---|
-  | Phase 4 (Naive 사전학습 + Naive retrieval) | 0.5524 | [0.424, 0.677] |
-  | Phase 6 (SA 사전학습 + Naive retrieval, 불일치) | 0.5081 | [0.383, 0.635] |
-  | Phase 6b (SA 사전학습 + SA retrieval) | 0.5481 | [0.421, 0.674] |
-  | Phase 6c (SA 사전학습 + retrieval 없음) | 0.5454 | [0.419, 0.674] |
-
-* **모든 신뢰구간이 0.5(무작위)를 포함**하며, 네 구간이 거의 완전히 겹침.
-* Paired bootstrap 승률: Phase 4 vs 6b = **0.53**, Phase 4 vs 6c = **0.55** — 동전 던지기. 유일하게 일관된 차이는 Phase 6(불일치 설정)이 나쁘다는 것뿐(승률 0.78~0.81).
-* **결론**: 이전 세션들이 기록한 "Phase 4가 최선", "Phase 6b가 Phase 6보다 개선" 같은 판단은 **n=87에서 구분 불가능한 노이즈를 쫓은 것**. AUROC 0.004~0.04 차이로 방향을 정해서는 안 됨.
-
-#### 종합 및 권고
-
-1. **retrieval 방향은 ICI 규모에서 접는 것이 합리적** — 이득이 없고(가설 1), 구현도 설계와 다르며(가설 2), 무엇보다 87명 규모에서는 어떤 차이도 검출할 수 없음.
-2. **Phase 5 재사전학습이 필요하다면** `episode_batch_size: 32`를 유지한 채 `max_epochs`를 80으로 올리거나(step 수 동등화), `episode_batch_size: 8`로 되돌려야 함. 현재 체크포인트는 학습량 1/4 + 잘못된 기준의 체크포인트 선택이라는 이중 결함이 있음.
-3. **평가 프로토콜부터 바로잡을 것** — n=87 단일 코호트로는 이 규모의 차이를 검증할 수 없음. 신뢰구간/paired bootstrap을 기본 리포팅에 포함하고, 외부 코호트 검증이나 반복 seed를 도입해야 의미 있는 비교가 가능함.
+**핵심**: 위 세 ICI 구성의 **95% 신뢰구간이 전부 0.5(무작위)를 포함하고 서로 거의 완전히 겹칩니다.** paired bootstrap 승률도 0.52~0.55로 동전 던지기 수준입니다. 즉 n=87 코호트에서 이 차이들은 **검출 불가능한 노이즈**입니다. 상세 근거: [`history/v21_retrieval_investigation.md`](history/v21_retrieval_investigation.md) §4-⑧.
 
 ---
 
-## 5. 다음 작업 세션 Action Plan (Next Steps for Any Agent Location)
+## 4. v22 결정: retrieval 완전 제거 (2026-07-29)
 
-연구실, 집, 또는 노트북 어디서 접속하더라도 다음 순서로 작업을 수행하면 됩니다:
+### 제거 근거 (3대 가설 검증 결과)
 
-1. **[최우선] 평가 프로토콜 신뢰성 확보** (§4-⑧ 참고): n=87 단일 코호트에서 Phase 4/6b/6c의 AUROC 95% CI가 전부 [0.42, 0.68] 근처로 겹치고 모두 0.5를 포함함. **현재 세팅으로는 어떤 아키텍처 변경도 검증할 수 없음.** 반복 seed·외부 코호트·bootstrap CI 리포팅을 도입하기 전에는 추가 아키텍처 실험을 진행해도 결론을 낼 수 없음. (통계 분석 재현: `predictions/ici_predictions_v21_{retrieved,phase6,phase6b,phase6c}_5fold.pt` 4개 파일에 대해 paired bootstrap)
-2. **Phase 5 재사전학습 (선택)**: 현재 체크포인트는 이중 결함 — (a) `episode_batch_size: 32`인데 `max_epochs: 20` 그대로라 Phase 1 대비 optimizer step이 1/4(2,560 vs 10,240), (b) validation이 retrieval 없이 수행되어 `epoch=014` 체크포인트가 학습 모드와 다른 기준으로 선택됨. 재실행 시 `max_epochs: 80`(step 동등화) + `_evaluation_step` retrieval 수정(이미 커밋 `7e378dc`에 반영됨) 적용 필요.
-3. **retrieval 방향 종료 권고** (§4-⑧ 가설1): ICI 규모(fold당 context ~69명)에서 24명 retrieval은 가용 context의 65%를 버리면서 AUROC 이득이 0이고 calibration은 오히려 악화됨. 대형 후보 pool 시나리오가 아니면 retrieval을 끄는 것(Phase 6c 설정)이 합리적.
-4. **(구현 부채) per-query retrieval 재학습 검증**: `BaseModel.retrieve_context_indices_per_query`를 구현해 두었으나 eval-only 교체로는 개선되지 않음(train/eval 불일치). 이 경로를 살리려면 per-query retrieval로 **재학습**해야 검증 가능. 위 1번이 해결되기 전에는 우선순위 낮음.
-2. **`test_4d_batched_forward` CPU 지연/무응답 원인 확인 (§4-③ 참고)**: GPU(`CUDA_VISIBLE_DEVICES=0`)에서 재현 여부 확인하거나, 10분+ 타임아웃으로 단독 실행해 실제 종료 여부와 소요 시간 측정.
-3. **단위 테스트 전체 실행 및 검증 완료 확인**:
-   - `timeout 600s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"` (All tests PASS 확인, `test_feature_retrieval.py`, `test_large_context_pretrain.py` 포함. 반드시 timeout 적용하여 행 발생 시 자동 종료되도록 할 것. 2번 이슈로 인해 이번 세션에서는 전체 discover 대신 개별 스크립트 검증만 수행함)
+1. **retrieval은 ICI에서 이득이 없음**: retrieval을 끈 Phase 6c가 켠 Phase 6b와 AUROC 동일(0.5454 vs 0.5481)한데 Log Loss(0.7921 vs 0.8672)와 Accuracy(0.6092 vs 0.5747)는 오히려 **더 좋음**. ICI는 fold당 context가 ~69명뿐이라 24명 선별은 가용 labeled context의 65%를 버리는 것.
+2. **구현이 문서화된 설계와 달랐음**: 설계는 "query 1명당 24명 맞춤 선별"이었으나, 실제로는 두 구현 모두 query 전체에 **공용 context 1세트**를 적용 (외부 collator는 첫 query만, 모델 내부는 query 평균 사용). 공용 context는 각 query의 개별 top-24와 평균 61.1%만 겹쳤고 반응자(y=1)에서 ~50%로 최악.
+3. **Phase 5 사전학습은 Phase 1의 1/4만 학습됨**: `episode_batch_size` 8→32로 올리면서 `max_epochs: 20`을 그대로 둬 optimizer step이 10,240 → 2,560으로 감소. 게다가 validation이 retrieval 없이 수행되어 `epoch=014` 체크포인트가 학습 모드와 다른 기준으로 선택됨.
+
+무엇보다 **위 차이들이 통계적으로 구분 불가능**하다는 점이 결정적이었습니다. 검출력 없는 지표 위에 복잡한 계층을 유지할 이유가 없다고 판단해 제거했습니다.
+
+### 제거 범위
+
+| 대상 | 조치 |
+|---|---|
+| `BaseModel.extract_bag_features` / `retrieve_context_indices` / `_retrieve_context_indices_impl` / `retrieve_context_indices_per_query` | 삭제 (303줄) |
+| `BaseModel.forward(retrieval_k=...)` 파라미터 | 삭제 |
+| `RetrievalEvaluationEpisodeCollator` / `RetrievalSyntheticTrainingEpisodeCollator` / `SignalAwarePretrainEpisodeCollator` | 삭제 |
+| `ModelInterface`의 `retrieval_k` 배선 4곳 + `_build_model` pop-list 항목 | 삭제 |
+| `scripts/test.py --retrieval-k` | 삭제 |
+| retrieval 계열 config 12개, launch 스크립트 3개, VRAM 벤치 2개 | `configs/archive/v21_retrieval/`, `scripts/archive/v21_retrieval/`로 이관 |
+| `tests/test_feature_retrieval.py`, `tests/test_large_context_pretrain.py` | 삭제 → `tests/test_batched_episode_forward.py`로 대체 |
+| `architecture_version` | 21 → **22** |
+
+**유지된 것**: v21 aggregator/meta-classifier 전부, 4대 수학 기술, batched multi-episode forward, 세션 중 고친 DataLoader CUDA/pin_memory 수정.
+
+**복구 지점**: retrieval 최종 상태는 git tag **`v21-retrieval-final`** 로 보존되어 있습니다 (`git show v21-retrieval-final`).
+
+### v20 롤백이 불가능했던 이유
+
+사용자 요청은 "v20으로 롤백"이었으나 조사 결과:
+* **v20은 코드로 존재하지 않습니다.** 이 브랜치 히스토리는 v18 → v19 → **v21**이며 (`ecf6199`가 19에서 21로 직접 점프), `main`은 아직 v18입니다. `configs/archive/v20/*.yaml`는 v19 코드 위에서 돌던 **설정 파일 시리즈**일 뿐입니다.
+* **v21 ≈ v19 + retrieval + 사소한 2줄**. `ecf6199`가 baseline.py에서 제거한 실질 코드는 4줄뿐이고, "v21 4대 개혁"으로 문서화됐던 기술들은 이미 v19에 있었습니다.
+* 따라서 retrieval 제거는 버전 롤백이 아니라 **덧붙은 계층의 절제**로 처리하는 것이 맞았고, 사용자 승인 하에 v22 신규 버전으로 진행했습니다.
+
+---
+
+## 5. 다음 작업 세션 Action Plan
+
+1. **[최우선] 평가 프로토콜 신뢰성 확보.** n=87 단일 코호트로는 아키텍처 변경을 검증할 수 없다는 것이 이번 세션의 최대 교훈입니다. 반복 seed, 외부 코호트, bootstrap CI 리포팅을 도입하기 전에는 어떤 아키텍처 실험도 결론을 낼 수 없습니다. 비교 시 반드시 `scripts/compare_predictions.py`로 CI와 paired bootstrap을 함께 보고할 것.
+2. **v22 사전학습 재실행.** 모든 기존 체크포인트가 무효화되었으므로 v22 기준선을 새로 만들어야 합니다. `configs/train_v22_medium.yaml`로 시작하되, Phase 5의 실패를 반복하지 않도록 **`episode_batch_size`를 바꾸면 `max_epochs`도 함께 조정**해 optimizer step 수를 맞출 것 (Phase 1 기준 10,240 steps).
+3. **v22 ICI 5-fold 기준선 측정.** `scripts/launch_ici_5fold.sh` (2번의 v22 체크포인트를 `PRETRAINED_CKPT` 환경변수로 전달, 미지정 시 scratch 학습).
+
+---
+
+## 6. Source of Truth 파일
+
+- Backbone & Version: `src/models/baseline.py` (`architecture_version = 22`)
+- Data Interface & Collators: `src/modules/data_interface.py`
+- Loss & Metrics: `src/modules/model_interface.py`
+- 통계 비교 도구: `scripts/compare_predictions.py`
+- 검증 스위트: `tests/test_base_model.py`, `tests/test_model_interface.py`, `tests/test_batched_episode_forward.py`

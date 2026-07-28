@@ -78,17 +78,20 @@ class ArchitectureCheckpointCompatibilityTest(unittest.TestCase):
             meta_ridge_dim=4,
         )
 
-    def test_v20_checkpoint_is_rejected(self) -> None:
-        checkpoint = {"state_dict": {"model._architecture_version": torch.tensor(20)}}
-        with self.assertRaisesRegex(RuntimeError, "Expected v21, found 20"):
+    def test_v21_checkpoint_is_rejected(self) -> None:
+        # v22 removed the retrieval layer, so every v21 checkpoint -- including
+        # the Phase 5 large-context pretrain one -- must fail loudly rather
+        # than silently load into a structurally different model.
+        checkpoint = {"state_dict": {"model._architecture_version": torch.tensor(21)}}
+        with self.assertRaisesRegex(RuntimeError, "Expected v22, found 21"):
             self.interface.on_load_checkpoint(checkpoint)
 
     def test_versionless_checkpoint_is_rejected(self) -> None:
-        with self.assertRaisesRegex(RuntimeError, "Expected v21, found missing"):
+        with self.assertRaisesRegex(RuntimeError, "Expected v22, found missing"):
             self.interface.on_load_checkpoint({"state_dict": {}})
 
-    def test_v21_checkpoint_is_accepted(self) -> None:
-        checkpoint = {"state_dict": {"model._architecture_version": torch.tensor(21)}}
+    def test_v22_checkpoint_is_accepted(self) -> None:
+        checkpoint = {"state_dict": {"model._architecture_version": torch.tensor(22)}}
         self.interface.on_load_checkpoint(checkpoint)
 
 

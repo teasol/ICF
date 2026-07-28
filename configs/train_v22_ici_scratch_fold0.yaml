@@ -6,7 +6,6 @@ data:
   num_workers: 2
   pin_memory: true
   drop_last: false
-  retrieval_k: 24
   dataset_kwargs:
     root_dir: data/ICI_CVOnly_scConcept_512
     seed: 42

@@ -8,8 +8,8 @@ data can actually separate two runs rather than just which number is bigger.
 
 Usage:
     python scripts/compare_predictions.py \
-        predictions/ici_predictions_v21_retrieved_5fold.pt \
-        predictions/ici_predictions_v21_phase6c_5fold.pt
+        predictions/ici_predictions_run_a.pt \
+        predictions/ici_predictions_run_b.pt
 """
 from __future__ import annotations
 

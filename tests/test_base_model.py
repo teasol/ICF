@@ -662,9 +662,9 @@ class BaseModelTest(unittest.TestCase):
         self.y = torch.tensor([0, 1, 0, 1, 0, 1, 0, 1, 0, 1])
         self.mask_index = torch.tensor([8, 9])
 
-    def test_architecture_version_is_21(self) -> None:
-        self.assertEqual(self.model.architecture_version, 21)
-        self.assertEqual(self.model._architecture_version.item(), 21)
+    def test_architecture_version_is_22(self) -> None:
+        self.assertEqual(self.model.architecture_version, 22)
+        self.assertEqual(self.model._architecture_version.item(), 22)
 
     def test_final_logits_are_invariant_to_per_bag_shift(self) -> None:
         shift = torch.randn(self.x.shape[0], 1, self.x.shape[-1])

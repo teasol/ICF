@@ -1,7 +1,7 @@
 # Documentation map
 
 **Last updated**: `2026-07-28 10:45:00 KST`  
-**Architecture Version**: `21` (`architecture_version = 21`)
+**Architecture Version**: `22` (`architecture_version = 22`)
 
 문서는 **새 대화 세션으로 접속하는 Agent가 최우선으로 읽는 Living 문서 5개(`docs/` 루트)**와 **과거 기록/딥다이브 분석서(`docs/history/`)**로 이원화하여 관리합니다.
 
@@ -13,7 +13,7 @@
 
 1. [`agent_handoff.md`](agent_handoff.md): 새 세션 Agent 초기화 수칙, Git 기반 워크플로우, 실행 환경, 타임아웃, 테스트 검증, Docs/Config 정리 규칙
 2. [`current_status.md`](current_status.md): 개발 현황, 최신 실증 수치, 최근 Git 커밋 내역, Naive vs Signal-Aware Retrieval 진단, Next Action Plan (SSOT)
-3. [`current_architecture.md`](current_architecture.md): Architecture v21 4대 수학적 개혁, 40차원 Signal-Aware Retrieval 레이어, Logit Fusion 수식
+3. [`current_architecture.md`](current_architecture.md): Architecture v22 모델 구조 (4대 수학 기술, retrieval 없는 context 구성), Logit Fusion 수식
 4. [`current_experiments.md`](current_experiments.md): Phase 1~5 실험 프로토콜, 실행 명령어 및 체크포인트/로그 실증 수치
 5. [`README.md`](README.md): 문서 맵 및 갱신/아카이빙 가이드라인
 
@@ -23,7 +23,9 @@
 
 [`docs/history/`](history/)는 과거 설계, 특정 시점의 딥다이브 분석 및 실험 판단 근거 자료를 보관합니다. 현재 실행 지침이 아니며 `docs/` 최상위 루트를 깨끗하게 유지하기 위해 하위로 아카이빙되었습니다:
 
-- [`history/retrieval_architecture_analysis.md`](history/retrieval_architecture_analysis.md): Naive Cosine Retrieval 실패 원인 상세 분석 및 40차원 Signal-Aware Retrieval 2-Pass Streaming 설계
+- [`history/v21_retrieval_investigation.md`](history/v21_retrieval_investigation.md): **v22에서 retrieval을 제거하기까지의 전체 조사 기록** — 3대 가설 검증, 구현 오류 규명, 그리고 n=87에서 모든 비교가 통계적으로 구분 불가능했다는 결론 (§4-⑧)
+- [`history/v21_retrieval_experiments.md`](history/v21_retrieval_experiments.md): v21 retrieval 시대(Phase 1~6c)의 실험 프로토콜과 실측값
+- [`history/retrieval_architecture_analysis.md`](history/retrieval_architecture_analysis.md): Naive Cosine Retrieval 실패 원인 상세 분석 및 40차원 Signal-Aware Retrieval 2-Pass Streaming 설계 (v21 당시 설계 문서)
 - [`history/v20_scalability_plan.md`](history/v20_scalability_plan.md): v20/v21 아키텍처 Scalability 검증 및 Hard Real-World 문제 프로토콜
 - [`history/architecture_v18.md`](history/architecture_v18.md): v18 구조
 - [`history/architecture_v19.md`](history/architecture_v19.md): CSP 확정 전 v19 centered 구조
@@ -41,5 +43,5 @@
 - **Living 문서 유지**: `docs/` 최상위 루트에는 오직 5개의 Living 문서만 유지합니다.
 - **Git 커밋 동기화**: 세션 핸드오프 시 작업을 남김없이 커밋하고 커밋 내역/diff를 `agent_handoff.md` 및 `current_status.md`에 반영합니다.
 - **아카이빙 규칙**: 특정 버전 딥다이브 보고서나 계획 문서는 완료 시 즉시 `docs/history/`로 이관하여 `docs/` 루트를 단순하고 가독성 높게 유지합니다.
-- **Config 루트 관리**: `configs/` 루트에는 활성화된 Architecture v21 entry point 10개만 남기고 구버전(v18~v20)은 `configs/archive/`로 관리합니다.
+- **Config 루트 관리**: `configs/` 루트에는 활성화된 Architecture v22 entry point 8개만 남기고 구버전(v18~v21)은 `configs/archive/`로 관리합니다.
 - **단일 출처화**: 동일한 수치나 진행 상태를 중복해 기록하지 않으며, 상태는 `current_status.md`에만 기록합니다.
