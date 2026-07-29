@@ -16,9 +16,24 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from scripts.evaluate_protocol import auroc as protocol_auroc  # noqa: E402
-from scripts.evaluate_protocol import bootstrap_interval, log_loss  # noqa: E402
-from scripts.test import auroc_confidence_interval, binary_metrics  # noqa: E402
+from scripts.test import binary_metrics  # noqa: E402
+from src.utils.metrics import (  # noqa: E402
+    auroc as protocol_auroc,
+    bootstrap_auroc_interval,
+    cluster_members,
+    log_loss,
+    resample_index,
+)
+
+
+def auroc_confidence_interval(probability, target, samples=2000, seed=0):
+    return bootstrap_auroc_interval(probability, target, samples=samples, seed=seed)
+
+
+def cluster_bootstrap_interval(probability, target, episode, samples=2000, seed=0):
+    return bootstrap_auroc_interval(
+        probability, target, groups=episode, samples=samples, seed=seed
+    )
 
 
 def separable(n_positive: int, n_negative: int, gap: float) -> tuple[torch.Tensor, torch.Tensor]:
@@ -83,12 +98,8 @@ class TestConfidenceInterval(unittest.TestCase):
 
     def test_bootstrap_interval_is_deterministic_for_a_fixed_generator(self) -> None:
         probability, target = separable(37, 50, gap=0.2)
-        first = bootstrap_interval(
-            probability, target, 300, torch.Generator().manual_seed(7)
-        )
-        second = bootstrap_interval(
-            probability, target, 300, torch.Generator().manual_seed(7)
-        )
+        first = bootstrap_auroc_interval(probability, target, samples=300, seed=7)
+        second = bootstrap_auroc_interval(probability, target, samples=300, seed=7)
         self.assertEqual(first, second)
 
 
@@ -103,6 +114,67 @@ class TestLogLoss(unittest.TestCase):
         target = torch.tensor([1, 0])
         value = log_loss(torch.tensor([1.0, 0.0]), target)
         self.assertTrue(torch.isfinite(torch.tensor(value)))
+
+
+def clustered(
+    episodes: int, per_episode: int, offset_scale: float
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Queries grouped into episodes that each carry their own difficulty."""
+    generator = torch.Generator().manual_seed(0)
+    offsets = torch.randn(episodes, generator=generator) * offset_scale
+    probability, target, episode = [], [], []
+    for index in range(episodes):
+        labels = torch.randint(0, 2, (per_episode,), generator=generator)
+        scores = torch.sigmoid(
+            0.8 * labels.float()
+            + offsets[index]
+            + 0.3 * torch.randn(per_episode, generator=generator)
+        )
+        probability.append(scores)
+        target.append(labels)
+        episode.append(torch.full((per_episode,), index, dtype=torch.long))
+    return torch.cat(probability), torch.cat(target).long(), torch.cat(episode)
+
+
+class TestClusterBootstrap(unittest.TestCase):
+    def test_clustering_widens_the_interval(self) -> None:
+        """Correlated queries carry less information than their raw count."""
+        probability, target, episode = clustered(100, 16, offset_scale=1.2)
+        clustered_low, clustered_high = cluster_bootstrap_interval(
+            probability, target, episode, samples=400, seed=1
+        )
+        # Treating every query as its own cluster is the naive per-query bootstrap.
+        naive_low, naive_high = cluster_bootstrap_interval(
+            probability, target, torch.arange(target.numel()), samples=400, seed=1
+        )
+        self.assertGreater(clustered_high - clustered_low, naive_high - naive_low)
+
+    def test_interval_brackets_the_point_estimate(self) -> None:
+        probability, target, episode = clustered(60, 10, offset_scale=0.8)
+        low, high = cluster_bootstrap_interval(
+            probability, target, episode, samples=400, seed=2
+        )
+        point = protocol_auroc(probability, target)
+        self.assertLessEqual(low, point)
+        self.assertGreaterEqual(high, point)
+
+    def test_resample_keeps_episodes_intact(self) -> None:
+        episode = torch.tensor([0, 0, 0, 1, 1, 1, 2, 2, 2])
+        members = cluster_members(episode)
+        self.assertEqual(len(members), 3)
+        index = resample_index(episode.numel(), members, torch.Generator().manual_seed(3))
+        # A cluster bootstrap draws whole episodes, so every episode present in
+        # the resample must appear with all of its members.
+        self.assertEqual(index.numel(), episode.numel())
+        picked = episode[index]
+        for value in torch.unique(picked).tolist():
+            self.assertEqual(int((picked == value).sum()) % 3, 0)
+
+    def test_no_episode_key_falls_back_to_row_resampling(self) -> None:
+        self.assertIsNone(cluster_members(None))
+        index = resample_index(20, None, torch.Generator().manual_seed(4))
+        self.assertEqual(index.numel(), 20)
+        self.assertTrue(bool(((index >= 0) & (index < 20)).all()))
 
 
 class TestBinaryMetricsReportsInterval(unittest.TestCase):

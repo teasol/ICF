@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.utils.metrics import auroc, bootstrap_auroc_interval, log_loss
 from src.utils.utils import build_datamodule, build_model, merge_train_config
 
 
@@ -136,36 +137,19 @@ def binary_metrics(result: dict[str, Any]) -> dict[str, float | int]:
     num_positive = int(positive.sum().item())
     num_negative = int(negative.sum().item())
     if num_positive == 0 or num_negative == 0:
-        auroc = float("nan")
+        auroc_value = float("nan")
         balanced_accuracy = float("nan")
     else:
-        positive_scores = probability[positive]
-        negative_scores = probability[negative]
-        comparisons = positive_scores[:, None] - negative_scores[None, :]
-        auroc = float(
-            ((comparisons > 0).float() + 0.5 * (comparisons == 0).float())
-            .mean()
-            .item()
-        )
+        auroc_value = auroc(probability, target)
         sensitivity = (prediction[positive] == 1).float().mean()
         specificity = (prediction[negative] == 0).float().mean()
         balanced_accuracy = float((0.5 * (sensitivity + specificity)).item())
 
-    eps = torch.finfo(probability.dtype).eps
-    clipped_probability = probability.clamp(eps, 1.0 - eps)
-    log_loss = float(
-        -(
-            target.float() * clipped_probability.log()
-            + (1.0 - target.float()) * (1.0 - clipped_probability).log()
-        )
-        .mean()
-        .item()
-    )
     metrics: dict[str, float | int] = {
         "accuracy": accuracy(result),
         "balanced_accuracy": balanced_accuracy,
-        "auroc": auroc,
-        "log_loss": log_loss,
+        "auroc": auroc_value,
+        "log_loss": log_loss(probability, target),
         "num_samples": int(target.numel()),
         "num_positive": num_positive,
         "num_predicted_positive": int((prediction == 1).sum().item()),
@@ -174,47 +158,13 @@ def binary_metrics(result: dict[str, Any]) -> dict[str, float | int]:
         "probability_min": float(probability.min().item()),
         "probability_max": float(probability.max().item()),
     }
-    low, high = auroc_confidence_interval(probability, target)
+    # Reported next to every point estimate on purpose: on this cohort
+    # (n=87) the interval spans roughly +/-0.13, and a whole line of
+    # architecture work was pursued on 0.04-AUROC gaps inside that noise.
+    low, high = bootstrap_auroc_interval(probability, target, samples=2000)
     metrics["auroc_ci_low"] = low
     metrics["auroc_ci_high"] = high
     return metrics
-
-
-def auroc_confidence_interval(
-    probability: torch.Tensor,
-    target: torch.Tensor,
-    samples: int = 2000,
-    seed: int = 0,
-) -> tuple[float, float]:
-    """Bootstrap 95% CI for AUROC.
-
-    Reported alongside every point estimate on purpose. On this cohort (n=87)
-    the interval is roughly +/-0.13 wide, and a whole line of architecture work
-    was pursued on the strength of 0.04-AUROC gaps that this interval shows to
-    be indistinguishable from noise.
-    """
-    positive = int((target == 1).sum())
-    if positive == 0 or positive == target.numel():
-        return float("nan"), float("nan")
-    generator = torch.Generator().manual_seed(seed)
-    count = target.numel()
-    values = []
-    for _ in range(samples):
-        index = torch.randint(0, count, (count,), generator=generator)
-        resampled = target[index]
-        if resampled.sum() in (0, count):
-            continue
-        scores = probability[index]
-        pos = scores[resampled == 1]
-        neg = scores[resampled == 0]
-        comparisons = pos[:, None] - neg[None, :]
-        values.append(
-            ((comparisons > 0).float() + 0.5 * (comparisons == 0).float()).mean().item()
-        )
-    if not values:
-        return float("nan"), float("nan")
-    spread = torch.tensor(values)
-    return spread.quantile(0.025).item(), spread.quantile(0.975).item()
 
 
 def format_metrics(metrics: dict[str, float | int]) -> str:

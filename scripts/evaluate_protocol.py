@@ -28,54 +28,18 @@ from __future__ import annotations
 
 import argparse
 import math
+import sys
 from pathlib import Path
 
 import torch
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.utils.metrics import auroc, bootstrap_auroc_interval, log_loss  # noqa: E402
+
 DEFAULT_SEEDS = (42, 1234, 2026, 271828, 314159)
-
-
-def auroc(probability: torch.Tensor, target: torch.Tensor) -> float:
-    positive = probability[target == 1]
-    negative = probability[target == 0]
-    if positive.numel() == 0 or negative.numel() == 0:
-        return float("nan")
-    comparisons = positive[:, None] - negative[None, :]
-    return (
-        ((comparisons > 0).float() + 0.5 * (comparisons == 0).float()).mean().item()
-    )
-
-
-def log_loss(probability: torch.Tensor, target: torch.Tensor) -> float:
-    eps = torch.finfo(probability.dtype).eps
-    clipped = probability.clamp(eps, 1.0 - eps)
-    return float(
-        -(
-            target.float() * clipped.log() + (1.0 - target.float()) * (1.0 - clipped).log()
-        )
-        .mean()
-        .item()
-    )
-
-
-def bootstrap_interval(
-    probability: torch.Tensor,
-    target: torch.Tensor,
-    samples: int,
-    generator: torch.Generator,
-) -> tuple[float, float]:
-    count = target.numel()
-    values = []
-    for _ in range(samples):
-        index = torch.randint(0, count, (count,), generator=generator)
-        resampled = target[index]
-        if resampled.sum() in (0, count):
-            continue
-        values.append(auroc(probability[index], resampled))
-    if not values:
-        return float("nan"), float("nan")
-    spread = torch.tensor(values)
-    return spread.quantile(0.025).item(), spread.quantile(0.975).item()
 
 
 def load_aggregate(path: Path) -> tuple[torch.Tensor, torch.Tensor, list]:
@@ -110,8 +74,6 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    generator = torch.Generator().manual_seed(args.seed)
-
     per_seed_auroc: list[float] = []
     per_seed_log_loss: list[float] = []
     donor_scores: dict[str, list[float]] = {}
@@ -163,7 +125,9 @@ def main() -> None:
         names = sorted(donor_scores)
         averaged = torch.tensor([sum(donor_scores[n]) / len(donor_scores[n]) for n in names])
         targets = torch.tensor([donor_target[n] for n in names], dtype=torch.long)
-        low, high = bootstrap_interval(averaged, targets, args.bootstrap, generator)
+        low, high = bootstrap_auroc_interval(
+            averaged, targets, samples=args.bootstrap, seed=args.seed
+        )
         print(
             f"\nSeed-averaged per-donor prediction ({targets.numel()} donors): "
             f"AUROC {auroc(averaged, targets):.4f}  95% CI [{low:.3f}, {high:.3f}]"
@@ -175,7 +139,9 @@ def main() -> None:
 
     if args.external is not None:
         probability, target, _ = load_aggregate(args.external)
-        low, high = bootstrap_interval(probability, target, args.bootstrap, generator)
+        low, high = bootstrap_auroc_interval(
+            probability, target, samples=args.bootstrap, seed=args.seed
+        )
         print(
             f"\nExternal cohort ({target.numel()} donors, "
             f"{int((target == 1).sum())} positive): "

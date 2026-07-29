@@ -10,7 +10,41 @@
 
 ---
 
-## 0. 평가 프로토콜 (실험 시작 전 반드시 읽을 것)
+## 0. 실험 전략: 합성 데이터로 결정하고, ICI는 최종 테스트에만 (2026-07-29 확정)
+
+> [!IMPORTANT]
+> **아키텍처 선택·하이퍼파라미터 튜닝·모든 반복 실험은 합성 데이터에서만 수행합니다.**
+> **ICI 실데이터는 최종 확인 1회에만 사용합니다.**
+
+### 왜 이렇게 나누는가
+
+**실측 비교** (둘 다 95% bootstrap CI, 합성은 episode cluster 방식으로 보수적으로 계산):
+
+| | 표본 | AUROC | 95% CI | **CI 폭** |
+|---|---|---:|---|---:|
+| ICI 5-fold (v21 Phase 6c) | 87명 | 0.5454 | [0.422, 0.664] | **0.242** |
+| 합성 val (v22 1-epoch 체크포인트) | 104 episodes / 1,698 query | 0.7272 | [0.697, 0.759] | **0.062** |
+
+합성 쪽 구간이 **약 4배 좁습니다.** 게다가 합성은 `episodes_per_epoch`를 늘려 더 좁힐 수 있지만, ICI는 87명이 상한이라 아무리 seed를 늘려도 좁아지지 않습니다.
+
+신호 자체도 합성 쪽이 훨씬 강합니다 (1 epoch만에 AUROC 0.73 vs ICI의 0.55). 즉 **아키텍처 변경이 실제로 효과가 있다면 합성에서 먼저, 더 뚜렷하게 보입니다.**
+
+v21의 실패는 **검출력이 없는 지표 위에서 아키텍처를 반복 비교한 것**이었습니다. 또한 ICI를 반복해서 들여다보면 그 87명에 과적합됩니다 (선택 편향). ICI를 최종 테스트로 남겨두어야 그 숫자가 의미를 갖습니다.
+
+### 규칙
+
+| 단계 | 데이터 | 지표 | 반복 |
+|---|---|---|---|
+| 아키텍처 탐색·튜닝 | 합성 val | `scripts/evaluate_synthetic.py`의 AUROC + episode cluster CI | 자유롭게 |
+| 최종 확인 | ICI 5 seed × 5 fold + 외부 코호트 | `scripts/evaluate_protocol.py` | **후보 확정 후 1회** |
+
+- 합성 val에서 이긴 후보만 ICI로 넘깁니다. ICI 결과를 보고 다시 아키텍처를 고치기 시작하면 이 프로토콜은 무효가 됩니다.
+- ICI 결과가 기대에 못 미쳐도 **그것 자체로는 아키텍처를 되돌릴 근거가 되지 않습니다** — §1에 따라 ±0.13 이내 변동은 이 코호트가 구분할 수 없는 범위입니다.
+- 합성 데이터에서 검출력이 부족하면 `episodes_per_epoch`를 늘리면 됩니다. 이것이 ICI 대비 합성 데이터의 결정적 장점입니다.
+
+---
+
+## 1. 평가 프로토콜 (실험 시작 전 반드시 읽을 것)
 
 ### ① 이 코호트가 검출할 수 있는 효과 크기
 
@@ -64,7 +98,7 @@ python scripts/compare_predictions.py predictions/<run_a>.pt predictions/<run_b>
 
 ---
 
-## 1. Context 구성 프로토콜 (v22)
+## 2. Context 구성 프로토콜 (v22)
 
 **retrieval 없음.** 에피소드의 모든 context bag이 그대로 aggregator에 들어갑니다.
 
@@ -75,7 +109,7 @@ v21의 K=24 retrieval을 제거한 근거는 [`current_status.md`](current_statu
 
 ---
 
-## 2. 실험 파이프라인
+## 3. 실험 파이프라인
 
 ### Stage 1: Medium 합성 사전학습
 - **Config**: `configs/train_v22_medium.yaml`
@@ -95,7 +129,27 @@ v21의 K=24 retrieval을 제거한 근거는 [`current_status.md`](current_statu
 - **Config**: `configs/train_v22_hard_realworld.yaml`
 - **참고 기준선 (v21 Phase 2)**: `val_ce_loss: 0.6845` @ 50 epoch.
 
-### Stage 3: ICI 실데이터 — 다중 seed 5-Fold CV + 외부 코호트
+### Stage 2.5: 합성 검증 — **여기서 아키텍처를 결정합니다**
+
+§0 전략에 따라 모든 아키텍처 비교는 이 단계에서 끝냅니다.
+
+```bash
+python scripts/evaluate_synthetic.py \
+  --checkpoint checkpoints/<ts>/v22_medium/last.ckpt \
+  --config configs/train_v22_medium.yaml \
+  --output predictions/synthetic_<이름>.pt
+
+# 두 후보 비교 (동일 config·seed로 평가해야 episode 구성이 일치)
+python scripts/compare_predictions.py \
+  predictions/synthetic_<A>.pt predictions/synthetic_<B>.pt
+```
+
+출력에는 전체 AUROC + **episode cluster bootstrap CI**, Log Loss, 그리고 5개 response task별 분해가 포함됩니다.
+
+> [!IMPORTANT]
+> **CI는 query가 아니라 episode 단위로 계산됩니다.** 한 episode 안의 query들은 같은 context set과 같은 생성 파라미터를 공유하므로 독립이 아닙니다. query 단위로 재표집하면 상관된 예측 ~1,600개를 독립 1,600개로 취급해 구간이 실제보다 훨씬 좁게 나옵니다. 검출력이 부족하면 `val_dataset_kwargs.episodes_per_epoch`를 늘리세요 — **episode 수가 실질적인 표본 크기입니다.**
+
+### Stage 3: ICI 실데이터 — 최종 테스트 (후보 확정 후 1회)
 
 - **Config**: `configs/train_v22_ici_finetune.yaml` (fine-tune), `configs/train_v22_ici_scratch.yaml` (scratch 대조군).
   fold와 seed는 config에 박아두지 않고 **`--cv` / `--seed`로 주입**합니다 (per-fold config 5개를 두던 방식은 폐기). config의 `seed: 42` / `cv: 0`은 아무것도 지정하지 않았을 때의 기본값일 뿐입니다.
@@ -135,7 +189,7 @@ v21의 K=24 retrieval을 제거한 근거는 [`current_status.md`](current_statu
 
 ---
 
-## 3. 합성 데이터 파라미터
+## 4. 합성 데이터 파라미터
 
 `configs/data/medium.yaml` 기준 (ICI 유사 에피소드 생성):
 
@@ -155,7 +209,7 @@ ICI 실데이터: 87명 환자, donor당 1,000 세포 샘플링, 512-dim scConce
 
 ---
 
-## 4. 검증 스위트
+## 5. 검증 스위트
 
 ```bash
 timeout 1500s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
@@ -169,7 +223,7 @@ timeout 1500s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest disco
 
 ---
 
-## 5. 평가 도구 요약
+## 6. 평가 도구 요약
 
 | 스크립트 | 용도 |
 |---|---|
@@ -177,4 +231,6 @@ timeout 1500s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest disco
 | `scripts/launch_ici_protocol.sh` | 5 seed × 5 fold sweep 실행 |
 | `scripts/test.py` | 체크포인트 → 예측 파일 (AUROC에 CI 자동 부착) |
 | `scripts/evaluate_protocol.py` | 다중 seed 집계 + 외부 코호트 보고 |
-| `scripts/compare_predictions.py` | 두 run 비교 (CI + paired bootstrap 승률) |
+| `scripts/evaluate_synthetic.py` | 합성 val 평가 (episode cluster CI + task별 분해) |
+| `scripts/compare_predictions.py` | 두 run 비교 (CI + paired bootstrap 승률, episode 있으면 cluster) |
+| `src/utils/metrics.py` | 공용 지표 구현 (rank 기반 AUROC, cluster bootstrap) |

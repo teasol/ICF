@@ -107,7 +107,8 @@ scripts/launch_interactive_training.sh \
 
 1. **`configs/` 최상위 루트 유지 조건**:
    - 현재 활성 파이프라인에서 직접 사용하는 **Architecture v22 entry point config만 `configs/` 최상위에 유지**합니다 (10개 내외).
-   - 예: `train_v22_medium.yaml`, `train_v22_hard_realworld.yaml`, `train_v22_ici_finetune_fold0.yaml`~`fold4.yaml` 등.
+   - 예: `train_v22_medium.yaml`, `train_v22_hard_realworld.yaml`, `train_v22_ici_finetune.yaml`, `train_v22_ici_scratch.yaml`.
+   - ICI의 fold/seed는 config에 박지 않고 `--cv` / `--seed`로 주입합니다 (`scripts/launch_ici_protocol.sh`).
 2. **구버전 Config 아카이빙 조건**:
    - 구버전 아키텍처(v18, v19, v20 등)의 config는 `configs/archive/v18_v19/`, `configs/archive/v20/` 하위 폴더로 즉시 이관합니다.
 3. **모듈형 Component 설정 분리**:

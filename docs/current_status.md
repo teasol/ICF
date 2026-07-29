@@ -89,16 +89,41 @@
 
 ---
 
-## 5. 다음 작업 세션 Action Plan
+## 5. 실험 전략 (2026-07-29 확정)
 
-1. **[완료] 평가 프로토콜 보강** (2026-07-29). §6 참고. 요약: 검정력 분석 결과 **이 코호트는 +0.13 AUROC 미만의 효과를 검출할 수 없습니다.** 5개 seed partition과 외부 코호트(26명)가 이미 디스크에 있었으나 v21 실험은 전부 SEED42 하나만 썼습니다. 이제 `scripts/launch_ici_protocol.sh`로 5 seed × 5 fold를 돌리고 `scripts/evaluate_protocol.py`로 집계하며, `scripts/test.py`는 모든 AUROC에 CI를 자동 부착합니다.
-2. **v22 사전학습 재실행.** 모든 기존 체크포인트가 무효화되었으므로 v22 기준선을 새로 만들어야 합니다. `configs/train_v22_medium.yaml`로 시작하되, Phase 5의 실패를 반복하지 않도록 **`episode_batch_size`를 바꾸면 `max_epochs`도 함께 조정**해 optimizer step 수를 맞출 것 (Phase 1 기준 10,240 steps). 스모크 테스트에서 512 steps/epoch·epoch0 `val_loss=0.667`로 Phase 1과 일치함을 확인했습니다.
-3. **v22 ICI 기준선 측정.** `scripts/launch_ici_protocol.sh` (2번의 v22 체크포인트를 `PRETRAINED_CKPT`로 전달, 미지정 시 scratch). 25개 run이므로 GPU 점유 시간을 고려해 계획할 것.
-4. **[전략] ICI AUROC로 아키텍처 우열을 가리는 방식 재검토.** §6의 검정력 표가 보여주듯 이 코호트에서 소폭 개선을 가려내는 것은 불가능합니다. 합성 데이터(n을 원하는 만큼 늘릴 수 있음)에서 판단하고 ICI는 최종 확인용으로만 쓰거나, 코호트를 확대하는 방향을 고려해야 합니다.
+> [!IMPORTANT]
+> **합성 데이터로 모든 결정을 내리고, ICI 실데이터는 최종 테스트에만 씁니다.**
+
+| 단계 | 데이터 | 도구 | 반복 |
+|---|---|---|---|
+| 아키텍처 탐색·튜닝 | 합성 val | `scripts/evaluate_synthetic.py` (AUROC + episode cluster CI) | 자유롭게 |
+| 최종 확인 | ICI 5 seed × 5 fold + 외부 코호트 26명 | `scripts/launch_ici_protocol.sh` → `scripts/evaluate_protocol.py` | **후보 확정 후 1회** |
+
+**근거 (실측)**:
+
+| | 표본 | AUROC | 95% CI | CI 폭 |
+|---|---|---:|---|---:|
+| ICI 5-fold (v21 Phase 6c) | 87명 | 0.5454 | [0.422, 0.664] | **0.242** |
+| 합성 val (v22 1-epoch) | 104 episodes / 1,698 query | 0.7272 | [0.697, 0.759] | **0.062** |
+
+합성 구간이 약 **4배 좁고**(그것도 episode cluster bootstrap이라는 보수적 계산으로), 신호도 훨씬 강합니다(1 epoch만에 0.73 vs 0.55). 합성은 `episodes_per_epoch`로 더 좁힐 수 있지만 ICI는 87명이 상한입니다. v21의 실패는 **검출력 없는 지표 위에서 아키텍처를 반복 비교한 것**이었고, ICI를 반복해서 보면 그 87명에 과적합됩니다.
+
+**지켜야 할 선**: ICI 결과를 보고 아키텍처를 다시 고치기 시작하면 ICI는 더 이상 테스트 세트가 아닙니다. 또한 ICI에서 ±0.13 이내 변동은 그 자체로 아무 근거가 되지 않습니다.
+
+**합성 평가의 CI는 query가 아니라 episode 단위(cluster bootstrap)로 계산합니다.** 한 episode의 query들은 context set과 생성 파라미터를 공유해 독립이 아니며, query 단위 재표집은 구간을 실제보다 좁게 만듭니다. 실질 표본 크기는 **episode 수**입니다.
 
 ---
 
-## 6. 평가 프로토콜 보강 (2026-07-29)
+## 6. 다음 작업 세션 Action Plan
+
+1. **[완료] 평가 프로토콜 보강** (2026-07-29). §7 참고. 요약: 검정력 분석 결과 **이 코호트는 +0.13 AUROC 미만의 효과를 검출할 수 없습니다.** 5개 seed partition과 외부 코호트(26명)가 이미 디스크에 있었으나 v21 실험은 전부 SEED42 하나만 썼습니다. 이제 `scripts/launch_ici_protocol.sh`로 5 seed × 5 fold를 돌리고 `scripts/evaluate_protocol.py`로 집계하며, `scripts/test.py`는 모든 AUROC에 CI를 자동 부착합니다.
+2. **v22 사전학습 재실행.** 모든 기존 체크포인트가 무효화되었으므로 v22 기준선을 새로 만들어야 합니다. `configs/train_v22_medium.yaml`로 시작하되, Phase 5의 실패를 반복하지 않도록 **`episode_batch_size`를 바꾸면 `max_epochs`도 함께 조정**해 optimizer step 수를 맞출 것 (Phase 1 기준 10,240 steps). 스모크 테스트에서 512 steps/epoch·epoch0 `val_loss=0.667`로 Phase 1과 일치함을 확인했습니다.
+3. **v22 ICI 기준선 측정.** `scripts/launch_ici_protocol.sh` (2번의 v22 체크포인트를 `PRETRAINED_CKPT`로 전달, 미지정 시 scratch). 25개 run이므로 GPU 점유 시간을 고려해 계획할 것.
+4. **[전략] ICI AUROC로 아키텍처 우열을 가리는 방식 재검토.** §7의 검정력 표가 보여주듯 이 코호트에서 소폭 개선을 가려내는 것은 불가능합니다. 합성 데이터(n을 원하는 만큼 늘릴 수 있음)에서 판단하고 ICI는 최종 확인용으로만 쓰거나, 코호트를 확대하는 방향을 고려해야 합니다.
+
+---
+
+## 7. 평가 프로토콜 보강 (2026-07-29)
 
 v21 조사의 결론("모든 비교가 노이즈였다")에 대응해 평가 체계를 다시 만들었습니다.
 
@@ -141,11 +166,12 @@ v21 조사의 결론("모든 비교가 노이즈였다")에 대응해 평가 체
 
 ---
 
-## 7. Source of Truth 파일
+## 8. Source of Truth 파일
 
 - Backbone & Version: `src/models/baseline.py` (`architecture_version = 22`)
 - Data Interface & Collators: `src/modules/data_interface.py`
 - Loss & Metrics: `src/modules/model_interface.py`
 - 통계 비교 도구: `scripts/compare_predictions.py` (§6 참고)
 - 검증 스위트: `tests/test_base_model.py`, `tests/test_model_interface.py`, `tests/test_batched_episode_forward.py`, `tests/test_evaluation_protocol.py`
-- 평가 프로토콜: `scripts/power_analysis.py`, `scripts/launch_ici_protocol.sh`, `scripts/evaluate_protocol.py`
+- 평가 프로토콜: `scripts/power_analysis.py`, `scripts/launch_ici_protocol.sh`, `scripts/evaluate_protocol.py`, `scripts/evaluate_synthetic.py`
+- **공용 평가 지표 구현**: `src/utils/metrics.py` (rank 기반 AUROC, cluster bootstrap) — 모든 평가 스크립트가 이 하나를 사용하므로 지표가 스크립트마다 어긋날 수 없음

@@ -15,6 +15,12 @@ for a paired comparison. Each simulated pair is then run through the same
 paired bootstrap used by `compare_predictions.py`, and power is the fraction
 of trials the test calls the better model at the stated confidence.
 
+Cost scales as trials * bootstrap * n log n. The ICI defaults finish in a few
+minutes; a synthetic-scale cohort (~1,700 predictions) is roughly an order of
+magnitude slower, so lower --trials/--bootstrap or expect a long run. For
+synthetic runs the cheaper and more direct answer is usually the measured
+interval from `evaluate_synthetic.py` rather than a simulation.
+
 Usage:
     python scripts/power_analysis.py
     python scripts/power_analysis.py --n-positive 37 --n-negative 50
@@ -23,18 +29,16 @@ from __future__ import annotations
 
 import argparse
 import math
+import sys
+from pathlib import Path
 
 import torch
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-def auroc(scores: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
-    """Batched AUROC over the leading dimension."""
-    positive = scores[..., labels == 1]
-    negative = scores[..., labels == 0]
-    comparisons = positive.unsqueeze(-1) - negative.unsqueeze(-2)
-    return (
-        (comparisons > 0).float() + 0.5 * (comparisons == 0).float()
-    ).mean(dim=(-2, -1))
+from src.utils.metrics import auroc_rows  # noqa: E402
 
 
 def separation_for_auroc(value: float) -> float:
@@ -78,14 +82,12 @@ def simulate_power(
         keep = (resampled_labels.sum(dim=1) > 0) & (resampled_labels.sum(dim=1) < total)
         if keep.sum() == 0:
             continue
-        wins = 0
-        usable = 0
-        for row in torch.nonzero(keep).flatten().tolist():
-            idx = index[row]
-            lab = labels[idx]
-            usable += 1
-            if auroc(strong[idx], lab) > auroc(weak[idx], lab):
-                wins += 1
+        index = index[keep]
+        resampled_labels = labels[index]
+        strong_auroc = auroc_rows(strong[index], resampled_labels)
+        weak_auroc = auroc_rows(weak[index], resampled_labels)
+        usable = int(keep.sum())
+        wins = int((strong_auroc > weak_auroc).sum())
         if wins / usable >= confidence:
             detected += 1
     return detected / trials
@@ -111,6 +113,18 @@ def parse_args() -> argparse.Namespace:
         help="Paired-bootstrap win rate required to call a winner.",
     )
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--deltas",
+        type=float,
+        nargs="+",
+        default=[0.02, 0.05, 0.10, 0.15, 0.20],
+        help="True AUROC gains to evaluate power for.",
+    )
+    parser.add_argument(
+        "--label",
+        default=None,
+        help="Optional name for the cohort being analysed, shown in the header.",
+    )
     return parser.parse_args()
 
 
@@ -119,14 +133,15 @@ def main() -> None:
     generator = torch.Generator().manual_seed(args.seed)
     total = args.n_positive + args.n_negative
 
+    label = f"{args.label}: " if args.label else ""
     print(
-        f"Cohort n={total} ({args.n_positive} positive / {args.n_negative} negative), "
+        f"{label}n={total} ({args.n_positive} positive / {args.n_negative} negative), "
         f"baseline AUROC {args.baseline_auroc}, model correlation rho={args.rho}"
     )
     print(f"Calling a winner at paired-bootstrap win rate >= {args.confidence}\n")
     print(f"{'true AUROC gain':>16} | {'power':>7}")
     print("-" * 27)
-    for delta in (0.02, 0.05, 0.10, 0.15, 0.20):
+    for delta in args.deltas:
         power = simulate_power(
             args.baseline_auroc,
             delta,
