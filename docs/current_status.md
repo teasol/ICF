@@ -139,7 +139,11 @@
 2. **[완료] v22 medium 기준선 확립** (2026-07-29). §3 참고. `val_ce_loss 0.5930`, 합성 val AUROC `0.7463 [0.715, 0.777]`. Phase 1(0.5921)을 사실상 재현해 retrieval 제거가 사전학습을 훼손하지 않았음을 확인했습니다.
 3. **[다음] 아키텍처 개선 시도 — 합성 데이터에서.** §3의 task별 분해를 보면 **`covariance` (0.6106)와 `state` (0.6503)가 병목**이고 composition/combined(0.80~0.82)는 이미 잘 됩니다. 개선 여지가 가장 큰 곳이 명확하므로 여기를 겨냥할 것. 변경 후 `scripts/evaluate_synthetic.py`로 평가하고 `scripts/compare_predictions.py`로 기준선과 paired cluster bootstrap 비교.
 4. **Stage 2 (Hard 합성) 기준선**: `configs/train_v22_hard_realworld.yaml` (v21 Phase 2 참고값 `val_ce_loss 0.6845`). 아직 v22로 재실행하지 않았습니다.
-5. **[보류] v22 ICI 최종 테스트.** §5 전략에 따라 **합성에서 후보가 확정된 뒤에만** 1회 실행합니다. `scripts/launch_ici_protocol.sh` (25 run). 지금 돌리면 테스트 세트를 조기 소진하는 것이라 하지 말 것.
+5. **[완료] 브랜치 구조 정리** (2026-07-29) — semver 도입은 폐기하고 `architecture_version` 정수를 그대로 브랜치명으로 사용하기로 확정. `v18` / `v19` / `v22` / `main`(= v22) 구조. 상세: [`history/branch_structure.md`](history/branch_structure.md).
+6. **[⚠ 미적용, 의도적 보류] v18 브랜치의 버그 수정 2건이 v22에 없습니다** ([`history/branch_structure.md`](history/branch_structure.md) §3):
+   - **`c05ff8d` Cholesky backward 안정화 — 우선순위 높음.** near-singular 행렬에서 forward는 성공해도 **backward가 non-finite gradient**를 냅니다. 단일 GPU에서도 발생 가능. 현재 위치 `src/models/baseline.py:1482`.
+   - **`835b726` rank-local CUDA 생성 — 현재 잠재.** 단일 GPU라 아직 안 터지지만 **DDP 전환 시 모든 rank가 GPU 0에 생성**하게 됩니다.
+7. **[보류] v22 ICI 최종 테스트.** §5 전략에 따라 **합성에서 후보가 확정된 뒤에만** 1회 실행합니다. `scripts/launch_ici_protocol.sh` (25 run). 지금 돌리면 테스트 세트를 조기 소진하는 것이라 하지 말 것.
 
 ---
 
