@@ -1106,10 +1106,12 @@ class RidgeResidualMetaClassifier(SetCrossAttentionMetaClassifier):
             dim=-1, keepdim=True
         ).clamp_min(1.0)
         jitter = diagonal_scale * 1e-6
-        for attempt in range(6):
-            candidate = system
-            if attempt:
-                candidate = system + jitter.unsqueeze(-1) * identity
+        # A Cholesky factorization can succeed for a nearly singular system
+        # while its backward pass still produces non-finite gradients. Always
+        # include the adaptive jitter, including on the first attempt, so a
+        # successful forward solve also has a numerically stable backward.
+        for _ in range(6):
+            candidate = system + jitter.unsqueeze(-1) * identity
             factor, info = torch.linalg.cholesky_ex(candidate, check_errors=False)
             if bool((info == 0).all()):
                 coefficients = torch.cholesky_solve(rhs, factor)
