@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-29 10:10:00 KST`
+**Last updated**: `2026-07-29 17:05:00 KST`
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
 **Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 해결하기 위한 Single Source of Truth (SSOT) living document.
@@ -37,20 +37,33 @@
 
 ## 3. 실험 현황
 
-### ✅ v22 기준선 (2026-07-29 완료) — 현재 유일한 v22 실측값
+### ✅ v22 기준선 (2026-07-29 확정) — **버그 수정 반영본이 공식 기준선**
 
 | 항목 | 값 |
 |---|---|
 | Config | `configs/train_v22_medium.yaml` (20 epoch, 512 steps/epoch = **10,240 steps**, Phase 1과 동일) |
-| Best `val_ce_loss` | **0.5930** (epoch 17) |
-| 합성 val AUROC | **0.7463**, 95% CI [0.715, 0.777] (episode cluster bootstrap, 104 episodes / 1,698 query) |
-| 합성 val Log Loss | 0.5928 |
-| Task별 AUROC | composition 0.8012 / combined 0.8186 / interaction 0.7537 / state 0.6503 / **covariance 0.6106 (최난이도)** |
-| 체크포인트 | `checkpoints/20260729_100611/v22_medium/epoch=017-val_ce_loss=0.5930.ckpt` |
-| 예측 파일 | `predictions/synthetic_v22_medium_baseline.pt` |
-| 로그 / W&B | `logs/20260729_100611/v22_medium.out` / https://wandb.ai/teasol/ICF/runs/1vixk8gu |
+| 코드 상태 | **Cholesky backward + rank-local 수정 반영 후** (커밋 `be36c59`) |
+| Best `val_ce_loss` | **0.5946** (epoch 13) |
+| 합성 val AUROC | **0.7466**, 95% CI [0.716, 0.776] (episode cluster bootstrap, 104 episodes / 1,698 query) |
+| 합성 val Log Loss | 0.5943 |
+| Task별 AUROC | composition 0.8022 / combined 0.8170 / interaction 0.7453 / state 0.6595 / **covariance 0.6122 (최난이도)** |
+| 체크포인트 | `checkpoints/20260729_160643/v22_medium_fixed/epoch=013-val_ce_loss=0.5946.ckpt` |
+| 예측 파일 | `predictions/synthetic_v22_baseline_fixed.pt` |
+| 로그 | `logs/20260729_160643/v22_medium_fixed.out` |
 
-**v21 Phase 1과 사실상 동일**: `val_ce_loss` 0.5930 vs 0.5921 (차이 0.0009), val_loss 궤적도 0.667 → 0.647 vs 0.667 → 0.644로 겹칩니다. Phase 1도 full-context였으므로 **retrieval 제거가 합성 사전학습 성능을 전혀 훼손하지 않았다는 확인**입니다.
+**버그 수정 전후 비교** (`scripts/compare_predictions.py`, paired cluster bootstrap):
+
+| | 수정 전 (`100611`) | **수정 후 (`160643`, 공식)** |
+|---|---:|---:|
+| AUROC | 0.7463 [0.715, 0.775] | **0.7466 [0.716, 0.775]** |
+| `val_ce_loss` | 0.5930 | 0.5946 |
+| paired 승률 | \- | **0.42 (구분 불가)** |
+
+> [!NOTE]
+> **두 수치는 통계적으로 구분되지 않습니다** (승률 0.42, CI 거의 동일). Cholesky 수정은 성능을 올리는 변경이 아니라 **near-singular 상황에서 backward가 non-finite로 터지는 것을 막는 보험**입니다. 평균적인 run에서는 차이가 안 나는 것이 정상이며, 그래도 반영한 이유는 언제 터질지 모르는 잠재 위험을 남겨둘 이유가 없기 때문입니다.
+> 이전 수정 전 기준선(`0.7463` / `checkpoints/20260729_100611/`)은 참고용으로만 남기고, **앞으로의 비교는 수정 후 기준선을 씁니다.**
+
+**v21 Phase 1과 사실상 동일**: `val_ce_loss` 0.5946 vs 0.5921 (차이 0.0025), val_loss 궤적도 0.667 → 0.650 vs 0.667 → 0.644로 겹칩니다. Phase 1도 full-context였으므로 **retrieval 제거가 합성 사전학습 성능을 전혀 훼손하지 않았다는 확인**입니다.
 
 **앞으로 아키텍처 변경은 이 수치와 비교합니다** (§5 전략에 따라 ICI가 아니라 여기서 판단). 비교 시 `scripts/compare_predictions.py`로 위 예측 파일과 paired cluster bootstrap을 돌릴 것.
 
@@ -123,9 +136,9 @@
 | | 표본 | AUROC | 95% CI | CI 폭 |
 |---|---|---:|---|---:|
 | ICI 5-fold (v21 Phase 6c) | 87명 | 0.5454 | [0.422, 0.664] | **0.242** |
-| 합성 val (v22 1-epoch) | 104 episodes / 1,698 query | 0.7272 | [0.697, 0.759] | **0.062** |
+| 합성 val (v22 기준선) | 104 episodes / 1,698 query | 0.7466 | [0.716, 0.776] | **0.060** |
 
-합성 구간이 약 **4배 좁고**(그것도 episode cluster bootstrap이라는 보수적 계산으로), 신호도 훨씬 강합니다(1 epoch만에 0.73 vs 0.55). 합성은 `episodes_per_epoch`로 더 좁힐 수 있지만 ICI는 87명이 상한입니다. v21의 실패는 **검출력 없는 지표 위에서 아키텍처를 반복 비교한 것**이었고, ICI를 반복해서 보면 그 87명에 과적합됩니다.
+합성 구간이 약 **4배 좁고**(그것도 episode cluster bootstrap이라는 보수적 계산으로), 신호도 훨씬 강합니다(0.75 vs 0.55). 합성은 `episodes_per_epoch`로 더 좁힐 수 있지만 ICI는 87명이 상한입니다. v21의 실패는 **검출력 없는 지표 위에서 아키텍처를 반복 비교한 것**이었고, ICI를 반복해서 보면 그 87명에 과적합됩니다.
 
 **지켜야 할 선**: ICI 결과를 보고 아키텍처를 다시 고치기 시작하면 ICI는 더 이상 테스트 세트가 아닙니다. 또한 ICI에서 ±0.13 이내 변동은 그 자체로 아무 근거가 되지 않습니다.
 
@@ -136,13 +149,14 @@
 ## 6. 다음 작업 세션 Action Plan
 
 1. **[완료] 평가 프로토콜 보강** (2026-07-29). §7 참고. 요약: 검정력 분석 결과 **이 코호트는 +0.13 AUROC 미만의 효과를 검출할 수 없습니다.** 5개 seed partition과 외부 코호트(26명)가 이미 디스크에 있었으나 v21 실험은 전부 SEED42 하나만 썼습니다. 이제 `scripts/launch_ici_protocol.sh`로 5 seed × 5 fold를 돌리고 `scripts/evaluate_protocol.py`로 집계하며, `scripts/test.py`는 모든 AUROC에 CI를 자동 부착합니다.
-2. **[완료] v22 medium 기준선 확립** (2026-07-29). §3 참고. `val_ce_loss 0.5930`, 합성 val AUROC `0.7463 [0.715, 0.777]`. Phase 1(0.5921)을 사실상 재현해 retrieval 제거가 사전학습을 훼손하지 않았음을 확인했습니다.
-3. **[다음] 아키텍처 개선 시도 — 합성 데이터에서.** §3의 task별 분해를 보면 **`covariance` (0.6106)와 `state` (0.6503)가 병목**이고 composition/combined(0.80~0.82)는 이미 잘 됩니다. 개선 여지가 가장 큰 곳이 명확하므로 여기를 겨냥할 것. 변경 후 `scripts/evaluate_synthetic.py`로 평가하고 `scripts/compare_predictions.py`로 기준선과 paired cluster bootstrap 비교.
+2. **[완료] v22 medium 기준선 확립** (2026-07-29). §3 참고. 버그 수정 반영본 기준 `val_ce_loss 0.5946`, 합성 val AUROC `0.7466 [0.716, 0.776]`. Phase 1(0.5921)을 사실상 재현해 retrieval 제거가 사전학습을 훼손하지 않았음을 확인했습니다.
+3. **[다음] 아키텍처 개선 시도 — 합성 데이터에서.** §3의 task별 분해를 보면 **`covariance` (0.6122)와 `state` (0.6595)가 병목**이고 composition/combined(0.80~0.82)는 이미 잘 됩니다. 개선 여지가 가장 큰 곳이 명확하므로 여기를 겨냥할 것. 변경 후 `scripts/evaluate_synthetic.py`로 평가하고 `scripts/compare_predictions.py`로 기준선과 paired cluster bootstrap 비교.
 4. **Stage 2 (Hard 합성) 기준선**: `configs/train_v22_hard_realworld.yaml` (v21 Phase 2 참고값 `val_ce_loss 0.6845`). 아직 v22로 재실행하지 않았습니다.
 5. **[완료] 브랜치 구조 정리** (2026-07-29) — semver 도입은 폐기하고 `architecture_version` 정수를 그대로 브랜치명으로 사용하기로 확정. `v18` / `v19` / `v22` / `main`(= v22) 구조. 상세: [`history/branch_structure.md`](history/branch_structure.md).
-6. **[⚠ 미적용, 의도적 보류] v18 브랜치의 버그 수정 2건이 v22에 없습니다** ([`history/branch_structure.md`](history/branch_structure.md) §3):
-   - **`c05ff8d` Cholesky backward 안정화 — 우선순위 높음.** near-singular 행렬에서 forward는 성공해도 **backward가 non-finite gradient**를 냅니다. 단일 GPU에서도 발생 가능. 현재 위치 `src/models/baseline.py:1482`.
-   - **`835b726` rank-local CUDA 생성 — 현재 잠재.** 단일 GPU라 아직 안 터지지만 **DDP 전환 시 모든 rank가 GPU 0에 생성**하게 됩니다.
+6. **[완료] v18 브랜치 버그 수정 2건을 v22에 반영** (2026-07-29, 커밋 `515030a` + `be36c59`):
+   - `c05ff8d` Cholesky backward 안정화 — cherry-pick 그대로 적용.
+   - `835b726` rank-local CUDA 생성 — v22에 없는 스크립트 2개는 제외하고 `synthetic_data.py` 변경분만 적용. 추가로 **v22에만 있는 `diagnostic_episode`도 같은 문제가 있어 함께 수정**(v18 패치가 커버할 수 없던 부분).
+   - 검증: 111/111 통과, 기준선 재학습 완료. 성능 차이는 통계적으로 구분되지 않음(§3) — 예상된 결과이며 수정의 목적은 잠재 위험 제거입니다.
 7. **[보류] v22 ICI 최종 테스트.** §5 전략에 따라 **합성에서 후보가 확정된 뒤에만** 1회 실행합니다. `scripts/launch_ici_protocol.sh` (25 run). 지금 돌리면 테스트 세트를 조기 소진하는 것이라 하지 말 것.
 
 ---

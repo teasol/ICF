@@ -1,6 +1,6 @@
 # Current experiments
 
-**Last updated**: `2026-07-29 10:10:00 KST`
+**Last updated**: `2026-07-29 17:05:00 KST`
 **Architecture Version**: `22` (`architecture_version = 22`)
 
 이 문서는 v22 기준 실험 프로토콜과 실행 명령어를 설명합니다. v21 retrieval 시대의 실험 기록은 [`history/v21_retrieval_experiments.md`](history/v21_retrieval_experiments.md)로 이관되었습니다.
@@ -23,11 +23,11 @@
 | | 표본 | AUROC | 95% CI | **CI 폭** |
 |---|---|---:|---|---:|
 | ICI 5-fold (v21 Phase 6c) | 87명 | 0.5454 | [0.422, 0.664] | **0.242** |
-| 합성 val (v22 1-epoch 체크포인트) | 104 episodes / 1,698 query | 0.7272 | [0.697, 0.759] | **0.062** |
+| 합성 val (v22 기준선) | 104 episodes / 1,698 query | 0.7466 | [0.716, 0.776] | **0.060** |
 
 합성 쪽 구간이 **약 4배 좁습니다.** 게다가 합성은 `episodes_per_epoch`를 늘려 더 좁힐 수 있지만, ICI는 87명이 상한이라 아무리 seed를 늘려도 좁아지지 않습니다.
 
-신호 자체도 합성 쪽이 훨씬 강합니다 (1 epoch만에 AUROC 0.73 vs ICI의 0.55). 즉 **아키텍처 변경이 실제로 효과가 있다면 합성에서 먼저, 더 뚜렷하게 보입니다.**
+신호 자체도 합성 쪽이 훨씬 강합니다 (AUROC 0.75 vs ICI의 0.55). 즉 **아키텍처 변경이 실제로 효과가 있다면 합성에서 먼저, 더 뚜렷하게 보입니다.**
 
 v21의 실패는 **검출력이 없는 지표 위에서 아키텍처를 반복 비교한 것**이었습니다. 또한 ICI를 반복해서 들여다보면 그 87명에 과적합됩니다 (선택 편향). ICI를 최종 테스트로 남겨두어야 그 숫자가 의미를 갖습니다.
 
@@ -120,9 +120,9 @@ v21의 K=24 retrieval을 제거한 근거는 [`current_status.md`](current_statu
   NETRC=/NHNHOME/kimds/.netrc \
   scripts/launch_interactive_training.sh v22_medium configs/train_v22_medium.yaml
   ```
-- **✅ v22 기준선 (2026-07-29 실측)**: `val_ce_loss: 0.5930` @ epoch 17 / 20 epoch / 10,240 steps.
-  체크포인트 `checkpoints/20260729_100611/v22_medium/epoch=017-val_ce_loss=0.5930.ckpt`, 로그 `logs/20260729_100611/v22_medium.out`, [W&B](https://wandb.ai/teasol/ICF/runs/1vixk8gu).
-- **참고 (v21 Phase 1)**: `val_ce_loss: 0.5921` @ 20 epoch / 10,240 steps — v22가 0.0009 이내로 재현했습니다 (val_loss 궤적도 0.667→0.647 vs 0.667→0.644로 겹침). Phase 1도 full-context였으므로 **retrieval 제거가 사전학습 성능을 훼손하지 않았다는 확인**입니다.
+- **✅ v22 기준선 (2026-07-29 확정, 버그 수정 반영본)**: `val_ce_loss: 0.5946` @ epoch 13 / 20 epoch / 10,240 steps.
+  체크포인트 `checkpoints/20260729_160643/v22_medium_fixed/epoch=013-val_ce_loss=0.5946.ckpt`, 로그 `logs/20260729_160643/v22_medium_fixed.out`.
+- **참고 (v21 Phase 1)**: `val_ce_loss: 0.5921` @ 20 epoch / 10,240 steps — v22가 0.0025 이내로 재현했습니다. Phase 1도 full-context였으므로 **retrieval 제거가 사전학습 성능을 훼손하지 않았다는 확인**입니다.
 
 > [!WARNING]
 > **`episode_batch_size`를 바꾸면 `max_epochs`도 함께 조정할 것.** v21 Phase 5가 batch를 8→32로 올리면서 epoch 수를 그대로 둬 optimizer step이 10,240 → 2,560으로 줄었고, 그 결과 val_loss가 수렴하지 못한 채(0.606→0.608 평평한 노이즈) 학습이 끝났습니다. `steps = episodes_per_epoch / episode_batch_size * max_epochs`를 항상 확인하세요.
@@ -148,24 +148,24 @@ python scripts/compare_predictions.py \
 
 출력에는 전체 AUROC + **episode cluster bootstrap CI**, Log Loss, 그리고 5개 response task별 분해가 포함됩니다.
 
-**✅ v22 기준선 실측값 (2026-07-29)** — 새 후보는 이것과 비교합니다:
+**✅ v22 기준선 실측값 (2026-07-29, 버그 수정 반영본)** — 새 후보는 이것과 비교합니다:
 
 ```text
-AUROC     0.7463  95% CI [0.715, 0.777]   (104 episodes / 1,698 queries)
-Log loss  0.5928
+AUROC     0.7466  95% CI [0.716, 0.776]   (104 episodes / 1,698 queries)
+Log loss  0.5943
 
 task             AUROC  queries  episodes
-composition     0.8012      417        25
-state           0.6503      277        17
-covariance      0.6106      292        18     <- 최난이도
-interaction     0.7537      254        15
-combined        0.8186      458        29
+composition     0.8022      417        25
+state           0.6595      277        17
+covariance      0.6122      292        18     <- 최난이도
+interaction     0.7453      254        15
+combined        0.8170      458        29
 ```
 
-예측 파일: `predictions/synthetic_v22_medium_baseline.pt`
+예측 파일: `predictions/synthetic_v22_baseline_fixed.pt`
 
 > [!TIP]
-> **개선 여지는 `covariance`(0.6106)와 `state`(0.6503)에 몰려 있습니다.** composition/combined는 이미 0.80~0.82라 올릴 여지가 적습니다. 아키텍처 변경은 이 두 축을 겨냥하는 편이 효율적입니다. 단, task별 수치는 episode 15~29개에 기반하므로 방향 힌트로만 쓰고 우열 판단은 전체 AUROC로 하세요.
+> **개선 여지는 `covariance`(0.6122)와 `state`(0.6595)에 몰려 있습니다.** composition/combined는 이미 0.80~0.82라 올릴 여지가 적습니다. 아키텍처 변경은 이 두 축을 겨냥하는 편이 효율적입니다. 단, task별 수치는 episode 15~29개에 기반하므로 방향 힌트로만 쓰고 우열 판단은 전체 AUROC로 하세요.
 
 > [!IMPORTANT]
 > **CI는 query가 아니라 episode 단위로 계산됩니다.** 한 episode 안의 query들은 같은 context set과 같은 생성 파라미터를 공유하므로 독립이 아닙니다. query 단위로 재표집하면 상관된 예측 ~1,600개를 독립 1,600개로 취급해 구간이 실제보다 훨씬 좁게 나옵니다. 검출력이 부족하면 `val_dataset_kwargs.episodes_per_epoch`를 늘리세요 — **episode 수가 실질적인 표본 크기입니다.**
