@@ -1,6 +1,6 @@
 # Documentation map
 
-**Last updated**: `2026-07-28 10:45:00 KST`  
+**Last updated**: `2026-07-29 10:10:00 KST`  
 **Architecture Version**: `22` (`architecture_version = 22`)
 
 문서는 **새 대화 세션으로 접속하는 Agent가 최우선으로 읽는 Living 문서 5개(`docs/` 루트)**와 **과거 기록/딥다이브 분석서(`docs/history/`)**로 이원화하여 관리합니다.
@@ -12,9 +12,9 @@
 사용자가 매번 새 채팅 세션으로 접속할 때, 새로 시작한 Agent는 아래 `docs/` 최상위 루트의 Living md 파일 5개를 우선 정독하고 **Git commit log/diff**를 조회하여 작업 맥락을 동기화합니다:
 
 1. [`agent_handoff.md`](agent_handoff.md): 새 세션 Agent 초기화 수칙, Git 기반 워크플로우, 실행 환경, 타임아웃, 테스트 검증, Docs/Config 정리 규칙
-2. [`current_status.md`](current_status.md): 개발 현황, 최신 실증 수치, 최근 Git 커밋 내역, Naive vs Signal-Aware Retrieval 진단, Next Action Plan (SSOT)
+2. [`current_status.md`](current_status.md): 개발 현황, 최신 실증 수치, v22 retrieval 제거 결정과 근거, 실험 전략(합성=결정 / ICI=최종 테스트), 평가 프로토콜, Next Action Plan (SSOT)
 3. [`current_architecture.md`](current_architecture.md): Architecture v22 모델 구조 (4대 수학 기술, retrieval 없는 context 구성), Logit Fusion 수식
-4. [`current_experiments.md`](current_experiments.md): Phase 1~5 실험 프로토콜, 실행 명령어 및 체크포인트/로그 실증 수치
+4. [`current_experiments.md`](current_experiments.md): 실험 전략과 검정력, 평가 프로토콜, Stage 1~3 실행 명령어 및 실증 수치
 5. [`README.md`](README.md): 문서 맵 및 갱신/아카이빙 가이드라인
 
 ---
@@ -43,5 +43,5 @@
 - **Living 문서 유지**: `docs/` 최상위 루트에는 오직 5개의 Living 문서만 유지합니다.
 - **Git 커밋 동기화**: 세션 핸드오프 시 작업을 남김없이 커밋하고 커밋 내역/diff를 `agent_handoff.md` 및 `current_status.md`에 반영합니다.
 - **아카이빙 규칙**: 특정 버전 딥다이브 보고서나 계획 문서는 완료 시 즉시 `docs/history/`로 이관하여 `docs/` 루트를 단순하고 가독성 높게 유지합니다.
-- **Config 루트 관리**: `configs/` 루트에는 활성화된 Architecture v22 entry point 8개만 남기고 구버전(v18~v21)은 `configs/archive/`로 관리합니다.
+- **Config 루트 관리**: `configs/` 루트에는 활성화된 Architecture v22 entry point 4개(`train_v22_medium`, `train_v22_hard_realworld`, `train_v22_ici_finetune`, `train_v22_ici_scratch`)만 남기고 구버전(v18~v21)은 `configs/archive/`로 관리합니다. ICI의 fold/seed는 config가 아니라 `--cv`/`--seed`로 주입하므로 fold별 config를 만들지 않습니다.
 - **단일 출처화**: 동일한 수치나 진행 상태를 중복해 기록하지 않으며, 상태는 `current_status.md`에만 기록합니다.

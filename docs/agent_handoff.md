@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-07-28 10:45:00 KST`  
+**Last updated**: `2026-07-29 10:10:00 KST`  
 **Architecture Version**: `22` (`architecture_version = 22`)
 
 이 문서는 BagPFN 저장소를 처음 맡은 coding agent가 안전하게 작업을 시작하기 위한 운영 및 핸드오프 지침입니다. 최신 개발 및 실험 진행 상황은 [`current_status.md`](current_status.md), 현재 모델 명세는 [`current_architecture.md`](current_architecture.md), 현재 실험 프로토콜은 [`current_experiments.md`](current_experiments.md)를 참고합니다.
@@ -29,7 +29,7 @@
    - 논리 단위 작업(기능 추가, 버그 수정, 문서 개정, config 정돈, 단위 테스트 작성 등)이 완료될 때마다 즉시 커밋을 수행하여 작업 이력을 세분화합니다.
 2. **상세한 커밋 메시지 작성 (Detailed Commit Messages)**:
    - 커밋 메시지는 제목(Subject)과 상세 본문(Body)을 명확히 구분하여 작성합니다:
-     - `feat`: 신규 모델 아키텍처, 텐서 연산, Feature Retrieval 기능 구현
+     - `feat`: 신규 모델 아키텍처, 텐서 연산, 평가 프로토콜 기능 구현
      - `docs`: Living 문서 개정, 아키텍처 스펙 문서화, 작업 수칙 업데이트
      - `chore`: 디렉터리 아카이빙, config 정돈, 환경 파일 설정
      - `test`: 단위 테스트 수트 작성 및 검증
@@ -52,8 +52,9 @@
 5. **테스트 검증 필수**:
    - 코드를 변경한 뒤에는 아래 unittest 수트를 통과해야 완결로 인정한다:
      ```bash
-     /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
+     timeout 1500s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
      ```
+   - 전체 스위트는 약 11분(111 tests) 걸립니다. 타임아웃 없이 돌리면 §3-2 원칙에 어긋나고 hang 시 세션이 멈춥니다.
 
 ---
 
@@ -94,7 +95,7 @@ scripts/launch_interactive_training.sh \
      - [`agent_handoff.md`](agent_handoff.md): 운영 규칙, 바이너리 경로, Git 수칙, Docs/Config 관리 지침
      - [`current_status.md`](current_status.md): 개발 현황, 최신 수치, Git 커밋 이력, 이슈 진단 및 Action Plan (SSOT)
      - [`current_architecture.md`](current_architecture.md): Architecture v22 수학적 기술 명세 (retrieval 없음)
-     - [`current_experiments.md`](current_experiments.md): Phase 1~5 실험 프로토콜 및 실증 성과 수치
+     - [`current_experiments.md`](current_experiments.md): 실험 전략(합성=결정 / ICI=최종 테스트), 검정력, 평가 프로토콜, Stage 1~3 실행 명령어
      - [`README.md`](README.md): 전체 문서 맵 및 갱신 규칙
    - 최상위 Living 문서 5개는 항상 서로 100% 일관된 맥락과 동일한 아키텍처 버전(v22)을 유지합니다.
 
@@ -106,10 +107,11 @@ scripts/launch_interactive_training.sh \
 ## 7. Config 관리 및 아카이빙 규칙 (Config Organization Rules)
 
 1. **`configs/` 최상위 루트 유지 조건**:
-   - 현재 활성 파이프라인에서 직접 사용하는 **Architecture v22 entry point config만 `configs/` 최상위에 유지**합니다 (10개 내외).
+   - 현재 활성 파이프라인에서 직접 사용하는 **Architecture v22 entry point config만 `configs/` 최상위에 유지**합니다 (현재 4개).
    - 예: `train_v22_medium.yaml`, `train_v22_hard_realworld.yaml`, `train_v22_ici_finetune.yaml`, `train_v22_ici_scratch.yaml`.
    - ICI의 fold/seed는 config에 박지 않고 `--cv` / `--seed`로 주입합니다 (`scripts/launch_ici_protocol.sh`).
 2. **구버전 Config 아카이빙 조건**:
-   - 구버전 아키텍처(v18, v19, v20 등)의 config는 `configs/archive/v18_v19/`, `configs/archive/v20/` 하위 폴더로 즉시 이관합니다.
+   - 구버전 아키텍처의 config는 `configs/archive/` 하위로 즉시 이관합니다: `archive/v18_v19/`, `archive/v20/`, `archive/v21_retrieval/`.
+   - 폐기된 기능의 실행 스크립트도 같은 규칙으로 `scripts/archive/`(예: `scripts/archive/v21_retrieval/`)로 옮깁니다.
 3. **모듈형 Component 설정 분리**:
    - `callbacks/`, `data/`, `logger/`, `model/`, `optimizer/`, `scheduler/`, `trainer/` 등 모듈 조각은 해당 서브폴더에 구성합니다.

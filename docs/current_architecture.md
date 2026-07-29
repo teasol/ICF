@@ -1,6 +1,6 @@
 # Current architecture
 
-**Last updated**: `2026-07-29 08:30:00 KST`  
+**Last updated**: `2026-07-29 10:10:00 KST`  
 **Code baseline**: Architecture Version `22` (`architecture_version = 22`)
 
 이 문서는 현재 production config 및 코드베이스가 실제로 사용하는 Architecture v22 모델 구조와 수학적 계약을 설명합니다. v22는 v21에서 **retrieval 계층을 완전히 제거**한 버전이며, aggregator/meta-classifier 본체는 v21과 동일합니다. 최신 개발 상태는 [`current_status.md`](current_status.md), 실험 프로토콜은 [`current_experiments.md`](current_experiments.md)를 참고합니다.
@@ -76,23 +76,51 @@ aggregator가 각 bag을 40개 토큰(1 global + 12 slots × 3 통계 + 3 tail)�
 
 ## 4. Main Classification Branches & Logit Fusion
 
+실제 코드(`StructuredPopulationMetaClassifier`) 기준 2단 합성입니다.
+
+**1단 — 증거 분기 융합** (`_fuse_evidence`, baseline.py:2518):
+
 ```text
-final_logits = base_logits
-             + sparse_evidence_scale * sparse_memory_logits
-             + covariance_residual_scale * covariance_ridge
-             + residual_scale * covariance_relation_learned_head
+logits = global_shape_logits
+       + population_scale * population_logits
+       + rare_scale     * rare_logits
+       + fusion_scale   * interaction(global, population, rare)
 ```
 
-* `sparse_evidence_scale`: 0.10
-* `covariance_residual_scale`: 0.25
-* `residual_scale` (CSP Head): 0.50
+`interaction`은 세 분기 logit의 곱·차 특징을 `fusion_scorer` MLP에 통과시킨 값입니다.
+
+**2단 — 공분산 항 가산** (baseline.py:2868~2871):
+
+```text
+final_logits = logits
+             + covariance_residual_scale * (covariance_ridge_scale * covariance_ridge_logits)
+             + covariance_relation_residual_scale * covariance_relation_logits
+```
+
+> [!IMPORTANT]
+> **위 scale 중 상당수는 고정 상수가 아니라 학습됩니다.** `population_scale` / `rare_scale` / `fusion_scale` / `covariance_residual_scale`은 학습 파라미터의 `sigmoid`이고, `covariance_ridge_scale`은 `exp` 후 `[0.1, 100]`으로 clamp됩니다. config의 값들은 이 학습 스케일의 **하한/상한 또는 초기 기준**을 정할 뿐입니다.
+
+config에서 직접 지정하는 고정값:
+
+| config 키 | 값 | 역할 |
+|---|---:|---|
+| `meta_population_residual_scale` | 0.25 | population 분기 scale 상한 |
+| `meta_minimum_population_residual_scale` | 0.10 | 동 하한 |
+| `meta_tail_residual_scale` | 0.10 | rare/tail 분기 scale 상한 |
+| `meta_minimum_tail_residual_scale` | 0.05 | 동 하한 |
+| `meta_fusion_residual_scale` | 0.10 | interaction 항 초기 scale |
+| `meta_covariance_residual_scale` | 0.25 | covariance ridge 잔차 기준 |
+| `covariance_relation.residual_scale` | 0.50 | CSP learned head 잔차 (고정 상수) |
+
+> [!NOTE]
+> 이전 문서는 이 식을 `base_logits + sparse_evidence_scale * sparse_memory_logits + ...`로 적고 `sparse_evidence_scale: 0.10`을 명시했으나, **`sparse_evidence_scale`이라는 파라미터는 코드베이스에 존재하지 않습니다** (2026-07-29 확인). 위 내용으로 교체했습니다.
 
 ---
 
 ## 5. 모델 스펙 파라미터 (Model Parameter Specs)
 
 ```text
-Total Trainable Parameters : 6,614,248 (약 6.6M)
+Total Trainable Parameters : 6,566,811 (약 6.57M)
 Token Dimension           : 512
 Aggregator Output Tokens  : 40 tokens (1 global + 36 slot (12 slots x center/spread/rare) + 3 tail)
 Context Retrieval         : none (v22 removed it; full context per episode)
@@ -103,6 +131,8 @@ Ridge Dimension           : 64
 Precision                 : bf16-mixed
 Architecture Version      : 22
 ```
+
+파라미터 수는 `configs/train_v22_medium.yaml`의 `model` 섹션 기준 실측값입니다 (2026-07-29). v21 태그(`v21-retrieval-final`)에서 동일 kwargs로 측정해도 **6,566,811로 같습니다** — retrieval은 학습 파라미터가 없는 순수 연산 계층이었으므로 제거해도 가중치 수는 변하지 않습니다. (이전 문서에 적혀 있던 `6,614,248`은 근거를 찾을 수 없는 오래된 값이라 실측값으로 교체했습니다.)
 
 ---
 

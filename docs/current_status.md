@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-29 08:30:00 KST`
+**Last updated**: `2026-07-29 10:10:00 KST`
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
 **Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 해결하기 위한 Single Source of Truth (SSOT) living document.
@@ -37,13 +37,32 @@
 
 ## 3. 실험 현황
 
+### ✅ v22 기준선 (2026-07-29 완료) — 현재 유일한 v22 실측값
+
+| 항목 | 값 |
+|---|---|
+| Config | `configs/train_v22_medium.yaml` (20 epoch, 512 steps/epoch = **10,240 steps**, Phase 1과 동일) |
+| Best `val_ce_loss` | **0.5930** (epoch 17) |
+| 합성 val AUROC | **0.7463**, 95% CI [0.715, 0.777] (episode cluster bootstrap, 104 episodes / 1,698 query) |
+| 합성 val Log Loss | 0.5928 |
+| Task별 AUROC | composition 0.8012 / combined 0.8186 / interaction 0.7537 / state 0.6503 / **covariance 0.6106 (최난이도)** |
+| 체크포인트 | `checkpoints/20260729_100611/v22_medium/epoch=017-val_ce_loss=0.5930.ckpt` |
+| 예측 파일 | `predictions/synthetic_v22_medium_baseline.pt` |
+| 로그 / W&B | `logs/20260729_100611/v22_medium.out` / https://wandb.ai/teasol/ICF/runs/1vixk8gu |
+
+**v21 Phase 1과 사실상 동일**: `val_ce_loss` 0.5930 vs 0.5921 (차이 0.0009), val_loss 궤적도 0.667 → 0.647 vs 0.667 → 0.644로 겹칩니다. Phase 1도 full-context였으므로 **retrieval 제거가 합성 사전학습 성능을 전혀 훼손하지 않았다는 확인**입니다.
+
+**앞으로 아키텍처 변경은 이 수치와 비교합니다** (§5 전략에 따라 ICI가 아니라 여기서 판단). 비교 시 `scripts/compare_predictions.py`로 위 예측 파일과 paired cluster bootstrap을 돌릴 것.
+
+### v21 이하 과거 수치 (참고용)
+
 > [!CAUTION]
-> **아래 수치들은 모두 v21 이하에서 측정된 것이며, v22 코드로 재현되지 않습니다.**
-> v22는 retrieval을 제거하고 `architecture_version`을 22로 올렸기 때문에 **기존 체크포인트는 전부 로드 불가**입니다 (`ModelInterface.on_load_checkpoint` 버전 게이트가 거부). 재사용하려면 v22로 재학습이 필요합니다.
+> **아래 수치들은 v21 이하에서 측정된 것이며 v22 코드로 재현되지 않습니다.**
+> v22는 `architecture_version`이 22이므로 **기존 체크포인트는 전부 로드 불가**입니다 (`ModelInterface.on_load_checkpoint` 버전 게이트가 거부).
 
 | Phase | 설명 | 지표 | 비고 |
 |---|---|---|---|
-| Phase 1 (v21) | Medium 합성 사전학습, full context | `val_ce_loss: 0.5921` | 20 epoch, 10,240 steps |
+| Phase 1 (v21) | Medium 합성 사전학습, full context | `val_ce_loss: 0.5921` | 20 epoch, 10,240 steps — v22 기준선이 재현함 |
 | Phase 2 (v21) | Hard 합성 사전학습, full context | `val_ce_loss: 0.6845` | 50 epoch |
 | Phase 4 (v21) | ICI 5-fold, Naive retrieval | AUROC 0.5524 / LL 0.7288 | 95% CI [0.424, 0.677] |
 | Phase 6b (v21) | ICI 5-fold, Signal-Aware retrieval | AUROC 0.5481 / LL 0.8672 | 95% CI [0.421, 0.674] |
@@ -117,9 +136,10 @@
 ## 6. 다음 작업 세션 Action Plan
 
 1. **[완료] 평가 프로토콜 보강** (2026-07-29). §7 참고. 요약: 검정력 분석 결과 **이 코호트는 +0.13 AUROC 미만의 효과를 검출할 수 없습니다.** 5개 seed partition과 외부 코호트(26명)가 이미 디스크에 있었으나 v21 실험은 전부 SEED42 하나만 썼습니다. 이제 `scripts/launch_ici_protocol.sh`로 5 seed × 5 fold를 돌리고 `scripts/evaluate_protocol.py`로 집계하며, `scripts/test.py`는 모든 AUROC에 CI를 자동 부착합니다.
-2. **v22 사전학습 재실행.** 모든 기존 체크포인트가 무효화되었으므로 v22 기준선을 새로 만들어야 합니다. `configs/train_v22_medium.yaml`로 시작하되, Phase 5의 실패를 반복하지 않도록 **`episode_batch_size`를 바꾸면 `max_epochs`도 함께 조정**해 optimizer step 수를 맞출 것 (Phase 1 기준 10,240 steps). 스모크 테스트에서 512 steps/epoch·epoch0 `val_loss=0.667`로 Phase 1과 일치함을 확인했습니다.
-3. **v22 ICI 기준선 측정.** `scripts/launch_ici_protocol.sh` (2번의 v22 체크포인트를 `PRETRAINED_CKPT`로 전달, 미지정 시 scratch). 25개 run이므로 GPU 점유 시간을 고려해 계획할 것.
-4. **[전략] ICI AUROC로 아키텍처 우열을 가리는 방식 재검토.** §7의 검정력 표가 보여주듯 이 코호트에서 소폭 개선을 가려내는 것은 불가능합니다. 합성 데이터(n을 원하는 만큼 늘릴 수 있음)에서 판단하고 ICI는 최종 확인용으로만 쓰거나, 코호트를 확대하는 방향을 고려해야 합니다.
+2. **[완료] v22 medium 기준선 확립** (2026-07-29). §3 참고. `val_ce_loss 0.5930`, 합성 val AUROC `0.7463 [0.715, 0.777]`. Phase 1(0.5921)을 사실상 재현해 retrieval 제거가 사전학습을 훼손하지 않았음을 확인했습니다.
+3. **[다음] 아키텍처 개선 시도 — 합성 데이터에서.** §3의 task별 분해를 보면 **`covariance` (0.6106)와 `state` (0.6503)가 병목**이고 composition/combined(0.80~0.82)는 이미 잘 됩니다. 개선 여지가 가장 큰 곳이 명확하므로 여기를 겨냥할 것. 변경 후 `scripts/evaluate_synthetic.py`로 평가하고 `scripts/compare_predictions.py`로 기준선과 paired cluster bootstrap 비교.
+4. **Stage 2 (Hard 합성) 기준선**: `configs/train_v22_hard_realworld.yaml` (v21 Phase 2 참고값 `val_ce_loss 0.6845`). 아직 v22로 재실행하지 않았습니다.
+5. **[보류] v22 ICI 최종 테스트.** §5 전략에 따라 **합성에서 후보가 확정된 뒤에만** 1회 실행합니다. `scripts/launch_ici_protocol.sh` (25 run). 지금 돌리면 테스트 세트를 조기 소진하는 것이라 하지 말 것.
 
 ---
 
