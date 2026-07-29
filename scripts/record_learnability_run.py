@@ -34,6 +34,13 @@ REPORT_METRICS = (
     "val_oracle_model_auroc_gap",
 )
 
+# wandb logs oracle diagnostics under a nested key ("val/oracle_..."), which
+# does not match the underscore-only CSV column name used elsewhere.
+HISTORY_KEY_OVERRIDES = {
+    "val_oracle_abundance_auroc": "val/oracle_abundance_auroc",
+    "val_oracle_model_auroc_gap": "val/oracle_model_auroc_gap",
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -112,7 +119,12 @@ def main() -> None:
         "checkpoint": str(checkpoint.relative_to(PROJECT_ROOT)),
         "wandb_file": str(wandb_file.relative_to(PROJECT_ROOT)),
     }
-    record.update({metric: selected.get(metric, "") for metric in REPORT_METRICS})
+    record.update(
+        {
+            metric: selected.get(HISTORY_KEY_OVERRIDES.get(metric, metric), "")
+            for metric in REPORT_METRICS
+        }
+    )
 
     output = args.output.expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
