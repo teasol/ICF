@@ -14,6 +14,10 @@ Machine-readable 평가 계약은 `experiments/v18_learnability_protocol.yaml`�
 - precision: BF16 mixed
 - global gradient clipping: 1.0
 - training seed: 42, 43, 44
+- seed 실패 시 architecture나 학습 설정을 바꾸지 않고 45, 46, ... 순서로 아직
+  사용하지 않은 seed를 대체 투입한다.
+- 실패 run은 삭제하거나 성공 run으로 덮어쓰지 않는다. 최종 표에 실패 seed, 실패
+  epoch/원인과 대체 seed의 대응 관계를 함께 기록한다.
 - NCCL P2P/NVLink: disabled (`NCCL_P2P_DISABLE=1`) for this A6000 host
 - smoke test는 seed 42만 허용하며 최종 판정은 세 seed를 사용한다.
 
@@ -76,28 +80,30 @@ D0-D4는 C4-D와 같은 medium composition-only base에서 nuisance 하나만 �
 
 ## 학습과 checkpoint 선택
 
-- A/B/C/C0-C5/D0-D4: 최대 20 epoch
-- C4-N/C4-D: 기존 난이도를 고려해 최대 100 epoch
+- 모든 stage: 최대 20 epoch
 - 5-epoch linear warm-up을 유지한다.
 - epoch 5 이전 checkpoint는 선택 대상에서 제외한다.
-- 일반 stage는 epoch 5-19, C4-N/C4-D는 epoch 5-99에서 선택한다.
+- epoch 5-19에서 checkpoint를 선택한다.
 - A/B는 `val_accuracy` 최대, 나머지는 `val_ce_loss` 최소 checkpoint 하나를 저장한다.
 - AUROC를 이용해 checkpoint를 선택하지 않는다.
 - 저장 위치는 `checkpoints/learnability_ladder/<STAGE>/seed_<SEED>/`다.
 - 모든 실행은 resume 없이 새 run으로 시작한다.
 
-## Frozen evaluation
+## Diagnostic validation
 
-A/B를 제외한 stage는 checkpoint 선택용 validation bank와 최종 evaluation bank를
-분리한다. Evaluation bank는 stage 정의와 architecture 비교 도중 변경하지 않는다.
+Learnability ladder의 목적은 독립 test 성능 추정이 아니라 학습 가능/불가능 경계를
+찾는 것이다. 따라서 별도의 final evaluation bank는 사용하지 않으며, 고정 validation
+bank에서 checkpoint를 선택하고 같은 validation 결과로 stage를 판정한다. AUROC로
+checkpoint를 선택하지 않기 때문에 stage 판정 metric을 직접 최적화하는
+metric cherry-picking은 방지한다.
 
-| family | validation seed | evaluation seed | evaluation episodes |
-|---|---:|---:|---:|
-| C full task | 50042 | 85042 | 8192 |
-| C0-C3, C4-N manifold | 73042 | 84042 | 8192 |
-| C4, C5, C4-D, D0-D4 | 50042 | 86042 | 8192 |
+| family | validation seed |
+|---|---:|
+| C full task | 50042 |
+| C0-C3, C4-N manifold | 73042 |
+| C4, C5, C4-D, D0-D4 | 50042 |
 
-각 training seed에서 evaluation bank의 전체 query prediction을 합친 뒤 다음 metric을
+각 training seed에서 validation bank의 전체 query prediction을 합친 뒤 다음 metric을
 계산한다.
 
 - model AUROC
@@ -109,7 +115,7 @@ A/B를 제외한 stage는 checkpoint 선택용 validation bank와 최종 evaluat
 - mean/population/tail branch logit standard deviation
 
 최종 표에는 seed별 값, 3-seed 평균과 최소 seed 성능을 기록한다. Config, architecture
-version, evaluation bank seed/크기, finite 검사 또는 oracle 격리가 계약과 다르면 결과를
+version, validation bank seed, finite 검사 또는 oracle 격리가 계약과 다르면 결과를
 `INVALID`로 처리한다.
 
 ## 실행

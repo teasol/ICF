@@ -2,7 +2,7 @@ seed: 42
 ckpt_path:
 data: learnability_b
 model: default
-optimizer: adamw_medium
+optimizer: adamw_learnability_5e4
 scheduler: learnability
 trainer: learnability_b_ddp4
 logger: wandb

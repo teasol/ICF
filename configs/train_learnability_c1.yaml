@@ -10,7 +10,7 @@ data_overrides:
     episodes_per_epoch: 8192
     seed: 84042
 model: default
-optimizer: adamw_medium
+optimizer: adamw_learnability_5e4
 scheduler: warmup_reduce_on_plateau_medium
 trainer: learnability_ddp4
 logger: wandb
