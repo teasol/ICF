@@ -93,6 +93,30 @@ task별: composition 0.8022 / combined 0.8170 / interaction 0.7453 / state 0.659
 >
 > 참고로 무작위 104개 서브샘플의 CI는 [0.647, 0.721]로 1,000-episode 추정치(0.7078)를 포함하지만, **기본 val split의 첫 104개는 0.7466**이 나왔습니다. n=104에서는 점추정치가 모집단에서 0.04쯤 벗어나는 일이 예사롭다는 뜻이며(CI 폭 0.074의 절반 수준), 편향이라 단정할 근거는 아니지만 **바로 그 부정확성이 문제**입니다.
 
+### 🎯 T3-1 결과 (2026-07-30): **진짜 약점은 covariance가 아니라 `state`**
+
+세 response effect scale을 **하나의 값으로 통일**해(`--effect-scale`) task를 동일 조건에서 비교했습니다 (400 episodes/run, task당 73~90 episodes):
+
+| effect scale | combined | interaction | covariance | composition | **state** |
+|---:|---:|---:|---:|---:|---:|
+| 0.4 | 0.6228 | 0.6146 | 0.5714 | 0.5713 | **0.5419** |
+| 0.7 | 0.7484 | 0.7266 | 0.6594 | 0.6488 | **0.6115** |
+| 1.0 | 0.8226 | 0.7914 | 0.7249 | 0.7200 | **0.6793** |
+| 1.4 | 0.8763 | 0.8429 | 0.7786 | 0.7970 | **0.7492** |
+
+> [!IMPORTANT]
+> **동일 effect scale에서 covariance는 약점이 아닙니다.** 모든 지점에서 composition과 사실상 동률입니다 (0.4에서 0.5714 vs 0.5713, 1.0에서 0.7249 vs 0.7200).
+> **`state`가 네 scale 전부에서 일관되게 최하위**입니다.
+>
+> 기본 config에서 covariance가 최하위로 보였던 것은 **순전히 생성기 effect scale 차이 때문**이었습니다 (composition 1.40 / state 0.45~1.00 / covariance 0.30~0.80). §5 전략대로 "합성에서 판단"하더라도 **task별 비교는 scale을 통제하지 않으면 무의미**하다는 것이 실증되었습니다.
+
+**민감도(기울기)는 task별로 비슷합니다** (0.4→1.4 구간에서 +0.207~+0.254). 즉 `state`는 신호 크기에 둔감한 것이 아니라 **모든 구간에서 일정하게 뒤처지는 구조적 handicap**을 가집니다.
+
+> [!NOTE]
+> **범위 밖 외삽 주의.** 학습 시 범위는 composition 1.40 고정 / state 0.45~1.00 / covariance 0.30~0.80입니다. 따라서 scale 1.4는 state·covariance에게 외삽이고, composition에게만 학습 조건입니다. **state와 covariance가 모두 학습 범위 안인 scale 0.4·0.7이 가장 공정한 비교 지점**이며, 그 두 지점에서도 결론(state 최하위)은 동일합니다.
+
+**→ Tier 2(state)가 이제 명확한 최우선 대상입니다.** 폐기된 Tier 1(covariance)은 애초에 이 아티팩트를 쫓고 있었습니다.
+
 ### 🔬 covariance 진단 (2026-07-29) — **병목은 공분산 활용이 아니라 반응세포 식별**
 
 `scripts/diagnose_oracle_covariance_upper_bound.py`, covariance task 206 episodes, episode cluster bootstrap:
@@ -397,19 +421,20 @@ T1-A가 실패 원인을 짚어줬습니다: 반응세포는 `effect_mask = (com
 
 </details>
 
-### ➡ 다음 우선순위: Tier 3 → Tier 2
+### ➡ 다음 우선순위: **Tier 2 (state)** — Tier 3는 T3-3만 남음
 
-Tier 1이 닫혔으므로 **Tier 3(방법론)을 먼저** 하는 것이 합리적입니다. Tier 1에서 배운 교훈이 그대로 적용됩니다:
-- **T3-1 (effect scale 정규화)**: task별 AUROC가 난이도에 오염되어 있어 아키텍처 강약을 비교할 수 없습니다. Tier 2에 들어가기 전 필수.
-- **T3-2 (val episode 증량)**: per-task CI가 넓어 어떤 개선도 검증이 안 됩니다. covariance episode 18개는 너무 적습니다.
-- **T3-3 (v22 hard 기준선)**: 대조군 부재.
-그 다음 **Tier 2(state)** — 단, T2-1의 경고대로 오라클/관측가능 descriptor를 처음부터 분리해 측정하세요.
+T3-1·T3-2가 완료되어 **판단 도구가 갖춰졌고, 타깃도 확정**되었습니다:
+- ✅ **T3-1**: 진짜 약점은 `state` (covariance는 아티팩트였음)
+- ✅ **T3-2**: `--val-episodes 1000`으로 평가 (task별 CI 0.045)
+- ⬜ **T3-3**: v22 hard 기준선 — 유일하게 남은 Tier 3 항목이며 50 epoch 학습이 필요합니다. Tier 2 착수 전 필수는 아니고, Tier 2 후보가 나왔을 때 대조군으로 쓰면 됩니다.
+
+**→ 다음은 Tier 2 (state).** T2-1의 경고를 반드시 지키세요: **오라클을 쓰는 descriptor와 진짜 관측 가능한 descriptor를 처음부터 분리 라벨링**할 것. Tier 1에서 `observed_covariance`가 오라클 마스크를 쓴다는 걸 놓쳐 한동안 잘못된 결론을 기록했습니다.
 
 > [!NOTE]
 > **폐기된 가설**: (a) fusion 희석, (b) `learned_head` < `prototype_cosine`, (c) sketch 압축 손실.
 > 관계식이나 스케치가 병목이라는 증거가 없습니다 — 모델은 이미 통짜 공분산으로 가능한 것 이상을 하고 있습니다. `learned_head` A/B는 하고 싶다면 값싸게 해볼 수는 있으나 **기대 효과는 낮습니다.**
 
-### Tier 2 — state 분기 (**0.6215**, 1,000 episode 기준)
+### ⭐ Tier 2 — state 분기 — **최우선** (T3-1이 진짜 약점으로 지목)
 
 **T2-1. state용 상한 진단 도구를 만들어 먼저 측정.** covariance에는 `diagnose_oracle_covariance_upper_bound.py`가 있지만 state용은 없습니다.
 
@@ -418,8 +443,13 @@ Tier 1이 닫혔으므로 **Tier 3(방법론)을 먼저** 하는 것이 합리�
 
 ### Tier 3 — 방법론 (성능이 아니라 판단 신뢰도)
 
-**T3-1. task별 effect scale 정규화 실험.**
+**T3-1. ✅ 완료 (2026-07-30) — 진짜 약점은 `state`.**
+effect scale을 통일해 비교하니 covariance는 composition과 동률이고 **state가 전 구간 최하위**. 기본 config의 covariance 최하위는 생성기 아티팩트였습니다. 상세는 §3.
+재현: `python scripts/evaluate_synthetic.py --checkpoint <best>.ckpt --config configs/train_v22_medium.yaml --val-episodes 400 --effect-scale 0.7`
+
+<details><summary>원래 T3-1 계획 (완료)</summary>
 현재 task별 AUROC는 생성기 effect scale(composition 1.40 / state 0.72 / covariance 0.55)에 오염되어 **아키텍처의 상대적 강약을 직접 비교할 수 없습니다.** 모든 task의 effect scale을 동일하게 맞춘 진단용 데이터 config를 만들면 "어느 메커니즘에 실제로 약한가"를 처음으로 공정하게 볼 수 있습니다. 학습된 모델을 그 데이터로 평가만 하면 되므로 재학습 불필요.
+</details>
 
 **T3-2. ✅ 완료 (2026-07-30) — 권고: val episode 1,000개.**
 CI 폭 104→0.074 / 400→0.035 / 1,000→0.021. task별은 1,000에서 0.045. **task별 +0.05 미만을 노리면 2,000개 이상 필요.** 상세는 §3. 이 과정에서 공식 기준선도 1,000 episode 기준으로 갱신했습니다(0.7078).

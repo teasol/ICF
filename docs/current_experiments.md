@@ -168,7 +168,14 @@ state           0.6215  .045      177   <-
 > **반드시 `--val-episodes 1000`으로 평가하십시오.** 기본값 104개는 전체 CI 폭 0.074, task당 ~20 episode로 판정에 부적합합니다. 104개로 재던 이전 기준선(0.7466)은 폐기했고, task별 순위도 그때와 달라졌습니다(covariance가 state보다 나쁜 것이 아니라 동률). 상세: [`current_status.md`](current_status.md) §3.
 
 > [!TIP]
-> **개선 여지는 `covariance`(0.6216)와 `state`(0.6215)에 몰려 있으며 둘은 동률입니다.** composition/combined는 이미 0.80~0.82라 올릴 여지가 적습니다. 아키텍처 변경은 이 두 축을 겨냥하는 편이 효율적입니다. 단 task별 CI 폭이 0.045 수준이므로, task별로 **+0.05 이상** 차이만 신뢰하세요. 그보다 작은 개선을 노리면 val episode를 2,000개 이상으로 올려야 합니다.
+> **⚠ 위 task별 수치로 아키텍처의 강약을 판단하지 마십시오.** 생성기가 task마다 다른 effect scale을 쓰기 때문에(composition 1.40 / state 0.45~1.00 / covariance 0.30~0.80) 이 순위는 난이도에 오염되어 있습니다.
+> **effect scale을 통일해 재보면 진짜 약점은 `state` 하나입니다** — covariance는 composition과 동률입니다. 상세: [`current_status.md`](current_status.md) §3 T3-1.
+> ```bash
+> # task를 공정하게 비교하려면 scale을 통제할 것 (0.4 또는 0.7 권장 — 학습 범위 안)
+> python scripts/evaluate_synthetic.py --checkpoint <ckpt> \
+>   --config configs/train_v22_medium.yaml --val-episodes 400 --effect-scale 0.7
+> ```
+> 또한 task별 CI 폭이 0.045 수준이므로 task별로 **+0.05 이상** 차이만 신뢰하세요.
 
 > [!IMPORTANT]
 > **CI는 query가 아니라 episode 단위로 계산됩니다.** 한 episode 안의 query들은 같은 context set과 같은 생성 파라미터를 공유하므로 독립이 아닙니다. query 단위로 재표집하면 상관된 예측을 독립으로 취급해 구간이 실제보다 훨씬 좁게 나옵니다(실측 1.5배 과소). 검출력이 부족하면 `val_dataset_kwargs.episodes_per_epoch`를 늘리세요 — **episode 수가 실질적인 표본 크기입니다.**
