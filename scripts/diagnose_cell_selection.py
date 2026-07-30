@@ -26,6 +26,12 @@ Scores compared:
                      score the meta-classifier's rare-evidence path pools over.
                      This one is learned rather than geometric, so it needs a
                      trained checkpoint (--checkpoint); skipped without one.
+  lda_probe          CHEATING upper bound: Fisher discriminant fitted on this
+                     bag using the responsive labels themselves, then scored on
+                     the same cells. No selection rule can beat it. If it is
+                     near 0.5, responsive cells are not separable from cell
+                     features at all and the oracle-cell ceiling is unreachable
+                     in principle rather than merely unreached.
 
 Usage:
     python scripts/diagnose_cell_selection.py \\
@@ -73,6 +79,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-episodes", type=int, default=None)
     parser.add_argument("--task", default="covariance", help="Response task to analyse.")
     parser.add_argument("--bootstrap", type=int, default=2000)
+    parser.add_argument("--probe", action="store_true",
+                        help="Add the cheating LDA upper bound on separability.")
     return parser.parse_args()
 
 
@@ -156,6 +164,28 @@ def main() -> None:
                         F.normalize(memories.float(), dim=-1),
                     )
                     scores["class_memory"] = similarity.amax(dim=(1, 3)).squeeze(0)
+                if args.probe:
+                    # Fisher LDA on the responsive labels. lda_probe fits and
+                    # scores the same cells, so with 512 dims it overfits and is
+                    # only a loose bound; lda_heldout fits on half the cells and
+                    # scores the other half, which is the honest number.
+                    f = bag.float()
+                    variance = f.var(dim=0, unbiased=False).clamp_min(1e-6)
+                    delta = f[responsive].mean(dim=0) - f[~responsive].mean(dim=0)
+                    scores["lda_probe"] = f @ (delta / variance)
+
+                    half = torch.zeros(f.shape[0], dtype=torch.bool, device=f.device)
+                    half[torch.randperm(f.shape[0], device=f.device)[: f.shape[0] // 2]] = True
+                    fit_pos = responsive & half
+                    fit_neg = (~responsive) & half
+                    if int(fit_pos.sum()) >= 2 and int(fit_neg.sum()) >= 2:
+                        delta_fit = f[fit_pos].mean(dim=0) - f[fit_neg].mean(dim=0)
+                        direction = delta_fit / f[half].var(dim=0, unbiased=False).clamp_min(1e-6)
+                        held = ~half
+                        if responsive[held].any() and (~responsive[held]).any():
+                            value = auroc((f[held] @ direction).cpu(), responsive[held].long().cpu())
+                            if value == value:
+                                episode_auroc["lda_heldout"].append(value)
                 target = responsive.long().cpu()
                 for name, score in scores.items():
                     value = auroc(score.cpu(), target)

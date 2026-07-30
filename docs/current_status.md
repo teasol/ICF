@@ -148,6 +148,36 @@
 
 **→ T1-B 방향이 명확해졌습니다: 개별 세포의 이상치 정도가 아니라 mixture component(=슬롯) 단위로 판별해야 합니다.** aggregator는 이미 12개 population slot에 세포를 배정하고 있으므로, **반응 component가 특정 슬롯과 정렬되는지** 먼저 확인하세요. 기존 도구 `scripts/diagnose_oracle_slot_alignment.py`가 바로 이 용도입니다.
 
+#### T1-B 결과 (2026-07-29): 슬롯도 못 잡지만, 신호는 특징 안에 있음
+
+**① 반응 component는 슬롯과 정렬되지 않습니다** (`scripts/diagnose_oracle_slot_alignment.py`, v22):
+
+| task | best slot purity | best slot capture | fragmentation entropy |
+|---|---:|---:|---:|
+| covariance | 0.173 | 0.155 | **0.963** |
+| composition | 0.253 | 0.175 | 0.920 |
+| state | 0.209 | 0.160 | 0.961 |
+| combined | 0.256 | 0.176 | 0.916 |
+| (무작위 기준) | ~base rate 0.110 | **~1/12 = 0.083** | 1.000 |
+
+capture 0.155는 무작위 0.083보다 약 1.9배 낫지만, **fragmentation entropy 0.963은 반응세포가 12개 슬롯에 거의 균등하게 흩어져 있다는 뜻**입니다. "반응 component = 특정 슬롯" 구도는 성립하지 않습니다.
+
+**② 그러나 세포 특징에는 신호가 있습니다** (`diagnose_cell_selection.py --probe`, covariance 80 eps):
+
+| score | AUROC | 95% CI | 성격 |
+|---|---:|---|---|
+| `lda_probe` | 0.8090 | [0.802, 0.816] | ⚠ 같은 세포로 적합·평가 → **512차원 과적합으로 과대평가** |
+| **`lda_heldout`** | **0.6969** | **[0.687, 0.707]** | ✅ **정직한 지도학습 상한** (절반으로 적합, 나머지로 평가) |
+| `studentized` / `outlier_distance` | 0.510 / 0.509 | — | 모델 기하 기준 |
+| `novelty` / `class_memory` | 0.498 / 0.497 | — | 모델 실사용 기준 |
+
+> [!IMPORTANT]
+> **반응세포는 세포 특징만으로 식별 가능합니다 — 단 세포 단위 라벨이 있을 때 AUROC 0.70 수준.** 즉 "정보가 없어서 못 찾는" 것이 아니고, **찾을 메커니즘이 없는** 것입니다. 현재 모든 기준이 0.50인데 정직한 상한은 0.70이므로 **0.50 → 0.70 구간이 실제 개선 여지**입니다.
+>
+> **단, 기대치를 낮게 잡으십시오.** ⑴ 0.70은 **세포 단위 정답 라벨**을 쓴 수치이고 모델에는 bag 단위 라벨(R/NR)만 있습니다. bag 라벨만으로 이 방향을 학습해야 하므로 0.70은 도달하기 어려운 상한입니다. ⑵ covariance AUROC 0.89는 **완벽한** 세포 선택을 가정한 값입니다. 부분적 선택은 부분적 이득만 줍니다. **+0.28을 기대하면 안 됩니다.**
+
+**T1-C 방향**: 세포 선택은 (a) 이상치 거리도 (b) 슬롯 배정도 아닌, **bag 라벨로부터 학습되는 판별 방향(discriminative direction)** 이어야 합니다. `lda_heldout`이 찾은 방향은 episode 내 생성 과정이 일관되므로 원리적으로 학습 가능하나, 이는 노브 조정이 아니라 **새 메커니즘 추가**입니다. 비용/이득을 §5 전략(합성에서 판단)에 따라 먼저 견적하고 결정하세요.
+
 ### v21 이하 과거 수치 (참고용)
 
 > [!CAUTION]
@@ -247,14 +277,21 @@ T1-0/T1-1 진단으로 원래 가설이 무너지고 병목이 바뀌었습니�
 **결론: k값 튜닝은 무의미합니다.** 랭킹에 신호가 없습니다.
 재현: `python scripts/diagnose_cell_selection.py --config configs/train_v22_medium.yaml --val-episodes 400 --checkpoint <best>.ckpt`
 
-**T1-B. [다음] 슬롯 정렬 확인 — 학습 없이 가능. [최우선]**
+**T1-B. ✅ 완료 (2026-07-29) — 슬롯 정렬 실패, 그러나 특징에는 신호 있음.**
+슬롯 capture 0.155(무작위 0.083)·fragmentation entropy 0.963 → 반응 component는 12개 슬롯에 흩어짐. 반면 held-out LDA는 0.6969 → **특징에는 신호가 있고 메커니즘이 없는 것**. 상세는 §3.
+재현: `python scripts/diagnose_oracle_slot_alignment.py --config configs/train_v22_medium.yaml` / `python scripts/diagnose_cell_selection.py --probe --checkpoint <best>.ckpt`
+
+<details><summary>원래 T1-B 계획 (완료)</summary>
 T1-A가 실패 원인을 짚어줬습니다: 반응세포는 `effect_mask = (component_index == effect_component_index)`, 즉 **latent mixture component 하나**이고, covariance task에서는 **위치가 아니라 분산이 바뀝니다.** 중심에서 먼 세포를 찾는 현재 기준으로는 구조적으로 못 찾습니다.
 → 개별 세포가 아니라 **component 단위**로 접근해야 합니다. aggregator는 이미 12개 slot에 세포를 배정하므로:
 1. **반응 component가 특정 슬롯과 정렬되는지 측정** — 기존 도구 `scripts/diagnose_oracle_slot_alignment.py`가 이 용도입니다.
 2. 정렬된다면 → 슬롯별 공분산(`slot_covariance_sketch`, 이미 계산 중)으로 0.89에 얼마나 근접하는지 측정.
 3. 정렬되지 않는다면 → 슬롯 배정 자체(anchor 선정, `assignment_temperature`)가 문제.
+</details>
 
-**T1-C. T1-B 결과가 나온 뒤에만 구조 변경.** 어떤 단위(세포/슬롯/component)로 골라야 상한을 회수하는지 알기 전에는 아키텍처를 건드리지 마세요.
+**T1-C. [다음] 구조 변경 여부 판단 — 이제 근거가 모였습니다.**
+세포 선택은 이상치 거리도(T1-A), 슬롯 배정도(T1-B) 아니고 **bag 라벨에서 학습되는 판별 방향**이어야 합니다. 이는 노브가 아니라 새 메커니즘입니다.
+**진행 전 반드시 확인할 것**: 현실적 이득은 `+0.28`이 아닙니다. 상한 0.70은 세포 라벨을 쓴 값이고 모델엔 bag 라벨만 있으며, 0.89는 완벽 선택 가정입니다. **먼저 "세포 선택 AUROC가 x일 때 covariance AUROC가 얼마가 되는가"를 오라클 마스크에 노이즈를 섞어 시뮬레이션해 이득 곡선을 그려보십시오** — 이것이 가장 값싼 다음 단계이고, 구조 변경의 기대 수익을 학습 없이 견적할 수 있습니다.
 
 > [!NOTE]
 > **폐기된 가설**: (a) fusion 희석, (b) `learned_head` < `prototype_cosine`, (c) sketch 압축 손실.
