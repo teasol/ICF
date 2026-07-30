@@ -122,6 +122,32 @@
 > [!WARNING]
 > **이전 판단 정정.** 세션 중 한때 "0.89가 관측만으로 달성 가능하므로 covariance 분기가 정보를 못 쓰고 있다(헤드룸 +0.28)"고 기록했으나, **틀렸습니다.** `observed_covariance`가 오라클 마스크를 쓴다는 점을 확인하지 못한 결과입니다. `allcell_covariance`를 추가 측정해 바로잡았습니다. 이에 따라 Tier 1의 원래 가설 (a) fusion 희석 / (b) learned_head 열위는 **근거를 잃었습니다** — 관계식(relation)이 병목이라는 증거가 없기 때문입니다.
 
+#### 🔴 T1-A 결과 (2026-07-29): 세포 선택이 **무작위와 구분되지 않음**
+
+`scripts/diagnose_cell_selection.py` — 모델의 세포 랭킹 점수가 `responsive_instance_mask`를 맞히는지 측정 (covariance 80 episodes, 반응세포 11.0%):
+
+| score | 정체 | AUROC | 95% CI |
+|---|---|---:|---|
+| `studentized` | z-scoring 후 centroid 거리 | 0.5098 | [0.500, 0.520] |
+| `outlier_distance` | 문서에 적힌 Top-1% 기준 | 0.5091 | [0.499, 0.519] |
+| `novelty` | **aggregator tail이 실제 쓰는 점수** | 0.4984 | [0.489, 0.508] |
+| `class_memory` | **meta-classifier rare-evidence의 학습된 점수** | 0.4971 | [0.486, 0.508] |
+
+**precision은 전부 base rate(0.110)와 같고, recall은 유지 비율과 정확히 일치**합니다 (1%→0.010, 5%→0.050, 10%→0.10, 20%→0.20). 이는 **무작위 추출의 정의 그대로**입니다.
+
+**4개 task 전부 동일** (composition 0.499~0.501 / state 0.517~0.520 / combined 0.501~0.503). covariance만의 문제가 아닙니다.
+
+> [!IMPORTANT]
+> **v21 "4대 수학 기술" 중 하나인 Top-1% Sparse Evidence 모듈이 반응세포를 전혀 찾지 못합니다.** 기하학적 기준 3종과 **학습된 기준 1종 모두** 무작위 수준입니다. 학습된 `class_memory`가 오히려 가장 낮습니다(0.4971).
+>
+> **따라서 `rare_evidence_fractions`나 `tail_fractions`의 k값을 조정하는 것은 무의미합니다.** 랭킹 자체에 신호가 없으므로 어디서 자르든 결과는 같습니다.
+
+**왜 실패하는지 — 생성기를 보면 명확합니다.** `effect_mask = (component_index == effect_component_index)` — 반응세포는 **latent mixture component 하나**입니다. 그리고 covariance task에서 그 component에 가해지는 효과는 **위치 이동이 아니라 분산(dispersion) 변화**입니다(`z = z + effect_mask * response_shift`는 composition/state 계열, covariance는 공분산 방향 스케일링).
+
+즉 **현재 선택 기준은 "중심에서 멀리 떨어진 세포"를 찾는데, 반응세포는 멀리 있지 않습니다.** 정상적인 mixture component이고, 단지 퍼진 모양이 다를 뿐입니다. 구조적으로 못 찾는 것이 당연합니다.
+
+**→ T1-B 방향이 명확해졌습니다: 개별 세포의 이상치 정도가 아니라 mixture component(=슬롯) 단위로 판별해야 합니다.** aggregator는 이미 12개 population slot에 세포를 배정하고 있으므로, **반응 component가 특정 슬롯과 정렬되는지** 먼저 확인하세요. 기존 도구 `scripts/diagnose_oracle_slot_alignment.py`가 바로 이 용도입니다.
+
 ### v21 이하 과거 수치 (참고용)
 
 > [!CAUTION]
@@ -216,20 +242,19 @@ T1-0/T1-1 진단으로 원래 가설이 무너지고 병목이 바뀌었습니�
 - 0.8931은 **반응세포 오라클 마스크**를 받은 경우이며 모델은 그 마스크를 못 받습니다.
 - 반응세포는 전체의 **11.7%**뿐. **그 세포들을 찾아내는 것이 유일한 실질 레버**입니다.
 
-**T1-A. Sparse Evidence 모듈이 실제로 반응세포를 찾는지 측정 — 학습 없이 가능. [최우선]**
-현재 아키텍처는 Top-1% outlier 거리로 희귀세포를 고릅니다(`meta_rare_evidence_fractions: [0.01, 0.05, 0.10, 0.20]`). **이 선택이 `responsive_instance_mask`와 얼마나 겹치는지 아무도 측정한 적이 없습니다.** precision/recall을 재세요:
-- 겹침이 낮다면 → **선택 기준(outlier 거리)이 잘못된 것**이고, 이것이 0.57→0.89를 여는 열쇠입니다.
-- 겹침이 이미 높은데 성능이 안 나온다면 → 찾아는 내지만 downstream에서 흘리는 것.
+**T1-A. ✅ 완료 (2026-07-29) — 세포 선택이 무작위와 구분되지 않음.**
+기하학적 기준 3종(`outlier_distance` 0.5091 / `studentized` 0.5098 / `novelty` 0.4984)과 **학습된 기준**(`class_memory` 0.4971) 전부 AUROC ~0.5. precision = base rate, recall = 유지 비율. 4개 task 모두 동일. 상세는 §3.
+**결론: k값 튜닝은 무의미합니다.** 랭킹에 신호가 없습니다.
+재현: `python scripts/diagnose_cell_selection.py --config configs/train_v22_medium.yaml --val-episodes 400 --checkpoint <best>.ckpt`
 
-반응세포 비율이 11.7%인데 top-1%를 우선 보는 현재 설정은 **애초에 스케일이 안 맞을 가능성**이 있습니다 (`rare_evidence_fractions`에 0.10/0.20이 있긴 하나 `aggregator_slot_rare_fraction: 0.05`, `aggregator_tail_fractions: [0.01,0.05,0.15]`와 함께 확인 필요).
+**T1-B. [다음] 슬롯 정렬 확인 — 학습 없이 가능. [최우선]**
+T1-A가 실패 원인을 짚어줬습니다: 반응세포는 `effect_mask = (component_index == effect_component_index)`, 즉 **latent mixture component 하나**이고, covariance task에서는 **위치가 아니라 분산이 바뀝니다.** 중심에서 먼 세포를 찾는 현재 기준으로는 구조적으로 못 찾습니다.
+→ 개별 세포가 아니라 **component 단위**로 접근해야 합니다. aggregator는 이미 12개 slot에 세포를 배정하므로:
+1. **반응 component가 특정 슬롯과 정렬되는지 측정** — 기존 도구 `scripts/diagnose_oracle_slot_alignment.py`가 이 용도입니다.
+2. 정렬된다면 → 슬롯별 공분산(`slot_covariance_sketch`, 이미 계산 중)으로 0.89에 얼마나 근접하는지 측정.
+3. 정렬되지 않는다면 → 슬롯 배정 자체(anchor 선정, `assignment_temperature`)가 문제.
 
-**T1-B. 선택 기준 대안 탐색 — 학습 없이 가능.**
-`_covariance_sketch`를 여러 세포 선택 규칙 위에서 계산해 어느 규칙이 0.89에 가장 근접하는지 측정합니다(오라클 마스크는 상한 기준선으로만 사용):
-- 현재: bag centroid로부터의 outlier 거리 상위 k%
-- 대안: context 클래스 prototype 대비 편차, 국소 밀도 이상치, 분산 기여도 상위 k%, k 자체를 5~20%로 스윕
-`scripts/diagnose_oracle_covariance_upper_bound.py`에 descriptor를 추가하는 방식으로 재사용 가능합니다(이번에 `allcell_covariance`를 추가한 것과 동일한 패턴).
-
-**T1-C. T1-A/B 결과가 나온 뒤에만 구조 변경.** 어떤 선택 규칙이 상한을 얼마나 회수하는지 알기 전에는 아키텍처를 건드리지 마세요.
+**T1-C. T1-B 결과가 나온 뒤에만 구조 변경.** 어떤 단위(세포/슬롯/component)로 골라야 상한을 회수하는지 알기 전에는 아키텍처를 건드리지 마세요.
 
 > [!NOTE]
 > **폐기된 가설**: (a) fusion 희석, (b) `learned_head` < `prototype_cosine`, (c) sketch 압축 손실.
