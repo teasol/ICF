@@ -1,6 +1,6 @@
 # Documentation map
 
-**Last updated**: `2026-07-29 10:10:00 KST`  
+**Last updated**: `2026-07-31 00:20:00 KST`
 **Architecture Version**: `22` (`architecture_version = 22`)
 
 문서는 **새 대화 세션으로 접속하는 Agent가 최우선으로 읽는 Living 문서 5개(`docs/` 루트)**와 **과거 기록/딥다이브 분석서(`docs/history/`)**로 이원화하여 관리합니다.
@@ -45,3 +45,4 @@
 - **아카이빙 규칙**: 특정 버전 딥다이브 보고서나 계획 문서는 완료 시 즉시 `docs/history/`로 이관하여 `docs/` 루트를 단순하고 가독성 높게 유지합니다.
 - **Config 루트 관리**: `configs/` 루트에는 활성화된 Architecture v22 entry point 4개(`train_v22_medium`, `train_v22_hard_realworld`, `train_v22_ici_finetune`, `train_v22_ici_scratch`)만 남기고 구버전(v18~v21)은 `configs/archive/`로 관리합니다. ICI의 fold/seed는 config가 아니라 `--cv`/`--seed`로 주입하므로 fold별 config를 만들지 않습니다.
 - **단일 출처화**: 동일한 수치나 진행 상태를 중복해 기록하지 않으며, 상태는 `current_status.md`에만 기록합니다.
+- **자율 연속 실행과 추적성**: `current_status.md`에 다음 Action과 판정 기준이 명확하면 재확인 없이 실행합니다. 각 논리 단위의 결과·명령·로그/산출물 경로·판단·후속 Action을 SSOT에 기록하고 Git 커밋하여 다른 작업공간이 즉시 이어받을 수 있게 합니다.

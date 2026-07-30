@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-07-29 10:10:00 KST`  
+**Last updated**: `2026-07-31 00:20:00 KST`
 **Architecture Version**: `22` (`architecture_version = 22`)
 
 이 문서는 BagPFN 저장소를 처음 맡은 coding agent가 안전하게 작업을 시작하기 위한 운영 및 핸드오프 지침입니다. 최신 개발 및 실험 진행 상황은 [`current_status.md`](current_status.md), 현재 모델 명세는 [`current_architecture.md`](current_architecture.md), 현재 실험 프로토콜은 [`current_experiments.md`](current_experiments.md)를 참고합니다.
@@ -25,6 +25,10 @@
 
 ## 2. Git 중심 개발 및 세션 핸드오프 수칙 (Git-Centric Workflow)
 
+0. **명확한 다음 단계는 자율적으로 연속 실행**:
+   - [`current_status.md`](current_status.md)의 Action Plan과 판정 기준이 명확하면 사용자에게 “진행할까요?”라고 다시 묻지 않고 실행합니다.
+   - 진단 결과가 사전 판정 기준을 만족해 다음 단계가 하나로 정해지는 경우, 구현·검증·후속 진단까지 같은 범위에서 계속 진행합니다.
+   - 단, 모순되는 선택지, 파괴적 변경, 외부 공개/비용, 누락된 필수 입력처럼 새로운 사용자 판단이나 권한이 필요한 경우에는 중단하고 확인합니다.
 1. **잦은 커밋 (Frequent Commits)**:
    - 논리 단위 작업(기능 추가, 버그 수정, 문서 개정, config 정돈, 단위 테스트 작성 등)이 완료될 때마다 즉시 커밋을 수행하여 작업 이력을 세분화합니다.
 2. **상세한 커밋 메시지 작성 (Detailed Commit Messages)**:
@@ -36,6 +40,11 @@
    - 본문(Body)에는 **변경 동기(Why)**, **구현 세부사항(What)**, **검증 결과(Verification)**를 정밀하게 명시합니다.
 3. **세션 종료 및 핸드오프 시 커밋 필수**:
    - 턴이나 대화 세션을 마무리하기 전 Working Tree의 모든 변경 사항을 남김없이 커밋하고, 생성된 Commit Hash와 핵심 요약을 [`current_status.md`](current_status.md)에 갱신하여 바톤 터치합니다.
+4. **진행상황 follow-up 가능성 보장**:
+   - 각 논리 단위가 끝날 때 [`current_status.md`](current_status.md)에 상태, 핵심 수치, 실행 명령, 로그/PID/체크포인트/예측 파일 경로, 성공·중단 판단 근거, 바로 다음 Action을 기록합니다.
+   - 실행법이나 모델 계약이 바뀌면 `current_experiments.md` 또는 `current_architecture.md`도 같은 논리 단위에서 함께 갱신합니다.
+   - 장시간 작업은 완전 이탈형 백그라운드로 실행하고, 시작 직후 PID와 로그 경로를 기록하며, 완료 후 최종 결과와 산출물 경로를 추가합니다.
+   - 다른 작업공간의 Agent가 대화 기록 없이 Living 문서와 `git log`만으로 작업을 이어갈 수 없는 상태는 완료된 핸드오프로 보지 않습니다.
 
 ---
 

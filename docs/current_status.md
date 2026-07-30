@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
 **Last updated**: `2026-07-31 00:20:00 KST`
-**Latest Commit**: `783173d` (`T3-1: at matched effect scale the weak task is state, not covariance`)
+**Latest experiment commit**: `783173d` (`T3-1: at matched effect scale the weak task is state, not covariance`). 이후 문서 정리 커밋은 `git log`를 기준으로 확인.
 **Branches**: `main` = `v22` (기본, 최신) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
@@ -28,10 +28,11 @@
 2. ⬜ T3-3 (v22 hard 기준선) — 50 epoch 학습, Tier 2 후보 나온 뒤 대조군으로.
 3. 🚫 **ICI는 건드리지 말 것** — 후보 확정 전까지 (§5).
 
-**작업 규칙 3가지**
+**작업 규칙 4가지**
 - 평가는 `--val-episodes 1000`, 비교는 `scripts/compare_predictions.py` (paired cluster bootstrap).
 - **오라클을 쓰는 상한을 목표로 삼지 말 것** — descriptor가 `responsive_instance_mask`나 latent를 쓰는지 먼저 확인 (§3에서 실제로 틀린 사례 있음).
 - 기본 task별 AUROC 표로 아키텍처 강약을 판단하지 말 것 — 생성기 effect scale에 오염됨 (§3 T3-1).
+- **다음 Action과 판정 기준이 명확하면 재확인 없이 실행**. 각 논리 단위마다 결과·명령·로그/산출물·판단·다음 Action을 이 문서에 갱신하고 Git 커밋하여, 다른 작업공간이 문서와 `git log`만으로 이어받을 수 있게 할 것.
 
 ---
 
