@@ -12,7 +12,12 @@ from src.utils.utils import build_datamodule,build_model,merge_train_config
 from scripts.diagnose_covariance_relations import episode_metrics
 from scripts.diagnose_oracle_slot_alignment import query_index
 
-DESCRIPTORS=("observed_covariance","observed_spectral","observed_local_distance",
+# NOTE ON NAMING: "observed_*" means "built from observed cell features" as
+# opposed to latent parameters -- but observed_covariance still *selects* which
+# cells to use via episode.responsive_instance_mask, which is diagnostic-only
+# ground truth the model never receives. allcell_covariance is the same sketch
+# over the whole bag and is the only genuinely model-reachable ceiling here.
+DESCRIPTORS=("allcell_covariance","observed_covariance","observed_spectral","observed_local_distance",
              "observed_local_anisotropy","observed_oracle_population","latent_dispersion")
 RELATIONS=("prototype_cosine","standardized_distance","multiscale_rbf")
 METRICS=("covariance_relation_auroc","covariance_relation_balanced_accuracy",
@@ -50,7 +55,7 @@ def main():
    if episode.response_task!="covariance": continue
    x,y,mask=episode.x,episode.y,episode.responsive_instance_mask
    if mask is None or episode.response_dispersion_factor is None: continue
-   covariance=[]; spectral=[]; local_distance=[]; local_anisotropy=[]
+   covariance=[]; allcell=[]; spectral=[]; local_distance=[]; local_anisotropy=[]
    original_descriptor=agg.slot_covariance_descriptor
    # A bag can carry fewer than three responsive cells. Only the local-geometry
    # descriptors need neighbours, so drop just those for such an episode rather
@@ -61,6 +66,8 @@ def main():
     selected=bag[bag_mask]
     delta=selected-selected.mean(dim=0,keepdim=True)
     covariance.append(agg._covariance_sketch(delta))
+    all_delta=bag-bag.mean(dim=0,keepdim=True)
+    allcell.append(agg._covariance_sketch(all_delta))
     assignment=torch.ones(1,selected.shape[0],1,device=x.device,dtype=x.dtype)
     agg.slot_covariance_descriptor="spectral"
     feature,_=agg._slot_covariance_sketch(assignment,delta.unsqueeze(0))
@@ -71,6 +78,7 @@ def main():
      local_distance.append(geometry["distance"].squeeze(0)); local_anisotropy.append(geometry["anisotropy"].squeeze(0))
    agg.slot_covariance_descriptor=original_descriptor
    descriptors={
+    "allcell_covariance":torch.stack(allcell),
     "observed_covariance":torch.stack(covariance),
     "observed_spectral":torch.stack(spectral),
     "observed_oracle_population":episode.oracle_population_features,

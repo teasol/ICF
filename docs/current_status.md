@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-29 17:05:00 KST`
+**Last updated**: `2026-07-29 18:40:00 KST`
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
 **Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 해결하기 위한 Single Source of Truth (SSOT) living document.
@@ -67,45 +67,60 @@
 
 **앞으로 아키텍처 변경은 이 수치와 비교합니다** (§5 전략에 따라 ICI가 아니라 여기서 판단). 비교 시 `scripts/compare_predictions.py`로 위 예측 파일과 paired cluster bootstrap을 돌릴 것.
 
-### 🔴 진단 결과: covariance 분기가 자기가 가진 정보를 못 쓰고 있음 (2026-07-29)
+### 🔬 covariance 진단 (2026-07-29) — **병목은 공분산 활용이 아니라 반응세포 식별**
 
-`scripts/diagnose_oracle_covariance_upper_bound.py`를 v22 config로 실행해 **descriptor × relation 조합별 상한**을 측정했습니다. 아래는 최초 측정(기본 val split, covariance 18 episodes)이며, 표본이 작아 T1-0에서 재확인했습니다(바로 아래).
+`scripts/diagnose_oracle_covariance_upper_bound.py`, covariance task 206 episodes, episode cluster bootstrap:
 
-| descriptor | relation | AUROC | 비고 |
-|---|---|---:|---|
-| `latent_dispersion` | `standardized_distance` | 1.0000 | ⚠ **oracle** (ground-truth latent 사용, 달성 불가) |
-| **`observed_covariance`** | **`prototype_cosine`** | **0.8908** | ✅ **관측만으로 달성 가능한 최고치** |
-| `observed_covariance` | `multiscale_rbf` | 0.8742 | 관측 가능 |
-| `observed_covariance` | `standardized_distance` | 0.8546 | 관측 가능 |
-| `observed_local_distance` | `multiscale_rbf` | 0.5959 | 관측 가능 |
-| `observed_spectral` / `observed_local_anisotropy` | (전부) | 0.48~0.56 | 거의 무신호 |
-| **학습된 v22 모델** | — | **0.6122** | **관측 상한 대비 −0.2786** |
-
-> [!IMPORTANT]
-> **covariance는 "본질적으로 어려운 과제"가 아닙니다.** 관측 가능한 공분산 스케치에 단순 prototype-cosine만 태워도 **0.89**가 나오는데, 학습된 모델은 **0.61**입니다. 즉 모델이 **이미 계산해 두고 있는 공분산 정보를 제대로 활용하지 못하고 있습니다.** 이것이 현재 가장 큰 개선 여지입니다.
->
-> 처음에는 task별 AUROC 순서(composition 0.80 > state 0.66 > covariance 0.61)가 생성기의 effect scale 순서(1.40 > 0.72 > 0.55)와 정확히 일치해서 **난이도 아티팩트로 보였지만**, 이 진단이 그 해석을 뒤집었습니다. 난이도가 낮아서가 아니라 아키텍처가 못 쓰는 것입니다.
-
-#### ✅ T1-0 확인 완료 (2026-07-29): 206 episodes에서 상한 유지
-
-18 episodes는 표본이 부족해 재확인이 필요했습니다. `--val-episodes 1000`(covariance 206 episodes, 11배)으로 재실행한 결과:
-
-| descriptor | relation | 18 eps | **206 eps** | 95% CI (206) |
-|---|---|---:|---:|---|
-| **`observed_covariance`** | **`prototype_cosine`** | 0.8908 | **0.8931** | **[0.876, 0.910]** |
-| `observed_covariance` | `multiscale_rbf` | 0.8742 | 0.8903 | [0.873, 0.908] |
-| `observed_covariance` | `standardized_distance` | 0.8546 | 0.8334 | [0.812, 0.856] |
-| `observed_spectral` | (최고) | 0.5609 | 0.5787 | [0.557, 0.600] |
-| `observed_local_*` | (최고) | 0.5959 | 0.5450 | [0.522, 0.569] |
-| **학습된 v22 모델** | — | 0.6122 | 0.6122 | — |
+| descriptor | relation | AUROC | 95% CI | 모델이 도달 가능? |
+|---|---|---:|---|---|
+| `latent_dispersion` | `standardized_distance` | 1.0000 | [1.000, 1.000] | ❌ latent 파라미터 오라클 |
+| `observed_covariance` | `prototype_cosine` | 0.8931 | [0.876, 0.910] | ❌ **반응세포 마스크 오라클** |
+| `observed_covariance` | `multiscale_rbf` | 0.8903 | [0.873, 0.908] | ❌ 동일 |
+| **`allcell_covariance`** | `prototype_cosine` | **0.5704** | **[0.550, 0.592]** | ✅ **유일하게 진짜 관측 가능** |
+| **학습된 v22 모델** | — | **0.6122** | — | — |
+| `observed_spectral` / `local_*` / `oracle_population` | (전부) | 0.52~0.58 | — | 혼재, 전부 무신호 수준 |
 
 > [!IMPORTANT]
-> **상한이 유지됩니다: 0.8931, CI [0.876, 0.910].** 모델의 0.6122는 이 구간 **한참 아래**로, 겹치지 않습니다.
-> **→ Tier 1은 진행할 가치가 있습니다. 헤드룸 약 +0.28은 실재합니다.**
+> **모델(0.6122)은 진짜 관측 가능한 상한(0.5704)을 이미 넘어섰습니다.**
+> 공분산 정보를 "못 쓰고 있는" 것이 아니라, 통짜 bag 공분산에서 뽑을 수 있는 것보다 **이미 더 뽑고 있습니다.**
 >
-> 추가로 드러난 것: 공분산 신호는 **`observed_covariance` 스케치에만** 있습니다. `spectral`(0.58), `local_distance`/`local_anisotropy`(0.53~0.55)는 전부 무작위에 가깝습니다. 즉 **어떤 descriptor를 쓰느냐가 결정적이고, 모델은 이미 올바른 것(`_covariance_sketch`)을 계산하고 있습니다.** 문제는 계산이 아니라 **활용**입니다.
+> **0.89는 달성 가능한 목표가 아닙니다.** 그 descriptor는 `episode.responsive_instance_mask`로 세포를 골라 공분산을 계산하는데, 이 마스크는 코드 주석에 명시된 대로 *"Diagnostic-only instance membership. SyntheticEpisodeDataset never exposes this field in training or evaluation batches"* — **모델이 절대 받지 못하는 정답**입니다.
 >
-> relation 측면에서는 `prototype_cosine`(0.8931)과 `multiscale_rbf`(0.8903)가 사실상 동률이고 `standardized_distance`(0.8334)만 뒤집니다. 현재 모델은 `mode: learned_head`를 씁니다 — T1-1(b) 가설의 직접적 근거입니다.
+> **`observed_` 접두사가 오해를 유발합니다.** 여기서 "observed"는 "latent 파라미터가 아니라 관측된 세포 특징으로 계산"이라는 뜻일 뿐, **어떤 세포를 쓸지는 오라클이 정해줍니다.**
+
+**따라서 0.61 → 0.89 격차의 정체는 공분산 활용이 아니라 반응세포 식별입니다.** covariance 에피소드에서 반응세포는 전체의 **평균 11.7%** (중앙값 11.5%, 범위 2.4~21.4%)에 불과합니다. 그 12%를 알면 0.89, 모르고 전부 쓰면 0.57입니다. 즉 **어느 세포가 반응세포인지 찾아내는 것이 전부**이고, 이는 정확히 **Top-1% Sparse Evidence 모듈이 담당해야 할 일**입니다.
+
+#### T1-1 결과 (2026-07-29): 관계식·게이트 모두 병목이 아님 — 직접 측정으로 확인
+
+`scripts/diagnose_covariance_utilisation.py` (학습된 baseline 체크포인트, covariance episodes):
+
+**(a) 융합 게이트는 열려 있습니다** — 꺼져 있지 않습니다.
+
+| gate | 값 |
+|---|---:|
+| `covariance_residual_scale` (sigmoid) | 0.2951 |
+| `covariance_ridge_scale` (exp, clamp) | 2.3897 |
+| **ridge 항 실효 배율** | **0.7052** |
+| `covariance_relation_residual_scale` (config 고정) | 0.5000 |
+| (참고) population / tail / fusion | 0.2445 / 0.1041 / 0.1137 |
+
+**(b) 관계식 4종이 전부 동률 — 전부 무작위 수준** (모델이 실제로 보는 all-cell 스케치 기준):
+
+| relation mode | AUROC | 95% CI |
+|---|---:|---|
+| `learned_head` (현재) | 0.5133 | [0.442, 0.589] |
+| `prototype_cosine` | 0.5074 | [0.448, 0.567] |
+| `multiscale_rbf` | 0.5084 | [0.451, 0.562] |
+| `standardized_distance` | 0.5146 | [0.453, 0.571] |
+| **전체 모델 (end-to-end)** | **0.6202** | [0.541, 0.692] |
+
+> [!IMPORTANT]
+> **가설 (a)·(b) 모두 기각.** 게이트는 실효 0.705로 열려 있고, 관계식은 무엇을 써도 0.51 근처로 동일합니다. `learned_head`를 `prototype_cosine`으로 바꿔봐야 얻을 것이 없습니다.
+> 그리고 **전체 모델(0.620)이 어떤 단일 관계식보다도 높습니다** — covariance 분기가 정보를 흘리는 것이 아니라, all-cell 공분산에 애초에 신호가 별로 없는 것입니다.
+> **남는 결론은 하나: 병목은 반응세포 식별입니다.**
+
+> [!WARNING]
+> **이전 판단 정정.** 세션 중 한때 "0.89가 관측만으로 달성 가능하므로 covariance 분기가 정보를 못 쓰고 있다(헤드룸 +0.28)"고 기록했으나, **틀렸습니다.** `observed_covariance`가 오라클 마스크를 쓴다는 점을 확인하지 못한 결과입니다. `allcell_covariance`를 추가 측정해 바로잡았습니다. 이에 따라 Tier 1의 원래 가설 (a) fusion 희석 / (b) learned_head 열위는 **근거를 잃었습니다** — 관계식(relation)이 병목이라는 증거가 없기 때문입니다.
 
 ### v21 이하 과거 수치 (참고용)
 
@@ -194,29 +209,38 @@
 > (`predictions/synthetic_v22_baseline_fixed.pt`, AUROC 0.7466 [0.716, 0.776])과
 > paired cluster bootstrap 비교할 것.
 
-### Tier 1 — covariance 분기 (근거가 가장 강함, 헤드룸 +0.28)
+### Tier 1 — 반응세포 식별 (Sparse Evidence) — **재정의됨**
 
-**T1-0. ✅ 완료 (2026-07-29) — 상한 확정, Tier 1 진행 승인.**
-206 episodes에서 `observed_covariance + prototype_cosine` = **0.8931 [0.876, 0.910]**. 모델 0.6122는 이 CI 아래로 겹치지 않습니다. 헤드룸 +0.28 실재 확인. 상세는 §3 참고.
-재현: `python scripts/diagnose_oracle_covariance_upper_bound.py --config configs/train_v22_medium.yaml --val-episodes 1000`
+T1-0/T1-1 진단으로 원래 가설이 무너지고 병목이 바뀌었습니다 (§3 참고). 요약:
+- 모델 0.6122는 **진짜 관측 가능한 상한 0.5704를 이미 초과**합니다.
+- 0.8931은 **반응세포 오라클 마스크**를 받은 경우이며 모델은 그 마스크를 못 받습니다.
+- 반응세포는 전체의 **11.7%**뿐. **그 세포들을 찾아내는 것이 유일한 실질 레버**입니다.
 
-**T1-1. 왜 못 쓰는지 국소화 — 학습 없이 가능.**
-`observed_covariance + prototype_cosine`이 0.89인데 모델이 0.61이라면 원인은 셋 중 하나입니다:
-- (a) **fusion에서 희석**: covariance 항이 `covariance_residual_scale`(학습된 sigmoid) × `covariance_ridge_scale`로 두 번 감쇠되고, CSP head는 고정 0.50입니다. 학습된 scale의 **실제 수렴값을 먼저 찍어보세요** — 0에 가깝다면 분기가 사실상 꺼진 것입니다.
-- (b) **learned head < prototype cosine** — **T1-0이 이 가설을 강화했습니다.** 진단에서 `prototype_cosine` 0.8931 / `multiscale_rbf` 0.8903이 최고인데 현재 모델은 `covariance_relation.mode: learned_head`(2-layer MLP)를 씁니다. `mode`를 prototype 계열로 바꿔 A/B가 가장 값싼 검증입니다.
-- (c) **descriptor 손실**: `aggregator_covariance_sketch_dim: 64` 압축 문제. **단, T1-0에서 진단이 쓴 것도 같은 `agg._covariance_sketch`였고 0.89가 나왔으므로 이 가설의 우선순위는 낮아졌습니다.** 신호는 스케치 안에 있습니다.
+**T1-A. Sparse Evidence 모듈이 실제로 반응세포를 찾는지 측정 — 학습 없이 가능. [최우선]**
+현재 아키텍처는 Top-1% outlier 거리로 희귀세포를 고릅니다(`meta_rare_evidence_fractions: [0.01, 0.05, 0.10, 0.20]`). **이 선택이 `responsive_instance_mask`와 얼마나 겹치는지 아무도 측정한 적이 없습니다.** precision/recall을 재세요:
+- 겹침이 낮다면 → **선택 기준(outlier 거리)이 잘못된 것**이고, 이것이 0.57→0.89를 여는 열쇠입니다.
+- 겹침이 이미 높은데 성능이 안 나온다면 → 찾아는 내지만 downstream에서 흘리는 것.
 
-  T1-0의 부수 소득: 공분산 신호는 **`observed_covariance`에만** 있고 `spectral`(0.58)·`local_*`(0.55)는 무작위 수준입니다. 대체 descriptor를 찾는 방향은 가망 없으니 시도하지 마세요.
-`scripts/diagnose_covariance_relations.py`, `diagnose_covariance_subspace.py`, `diagnose_v19_branches.py`(분기별 AUROC 분해)가 이미 있으니 학습 없이 (a)~(c)를 가릅니다.
+반응세포 비율이 11.7%인데 top-1%를 우선 보는 현재 설정은 **애초에 스케일이 안 맞을 가능성**이 있습니다 (`rare_evidence_fractions`에 0.10/0.20이 있긴 하나 `aggregator_slot_rare_fraction: 0.05`, `aggregator_tail_fractions: [0.01,0.05,0.15]`와 함께 확인 필요).
 
-**T1-2. 원인별 구조 변경** (T1-1 결과에 따라 하나만 선택):
-- (a)였다면 → `meta_covariance_residual_scale` 하한 도입 또는 covariance 항을 fusion 이전 단계로 이동
-- (b)였다면 → `covariance_relation.mode`를 prototype cosine 계열로 교체 (진단에서 이미 최고 성능)
-- (c)였다면 → `aggregator_covariance_sketch_dim` 증대 (64 → 128/256) 또는 압축 방식 변경
+**T1-B. 선택 기준 대안 탐색 — 학습 없이 가능.**
+`_covariance_sketch`를 여러 세포 선택 규칙 위에서 계산해 어느 규칙이 0.89에 가장 근접하는지 측정합니다(오라클 마스크는 상한 기준선으로만 사용):
+- 현재: bag centroid로부터의 outlier 거리 상위 k%
+- 대안: context 클래스 prototype 대비 편차, 국소 밀도 이상치, 분산 기여도 상위 k%, k 자체를 5~20%로 스윕
+`scripts/diagnose_oracle_covariance_upper_bound.py`에 descriptor를 추가하는 방식으로 재사용 가능합니다(이번에 `allcell_covariance`를 추가한 것과 동일한 패턴).
+
+**T1-C. T1-A/B 결과가 나온 뒤에만 구조 변경.** 어떤 선택 규칙이 상한을 얼마나 회수하는지 알기 전에는 아키텍처를 건드리지 마세요.
+
+> [!NOTE]
+> **폐기된 가설**: (a) fusion 희석, (b) `learned_head` < `prototype_cosine`, (c) sketch 압축 손실.
+> 관계식이나 스케치가 병목이라는 증거가 없습니다 — 모델은 이미 통짜 공분산으로 가능한 것 이상을 하고 있습니다. `learned_head` A/B는 하고 싶다면 값싸게 해볼 수는 있으나 **기대 효과는 낮습니다.**
 
 ### Tier 2 — state 분기 (0.6595, 근거 중간)
 
-**T2-1. state에도 동일한 상한 진단이 없습니다.** covariance에는 `diagnose_oracle_covariance_upper_bound.py`가 있지만 state용은 없습니다. **동형 도구를 만들어 state의 관측 상한을 먼저 재보세요.** 상한이 0.70 근처면 지금이 거의 최선이고, 0.85면 covariance와 같은 종류의 미활용 문제입니다. 도구 없이 아키텍처부터 건드리면 Tier 1에서 피한 실수를 반복하게 됩니다.
+**T2-1. state용 상한 진단 도구를 만들어 먼저 측정.** covariance에는 `diagnose_oracle_covariance_upper_bound.py`가 있지만 state용은 없습니다.
+
+> [!CAUTION]
+> **Tier 1에서 저지른 실수를 반복하지 마세요.** 도구를 만들 때 **오라클을 쓰는 descriptor와 진짜 관측 가능한 descriptor를 반드시 분리해 라벨링**하세요. covariance 진단의 `observed_covariance`는 이름과 달리 `responsive_instance_mask`(정답)로 세포를 골라 0.89를 냈고, 이 때문에 한동안 잘못된 결론을 기록했습니다. 진짜 관측 가능한 값은 0.57이었습니다. state 도구에서도 **모델이 실제로 받는 입력만으로 계산한 기준선을 반드시 포함**시키세요.
 
 ### Tier 3 — 방법론 (성능이 아니라 판단 신뢰도)
 
@@ -232,7 +256,8 @@
 ### 하지 말 것
 
 - **ICI 실행 금지** — 후보 확정 전까지. §5 참고, 지금 돌리면 테스트 세트 조기 소진.
-- **근거 없이 covariance 아키텍처부터 뜯기 금지** — T1-0을 건너뛰면 18 episode 노이즈를 쫓게 됩니다.
+- **오라클 기반 상한을 목표치로 삼기 금지** — descriptor가 `responsive_instance_mask`나 latent 파라미터를 쓰는지 항상 먼저 확인하세요. 모델이 못 받는 정보로 만든 상한은 목표가 아닙니다 (§3 정정 사례).
+- **T1-A/B 없이 covariance 아키텍처 뜯기 금지** — 세포 선택 규칙이 상한을 얼마나 회수하는지 모른 채 관계식을 바꾸면 헛수고입니다.
 - **effect scale 정규화 없이 task별 AUROC로 우열 판단 금지** (T3-1).
 
 ---
