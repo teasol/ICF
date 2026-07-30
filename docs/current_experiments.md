@@ -1,6 +1,6 @@
 # Current experiments
 
-**Last updated**: `2026-07-30 23:40:00 KST`
+**Last updated**: `2026-07-31 03:54:00 KST`
 **Architecture Version**: `22` (`architecture_version = 22`)
 
 이 문서는 v22 기준 실험 프로토콜과 실행 명령어를 설명합니다. v21 retrieval 시대의 실험 기록은 [`history/v21_retrieval_experiments.md`](history/v21_retrieval_experiments.md)로 이관되었습니다.
@@ -180,6 +180,12 @@ state           0.6215  .045      177   <-
 > [!IMPORTANT]
 > **CI는 query가 아니라 episode 단위로 계산됩니다.** 한 episode 안의 query들은 같은 context set과 같은 생성 파라미터를 공유하므로 독립이 아닙니다. query 단위로 재표집하면 상관된 예측을 독립으로 취급해 구간이 실제보다 훨씬 좁게 나옵니다(실측 1.5배 과소). 검출력이 부족하면 `val_dataset_kwargs.episodes_per_epoch`를 늘리세요 — **episode 수가 실질적인 표본 크기입니다.**
 
+### Tier 2 state 진단 — 🛑 종료 (2026-07-31)
+
+1,000 validation episodes에서 현재 모델 state AUROC는 `0.6217 [0.597, 0.644]`였습니다. 모델이 실제 받는 global/slot-center 토큰의 context-label ridge probe도 `0.6196~0.6210`, raw mean 계열 관측 통계는 `0.5273~0.5578`로 현재 모델을 넘지 못했습니다. `0.8819~0.9013`은 정답 반응세포 마스크를 쓴 오라클이므로 목표가 아닙니다.
+
+사전 판정 기준에 따라 state 구조 변경은 종료합니다. 다음 계획 실험은 v22 Hard 기준선(T3-3)입니다. 상세 표와 재현 명령은 [`current_status.md`](current_status.md) §3을 참고합니다.
+
 ### Stage 3: ICI 실데이터 — 최종 테스트 (후보 확정 후 1회)
 
 - **Config**: `configs/train_v22_ici_finetune.yaml` (fine-tune), `configs/train_v22_ici_scratch.yaml` (scratch 대조군).
@@ -263,5 +269,6 @@ timeout 1500s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest disco
 | `scripts/test.py` | 체크포인트 → 예측 파일 (AUROC에 CI 자동 부착) |
 | `scripts/evaluate_protocol.py` | 다중 seed 집계 + 외부 코호트 보고 |
 | `scripts/evaluate_synthetic.py` | 합성 val 평가 (episode cluster CI + task별 분해) |
+| `scripts/diagnose_state_upper_bound.py` | state 관측 가능/model-input/oracle descriptor 상한 비교 |
 | `scripts/compare_predictions.py` | 두 run 비교 (CI + paired bootstrap 승률, episode 있으면 cluster) |
 | `src/utils/metrics.py` | 공용 지표 구현 (rank 기반 AUROC, cluster bootstrap) |

@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-31 00:20:00 KST`
-**Latest experiment commit**: `783173d` (`T3-1: at matched effect scale the weak task is state, not covariance`). 이후 문서 정리 커밋은 `git log`를 기준으로 확인.
+**Last updated**: `2026-07-31 03:54:00 KST`
+**Latest experiment state**: T2-1/T2-2 state 상한 진단 완료. 정확한 최신 커밋은 `git log` 기준으로 확인.
 **Branches**: `main` = `v22` (기본, 최신) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
@@ -22,10 +22,11 @@
 | 🛑 **Tier 1 (covariance/세포선택) 종료** | 세포 선택 점수 4종 전부 무작위 수준. bag 라벨로는 purity 0.128 (사전 판정 기준 ≤0.15) |
 | 🎯 **진짜 약점은 `state`** | effect scale 통일 시 covariance는 composition과 동률, state만 전 구간 최하위 |
 | 📏 **val episode 1,000개 필요** | 104개는 CI 폭 0.074 + task당 ~20 episode로 판정 불가 |
+| 🛑 **Tier 2 (state) 종료** | 현재 모델 0.6217과 model-input probe 0.6196~0.6210이 동률. raw mean 관측 통계는 0.5273~0.5578 |
 
 **다음 할 일**
-1. ⭐ **Tier 2 (state 분기)** — §6. 단 T2-1 경고 필수 준수: **오라클 descriptor와 관측가능 descriptor를 처음부터 분리 라벨링**할 것.
-2. ⬜ T3-3 (v22 hard 기준선) — 50 epoch 학습, Tier 2 후보 나온 뒤 대조군으로.
+1. ⭐ **T3-3: v22 hard 기준선** — 남은 유일한 계획 실험. 50 epoch 학습.
+2. ⬜ Medium/Hard 결과를 기준으로 생성기·문제 설정 재검토 여부 결정. 검증된 관측 descriptor 없이 새 state/covariance 구조를 추가하지 말 것.
 3. 🚫 **ICI는 건드리지 말 것** — 후보 확정 전까지 (§5).
 
 **작업 규칙 4가지**
@@ -145,6 +146,39 @@ task별: composition 0.8022 / combined 0.8170 / interaction 0.7453 / state 0.659
 > **범위 밖 외삽 주의.** 학습 시 범위는 composition 1.40 고정 / state 0.45~1.00 / covariance 0.30~0.80입니다. 따라서 scale 1.4는 state·covariance에게 외삽이고, composition에게만 학습 조건입니다. **state와 covariance가 모두 학습 범위 안인 scale 0.4·0.7이 가장 공정한 비교 지점**이며, 그 두 지점에서도 결론(state 최하위)은 동일합니다.
 
 **→ Tier 2(state)가 이제 명확한 최우선 대상입니다.** 폐기된 Tier 1(covariance)은 애초에 이 아티팩트를 쫓고 있었습니다.
+
+### 🛑 T2-1/T2-2 결과 (2026-07-31): state도 관측 descriptor 헤드룸 없음 → Tier 2 종료
+
+`scripts/diagnose_state_upper_bound.py`, 1,000 validation episodes 중 state 177 episodes / 2,910 query, episode cluster bootstrap:
+
+| access | descriptor | AUROC | 95% CI |
+|---|---|---:|---|
+| **현재 모델** | end-to-end v22 | **0.6217** | **[0.597, 0.644]** |
+| model input | slot center tokens | 0.6210 | [0.598, 0.643] |
+| model input | global summary + slot centers | 0.6209 | [0.598, 0.643] |
+| model input | global summary | 0.6196 | [0.597, 0.641] |
+| observable | raw mean + spread | 0.5578 | [0.535, 0.580] |
+| observable | raw mean | 0.5478 | [0.526, 0.570] |
+| observable | centered-direction mean | 0.5273 | [0.504, 0.550] |
+| oracle mask | responsive population features | 0.9013 | [0.889, 0.913] |
+| oracle mask | responsive-cell mean | 0.8819 | [0.868, 0.895] |
+| oracle latent | response score | 1.0000 | [1.000, 1.000] |
+
+> [!IMPORTANT]
+> **사전 T2-2 판정 기준에 따라 Tier 2를 종료합니다.** 모델이 실제로 받는 global/slot-center 토큰에 context-label ridge probe를 붙여도 현재 모델과 완전히 동률이고, 세포를 특정하지 않는 raw mean 계열은 오히려 모델보다 낮습니다. 기대했던 “state 위치 이동이 bag 평균에 선형 누적되어 큰 관측 헤드룸을 만든다”는 가설은 기각되었습니다.
+>
+> 0.88~0.90은 `responsive_instance_mask`로 정답 세포를 고른 오라클입니다. **모델이 접근할 수 없는 격차를 구조 변경 목표로 삼지 않습니다.** 이 진단은 절대적인 모든 함수의 수학적 상한을 증명하지는 않지만, 사전에 지정한 관측 descriptor 어디에도 +0.05 이상의 실행 가능한 헤드룸이 없음을 보여줍니다.
+
+재현:
+```bash
+/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python scripts/diagnose_state_upper_bound.py \
+  --val-episodes 1000 --bootstrap 2000 \
+  --output logs/v22_state_upper_bound_1000ep.csv
+```
+
+산출물: `logs/v22_state_upper_bound_1000ep.csv`; 실행 로그/PID 기록: `logs/20260731_state_upper_bound/`.
+
+검증: 100-episode smoke test 성공, 정식 1,000-episode 실행 성공, 전체 unittest **111개 통과** (670.595초).
 
 ### 🔬 covariance 진단 전체 기록 (2026-07-29) — 🛑 **종료된 라인**
 
@@ -405,44 +439,18 @@ capture 0.155는 무작위 0.083보다 약 1.9배 낫지만, **fragmentation ent
 > (`predictions/synthetic_v22_baseline_1000ep.pt`, AUROC 0.7078 [0.696, 0.719])과
 > paired cluster bootstrap 비교할 것.
 
-### ➡ 다음 우선순위: **Tier 2 (state)** — Tier 3는 T3-3만 남음
+### ➡ 다음 우선순위: **T3-3 v22 Hard 기준선**
 
-T3-1·T3-2가 완료되어 **판단 도구가 갖춰졌고, 타깃도 확정**되었습니다:
-- ✅ **T3-1**: 진짜 약점은 `state` (covariance는 아티팩트였음)
-- ✅ **T3-2**: `--val-episodes 1000`으로 평가 (task별 CI 0.045)
-- ⬜ **T3-3**: v22 hard 기준선 — 유일하게 남은 Tier 3 항목이며 50 epoch 학습이 필요합니다. Tier 2 착수 전 필수는 아니고, Tier 2 후보가 나왔을 때 대조군으로 쓰면 됩니다.
+T3-1·T3-2가 판단 도구와 타깃을 정리했고, T2-1/T2-2가 사전 기준에 따라 state 구조 변경도 종료했습니다.
 
-**→ 다음은 Tier 2 (state).** T2-1의 경고를 반드시 지키세요: **오라클을 쓰는 descriptor와 진짜 관측 가능한 descriptor를 처음부터 분리 라벨링**할 것. Tier 1에서 `observed_covariance`가 오라클 마스크를 쓴다는 걸 놓쳐 한동안 잘못된 결론을 기록했습니다.
+- ✅ T3-1: matched effect scale에서 state가 상대적 약점임을 확인
+- ✅ T3-2: 판정 규모를 1,000 validation episodes로 확정
+- 🛑 T2: 현재 모델 0.6217 ≥ 테스트한 관측 descriptor 0.5273~0.6210 — 실행 가능한 헤드룸 없음
+- ⬜ **T3-3: v22 Hard 기준선 50 epoch** — 남은 유일한 계획 실험
 
-> [!NOTE]
-> **폐기된 가설**: (a) fusion 희석, (b) `learned_head` < `prototype_cosine`, (c) sketch 압축 손실.
-> 관계식이나 스케치가 병목이라는 증거가 없습니다 — 모델은 이미 통짜 공분산으로 가능한 것 이상을 하고 있습니다. `learned_head` A/B는 하고 싶다면 값싸게 해볼 수는 있으나 **기대 효과는 낮습니다.**
+### ~~Tier 2 — state 분기~~ — 🛑 **종료 (2026-07-31)**
 
-### ⭐ Tier 2 — state 분기 — **최우선** (T3-1이 진짜 약점으로 지목)
-
-현재 `state` AUROC **0.6215** (1,000 episodes, CI 폭 0.045). effect scale을 통일해도 전 구간 최하위인 유일한 task입니다.
-
-> [!TIP]
-> **Tier 1과 구조적으로 다르고, 그래서 전망이 낫습니다.** covariance 효과는 반응 component의 **분산**을 바꾸기 때문에 어느 세포가 반응세포인지 모르면 통짜 통계에 신호가 거의 남지 않았습니다(그래서 Tier 1이 세포 식별에 막혀 종료). 반면 **state 효과는 세포의 위치를 이동**시키므로 **bag 평균 같은 1차 통계에 선형으로 누적됩니다** — 반응세포가 12%뿐이라 희석되긴 하지만 **세포를 특정하지 않아도 신호가 남습니다.** 즉 Tier 1을 막았던 병목이 여기엔 적용되지 않을 가능성이 있습니다.
-> 이 가설이 맞는지가 T2-1의 첫 확인 사항입니다.
-
-**T2-1. state 상한 진단 도구 구축 및 측정 — 학습 없이 가능. [먼저]**
-`diagnose_oracle_covariance_upper_bound.py`를 본떠 state용을 만듭니다. **Tier 1의 절차를 그대로 재사용**하되(T1-0 → T1-A → T1-C 순서), 후보 descriptor는 state 효과의 성질에 맞게:
-- **진짜 관측 가능** (반드시 포함): bag 평균(`global_summary`, centered_spread), 슬롯 center 토큰, studentized 평균 — 모두 모델이 이미 계산하는 것
-- **오라클 기준선** (상한 참고용, 목표 아님): 반응세포만으로 계산한 동일 통계, latent state 파라미터
-
-> [!CAUTION]
-> **Tier 1에서 저지른 실수를 반복하지 마세요.** covariance 진단의 `observed_covariance`는 이름과 달리 `responsive_instance_mask`(정답)로 세포를 골라 0.89를 냈고, 저는 이를 "관측만으로 달성 가능"으로 잘못 읽어 한동안 틀린 결론을 기록했습니다. 진짜 관측 가능한 값은 0.57이었습니다.
-> **도구를 만들 때 오라클/관측가능 descriptor를 처음부터 이름과 출력에서 분리하고, 모델이 실제로 받는 입력만으로 계산한 기준선을 반드시 포함**시키세요.
-
-**T2-2. 조기 종료 판정.** T2-1의 **관측 가능한 상한**과 모델의 0.6215를 비교합니다:
-- 모델이 관측 상한과 비슷하거나 그 이상이면 → **Tier 1과 같은 막다른 길. 즉시 종료**하고 T3-3 또는 생성기/문제 설정 자체를 재검토.
-- 관측 상한이 모델보다 뚜렷이 높으면 → 헤드룸 실재. T2-3으로.
-
-**T2-3. 이득 곡선 후 구조 변경.** `diagnose_selection_gain_curve.py`와 같은 방식으로 "descriptor 품질 → state AUROC" 곡선을 그려 기대 수익을 견적한 뒤에만 아키텍처를 건드립니다.
-
-> [!IMPORTANT]
-> **판정은 `--val-episodes 1000`의 task별 state AUROC로.** task별 CI 폭이 0.045이므로 **+0.05 이상**만 신뢰하고, 그보다 작은 개선을 노린다면 2,000개 이상으로 올리세요. state는 전체의 20%라 전체 AUROC로는 개선이 거의 안 보입니다(§3 검출 가능성 경고).
+상세 결과는 §3의 T2-1/T2-2 표를 참고합니다. `model_input`, `observable`, `oracle_mask`, `oracle_latent`를 처음부터 분리했고, 현재 모델이 관측 가능 probe와 동률이라는 사전 종료 조건이 충족됐습니다. 따라서 T2-3 이득 곡선과 state 아키텍처 변경은 진행하지 않습니다.
 
 ### Tier 3 — 방법론 (성능이 아니라 판단 신뢰도)
 
@@ -580,11 +588,12 @@ v21 조사의 결론("모든 비교가 노이즈였다")에 대응해 평가 체
 - **공용 평가 지표 구현**: `src/utils/metrics.py` (rank 기반 AUROC, cluster bootstrap) — 모든 평가 스크립트가 이 하나를 사용하므로 지표가 스크립트마다 어긋날 수 없음
 - 브랜치/버전 정책: [`history/branch_structure.md`](history/branch_structure.md)
 
-### 진단 도구 (Tier 1 조사에서 구축 — Tier 2에 그대로 재사용 가능)
+### 진단 도구 (Tier 1/2 조사에서 구축)
 
 | 스크립트 | 무엇을 답하는가 |
 |---|---|
 | `diagnose_oracle_covariance_upper_bound.py` | descriptor × relation별 상한. `--val-episodes`로 규모 조절, episode cluster CI 포함. **오라클/관측가능 descriptor 구분 사례 포함** |
+| `diagnose_state_upper_bound.py` | state descriptor를 `model_input`/`observable`/`oracle_mask`/`oracle_latent`로 분리하고 현재 모델과 동일 episode cluster CI로 비교 |
 | `diagnose_cell_selection.py` | 세포 랭킹 점수가 반응세포를 맞히는가 (AUROC + precision/recall@k, `--probe`로 지도학습 상한) |
 | `diagnose_bag_label_selection.py` | **bag 라벨만으로** 반응세포를 찾을 수 있는가 (Tier 1 종료 근거) |
 | `diagnose_selection_gain_curve.py` | 선택 품질 → task AUROC 이득 곡선. **구조 변경 전 기대 수익 견적용** |
