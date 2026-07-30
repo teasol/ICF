@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-29 20:15:00 KST`
+**Last updated**: `2026-07-30 23:40:00 KST`
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
 **Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 해결하기 위한 Single Source of Truth (SSOT) living document.
@@ -37,35 +37,61 @@
 
 ## 3. 실험 현황
 
-### ✅ v22 기준선 (2026-07-29 확정) — **버그 수정 반영본이 공식 기준선**
+### ✅ v22 공식 기준선 (2026-07-30 갱신 — **1,000 episode 기준**)
 
 | 항목 | 값 |
 |---|---|
-| Config | `configs/train_v22_medium.yaml` (20 epoch, 512 steps/epoch = **10,240 steps**, Phase 1과 동일) |
-| 코드 상태 | **Cholesky backward + rank-local 수정 반영 후** (커밋 `be36c59`) |
+| Config / 코드 | `configs/train_v22_medium.yaml`, 커밋 `be36c59` (Cholesky + rank-local 수정 반영) |
+| 학습 | 20 epoch, 512 steps/epoch = **10,240 steps** |
 | Best `val_ce_loss` | **0.5946** (epoch 13) |
-| 합성 val AUROC | **0.7466**, 95% CI [0.716, 0.776] (episode cluster bootstrap, 104 episodes / 1,698 query) |
-| 합성 val Log Loss | 0.5943 |
-| Task별 AUROC | composition 0.8022 / combined 0.8170 / interaction 0.7453 / state 0.6595 / **covariance 0.6122 (최난이도)** |
+| **합성 val AUROC** | **0.7078**, 95% CI **[0.696, 0.719]** (1,000 episodes / 16,330 query, episode cluster bootstrap) |
+| 합성 val Log Loss | 0.6209 |
 | 체크포인트 | `checkpoints/20260729_160643/v22_medium_fixed/epoch=013-val_ce_loss=0.5946.ckpt` |
-| 예측 파일 | `predictions/synthetic_v22_baseline_fixed.pt` |
-| 로그 | `logs/20260729_160643/v22_medium_fixed.out` |
+| 예측 파일 | **`predictions/synthetic_v22_baseline_1000ep.pt`** ← 앞으로 비교 대상 |
 
-**버그 수정 전후 비교** (`scripts/compare_predictions.py`, paired cluster bootstrap):
+**task별 AUROC (1,000 episodes, task당 177~213 episodes, CI 폭 0.039~0.049)**:
 
-| | 수정 전 (`100611`) | **수정 후 (`160643`, 공식)** |
-|---|---:|---:|
-| AUROC | 0.7463 [0.715, 0.775] | **0.7466 [0.716, 0.775]** |
-| `val_ce_loss` | 0.5930 | 0.5946 |
-| paired 승률 | \- | **0.42 (구분 불가)** |
+| task | AUROC | CI 폭 | episodes |
+|---|---:|---:|---:|
+| combined | 0.8201 | 0.039 | 213 |
+| composition | 0.7729 | 0.039 | 204 |
+| interaction | 0.6628 | 0.049 | 200 |
+| **covariance** | **0.6216** | 0.045 | 206 |
+| **state** | **0.6215** | 0.045 | 177 |
 
-> [!NOTE]
-> **두 수치는 통계적으로 구분되지 않습니다** (승률 0.42, CI 거의 동일). Cholesky 수정은 성능을 올리는 변경이 아니라 **near-singular 상황에서 backward가 non-finite로 터지는 것을 막는 보험**입니다. 평균적인 run에서는 차이가 안 나는 것이 정상이며, 그래도 반영한 이유는 언제 터질지 모르는 잠재 위험을 남겨둘 이유가 없기 때문입니다.
-> 이전 수정 전 기준선(`0.7463` / `checkpoints/20260729_100611/`)은 참고용으로만 남기고, **앞으로의 비교는 수정 후 기준선을 씁니다.**
+> [!IMPORTANT]
+> **104 episode로 잰 이전 기준선(0.7466)은 폐기합니다.** 1,000 episode 기준 0.7078이 훨씬 신뢰할 수 있는 추정값입니다.
+> **task별 순위도 바뀌었습니다.** 104 episode에서는 covariance(0.6122)가 state(0.6595)보다 명확히 나빠 보였지만, 1,000 episode에서는 **covariance 0.6216 / state 0.6215로 사실상 동률**입니다. interaction도 0.7453 → 0.6628로 크게 내려왔습니다.
+> task당 episode가 15~29개였던 것이 원인입니다 — **T3-2를 하기 전 per-task 판단은 신뢰할 수 없었습니다.**
 
-**v21 Phase 1과 사실상 동일**: `val_ce_loss` 0.5946 vs 0.5921 (차이 0.0025), val_loss 궤적도 0.667 → 0.650 vs 0.667 → 0.644로 겹칩니다. Phase 1도 full-context였으므로 **retrieval 제거가 합성 사전학습 성능을 전혀 훼손하지 않았다는 확인**입니다.
+<details><summary>폐기된 104-episode 기준선 (참고)</summary>
 
-**앞으로 아키텍처 변경은 이 수치와 비교합니다** (§5 전략에 따라 ICI가 아니라 여기서 판단). 비교 시 `scripts/compare_predictions.py`로 위 예측 파일과 paired cluster bootstrap을 돌릴 것.
+AUROC 0.7466 [0.716, 0.776] / Log Loss 0.5943 / `predictions/synthetic_v22_baseline_fixed.pt`
+task별: composition 0.8022 / combined 0.8170 / interaction 0.7453 / state 0.6595 / covariance 0.6122
+(버그 수정 전 100611 run: 0.7463)
+</details>
+
+### 📏 T3-2 결과 (2026-07-30): 필요한 val episode 수
+
+동일 예측을 episode 단위로 서브샘플링해 측정한 CI 폭:
+
+| val episodes | 전체 AUROC CI 폭 |
+|---:|---:|
+| 104 (기존 기본값) | **0.074** |
+| 200 | 0.049 |
+| 400 | 0.035 |
+| 600 | 0.030 |
+| **1,000** | **0.021** |
+
+`1/√n`에 맞게 줄어듭니다. task별로는 1,000 episode에서 task당 ~200개, CI 폭 0.039~0.049입니다.
+
+> [!IMPORTANT]
+> **권고: 아키텍처 판정에는 val episode 1,000개를 쓰십시오** (`--val-episodes 1000`).
+> - 전체 CI 폭 0.021 → 0.03 이상 차이는 검출 가능
+> - **task별 CI 폭 0.045** → task별로 +0.05 이상 차이만 신뢰 가능. **task별로 +0.05 미만을 노리는 실험은 1,000개로도 부족하므로 2,000개 이상 필요**합니다.
+> - 기본값 104개는 전체 CI 폭 0.074, task당 ~20 episode로 **어떤 판정에도 부적합**합니다.
+>
+> 참고로 무작위 104개 서브샘플의 CI는 [0.647, 0.721]로 1,000-episode 추정치(0.7078)를 포함하지만, **기본 val split의 첫 104개는 0.7466**이 나왔습니다. n=104에서는 점추정치가 모집단에서 0.04쯤 벗어나는 일이 예사롭다는 뜻이며(CI 폭 0.074의 절반 수준), 편향이라 단정할 근거는 아니지만 **바로 그 부정확성이 문제**입니다.
 
 ### 🔬 covariance 진단 (2026-07-29) — **병목은 공분산 활용이 아니라 반응세포 식별**
 
@@ -301,9 +327,9 @@ capture 0.155는 무작위 0.083보다 약 1.9배 낫지만, **fragmentation ent
 | | 표본 | AUROC | 95% CI | CI 폭 |
 |---|---|---:|---|---:|
 | ICI 5-fold (v21 Phase 6c) | 87명 | 0.5454 | [0.422, 0.664] | **0.242** |
-| 합성 val (v22 기준선) | 104 episodes / 1,698 query | 0.7466 | [0.716, 0.776] | **0.060** |
+| 합성 val (v22 기준선, 1,000 eps) | 1,000 episodes / 16,330 query | 0.7078 | [0.696, 0.719] | **0.021** |
 
-합성 구간이 약 **4배 좁고**(그것도 episode cluster bootstrap이라는 보수적 계산으로), 신호도 훨씬 강합니다(0.75 vs 0.55). 합성은 `episodes_per_epoch`로 더 좁힐 수 있지만 ICI는 87명이 상한입니다. v21의 실패는 **검출력 없는 지표 위에서 아키텍처를 반복 비교한 것**이었고, ICI를 반복해서 보면 그 87명에 과적합됩니다.
+합성 구간이 약 **12배 좁고**(그것도 episode cluster bootstrap이라는 보수적 계산으로), 신호도 훨씬 강합니다(0.71 vs 0.55). 합성은 `episodes_per_epoch`로 더 좁힐 수 있지만 ICI는 87명이 상한입니다. v21의 실패는 **검출력 없는 지표 위에서 아키텍처를 반복 비교한 것**이었고, ICI를 반복해서 보면 그 87명에 과적합됩니다.
 
 **지켜야 할 선**: ICI 결과를 보고 아키텍처를 다시 고치기 시작하면 ICI는 더 이상 테스트 세트가 아닙니다. 또한 ICI에서 ±0.13 이내 변동은 그 자체로 아무 근거가 되지 않습니다.
 
@@ -316,7 +342,7 @@ capture 0.155는 무작위 0.083보다 약 1.9배 낫지만, **fragmentation ent
 > [!IMPORTANT]
 > 모든 판단은 **합성 val**에서 하고 ICI는 손대지 않습니다 (§5). 후보마다
 > `scripts/evaluate_synthetic.py` → `scripts/compare_predictions.py`로 기준선
-> (`predictions/synthetic_v22_baseline_fixed.pt`, AUROC 0.7466 [0.716, 0.776])과
+> (`predictions/synthetic_v22_baseline_1000ep.pt`, AUROC 0.7078 [0.696, 0.719])과
 > paired cluster bootstrap 비교할 것.
 
 ### ~~Tier 1 — 반응세포 식별 (Sparse Evidence)~~ — 🛑 **종료 (2026-07-29)**
@@ -383,7 +409,7 @@ Tier 1이 닫혔으므로 **Tier 3(방법론)을 먼저** 하는 것이 합리�
 > **폐기된 가설**: (a) fusion 희석, (b) `learned_head` < `prototype_cosine`, (c) sketch 압축 손실.
 > 관계식이나 스케치가 병목이라는 증거가 없습니다 — 모델은 이미 통짜 공분산으로 가능한 것 이상을 하고 있습니다. `learned_head` A/B는 하고 싶다면 값싸게 해볼 수는 있으나 **기대 효과는 낮습니다.**
 
-### Tier 2 — state 분기 (0.6595, 근거 중간)
+### Tier 2 — state 분기 (**0.6215**, 1,000 episode 기준)
 
 **T2-1. state용 상한 진단 도구를 만들어 먼저 측정.** covariance에는 `diagnose_oracle_covariance_upper_bound.py`가 있지만 state용은 없습니다.
 
@@ -395,8 +421,12 @@ Tier 1이 닫혔으므로 **Tier 3(방법론)을 먼저** 하는 것이 합리�
 **T3-1. task별 effect scale 정규화 실험.**
 현재 task별 AUROC는 생성기 effect scale(composition 1.40 / state 0.72 / covariance 0.55)에 오염되어 **아키텍처의 상대적 강약을 직접 비교할 수 없습니다.** 모든 task의 effect scale을 동일하게 맞춘 진단용 데이터 config를 만들면 "어느 메커니즘에 실제로 약한가"를 처음으로 공정하게 볼 수 있습니다. 학습된 모델을 그 데이터로 평가만 하면 되므로 재학습 불필요.
 
-**T3-2. 합성 val 검정력 확보.**
+**T3-2. ✅ 완료 (2026-07-30) — 권고: val episode 1,000개.**
+CI 폭 104→0.074 / 400→0.035 / 1,000→0.021. task별은 1,000에서 0.045. **task별 +0.05 미만을 노리면 2,000개 이상 필요.** 상세는 §3. 이 과정에서 공식 기준선도 1,000 episode 기준으로 갱신했습니다(0.7078).
+
+<details><summary>원래 T3-2 계획 (완료)</summary>
 현재 104 episodes → CI 폭 0.060. Tier 1/2에서 기대하는 개선폭이 그보다 작다면 검출이 안 됩니다. `val_dataset_kwargs.episodes_per_epoch`를 늘려 CI를 좁히세요 (episode 수가 실질 표본 크기, §5).
+</details>
 
 **T3-3. Stage 2 (Hard) 기준선.**
 `configs/train_v22_hard_realworld.yaml` 아직 v22로 미실행 (v21 Phase 2 참고값 `val_ce_loss 0.6845`). Tier 1 변경이 medium에서만 좋고 hard에서 무너지지 않는지 확인할 대조군이 필요합니다.

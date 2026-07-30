@@ -48,6 +48,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--bootstrap", type=int, default=2000)
+    parser.add_argument("--val-episodes", type=int, default=None,
+                        help="Override val_dataset_kwargs.episodes_per_epoch.")
+    parser.add_argument(
+        "--effect-scale", type=float, default=None,
+        help="Set all three response effect scales to this value (T3-1). Per-task\n"
+             "AUROCs are otherwise confounded: the generator drives composition at\n"
+             "1.40, state at 0.45-1.00 and covariance at 0.30-0.80, so the usual\n"
+             "per-task ranking partly reflects the data rather than the model.")
     parser.add_argument("--accelerator", default="auto")
     parser.add_argument("--precision", default="bf16-mixed")
     parser.add_argument(
@@ -66,6 +74,17 @@ def main() -> None:
 
     config = merge_train_config(args.config.expanduser().resolve())
     config["seed"] = args.seed
+    if args.val_episodes is not None:
+        config["data"].setdefault("val_dataset_kwargs", {})["episodes_per_epoch"] = args.val_episodes
+    if args.effect_scale is not None:
+        # Equal numbers are not equal difficulty -- these scales act on different
+        # mechanisms -- so read the sweep as sensitivity per task, and compare
+        # tasks only at a matched scale.
+        for section in ("dataset_kwargs", "val_dataset_kwargs"):
+            kwargs = config["data"].setdefault(section, {})
+            kwargs["response_mixture_effect_scale"] = args.effect_scale
+            kwargs["response_state_effect_scale"] = args.effect_scale
+            kwargs["response_covariance_effect_scale"] = args.effect_scale
     datamodule = build_datamodule(config)
     model = build_model(config)
 
