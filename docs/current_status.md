@@ -67,6 +67,27 @@
 
 **앞으로 아키텍처 변경은 이 수치와 비교합니다** (§5 전략에 따라 ICI가 아니라 여기서 판단). 비교 시 `scripts/compare_predictions.py`로 위 예측 파일과 paired cluster bootstrap을 돌릴 것.
 
+### 🔴 진단 결과: covariance 분기가 자기가 가진 정보를 못 쓰고 있음 (2026-07-29)
+
+`scripts/diagnose_oracle_covariance_upper_bound.py`를 v22 config로 실행해, covariance task 에피소드(18 episodes / 292 query)에서 **descriptor × relation 조합별 상한**을 측정했습니다.
+
+| descriptor | relation | AUROC | 비고 |
+|---|---|---:|---|
+| `latent_dispersion` | `standardized_distance` | 1.0000 | ⚠ **oracle** (ground-truth latent 사용, 달성 불가) |
+| **`observed_covariance`** | **`prototype_cosine`** | **0.8908** | ✅ **관측만으로 달성 가능한 최고치** |
+| `observed_covariance` | `multiscale_rbf` | 0.8742 | 관측 가능 |
+| `observed_covariance` | `standardized_distance` | 0.8546 | 관측 가능 |
+| `observed_local_distance` | `multiscale_rbf` | 0.5959 | 관측 가능 |
+| `observed_spectral` / `observed_local_anisotropy` | (전부) | 0.48~0.56 | 거의 무신호 |
+| **학습된 v22 모델** | — | **0.6122** | **관측 상한 대비 −0.2786** |
+
+> [!IMPORTANT]
+> **covariance는 "본질적으로 어려운 과제"가 아닙니다.** 관측 가능한 공분산 스케치에 단순 prototype-cosine만 태워도 **0.89**가 나오는데, 학습된 모델은 **0.61**입니다. 즉 모델이 **이미 계산해 두고 있는 공분산 정보를 제대로 활용하지 못하고 있습니다.** 이것이 현재 가장 큰 개선 여지입니다.
+>
+> 처음에는 task별 AUROC 순서(composition 0.80 > state 0.66 > covariance 0.61)가 생성기의 effect scale 순서(1.40 > 0.72 > 0.55)와 정확히 일치해서 **난이도 아티팩트로 보였지만**, 이 진단이 그 해석을 뒤집었습니다. 난이도가 낮아서가 아니라 아키텍처가 못 쓰는 것입니다.
+>
+> **주의**: 18 episodes / 292 query 기준이라 0.89의 신뢰구간은 넓습니다. 아키텍처를 크게 뜯기 전에 **에피소드 수를 늘려 재확인**하는 것이 첫 단계여야 합니다 (§6-3).
+
 ### v21 이하 과거 수치 (참고용)
 
 > [!CAUTION]
@@ -146,18 +167,51 @@
 
 ---
 
-## 6. 다음 작업 세션 Action Plan
+## 6. 다음 작업 세션 Action Plan — 구조적 변경 및 실험 목록
 
-1. **[완료] 평가 프로토콜 보강** (2026-07-29). §7 참고. 요약: 검정력 분석 결과 **이 코호트는 +0.13 AUROC 미만의 효과를 검출할 수 없습니다.** 5개 seed partition과 외부 코호트(26명)가 이미 디스크에 있었으나 v21 실험은 전부 SEED42 하나만 썼습니다. 이제 `scripts/launch_ici_protocol.sh`로 5 seed × 5 fold를 돌리고 `scripts/evaluate_protocol.py`로 집계하며, `scripts/test.py`는 모든 AUROC에 CI를 자동 부착합니다.
-2. **[완료] v22 medium 기준선 확립** (2026-07-29). §3 참고. 버그 수정 반영본 기준 `val_ce_loss 0.5946`, 합성 val AUROC `0.7466 [0.716, 0.776]`. Phase 1(0.5921)을 사실상 재현해 retrieval 제거가 사전학습을 훼손하지 않았음을 확인했습니다.
-3. **[다음] 아키텍처 개선 시도 — 합성 데이터에서.** §3의 task별 분해를 보면 **`covariance` (0.6122)와 `state` (0.6595)가 병목**이고 composition/combined(0.80~0.82)는 이미 잘 됩니다. 개선 여지가 가장 큰 곳이 명확하므로 여기를 겨냥할 것. 변경 후 `scripts/evaluate_synthetic.py`로 평가하고 `scripts/compare_predictions.py`로 기준선과 paired cluster bootstrap 비교.
-4. **Stage 2 (Hard 합성) 기준선**: `configs/train_v22_hard_realworld.yaml` (v21 Phase 2 참고값 `val_ce_loss 0.6845`). 아직 v22로 재실행하지 않았습니다.
-5. **[완료] 브랜치 구조 정리** (2026-07-29) — semver 도입은 폐기하고 `architecture_version` 정수를 그대로 브랜치명으로 사용하기로 확정. `v18` / `v19` / `v22` / `main`(= v22) 구조. 상세: [`history/branch_structure.md`](history/branch_structure.md).
-6. **[완료] v18 브랜치 버그 수정 2건을 v22에 반영** (2026-07-29, 커밋 `515030a` + `be36c59`):
-   - `c05ff8d` Cholesky backward 안정화 — cherry-pick 그대로 적용.
-   - `835b726` rank-local CUDA 생성 — v22에 없는 스크립트 2개는 제외하고 `synthetic_data.py` 변경분만 적용. 추가로 **v22에만 있는 `diagnostic_episode`도 같은 문제가 있어 함께 수정**(v18 패치가 커버할 수 없던 부분).
-   - 검증: 111/111 통과, 기준선 재학습 완료. 성능 차이는 통계적으로 구분되지 않음(§3) — 예상된 결과이며 수정의 목적은 잠재 위험 제거입니다.
-7. **[보류] v22 ICI 최종 테스트.** §5 전략에 따라 **합성에서 후보가 확정된 뒤에만** 1회 실행합니다. `scripts/launch_ici_protocol.sh` (25 run). 지금 돌리면 테스트 세트를 조기 소진하는 것이라 하지 말 것.
+> [!IMPORTANT]
+> 모든 판단은 **합성 val**에서 하고 ICI는 손대지 않습니다 (§5). 후보마다
+> `scripts/evaluate_synthetic.py` → `scripts/compare_predictions.py`로 기준선
+> (`predictions/synthetic_v22_baseline_fixed.pt`, AUROC 0.7466 [0.716, 0.776])과
+> paired cluster bootstrap 비교할 것.
+
+### Tier 1 — covariance 분기 (근거가 가장 강함, 헤드룸 +0.28)
+
+**T1-0. [선행] 상한 재확인 — 반드시 먼저.**
+현재 상한 0.8908은 18 episodes에 불과합니다. `val_dataset_kwargs.episodes_per_epoch`를 1,000 정도로 올린 임시 config로 `diagnose_oracle_covariance_upper_bound.py`를 재실행해 0.89가 유지되는지 확인합니다. **여기서 상한이 0.65 수준으로 내려오면 Tier 1 전체가 무의미해지므로 다른 것보다 먼저 합니다.** (비용: 진단 1회, 학습 없음)
+
+**T1-1. 왜 못 쓰는지 국소화 — 학습 없이 가능.**
+`observed_covariance + prototype_cosine`이 0.89인데 모델이 0.61이라면 원인은 셋 중 하나입니다:
+- (a) **fusion에서 희석**: covariance 항이 `covariance_residual_scale`(학습된 sigmoid) × `covariance_ridge_scale`로 두 번 감쇠되고, CSP head는 고정 0.50입니다. 학습된 scale의 **실제 수렴값을 먼저 찍어보세요** — 0에 가깝다면 분기가 사실상 꺼진 것입니다.
+- (b) **learned head < prototype cosine**: `covariance_relation.mode: learned_head`(2-layer MLP)가 단순 prototype cosine보다 나쁠 수 있습니다. `mode`를 바꿔 A/B.
+- (c) **descriptor 손실**: `aggregator_covariance_sketch_dim: 64` 압축이 신호를 죽였을 수 있음. 진단이 쓴 descriptor와 모델이 쓰는 sketch가 같은 것인지 대조.
+`scripts/diagnose_covariance_relations.py`, `diagnose_covariance_subspace.py`, `diagnose_v19_branches.py`(분기별 AUROC 분해)가 이미 있으니 학습 없이 (a)~(c)를 가릅니다.
+
+**T1-2. 원인별 구조 변경** (T1-1 결과에 따라 하나만 선택):
+- (a)였다면 → `meta_covariance_residual_scale` 하한 도입 또는 covariance 항을 fusion 이전 단계로 이동
+- (b)였다면 → `covariance_relation.mode`를 prototype cosine 계열로 교체 (진단에서 이미 최고 성능)
+- (c)였다면 → `aggregator_covariance_sketch_dim` 증대 (64 → 128/256) 또는 압축 방식 변경
+
+### Tier 2 — state 분기 (0.6595, 근거 중간)
+
+**T2-1. state에도 동일한 상한 진단이 없습니다.** covariance에는 `diagnose_oracle_covariance_upper_bound.py`가 있지만 state용은 없습니다. **동형 도구를 만들어 state의 관측 상한을 먼저 재보세요.** 상한이 0.70 근처면 지금이 거의 최선이고, 0.85면 covariance와 같은 종류의 미활용 문제입니다. 도구 없이 아키텍처부터 건드리면 Tier 1에서 피한 실수를 반복하게 됩니다.
+
+### Tier 3 — 방법론 (성능이 아니라 판단 신뢰도)
+
+**T3-1. task별 effect scale 정규화 실험.**
+현재 task별 AUROC는 생성기 effect scale(composition 1.40 / state 0.72 / covariance 0.55)에 오염되어 **아키텍처의 상대적 강약을 직접 비교할 수 없습니다.** 모든 task의 effect scale을 동일하게 맞춘 진단용 데이터 config를 만들면 "어느 메커니즘에 실제로 약한가"를 처음으로 공정하게 볼 수 있습니다. 학습된 모델을 그 데이터로 평가만 하면 되므로 재학습 불필요.
+
+**T3-2. 합성 val 검정력 확보.**
+현재 104 episodes → CI 폭 0.060. Tier 1/2에서 기대하는 개선폭이 그보다 작다면 검출이 안 됩니다. `val_dataset_kwargs.episodes_per_epoch`를 늘려 CI를 좁히세요 (episode 수가 실질 표본 크기, §5).
+
+**T3-3. Stage 2 (Hard) 기준선.**
+`configs/train_v22_hard_realworld.yaml` 아직 v22로 미실행 (v21 Phase 2 참고값 `val_ce_loss 0.6845`). Tier 1 변경이 medium에서만 좋고 hard에서 무너지지 않는지 확인할 대조군이 필요합니다.
+
+### 하지 말 것
+
+- **ICI 실행 금지** — 후보 확정 전까지. §5 참고, 지금 돌리면 테스트 세트 조기 소진.
+- **근거 없이 covariance 아키텍처부터 뜯기 금지** — T1-0을 건너뛰면 18 episode 노이즈를 쫓게 됩니다.
+- **effect scale 정규화 없이 task별 AUROC로 우열 판단 금지** (T3-1).
 
 ---
 
