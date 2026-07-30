@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-29 18:40:00 KST`
+**Last updated**: `2026-07-29 20:15:00 KST`
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
 **Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 해결하기 위한 Single Source of Truth (SSOT) living document.
@@ -209,6 +209,29 @@ capture 0.155는 무작위 0.083보다 약 1.9배 낫지만, **fragmentation ent
 > covariance는 전체 episode의 20%입니다. 따라서 covariance-task AUROC가 +0.07 개선돼도 **전체 합성 AUROC로는 약 +0.014**에 불과한데, 현재 합성 val CI 폭은 **0.060**입니다. **성공해도 전체 지표에서는 보이지 않습니다.**
 > → ⑴ 판정은 **task별 covariance AUROC로** 해야 하고, ⑵ 기본 val split의 covariance episode는 18개뿐이므로 **`episodes_per_epoch`를 늘려(T3-2) per-task CI를 좁히는 것이 Tier 1 검증의 전제**입니다.
 
+#### 🛑 T1-C 2단계 결과 (2026-07-29): **bag 라벨만으로는 못 찾음 → Tier 1 종료**
+
+`scripts/diagnose_bag_label_selection.py` — context bag에 **bag 라벨(R/NR)만으로** 판별 규칙을 적합하고 query bag에서 평가 (세포 라벨은 채점에만 사용, covariance 1,321 query bags):
+
+| rule | 무엇을 노리는가 | AUROC | 95% CI | purity@k |
+|---|---|---:|---|---:|
+| `bag_label_lda` | R/NR 세포의 **평균 차이** | 0.5020 | [0.498, 0.506] | 0.111 |
+| `bag_label_csp` | R/NR 세포의 **분산 비** (dispersion) | 0.5136 | [0.509, 0.518] | 0.128 |
+| (무작위) | — | 0.5000 | — | 0.110 |
+
+> [!CAUTION]
+> **사전에 정한 판정 기준(purity ≤ 0.15 → Tier 1 종료)에 따라 Tier 1을 종료합니다.** 최고 purity 0.128은 무작위 0.110과 거의 같습니다.
+>
+> 판정 기준은 **결과를 보기 전 커밋 `f5ddbf5`에 미리 기록**했습니다. 사후에 문턱을 옮기지 않습니다.
+
+**왜 실패하는가**: R bag 안에서도 반응세포는 11%뿐이고 나머지 89%는 NR bag 세포와 구별되지 않습니다. 여기에 covariance effect scale이 0.30~0.80이라, bag 단위로 집계한 평균 차이나 분산 비에서는 신호가 배경에 묻힙니다. 예상대로 **분산 기반(`csp`)이 평균 기반(`lda`)보다 낫긴 했지만**(0.514 vs 0.502) 그 차이도 무의미한 수준입니다.
+
+**정리하면**: 세포 특징에는 정보가 있습니다(세포 라벨 사용 시 held-out 0.697). 하지만 **모델이 실제로 가진 감독 신호(bag 라벨)로는 도달할 수 없습니다.**
+
+> [!NOTE]
+> **이 결론의 한계**: 검증한 것은 **episode별 closed-form 선형 규칙 2종**입니다. 수천 episode에 걸쳐 end-to-end 학습되는 **비선형 attention 메커니즘**은 episode 하나에서 못 뽑는 통계적 힘을 누적할 수 있어 원리적으로 배제되지는 않습니다.
+> 다만 이제 **입증 책임이 넘어갔습니다** — 값싼 검증들이 전부 무신호를 보였으므로, 비용을 들일 **긍정적 근거가 없습니다.** 나중에 이 방향을 다시 열려면 "bag 라벨로 학습 가능하다"는 증거를 먼저 확보하고 시작하세요.
+
 ### v21 이하 과거 수치 (참고용)
 
 > [!CAUTION]
@@ -296,7 +319,20 @@ capture 0.155는 무작위 0.083보다 약 1.9배 낫지만, **fragmentation ent
 > (`predictions/synthetic_v22_baseline_fixed.pt`, AUROC 0.7466 [0.716, 0.776])과
 > paired cluster bootstrap 비교할 것.
 
-### Tier 1 — 반응세포 식별 (Sparse Evidence) — **재정의됨**
+### ~~Tier 1 — 반응세포 식별 (Sparse Evidence)~~ — 🛑 **종료 (2026-07-29)**
+
+**결론: 진행하지 않습니다.** 사전 판정 기준에 따라 T1-C 2단계에서 종료했습니다 (bag 라벨 purity 0.128 ≤ 0.15). 전체 근거 사슬은 §3의 T1-0 → T1-A → T1-B → T1-C 참고.
+
+| 단계 | 질문 | 결과 |
+|---|---|---|
+| T1-0 | covariance 상한이 실재하는가 | 오라클 세포 0.893 / **실제 관측 가능 0.570** — 모델 0.612는 이미 그 위 |
+| T1-A | 세포 선택이 반응세포를 찾는가 | 기하 3종 + 학습 1종 **전부 AUROC ~0.50** |
+| T1-B | 슬롯 단위로는 되는가 | fragmentation entropy 0.963 — 12슬롯에 흩어짐. 단 세포 라벨 held-out은 0.697 |
+| T1-C 1 | 부분 개선도 값이 있는가 | **있음** — 곡선 선형, 순도 0.40에서 분기 +0.107 |
+| T1-C 2 | bag 라벨만으로 되는가 | **안 됨** — purity 0.128 (무작위 0.110) → **종료** |
+
+<details><summary>종료된 Tier 1 상세 계획</summary>
+
 
 T1-0/T1-1 진단으로 원래 가설이 무너지고 병목이 바뀌었습니다 (§3 참고). 요약:
 - 모델 0.6122는 **진짜 관측 가능한 상한 0.5704를 이미 초과**합니다.
@@ -332,6 +368,16 @@ T1-A가 실패 원인을 짚어줬습니다: 반응세포는 `effect_mask = (com
 
 > [!WARNING]
 > **T3-2(val episode 증량)가 Tier 1 검증의 선행 조건입니다.** covariance는 전체의 20%라 성공해도 전체 AUROC로는 +0.014 수준이고 현재 CI 폭(0.060)에 묻힙니다. §3의 검출 가능성 경고 참고.
+
+</details>
+
+### ➡ 다음 우선순위: Tier 3 → Tier 2
+
+Tier 1이 닫혔으므로 **Tier 3(방법론)을 먼저** 하는 것이 합리적입니다. Tier 1에서 배운 교훈이 그대로 적용됩니다:
+- **T3-1 (effect scale 정규화)**: task별 AUROC가 난이도에 오염되어 있어 아키텍처 강약을 비교할 수 없습니다. Tier 2에 들어가기 전 필수.
+- **T3-2 (val episode 증량)**: per-task CI가 넓어 어떤 개선도 검증이 안 됩니다. covariance episode 18개는 너무 적습니다.
+- **T3-3 (v22 hard 기준선)**: 대조군 부재.
+그 다음 **Tier 2(state)** — 단, T2-1의 경고대로 오라클/관측가능 descriptor를 처음부터 분리해 측정하세요.
 
 > [!NOTE]
 > **폐기된 가설**: (a) fusion 희석, (b) `learned_head` < `prototype_cosine`, (c) sketch 압축 손실.
