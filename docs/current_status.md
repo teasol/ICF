@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-31 03:54:00 KST`
-**Latest experiment state**: T2-1/T2-2 state 상한 진단 완료. 정확한 최신 커밋은 `git log` 기준으로 확인.
+**Last updated**: `2026-07-31 03:56:00 KST`
+**Latest experiment state**: T2 종료 커밋 `ab5e8b8`; T3-3 v22 Hard 기준선 학습 실행 중.
 **Branches**: `main` = `v22` (기본, 최신) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
@@ -23,9 +23,10 @@
 | 🎯 **진짜 약점은 `state`** | effect scale 통일 시 covariance는 composition과 동률, state만 전 구간 최하위 |
 | 📏 **val episode 1,000개 필요** | 104개는 CI 폭 0.074 + task당 ~20 episode로 판정 불가 |
 | 🛑 **Tier 2 (state) 종료** | 현재 모델 0.6217과 model-input probe 0.6196~0.6210이 동률. raw mean 관측 통계는 0.5273~0.5578 |
+| 🟡 **T3-3 Hard 기준선 실행 중** | PID 2247641, 50 epoch / 25,600 optimizer steps, `logs/20260731_035538/` |
 
 **다음 할 일**
-1. ⭐ **T3-3: v22 hard 기준선** — 남은 유일한 계획 실험. 50 epoch 학습.
+1. 🟡 **T3-3: v22 hard 기준선 완료 대기** — 실행 중. 완료 후 best checkpoint를 `--val-episodes 1000`으로 평가.
 2. ⬜ Medium/Hard 결과를 기준으로 생성기·문제 설정 재검토 여부 결정. 검증된 관측 descriptor 없이 새 state/covariance 구조를 추가하지 말 것.
 3. 🚫 **ICI는 건드리지 말 것** — 후보 확정 전까지 (§5).
 
@@ -446,7 +447,19 @@ T3-1·T3-2가 판단 도구와 타깃을 정리했고, T2-1/T2-2가 사전 기�
 - ✅ T3-1: matched effect scale에서 state가 상대적 약점임을 확인
 - ✅ T3-2: 판정 규모를 1,000 validation episodes로 확정
 - 🛑 T2: 현재 모델 0.6217 ≥ 테스트한 관측 descriptor 0.5273~0.6210 — 실행 가능한 헤드룸 없음
-- ⬜ **T3-3: v22 Hard 기준선 50 epoch** — 남은 유일한 계획 실험
+- 🟡 **T3-3: v22 Hard 기준선 50 epoch 실행 중** — 남은 유일한 계획 실험
+
+**실행 기록 (2026-07-31 03:55 KST)**
+- Run: `v22_hard_baseline`
+- Config: `configs/train_v22_hard_realworld.yaml`
+- 예산: 4,096 episodes/epoch ÷ batch 4 ÷ accumulation 2 = 512 optimizer steps/epoch; 50 epoch = **25,600 steps**
+- PID: `2247641`
+- 학습 로그: `logs/20260731_035538/v22_hard_baseline.out`
+- launcher 로그: `logs/20260731_035538/v22_hard_baseline_launcher.out`
+- checkpoint: `checkpoints/20260731_035538/v22_hard_baseline/`
+- 초기 검증: 프로세스 생존, CUDA 사용 확인, W&B 인증 및 trainer 시작 확인
+
+완료 후 best checkpoint를 `scripts/evaluate_synthetic.py --val-episodes 1000`으로 평가해 v21 Hard 참고값(`val_ce_loss 0.6845`)과 분리 보고합니다.
 
 ### ~~Tier 2 — state 분기~~ — 🛑 **종료 (2026-07-31)**
 
