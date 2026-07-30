@@ -69,7 +69,7 @@
 
 ### 🔴 진단 결과: covariance 분기가 자기가 가진 정보를 못 쓰고 있음 (2026-07-29)
 
-`scripts/diagnose_oracle_covariance_upper_bound.py`를 v22 config로 실행해, covariance task 에피소드(18 episodes / 292 query)에서 **descriptor × relation 조합별 상한**을 측정했습니다.
+`scripts/diagnose_oracle_covariance_upper_bound.py`를 v22 config로 실행해 **descriptor × relation 조합별 상한**을 측정했습니다. 아래는 최초 측정(기본 val split, covariance 18 episodes)이며, 표본이 작아 T1-0에서 재확인했습니다(바로 아래).
 
 | descriptor | relation | AUROC | 비고 |
 |---|---|---:|---|
@@ -85,8 +85,27 @@
 > **covariance는 "본질적으로 어려운 과제"가 아닙니다.** 관측 가능한 공분산 스케치에 단순 prototype-cosine만 태워도 **0.89**가 나오는데, 학습된 모델은 **0.61**입니다. 즉 모델이 **이미 계산해 두고 있는 공분산 정보를 제대로 활용하지 못하고 있습니다.** 이것이 현재 가장 큰 개선 여지입니다.
 >
 > 처음에는 task별 AUROC 순서(composition 0.80 > state 0.66 > covariance 0.61)가 생성기의 effect scale 순서(1.40 > 0.72 > 0.55)와 정확히 일치해서 **난이도 아티팩트로 보였지만**, 이 진단이 그 해석을 뒤집었습니다. 난이도가 낮아서가 아니라 아키텍처가 못 쓰는 것입니다.
+
+#### ✅ T1-0 확인 완료 (2026-07-29): 206 episodes에서 상한 유지
+
+18 episodes는 표본이 부족해 재확인이 필요했습니다. `--val-episodes 1000`(covariance 206 episodes, 11배)으로 재실행한 결과:
+
+| descriptor | relation | 18 eps | **206 eps** | 95% CI (206) |
+|---|---|---:|---:|---|
+| **`observed_covariance`** | **`prototype_cosine`** | 0.8908 | **0.8931** | **[0.876, 0.910]** |
+| `observed_covariance` | `multiscale_rbf` | 0.8742 | 0.8903 | [0.873, 0.908] |
+| `observed_covariance` | `standardized_distance` | 0.8546 | 0.8334 | [0.812, 0.856] |
+| `observed_spectral` | (최고) | 0.5609 | 0.5787 | [0.557, 0.600] |
+| `observed_local_*` | (최고) | 0.5959 | 0.5450 | [0.522, 0.569] |
+| **학습된 v22 모델** | — | 0.6122 | 0.6122 | — |
+
+> [!IMPORTANT]
+> **상한이 유지됩니다: 0.8931, CI [0.876, 0.910].** 모델의 0.6122는 이 구간 **한참 아래**로, 겹치지 않습니다.
+> **→ Tier 1은 진행할 가치가 있습니다. 헤드룸 약 +0.28은 실재합니다.**
 >
-> **주의**: 18 episodes / 292 query 기준이라 0.89의 신뢰구간은 넓습니다. 아키텍처를 크게 뜯기 전에 **에피소드 수를 늘려 재확인**하는 것이 첫 단계여야 합니다 (§6-3).
+> 추가로 드러난 것: 공분산 신호는 **`observed_covariance` 스케치에만** 있습니다. `spectral`(0.58), `local_distance`/`local_anisotropy`(0.53~0.55)는 전부 무작위에 가깝습니다. 즉 **어떤 descriptor를 쓰느냐가 결정적이고, 모델은 이미 올바른 것(`_covariance_sketch`)을 계산하고 있습니다.** 문제는 계산이 아니라 **활용**입니다.
+>
+> relation 측면에서는 `prototype_cosine`(0.8931)과 `multiscale_rbf`(0.8903)가 사실상 동률이고 `standardized_distance`(0.8334)만 뒤집니다. 현재 모델은 `mode: learned_head`를 씁니다 — T1-1(b) 가설의 직접적 근거입니다.
 
 ### v21 이하 과거 수치 (참고용)
 
@@ -177,14 +196,17 @@
 
 ### Tier 1 — covariance 분기 (근거가 가장 강함, 헤드룸 +0.28)
 
-**T1-0. [선행] 상한 재확인 — 반드시 먼저.**
-현재 상한 0.8908은 18 episodes에 불과합니다. `val_dataset_kwargs.episodes_per_epoch`를 1,000 정도로 올린 임시 config로 `diagnose_oracle_covariance_upper_bound.py`를 재실행해 0.89가 유지되는지 확인합니다. **여기서 상한이 0.65 수준으로 내려오면 Tier 1 전체가 무의미해지므로 다른 것보다 먼저 합니다.** (비용: 진단 1회, 학습 없음)
+**T1-0. ✅ 완료 (2026-07-29) — 상한 확정, Tier 1 진행 승인.**
+206 episodes에서 `observed_covariance + prototype_cosine` = **0.8931 [0.876, 0.910]**. 모델 0.6122는 이 CI 아래로 겹치지 않습니다. 헤드룸 +0.28 실재 확인. 상세는 §3 참고.
+재현: `python scripts/diagnose_oracle_covariance_upper_bound.py --config configs/train_v22_medium.yaml --val-episodes 1000`
 
 **T1-1. 왜 못 쓰는지 국소화 — 학습 없이 가능.**
 `observed_covariance + prototype_cosine`이 0.89인데 모델이 0.61이라면 원인은 셋 중 하나입니다:
 - (a) **fusion에서 희석**: covariance 항이 `covariance_residual_scale`(학습된 sigmoid) × `covariance_ridge_scale`로 두 번 감쇠되고, CSP head는 고정 0.50입니다. 학습된 scale의 **실제 수렴값을 먼저 찍어보세요** — 0에 가깝다면 분기가 사실상 꺼진 것입니다.
-- (b) **learned head < prototype cosine**: `covariance_relation.mode: learned_head`(2-layer MLP)가 단순 prototype cosine보다 나쁠 수 있습니다. `mode`를 바꿔 A/B.
-- (c) **descriptor 손실**: `aggregator_covariance_sketch_dim: 64` 압축이 신호를 죽였을 수 있음. 진단이 쓴 descriptor와 모델이 쓰는 sketch가 같은 것인지 대조.
+- (b) **learned head < prototype cosine** — **T1-0이 이 가설을 강화했습니다.** 진단에서 `prototype_cosine` 0.8931 / `multiscale_rbf` 0.8903이 최고인데 현재 모델은 `covariance_relation.mode: learned_head`(2-layer MLP)를 씁니다. `mode`를 prototype 계열로 바꿔 A/B가 가장 값싼 검증입니다.
+- (c) **descriptor 손실**: `aggregator_covariance_sketch_dim: 64` 압축 문제. **단, T1-0에서 진단이 쓴 것도 같은 `agg._covariance_sketch`였고 0.89가 나왔으므로 이 가설의 우선순위는 낮아졌습니다.** 신호는 스케치 안에 있습니다.
+
+  T1-0의 부수 소득: 공분산 신호는 **`observed_covariance`에만** 있고 `spectral`(0.58)·`local_*`(0.55)는 무작위 수준입니다. 대체 descriptor를 찾는 방향은 가망 없으니 시도하지 마세요.
 `scripts/diagnose_covariance_relations.py`, `diagnose_covariance_subspace.py`, `diagnose_v19_branches.py`(분기별 AUROC 분해)가 이미 있으니 학습 없이 (a)~(c)를 가릅니다.
 
 **T1-2. 원인별 구조 변경** (T1-1 결과에 따라 하나만 선택):
