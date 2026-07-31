@@ -789,7 +789,7 @@ v21 조사의 결론("모든 비교가 노이즈였다")에 대응해 평가 체
 - v22(구 기준선), v23-A0, v24-A0, v24-B0 폐기. 상세는 §3 "최종 결정 (2026-08-01)".
 - `configs/train_v23_medium_bag_mean.yaml`, `train_v24_medium_bag_proj.yaml`, `train_v24_medium_bag_proj_bottleneck.yaml`을 `configs/archive/v23_v24_candidates/`로 이관. `train_v24_medium_bag_proj_residual.yaml`이 v24 production entry point.
 - `docs/architecture_v23_candidates.md`에 결정 기록을 남기고 `docs/history/`로 이관 (T5-A/B/C는 필요 시 재검토할 미실행 계획으로 보존).
-- Git: `main`/`v24` 브랜치를 `codex/v23-bag-mean` 최종 커밋으로 fast-forward. (커밋 해시는 이 문서를 갱신하는 커밋에서 확정 — 커밋 후 아래에 기록.)
+- Git: 이 문서 갱신 커밋은 `d668d33`. `main`/`v24` 브랜치를 이 커밋(즉 `codex/v23-bag-mean` 최종 커밋)으로 fast-forward.
 
 ### 남겨진 것 (폐기되지 않음)
 
