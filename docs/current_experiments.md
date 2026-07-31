@@ -1,6 +1,6 @@
 # Current experiments
 
-**Last updated**: `2026-07-31 09:25:00 KST`
+**Last updated**: `2026-07-31 09:42:00 KST`
 **Architecture Version**: `22` (`architecture_version = 22`)
 
 이 문서는 v22 기준 실험 프로토콜과 실행 명령어를 설명합니다. v21 retrieval 시대의 실험 기록은 [`history/v21_retrieval_experiments.md`](history/v21_retrieval_experiments.md)로 이관되었습니다.
@@ -194,7 +194,7 @@ state           0.6215  .045      177   <-
 
 ICI로 넘어가지 않고 Hard 붕괴 원인을 먼저 분해합니다. 순서는 재학습 없는 Hard state/covariance 접근성 감사와 matched-effect 평가, 그다음 signal scarcity → nuisance → geometry/scale → optimization의 누적 bridge ablation입니다. 전체 조합 탐색은 하지 않고 처음 성능이 무너지는 요인군만 one-factor로 좁힙니다.
 
-판정은 1,000 episode paired cluster bootstrap으로 overall `+0.03` 또는 target task `+0.05` 이상일 때만 다음 구조/학습 후보로 인정합니다. Medium과 Hard 양쪽에서 후보가 확정되기 전까지 ICI는 계속 잠급니다. 상세 변수 목록은 [`current_status.md`](current_status.md) §6을 참고합니다.
+판정은 1,000 episode paired cluster bootstrap으로 overall `+0.03` 또는 target task `+0.05` 이상일 때만 다음 구조/학습 후보로 인정합니다. Medium과 Hard 양쪽에서 후보가 확정되기 전까지 ICI는 계속 잠급니다. 진단 우선순위는 paired context-size curve → raw-cell 대 40-token information audit → token budget sweep → training update scaling입니다. 이 순서로 bag 압축, episode context 수, 전체 meta-training 예산을 분리합니다. 상세 변수 목록은 [`current_status.md`](current_status.md) §6을 참고합니다.
 
 ### Stage 3: ICI 실데이터 — 최종 테스트 (후보 확정 후 1회)
 

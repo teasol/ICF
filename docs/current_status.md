@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-31 09:33:00 KST`
+**Last updated**: `2026-07-31 09:42:00 KST`
 **Latest experiment state**: T4-0 Hard state/covariance 감사 모두 관측 헤드룸 없음; matched-effect 0.4/0.7 PID `2495981` 실행 중. ICI 잠금 유지.
 **Branches**: `main` = `v22` (기본, 최신) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
@@ -468,6 +468,14 @@ capture 0.155는 무작위 0.083보다 약 1.9배 낫지만, **fragmentation ent
 ### ➡ 다음 우선순위: T4 Medium→Hard 성능 붕괴 attribution
 
 Hard는 Medium과 비교해 9개 축이 동시에 바뀝니다: class separation `0.5~1.4→0.2~0.8`, rare fraction `2~8%→0.5~3%`, rare probability `0.15→0.25`, donor shift `0.35→0.70`, component shift `0.12→0.25`, noise `0.01→0.05`, latent dim `32→64`, cells `500~1000→500~1500`, 그리고 batch/accumulation·covariance rank가 달라집니다. 현재 결과만으로는 어느 변화가 AUROC `0.7078→0.5483` 붕괴를 만들었는지 알 수 없습니다.
+
+**세 가지 표본·압축 병목 가설 (2026-07-31)**
+
+1. **Bag 내부 압축 병목 — 가능성 높음.** “40 instances”가 아니라 1 global + 12 slots×(center/spread/rare) + 3 tails의 **40개 512-d token**이며, 별도 slot metadata/covariance 경로도 있으므로 단순 1000→40 비율만으로 과압축이라 단정할 수는 없습니다. 하지만 Hard 반응세포는 0.5~3%뿐이고, 기존 sparse/slot 선택이 무작위·fragmented였으므로 label-relevant 소집단이 요약 과정에서 사라질 가능성은 높습니다. 판별은 같은 context에서 raw-cell observable distribution descriptor와 40-token descriptor를 직접 비교하고, 이후 12/24/48 slot·tail budget scaling으로 합니다.
+2. **Episode 내부 context bag 부족 — 가능성 높음.** 50~100 bags에서 최대 20%를 query로 빼면 context는 대략 40~80 bags, 클래스당 약 20~40개입니다. 매 episode마다 manifold와 response direction이 새로 뽑히므로 이 수십 개 label로 512-d 이상의 episode-specific 관계를 다시 추정해야 합니다. 또한 context token은 class당 8 memory token으로 다시 압축되지만 global/ridge 분기는 원 bag 통계를 직접 쓰므로 두 경로를 분리해 봐야 합니다. 판별은 같은 query를 고정한 paired context-size curve(8/16/32/64/96+)로 합니다.
+3. **전체 training episode/step 부족 — 가능성 중간 이하, 아직 배제 불가.** Training은 seed 고정 dataset 재사용이 아니라 온라인 non-repeating stream입니다. Medium은 약 81,920 episodes/10,240 optimizer steps, Hard는 약 204,800 episodes/25,600 steps로 episode 절대량은 이미 큽니다. Hard CE도 epoch 30의 0.6845에서 epoch 44의 0.6839로만 개선되어 거의 plateau입니다. 따라서 우선순위는 낮지만, checkpoint별 1,000-episode curve와 1×/2×/4× update scaling으로 최종 확인합니다. Episode 수와 optimizer update 수는 별도로 통제합니다.
+
+**판별 순서**: context-size curve(가장 저렴) → raw-cell 대 40-token information audit → token budget sweep → 마지막으로 training scaling. Context를 늘려도 평평하면 bag 표현 병목, raw-cell descriptor만 높으면 압축 병목, 둘 다 충분한데 checkpoint 성능만 낮으면 meta-training/optimizer 병목으로 판정합니다.
 
 **T4-0. 재학습 없는 접근성 감사 [먼저]**
 - Hard best checkpoint로 state `model_input`/`observable`/`oracle` 상한 재측정
