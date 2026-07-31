@@ -532,7 +532,9 @@ Hard는 Medium과 비교해 9개 축이 동시에 바뀝니다: class separation
 - 최대 조합은 context 305 + query 12 = 총 317 bags이며, 이 범위를 train dataset에만 적용한다. Validation/test의 기존 50~100 bags 분포는 유지한다.
 - Batch 2, accumulation 4로 effective 8 episodes/update와 epoch당 optimizer step 수를 기존 Hard 기준선과 동일하게 유지한다.
 - 테스트: 관련 dataset/model 27개 통과, batched forward 포함 31개 통과(169.244초).
-- 최대 bucket CUDA smoke: `(batch=2, bags=308, cells=1500, dim=512)`, query 9, 실제 context 299, forward/backward peak 72,493.2 MiB.
+- 최초 training smoke에서 whole-batch CUDA prefetch가 다음 대형 episode 생성을 현재 forward와 겹치며 순간 allocator OOM 경고를 냈다. 해당 run은 즉시 중단했고 `cuda_prefetch: false`로 변경했다. Episode batch 2 내부의 병렬 생성은 유지된다.
+- Prefetch-off 최대 경계 smoke: `(batch=2, bags=317, cells=1500, dim=512)`, query 12, 실제 context 305. Online generation부터 forward/backward까지 peak 74,546.6 MiB로 통과했다.
+- 외부 W&B 인증에 의존하지 않도록 파생 config는 local CSV logger를 사용한다.
 
 **T4-0. 재학습 없는 접근성 감사 [먼저]**
 - Hard best checkpoint로 state `model_input`/`observable`/`oracle` 상한 재측정

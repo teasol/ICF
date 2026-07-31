@@ -2,6 +2,10 @@ base_config: train_v22_hard_realworld.yaml
 
 data_overrides:
   episode_batch_size: 2
+  # Large online-generated episodes can fill B200 memory when the next batch
+  # overlaps the current forward pass. Keep two-episode generation parallelism
+  # but disable whole-batch CUDA prefetch for a stable memory ceiling.
+  cuda_prefetch: false
   train_dataset_kwargs:
     # Context is sampled uniformly from one of the centres below, then jittered
     # by an integer in [-5, 5]. The dataset adds 5-12 query bags so the model
