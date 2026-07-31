@@ -210,6 +210,8 @@ Hard best epoch 44 checkpoint에서 epoch 45~49를 잇는 5-epoch fine-tuning은
 
 Medium에서도 같은 context 분포를 시험하는 파생 config `configs/train_v22_medium_context300.yaml`을 추가합니다. 공식 Medium epoch 13 checkpoint에서 남은 epoch 14~19를 fine-tune하고, 원본/fine-tuned checkpoint를 동일 pool 400·context 40/80/160/300에서 비교합니다. 성공 기준은 실제 ICI 범위인 40/80에서의 paired 개선이며, state oracle-mask AUROC 0.9013과 latent 1.0은 모델이 받지 못하는 정보를 사용하므로 참고용 비현실적 상한으로만 표시합니다.
 
+Medium 원본 checkpoint의 1,000-episode curve는 context 40/80/160/300에서 AUROC `0.6757/0.7204/0.7654/0.7989`, log loss `0.6456/0.6100/0.5817/0.5639`입니다. 즉 현재 모델 자체가 많은 labeled context를 활용해 300에서 약 0.80까지 올라갑니다. Mixed-context fine-tuning은 PID `2533126`으로 epoch 16 진행 중이며, 완료 후 동일 curve와 state upper-bound를 재측정합니다.
+
 ### Stage 3: ICI 실데이터 — 최종 테스트 (후보 확정 후 1회)
 
 - **Config**: `configs/train_v22_ici_finetune.yaml` (fine-tune), `configs/train_v22_ici_scratch.yaml` (scratch 대조군).

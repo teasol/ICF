@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
 **Last updated**: `2026-07-31 10:55:00 KST`
-**Latest experiment state**: Hard 동일 pool-400 대조 평가 실행 중(PID `2530921`). 종료 후 Medium baseline curve(PID `2533049`) → Medium mixed-context fine-tuning(PID `2533126`) 순차 실행 예약. ICI 잠금 유지.
+**Latest experiment state**: Hard matched 대조 및 Medium baseline context curve 완료. Medium mixed-context fine-tuning epoch 16 진행 중(PID `2533126`). ICI 잠금 유지.
 **Branches**: `main` = `v22` (기본, 최신) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
@@ -560,17 +560,33 @@ Hard는 Medium과 비교해 9개 축이 동시에 바뀝니다: class separation
 
 - 로그: `logs/20260731_context300_eval/context_curve.out`
 - 산출물: `logs/v22_hard_context300_ft_curve_1000ep.csv`, `predictions/v22_hard_context300_ft_curve/context_{40,80,160,300}.pt`
-- 기존 curve는 pool 220이어서 직접 paired 비교할 수 없다. 동일 pool 400·동일 episode의 원본 Hard checkpoint 대조 평가를 PID `2530921`로 실행 중이다.
-- 대조 로그: `logs/20260731_context300_baseline_eval/context_curve.out`; 예정 summary: `logs/v22_hard_baseline_pool400_curve_1000ep.csv`
+- 동일 pool 400·동일 episode의 원본 Hard checkpoint 대조 평가 완료:
+
+| Context | 원본 AUROC | Fine-tuned AUROC | Δ |
+|---:|---:|---:|---:|
+| 40 | 0.5284 | 0.5331 | +0.0047 |
+| 80 | 0.5483 | 0.5553 | +0.0070 |
+| 160 | 0.5734 | 0.5842 | +0.0108 |
+| 300 | 0.5839 | 0.5977 | +0.0138 |
+
+- Fine-tuning 이득은 context가 클수록 증가하지만 사전 구조 후보 기준 overall `+0.03`에는 전 구간 미달한다. 실제 ICI 범위 40/80의 이득도 `+0.005~0.007`로 작다.
+- 대조 로그: `logs/20260731_context300_baseline_eval/context_curve.out`; summary: `logs/v22_hard_baseline_pool400_curve_1000ep.csv`
 
 **Medium context-to-oracle 실험**
 - 공식 checkpoint: `checkpoints/20260729_160643/v22_medium_fixed/epoch=013-val_ce_loss=0.5946.ckpt`; 기존 AUROC `0.7078 [0.696, 0.719]`.
 - Config: `configs/train_v22_medium_context300.yaml`; Hard와 같은 context 중심 `[40,80,120,160,180,240,300]±5`, batch 2/accumulation 4, 순차 CUDA generation.
-- GPU 직렬 실행:
-  1. Hard 대조 PID `2530921` 종료 대기.
-  2. Medium 원본 checkpoint pool-400 context 40/80/160/300 curve, 대기 PID `2533049`.
-  3. 위 평가 종료 후 epoch 13→20 mixed-context fine-tuning, 대기 PID `2533126`.
-- Baseline 평가 로그: `logs/20260731_medium_context_baseline_eval/context_curve.out`; 예정 summary: `logs/v22_medium_baseline_pool400_curve_1000ep.csv`.
+- Medium 원본 checkpoint pool-400 context curve 완료:
+
+| Context | AUROC (episode-cluster 95% CI) | Log loss |
+|---:|---:|---:|
+| 40 | 0.6757 [0.665, 0.686] | 0.6456 |
+| 80 | 0.7204 [0.709, 0.730] | 0.6100 |
+| 160 | 0.7654 [0.755, 0.775] | 0.5817 |
+| 300 | 0.7989 [0.790, 0.807] | 0.5639 |
+
+- 재학습 전 모델도 context 40→300에서 `+0.1232` 상승해 context 활용 능력이 분명하다. 다만 300에서도 overall 0.80이며, state task의 비현실적 oracle-mask 0.9013과는 직접 같은 지표가 아니므로 혼동하지 않는다.
+- Baseline 평가 로그: `logs/20260731_medium_context_baseline_eval/context_curve.out`; summary: `logs/v22_medium_baseline_pool400_curve_1000ep.csv`.
+- Mixed-context fine-tuning은 PID `2533126`, 현재 epoch 16 진행 중. Epoch 14/15 val CE는 `0.5953/0.5970`으로 원본 best `0.5946`을 아직 넘지 못했다.
 - Fine-tuning 로그: `logs/20260731_medium_context300_ft/train.out`; checkpoints: `checkpoints/20260731_medium_context300_ft/v22_medium_context300_ft/`.
 - 완료 후 best fine-tuned checkpoint의 동일 curve와 `diagnose_state_upper_bound.py`를 실행한다. State oracle-mask `0.9013`/latent `1.0`은 정답 반응세포 또는 latent score를 사용하므로 달성 목표가 아니라 비현실적 참고 상한이다. 실제 성공 기준은 관측 입력만으로 context 40/80 및 overall AUROC가 개선되는지다.
 
