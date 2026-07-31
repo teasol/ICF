@@ -194,7 +194,9 @@ state           0.6215  .045      177   <-
 
 ICI로 넘어가지 않고 Hard 붕괴 원인을 먼저 분해합니다. 순서는 재학습 없는 Hard state/covariance 접근성 감사와 matched-effect 평가, 그다음 signal scarcity → nuisance → geometry/scale → optimization의 누적 bridge ablation입니다. 전체 조합 탐색은 하지 않고 처음 성능이 무너지는 요인군만 one-factor로 좁힙니다.
 
-판정은 1,000 episode paired cluster bootstrap으로 overall `+0.03` 또는 target task `+0.05` 이상일 때만 다음 구조/학습 후보로 인정합니다. Medium과 Hard 양쪽에서 후보가 확정되기 전까지 ICI는 계속 잠급니다. 진단 우선순위는 paired context-size curve → raw-cell 대 40-token information audit → token budget sweep → training update scaling입니다. 이 순서로 bag 압축, episode context 수, 전체 meta-training 예산을 분리합니다. 상세 변수 목록은 [`current_status.md`](current_status.md) §6을 참고합니다. 현재 Hard checkpoint에서 동일 query·nested balanced context 10/20/40/80/160의 1,000-episode curve를 PID `2499444`로 실행 중입니다. 160은 학습 범위를 넘는 상한 진단으로 별도 해석합니다.
+판정은 1,000 episode paired cluster bootstrap으로 overall `+0.03` 또는 target task `+0.05` 이상일 때만 다음 구조/학습 후보로 인정합니다. Medium과 Hard 양쪽에서 후보가 확정되기 전까지 ICI는 계속 잠급니다. 진단 우선순위는 paired context-size curve → raw-cell 대 40-token information audit → token budget sweep → training update scaling입니다. 이 순서로 bag 압축, episode context 수, 전체 meta-training 예산을 분리합니다. 상세 변수 목록은 [`current_status.md`](current_status.md) §6을 참고합니다.
+
+Context-size curve는 Hard best checkpoint, 동일 query, nested balanced context 10/20/40/80/160으로 완료했습니다. 991개 유효 episode에서 AUROC가 `0.5084→0.5193→0.5312→0.5505→0.5737`, log loss가 `0.7170→0.7047→0.6967→0.6900→0.6835`로 단조 개선됐습니다. 10→80의 `+0.0421`과 OOD 상한 80→160의 추가 `+0.0232`는 episode context 부족이 실제 병목임을 보여줍니다. 200회 paired episode bootstrap에서도 `P(40 > 80)=0.00`, `P(80 > 160)=0.00`으로 증가 방향이 일관됐습니다. 다만 160에서도 0.5737에 그쳐 단독 원인은 아니므로, 다음 단계는 같은 조건의 raw-cell 대 현재 40-token information audit입니다. 산출물은 `logs/v22_hard_context_curve_1000ep.csv`와 `predictions/v22_hard_context_curve/context_{10,20,40,80,160}.pt`입니다.
 
 ### Stage 3: ICI 실데이터 — 최종 테스트 (후보 확정 후 1회)
 

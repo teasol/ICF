@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-31 10:33:00 KST`
-**Latest experiment state**: T4 context-size curve 10/20/40/80/160, 1,000 episodes PID `2499444` 실행 중. ICI 잠금 유지.
+**Last updated**: `2026-07-31 10:55:00 KST`
+**Latest experiment state**: T4 context-size curve 10/20/40/80/160 완료. Context 부족 병목 확인; 다음은 raw-cell 대 40-token information audit. ICI 잠금 유지.
 **Branches**: `main` = `v22` (기본, 최신) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
@@ -24,11 +24,12 @@
 | 📏 **val episode 1,000개 필요** | 104개는 CI 폭 0.074 + task당 ~20 episode로 판정 불가 |
 | 🛑 **Tier 2 (state) 종료** | 현재 모델 0.6217과 model-input probe 0.6196~0.6210이 동률. raw mean 관측 통계는 0.5273~0.5578 |
 | ✅ **T3-3 Hard 기준선 완료** | best val CE 0.6839; AUROC 0.5483 [0.538, 0.558], 1,000 episodes |
+| ✅ **T4 context 병목 확인** | context 10→20→40→80→160에서 AUROC 0.5084→0.5193→0.5312→0.5505→0.5737로 단조 증가 |
 
 **다음 할 일 — 개선 방향 정리 및 Hard 붕괴 attribution**
-1. **재학습 없는 Hard 접근성 감사**: state/covariance의 `model_input`·`observable`·`oracle` 상한과 matched-effect 민감도를 Hard checkpoint에서 재측정.
-2. **Medium→Hard 누적 bridge ablation**: signal scarcity → nuisance → geometry/scale → optimization 순서로 한 요인군씩 바꿔 성능이 처음 무너지는 지점을 찾음.
-3. 관측 가능한 +0.05 task 헤드룸 또는 +0.03 overall 이득 근거가 생긴 요인만 구조/학습 변경 대상으로 승격.
+1. **raw-cell 대 40-token information audit**: 같은 episode/query/context에서 raw-cell observable descriptor와 현재 bag representation의 label-context 접근 가능 정보를 비교.
+2. context 증가와 bag 표현 개선을 분리한 뒤 근거가 있을 때만 token budget sweep(12/24/48 slots·tails)으로 진입.
+3. training episode/update scaling은 context·bag 표현 병목을 먼저 판정한 뒤 마지막에 수행.
 4. **ICI는 개선 후보가 합성 Medium+Hard에서 확정될 때까지 계속 잠금.**
 
 **작업 규칙 4가지**
@@ -477,10 +478,24 @@ Hard는 Medium과 비교해 9개 축이 동시에 바뀝니다: class separation
 
 **판별 순서**: context-size curve(가장 저렴) → raw-cell 대 40-token information audit → token budget sweep → 마지막으로 training scaling. Context를 늘려도 평평하면 bag 표현 병목, raw-cell descriptor만 높으면 압축 병목, 둘 다 충분한데 checkpoint 성능만 낮으면 meta-training/optimizer 병목으로 판정합니다.
 
-**Context-size curve 실행 기록 (2026-07-31 10:21 KST)**
+**Context-size curve 완료 기록 (2026-07-31 10:21~10:42 KST)**
 - 고정: Hard best checkpoint, 동일 episode, 클래스별 query 10개(총 20), nested balanced context
 - Context: 총 10/20/40/80/160 bags. 10~80은 학습 범위, 160은 의도적 OOD 상한
-- PID: `2499444`; 로그: `logs/20260731_context_curve/context_curve.out`
+- 완료: 1,000 episode 중 991 사용, 9 skip; context 크기당 query 19,820개
+
+| 총 context bags | AUROC (episode-cluster 95% CI) | Log loss |
+|---:|---:|---:|
+| 10 | 0.5084 [0.500, 0.516] | 0.7170 |
+| 20 | 0.5193 [0.511, 0.528] | 0.7047 |
+| 40 | 0.5312 [0.523, 0.539] | 0.6967 |
+| 80 | 0.5505 [0.542, 0.559] | 0.6900 |
+| 160 | 0.5737 [0.565, 0.583] | 0.6835 |
+
+- **판정**: context 10→80에서 `+0.0421`, 80→160에서 추가 `+0.0232`, 전체 10→160에서 `+0.0653`으로 단조 증가한다. 따라서 episode 내부 labeled bag 부족은 실제 주요 병목이다.
+- 200회 paired episode bootstrap 교차검증에서 `P(40 > 80)=0.00`, `P(80 > 160)=0.00`이었다. 즉 두 핵심 증가는 동일 episode/query 기준으로도 방향이 일관됐다.
+- 80의 0.5505가 기존 Hard 기준선 0.5483과 정합하므로 통상 Hard 평가의 context 규모를 재현한다.
+- 160은 학습 분포 밖 상한인데도 개선이 계속되지만 AUROC는 0.5737에 그친다. 따라서 context 부족만으로 Hard 붕괴 전체를 설명할 수 없고, bag 내부 정보 손실/압축 병목을 다음으로 분리한다.
+- 실행 PID(종료): `2499444`; 로그: `logs/20260731_context_curve/context_curve.out`
 - Summary: `logs/v22_hard_context_curve_1000ep.csv`; predictions: `predictions/v22_hard_context_curve/context_{10,20,40,80,160}.pt`
 - Smoke: 2 episodes 전체 경로 성공; unit tests 3개 통과 (balanced/disjoint/nested 계약); 전체 unittest 114개 통과 (675.411초)
 
