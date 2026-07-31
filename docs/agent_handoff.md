@@ -1,7 +1,7 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-01 13:20:00 KST`
-**Architecture Version**: **v24 확정** — residual + bottleneck bag projection (구 v24-B1): `project_structured_tokens: true`, `projection_bottleneck_dim: 64`, `projection_residual_mean: true`. v22(구 기준선)/v23-A0/v24-A0/v24-B0는 폐기. Config: `configs/train_v24_medium_bag_proj_residual.yaml`. 상세 결정 근거: [`current_status.md`](current_status.md) §3 최종 결정.
+**Last updated**: `2026-08-01 14:10:00 KST`
+**Architecture Version**: **v24 확정** — residual + bottleneck bag projection (구 v24-B1): `project_structured_tokens: true`, `projection_bottleneck_dim: 64`, `projection_residual_mean: true`. v22(구 기준선)/v23-A0/v24-A0/v24-B0는 폐기. Config: `configs/train_v24_medium_bag_proj_residual.yaml`. 상세 결정 근거: [`current_status.md`](current_status.md) §3 최종 결정. **v25(T5-A typed bag-preserving branch)는 브랜치 `codex/v25-typed-bag`에서 학습 진행 중, 아직 미확정** — [`current_status.md`](current_status.md) §3 "🧪 v25 (T5-A) 진행 중" 참고.
 
 이 문서는 BagPFN 저장소를 처음 맡은 coding agent가 안전하게 작업을 시작하기 위한 운영 및 핸드오프 지침입니다. 최신 개발 및 실험 진행 상황은 [`current_status.md`](current_status.md), 현재 모델 명세는 [`current_architecture.md`](current_architecture.md), 현재 실험 프로토콜은 [`current_experiments.md`](current_experiments.md)를 참고합니다.
 

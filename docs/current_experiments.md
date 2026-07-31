@@ -1,7 +1,7 @@
 # Current experiments
 
-**Last updated**: `2026-08-01 13:20:00 KST`
-**Architecture Version**: **v24 확정** (residual + bottleneck bag projection, `configs/train_v24_medium_bag_proj_residual.yaml`)
+**Last updated**: `2026-08-01 14:10:00 KST`
+**Architecture Version**: **v24 확정** (residual + bottleneck bag projection, `configs/train_v24_medium_bag_proj_residual.yaml`). **v25(T5-A, typed bag-preserving branch)는 `codex/v25-typed-bag` 브랜치에서 학습 진행 중** — `configs/train_v25_medium_typed_bag.yaml`, 상세는 [`current_status.md`](current_status.md) §3.
 
 이 문서는 v22 시절에 확립된 실험 프로토콜(§0~§1, Stage 3 ICI 절차)과 실행 명령어를 설명합니다. **2026-08-01, 사용자 결정으로 v23-A0/v24-A0/v24-B0/v24-B1 4종의 1,000-episode paired 비교 평가는 폐기되고 v24-B1이 그대로 v24로 확정되었습니다** — 상세: [`current_status.md`](current_status.md) §3 "최종 결정". 아래 두 섹션(v23-A0, v24-A0/B0)은 폐기된 candidate의 기록이며 더 이상 active가 아닙니다. v21 retrieval 시대의 실험 기록은 [`history/v21_retrieval_experiments.md`](history/v21_retrieval_experiments.md)로 이관되었습니다.
 
