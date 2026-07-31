@@ -406,18 +406,45 @@ class ModelInterface(L.LightningModule):
                 "Not enough bags to sample the requested queries while retaining "
                 "one context bag per class."
             )
+        context_sizes = self.hparams.get("training_context_sizes")
+        context_jitter = int(self.hparams.get("training_context_jitter", 0))
+        valid_targets = list(range(min_targets, max_targets + 1))
+        if context_sizes is not None:
+            context_sizes = tuple(int(size) for size in context_sizes)
+            if (
+                not context_sizes
+                or context_jitter < 0
+                or any(size - context_jitter < num_classes for size in context_sizes)
+            ):
+                raise ValueError(
+                    "training_context_sizes must be non-empty and remain large "
+                    "enough for every class after applying training_context_jitter."
+                )
+            valid_targets = [
+                targets
+                for targets in valid_targets
+                if any(
+                    abs((y.numel() - targets) - center) <= context_jitter
+                    for center in context_sizes
+                )
+            ]
+            if not valid_targets:
+                raise ValueError(
+                    f"Episode with {y.numel()} bags cannot produce a configured "
+                    "training context using the available query range."
+                )
         if num_targets_override is not None:
             num_targets = int(num_targets_override)
-            if not min_targets <= num_targets <= max_targets:
+            if num_targets not in valid_targets:
                 raise ValueError(
-                    "The shared query count is outside the configured range."
+                    "The shared query count is outside the configured context/query "
+                    "range."
                 )
-        elif min_targets == max_targets:
-            num_targets = min_targets
+        elif len(valid_targets) == 1:
+            num_targets = valid_targets[0]
         else:
-            num_targets = int(
-                torch.randint(min_targets, max_targets + 1, (), device="cpu").item()
-            )
+            choice = int(torch.randint(len(valid_targets), (), device="cpu").item())
+            num_targets = valid_targets[choice]
 
         fixed_queries = bool(self.hparams.get("fixed_training_queries", False))
         # Protect one context example from every class. Learnability diagnostics
@@ -698,6 +725,8 @@ class ModelInterface(L.LightningModule):
             "interval",
             "frequency",
             "training_targets_per_episode",
+            "training_context_sizes",
+            "training_context_jitter",
             "ranking_loss_weight",
             "routing_sparsity_weight",
             "routing_balance_weight",

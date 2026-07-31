@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any
+from typing import Any, Sequence
 import math
 from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
@@ -874,6 +874,9 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         effect_scale_end: float | tuple[float, float] = (1.0, 1.0),
         return_oracle_diagnostics: bool = False,
         return_task_metadata: bool = False,
+        training_context_sizes: Sequence[int] | None = None,
+        training_context_jitter: int = 0,
+        training_query_range: Sequence[int] = (1, 1),
         **generator_kwargs: Any,
     ) -> None:
         if episodes_per_epoch < 1:
@@ -888,6 +891,27 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
             raise ValueError("difficulty_curriculum_episodes cannot be negative.")
         if shape_group_size < 1:
             raise ValueError("shape_group_size must be positive.")
+        if training_context_jitter < 0:
+            raise ValueError("training_context_jitter cannot be negative.")
+        if len(training_query_range) != 2:
+            raise ValueError("training_query_range must be [min_queries, max_queries].")
+        min_queries, max_queries = map(int, training_query_range)
+        if not 1 <= min_queries <= max_queries:
+            raise ValueError("training_query_range must be an ordered positive range.")
+        context_sizes = (
+            None
+            if training_context_sizes is None
+            else tuple(int(size) for size in training_context_sizes)
+        )
+        if context_sizes is not None and (
+            not context_sizes
+            or len(set(context_sizes)) != len(context_sizes)
+            or any(size - training_context_jitter < 2 for size in context_sizes)
+        ):
+            raise ValueError(
+                "training_context_sizes must be unique and remain at least two "
+                "after applying training_context_jitter."
+            )
         effect_scale_start = self._as_non_negative_range(
             "effect_scale_start", effect_scale_start
         )
@@ -904,8 +928,21 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         self.effect_scale_end = effect_scale_end
         self.return_oracle_diagnostics = bool(return_oracle_diagnostics)
         self.return_task_metadata = bool(return_task_metadata)
+        self.training_context_sizes = context_sizes
+        self.training_context_jitter = int(training_context_jitter)
+        self.training_query_range = (min_queries, max_queries)
         self._sample_count = 0
         self.episode_generator = SyntheticManifoldGenerator(**generator_kwargs)
+        if context_sizes is not None:
+            required_min = min(context_sizes) - training_context_jitter + min_queries
+            required_max = max(context_sizes) + training_context_jitter + max_queries
+            configured_min, configured_max = self.episode_generator.num_bags
+            if configured_min > required_min or configured_max < required_max:
+                raise ValueError(
+                    "num_bags must cover every configured context/query combination: "
+                    f"required [{required_min}, {required_max}], configured "
+                    f"[{configured_min}, {configured_max}]."
+                )
 
     def __len__(self) -> int:
         return self.episodes_per_epoch
@@ -944,9 +981,7 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         device = self._generation_device()
         shape_seed = torch.initial_seed() + start // self.shape_group_size
         shape_generator = torch.Generator(device=device).manual_seed(shape_seed)
-        num_bags = self.episode_generator.sample_num_bags(
-            shape_generator, device=device
-        )
+        num_bags = self._sample_num_bags(shape_generator, device)
         num_cells = self.episode_generator.sample_num_cells(
             shape_generator, device=device
         )
@@ -1025,10 +1060,7 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
             else self.seed + episode_index
         )
         shape_generator = torch.Generator(device=device).manual_seed(shape_seed)
-        num_bags = self.episode_generator.sample_num_bags(
-            shape_generator,
-            device=device,
-        )
+        num_bags = self._sample_num_bags(shape_generator, device)
         num_cells = self.episode_generator.sample_num_cells(
             shape_generator,
             device=device,
@@ -1072,6 +1104,44 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
             effect_scale_multiplier=effect_scale_multiplier,
             num_bags=num_bags, num_cells=num_cells,
         )
+
+    def _sample_num_bags(
+        self,
+        generator: torch.Generator,
+        device: torch.device,
+    ) -> int:
+        """Sample a shape, optionally from a context-centred training mixture."""
+        if self.training_context_sizes is None:
+            return self.episode_generator.sample_num_bags(generator, device=device)
+        center_index = int(
+            torch.randint(
+                len(self.training_context_sizes),
+                (),
+                generator=generator,
+                device=device,
+            ).item()
+        )
+        center = self.training_context_sizes[center_index]
+        jitter = int(
+            torch.randint(
+                -self.training_context_jitter,
+                self.training_context_jitter + 1,
+                (),
+                generator=generator,
+                device=device,
+            ).item()
+        )
+        min_queries, max_queries = self.training_query_range
+        queries = int(
+            torch.randint(
+                min_queries,
+                max_queries + 1,
+                (),
+                generator=generator,
+                device=device,
+            ).item()
+        )
+        return center + jitter + queries
 
     def _format_episode(self, episode: SyntheticEpisode) -> tuple[torch.Tensor, ...]:
         fields: list[torch.Tensor] = [episode.x, episode.y]

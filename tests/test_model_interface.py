@@ -45,6 +45,38 @@ class RoutingBalanceLossTest(unittest.TestCase):
         torch.testing.assert_close(loss, torch.tensor(3.0).log())
 
 
+class TrainingContextSamplingTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.context_sizes = (40, 80, 120, 160, 180, 240, 300)
+        self.interface = ModelInterface(
+            model_src="src.models.baseline.BaseModel",
+            input_dim=8,
+            meta_hidden_dim=16,
+            meta_num_heads=4,
+            meta_num_set_layers=1,
+            meta_relation_hidden_dim=16,
+            meta_ridge_dim=4,
+            training_targets_per_episode=(5, 12),
+            training_context_sizes=self.context_sizes,
+            training_context_jitter=5,
+        )
+
+    def test_queries_leave_context_inside_configured_bucket(self) -> None:
+        torch.manual_seed(3)
+        for total_bags in (40, 52, 85, 127, 172, 191, 247, 317):
+            y = torch.arange(total_bags) % 2
+            query = self.interface._sample_training_queries(y)
+            context = total_bags - query.numel()
+            self.assertTrue(
+                any(abs(context - center) <= 5 for center in self.context_sizes)
+            )
+
+    def test_impossible_total_bag_count_is_rejected(self) -> None:
+        y = torch.arange(70) % 2
+        with self.assertRaisesRegex(ValueError, "cannot produce"):
+            self.interface._sample_training_queries(y)
+
+
 class FinalObjectiveTest(unittest.TestCase):
     def test_path_auxiliary_losses_are_absent(self) -> None:
         interface = ModelInterface(

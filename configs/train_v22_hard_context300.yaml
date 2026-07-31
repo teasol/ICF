@@ -1,0 +1,19 @@
+base_config: train_v22_hard_realworld.yaml
+
+data_overrides:
+  episode_batch_size: 2
+  train_dataset_kwargs:
+    # Context is sampled uniformly from one of the centres below, then jittered
+    # by an integer in [-5, 5]. The dataset adds 5-12 query bags so the model
+    # receives exactly the requested number of labelled context bags.
+    num_bags: [40, 317]
+    training_context_sizes: [40, 80, 120, 160, 180, 240, 300]
+    training_context_jitter: 5
+    training_query_range: [5, 12]
+
+trainer:
+  accumulate_grad_batches: 4
+
+model_kwargs:
+  training_context_sizes: [40, 80, 120, 160, 180, 240, 300]
+  training_context_jitter: 5

@@ -219,6 +219,50 @@ class VariableCellCountTest(unittest.TestCase):
         self.assertGreater(len(observed), 1)
         self.assertTrue(all(6 <= count <= 10 for count in observed))
 
+    def test_context_centred_bag_sampling_stays_in_supported_envelope(self) -> None:
+        context_sizes = (40, 80, 120, 160, 180, 240, 300)
+        dataset = SyntheticEpisodeDataset(
+            episodes_per_epoch=1,
+            seed=None,
+            generation_device="cpu",
+            num_bags=(40, 317),
+            num_cells=2,
+            latent_dim=2,
+            output_dim=4,
+            mlp_hidden_dim=4,
+            mlp_num_layers=1,
+            training_context_sizes=context_sizes,
+            training_context_jitter=5,
+            training_query_range=(5, 12),
+        )
+        generator = torch.Generator().manual_seed(17)
+        observed = [
+            dataset._sample_num_bags(generator, torch.device("cpu"))
+            for _ in range(256)
+        ]
+        for bags in observed:
+            self.assertTrue(
+                any(
+                    center - 5 + 5 <= bags <= center + 5 + 12
+                    for center in context_sizes
+                )
+            )
+
+    def test_context_sampling_requires_num_bags_to_cover_full_range(self) -> None:
+        with self.assertRaisesRegex(ValueError, "num_bags must cover"):
+            SyntheticEpisodeDataset(
+                episodes_per_epoch=1,
+                num_bags=(40, 312),
+                num_cells=2,
+                latent_dim=2,
+                output_dim=4,
+                mlp_hidden_dim=4,
+                mlp_num_layers=1,
+                training_context_sizes=(40, 300),
+                training_context_jitter=5,
+                training_query_range=(5, 12),
+            )
+
     def test_cell_count_varies_between_episodes(self) -> None:
         generator = build_generator((8, 12))
         observed = {

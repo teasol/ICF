@@ -202,6 +202,8 @@ Context-size curve는 Hard best checkpoint, 동일 query, nested balanced contex
 
 따라서 large-context 후보는 episode batch 2, gradient accumulation 4로 기존 effective batch 8과 optimizer-step 수를 유지하고 최대 context 300까지 노출합니다. Context 300 고정은 실제 ICI의 약 69 context와 지나치게 다르므로 기존 38~95 범위를 충분히 포함하는 mixed/bucket sampling을 사용합니다. 평가는 고정 40/80/160/300으로 수행하며 40~80에서도 좋아져야 학습 개선으로 인정합니다. 짧은 checkpoint fine-tuning에서 신호를 확인한 뒤 동일 update/학습-bag 예산의 정식 재학습 비교로 승격하고, 이후 raw-cell audit로 남은 병목을 분리합니다.
 
+구현 config는 `configs/train_v22_hard_context300.yaml`입니다. Training context 중심 `[40, 80, 120, 160, 180, 240, 300]`을 균등 선택하고 각 중심에 정수 `±5` jitter를 적용합니다. Query는 기존처럼 5~12개이며, dataset이 context+query 총 bag 수를 만들고 model interface가 실제 query 제거 후 context 범위 계약을 강제합니다. 최대 총 bag 수는 317입니다. 이 sampling은 train split에만 적용되며 validation/test 분포는 바뀌지 않습니다. Batch 2/accumulation 4의 최대-bucket CUDA smoke에서 실제 context 299, 1,500 cells/bag forward/backward가 peak 72.5GB로 통과했습니다.
+
 ### Stage 3: ICI 실데이터 — 최종 테스트 (후보 확정 후 1회)
 
 - **Config**: `configs/train_v22_ici_finetune.yaml` (fine-tune), `configs/train_v22_ici_scratch.yaml` (scratch 대조군).
