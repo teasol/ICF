@@ -1,8 +1,8 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-31 18:58:00 KST`
-**Status**: v23-A0 exact bag-mean 50-epoch **학습 완료** (best epoch 43 `val_ce_loss=0.5912154`). **v24-A0 learned bag projection 50-epoch 학습 완료** (best epoch 45 `val_ce_loss=0.5976237`). v23/v24 평가 모두 대기. ICI 잠금 유지.
-**Read first if you are picking this up**: §3의 **v24-A0 bag-projection 실행 기록**, §3의 v23-A0 완료 기록, §6 Action Plan.
+**Last updated**: `2026-07-31 20:13:00 KST`
+**Status**: v23-A0(mean)/v24-A0(projection 1slot) 50-epoch **학습 완료**. **v24-B0(per-token bottleneck projection, 12 slot) 50-epoch 학습 시작** (PID `3033073`, run `20260731_201252`, epoch 0). v23/v24 평가 모두 대기. ICI 잠금 유지.
+**Read first if you are picking this up**: §3의 **v24-B0 실행 기록**, §3의 v24-A0/v23-A0 완료 기록, §6 Action Plan.
 **Branches**: `codex/v23-bag-mean` = v23-A0/v24-A0 실험 / `main` = `v22` 기준선 / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: 기본 `22`; `mean_pool_structured_tokens: true`이면 `23`; `project_structured_tokens: true`이면 `24`
@@ -150,6 +150,26 @@ exact mean(v23) 대신 **learned linear projection**으로 bag을 1토큰으로
 v22(`predictions/v22_medium_baseline_pool400_curve/`)와 paired episode-cluster
 bootstrap 비교. Overall `+0.03` 또는 target task `+0.05`가 없으면 폐기.
 ICI는 잠금 유지.
+
+### ⏳ v24-B0 per-token bottleneck projection: 50-epoch 학습 시작 (2026-07-31)
+
+v24-A0가 slot 1개로 정보를 잃는 문제를 해결하기 위한 variant. **12 slot 유지**
+(40 tokens) + 토큰별 전용 `Linear(512→64)` 40개 적용 → concat(40×64=2560) →
+`Linear(2560→512)` → bag당 512-d 1토큰. 직결 40×512→512(~10.5M) 대신
+병목으로 파라미터를 ~2.62M로 제한.
+
+| 항목 | 값 |
+|---|---|
+| Branch / implementation | `codex/v23-bag-mean`, commit `b2fb9d0` |
+| Config | `configs/train_v24_medium_bag_proj_bottleneck.yaml` (`project_structured_tokens: true`, `projection_bottleneck_dim: 64`, 12 slot, `max_epochs=50`) |
+| Run | `20260731_201252`, scratch Medium 50 epochs |
+| PID | `3033073` |
+| Model size | 9.2M trainable params (v22 6.57M + 병목 projection ≈2.62M) |
+| Training log | `logs/20260731_201252/v24_medium_bag_proj_bottleneck.out` |
+| Checkpoints | `checkpoints/20260731_201252/v24_medium_bag_proj_bottleneck/` |
+| Verification | 신규 테스트 4개 포함 `test_base_model` + `test_model_interface` **80개 통과** (`578.291s`) |
+
+판정: v23/v24-A0와 동일 기준 (1,000 pool-400, context 40/80/160/300, v22 paired).
 
 ### ✅ v22 공식 기준선 (2026-07-30 갱신 — **1,000 episode 기준**)
 
