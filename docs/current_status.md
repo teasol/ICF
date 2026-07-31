@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-31 09:30:00 KST`
-**Latest experiment state**: T4-0 Hard state 감사 완료(실행 가능한 헤드룸 없음); covariance 감사 PID `2495510` 실행 중. ICI 잠금 유지.
+**Last updated**: `2026-07-31 09:33:00 KST`
+**Latest experiment state**: T4-0 Hard state/covariance 감사 모두 관측 헤드룸 없음; matched-effect 0.4/0.7 PID `2495981` 실행 중. ICI 잠금 유지.
 **Branches**: `main` = `v22` (기본, 최신) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
@@ -474,8 +474,10 @@ Hard는 Medium과 비교해 9개 축이 동시에 바뀝니다: class separation
   - 완료: 현재 모델 0.5175 [0.496, 0.538], model-input 최대 0.5336 [0.510, 0.556](+0.016, 기준 +0.05 미달), oracle-mask 0.6953
   - 산출물: `logs/v22_hard_state_upper_bound_1000ep.csv`; 로그 `logs/20260731_hard_accessibility/state_upper_bound.out`
 - Hard config에서 covariance all-cell/oracle-mask 상한 재측정
-  - 실행 중: PID `2495510`, 로그 `logs/20260731_hard_accessibility/covariance_upper_bound.out`, 출력 `logs/v22_hard_covariance_upper_bound_1000ep.csv`
+  - 완료: all-cell 최대 0.5044 [0.483, 0.525], 현재 모델 0.5103과 동률; oracle-mask covariance 최대 0.6074 [0.564, 0.652]
+  - 산출물: `logs/v22_hard_covariance_upper_bound_1000ep.csv`; 로그 `logs/20260731_hard_accessibility/covariance_upper_bound.out`
 - effect scale 0.4/0.7 matched 평가로 Hard task 상대 약점이 생성기 scale 아티팩트인지 확인
+  - 실행 중: PID `2495981`, 로그 `logs/20260731_hard_accessibility/matched_effect.out`, 출력 `predictions/synthetic_v22_hard_scale{0.4,0.7}_1000ep.pt`
 
 **T4-1. 누적 bridge ablation [T4-0 후]**
 1. **Signal scarcity**: class separation + rare fraction/probability
