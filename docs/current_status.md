@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
 **Last updated**: `2026-07-31 10:55:00 KST`
-**Latest experiment state**: T4 mixed-context 5-epoch fine-tuning 실행 중(PID `2521372`). `[40,80,120,160,180,240,300]±5`, batch 2/accumulation 4. ICI 잠금 유지.
+**Latest experiment state**: T4 mixed-context 5-epoch fine-tuning 완료. Best epoch 47 `val_ce_loss=0.6853`; 40/80/160/300 평가 실행 중(PID `2528070`). ICI 잠금 유지.
 **Branches**: `main` = `v22` (기본, 최신) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
@@ -536,9 +536,22 @@ Hard는 Medium과 비교해 9개 축이 동시에 바뀝니다: class separation
 - 최종 안전 설정은 `cuda_prefetch: false`, `parallel_cuda_generation: false`다. 두 episode tensor는 순차 생성한 뒤 stack하여 batch 2 forward/backward를 수행하므로 학습 통계와 effective batch는 바뀌지 않는다.
 - Prefetch-off 최대 경계 smoke: `(batch=2, bags=317, cells=1500, dim=512)`, query 12, 실제 context 305. Online generation부터 forward/backward까지 peak 74,546.6 MiB로 통과했다.
 - 외부 W&B 인증에 의존하지 않도록 파생 config는 local CSV logger를 사용한다.
-- Fine-tuning: Hard best epoch 44 checkpoint에서 epoch 45~49를 이어 학습. PID `2521372`.
+- Fine-tuning: Hard best epoch 44 checkpoint에서 epoch 45~49를 이어 학습 완료.
 - 로그: `logs/20260731_context300_ft/v22_hard_context300_ft_serial.out`
 - Checkpoints: `checkpoints/20260731_context300_ft/v22_hard_context300_ft_serial/`
+
+| Fine-tuning epoch | val CE | val AUROC (104 episodes, 참고용) |
+|---:|---:|---:|
+| 45 | 0.6867 | 0.5542 |
+| 46 | 0.6889 | 0.5588 |
+| **47** | **0.6853** | 0.5623 |
+| 48 | 0.6864 | 0.5586 |
+| 49 | 0.6890 | 0.5626 |
+
+- 기존 Hard best CE `0.6839`를 넘지 못했으므로 CE 기준 개선 신호는 없다. 다만 104-episode AUROC는 불확실하므로 epoch 47 checkpoint를 동일 1,000-episode context curve로 최종 비교한다.
+- 평가: context 40/80/160/300, fixed query, pool 400 bags, PID `2528070`.
+- 평가 로그: `logs/20260731_context300_eval/context_curve.out`
+- 예정 산출물: `logs/v22_hard_context300_ft_curve_1000ep.csv`, `predictions/v22_hard_context300_ft_curve/context_{40,80,160,300}.pt`
 
 **T4-0. 재학습 없는 접근성 감사 [먼저]**
 - Hard best checkpoint로 state `model_input`/`observable`/`oracle` 상한 재측정

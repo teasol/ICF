@@ -206,7 +206,7 @@ Context-size curve는 Hard best checkpoint, 동일 query, nested balanced contex
 
 Batch 2/accumulation 4는 유지하되, 대형 online generation의 transient buffer 중첩을 피하기 위해 whole-batch `cuda_prefetch`와 batch 내부 parallel CUDA generation을 모두 끕니다. 두 episode는 순차 생성 후 stack되므로 실제 forward/backward와 gradient 평균은 여전히 batch 2입니다. 최대 경계 `(2, 317, 1500, 512)`, context 305의 generation+forward/backward smoke는 74.5GB로 통과했습니다. Logger는 외부 인증이 필요 없는 local CSV를 사용합니다.
 
-Hard best epoch 44 checkpoint에서 epoch 45~49를 잇는 5-epoch 신호 확인 fine-tuning을 PID `2521372`로 실행 중입니다. 로그는 `logs/20260731_context300_ft/v22_hard_context300_ft_serial.out`, checkpoint 디렉터리는 `checkpoints/20260731_context300_ft/v22_hard_context300_ft_serial/`입니다.
+Hard best epoch 44 checkpoint에서 epoch 45~49를 잇는 5-epoch fine-tuning은 완료됐습니다. Epoch별 val CE는 `0.6867/0.6889/0.6853/0.6864/0.6890`이며 best epoch 47도 기존 Hard best `0.6839`를 넘지 못했습니다. Best fine-tuned checkpoint의 context 40/80/160/300 1,000-episode 평가는 PID `2528070`으로 실행 중입니다. 로그는 `logs/20260731_context300_eval/context_curve.out`, 예정 summary는 `logs/v22_hard_context300_ft_curve_1000ep.csv`입니다.
 
 ### Stage 3: ICI 실데이터 — 최종 테스트 (후보 확정 후 1회)
 
