@@ -1,8 +1,8 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-31 21:48:00 KST`
-**Status**: v23-A0(mean)/v24-A0(proj 1slot)/v24-B0(bottleneck 12slot) 50-epoch **학습 3종 모두 완료**. (v24-B0 best epoch 46 `val_ce_loss 0.59232`). v23/v24 후보군 1,000-episode paired 평가 준비 완료. ICI 잠금 유지.
-**Read first if you are picking this up**: §3의 v24-B0 완료 기록, §3의 v24-A0/v23-A0 완료 기록, §6 Action Plan, §9 세션 핸드오프.
+**Last updated**: `2026-07-31 22:01:00 KST`
+**Status**: v23-A0(mean)/v24-A0(proj 1slot)/v24-B0(bottleneck 12slot) 50-epoch **학습 3종 모두 완료** (v24-B0 best `val_ce_loss 0.59232`). **v24-B1(bottleneck + residual mean) 50-epoch 학습 구동 완료** (PID `3332090`, run `20260731_220100`). ICI 잠금 유지.
+**Read first if you are picking this up**: §3의 v24-B1 실행 기록, §3의 v24-B0/v24-A0/v23-A0 완료 기록, §6 Action Plan, §9 세션 핸드오프.
 **Branches**: `codex/v23-bag-mean` = v23-A0/v24-A0 실험 / `main` = `v22` 기준선 / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: 기본 `22`; `mean_pool_structured_tokens: true`이면 `23`; `project_structured_tokens: true`이면 `24`
@@ -171,7 +171,22 @@ v24-A0가 slot 1개로 정보를 잃는 문제를 해결하기 위한 variant. *
 | Checkpoints | `checkpoints/20260731_201252/v24_medium_bag_proj_bottleneck/` |
 | Verification | 신규 테스트 4개 포함 `test_base_model` + `test_model_interface` **80개 통과** (`578.291s`) |
 
-판정: v23/v24-A0/v24-B0 3종 모두 완료됨. 동일 기준 (1,000 pool-400, context 40/80/160/300, v22 paired) 평가 준비 완료.
+### ⏳ v24-B1 residual bottleneck projection: 50-epoch 학습 시작 (2026-07-31)
+
+v24-B0 병목 구조(40×64=2560d)에 v23-A0에서 효과적이었던 **Exact Arithmetic Mean Token(512d)**을 Concat(3072d)하여 `Linear(3072→512)`로 압축하는 Residual Shortcut 적용 variant.
+
+| 항목 | 값 |
+|---|---|
+| Branch / implementation | `codex/v23-bag-mean`, commit `4f984ca` |
+| Config | `configs/train_v24_medium_bag_proj_residual.yaml` (`project_structured_tokens: true`, `projection_bottleneck_dim: 64`, `projection_residual_mean: true`, `max_epochs=50`) |
+| Run | `20260731_220100`, scratch Medium 50 epochs |
+| PID | `3332090` |
+| Model size | 9.45M trainable params (v22 6.57M + residual 병목 projection ≈2.88M) |
+| Training log | `logs/20260731_220100/v24_medium_bag_proj_residual.out` |
+| Checkpoints | `checkpoints/20260731_220100/v24_medium_bag_proj_residual/` |
+| Verification | 신규 테스트 `test_bottleneck_projection_with_residual_mean` 통과 |
+
+판정: 50-epoch 학습 완료 후 v23-A0/v24-A0/v24-B0/v24-B1 4종을 동일 기준 (1,000 pool-400, context 40/80/160/300, v22 paired) 평가 예정.
 
 ### ✅ v22 공식 기준선 (2026-07-30 갱신 — **1,000 episode 기준**)
 
