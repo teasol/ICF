@@ -421,6 +421,75 @@ class StructuredPopulationMetaClassifierTest(unittest.TestCase):
         )
         torch.testing.assert_close(logits, swapped.flip(-1))
 
+    def test_mean_pooling_collapses_all_structured_tokens_per_bag(self) -> None:
+        classifier = StructuredPopulationMetaClassifier(
+            token_dim=8,
+            hidden_dim=16,
+            num_heads=4,
+            num_set_layers=1,
+            relation_hidden_dim=16,
+            ridge_dim=4,
+            mean_pool_structured_tokens=True,
+        ).eval()
+        expected = classifier._all_structured_tokens(self.query).mean(
+            dim=1, keepdim=True
+        )
+        actual = classifier._population_tokens(self.query)
+        self.assertEqual(actual.shape, (3, 1, 8))
+        torch.testing.assert_close(actual, expected)
+
+    def test_mean_pooling_preserves_one_context_item_per_bag(self) -> None:
+        classifier = StructuredPopulationMetaClassifier(
+            token_dim=8,
+            hidden_dim=16,
+            num_heads=4,
+            num_set_layers=1,
+            relation_hidden_dim=16,
+            ridge_dim=4,
+            mean_pool_structured_tokens=True,
+        ).eval()
+        captured_shape: list[tuple[int, ...]] = []
+
+        def capture_shape(_module, inputs):
+            captured_shape.append(tuple(inputs[0].shape))
+
+        handle = classifier.memory_input_norm.register_forward_pre_hook(capture_shape)
+        try:
+            classifier._class_memories(self.context, self.labels)
+        finally:
+            handle.remove()
+        # Eight context bags become eight items; without mean pooling this is
+        # 8 * (1 + 4 * 3 + 3) = 128 items.
+        self.assertEqual(captured_shape, [(4, 8), (4, 8)])
+
+    def test_batched_mean_pooling_preserves_one_context_item_per_bag(self) -> None:
+        classifier = StructuredPopulationMetaClassifier(
+            token_dim=8,
+            hidden_dim=16,
+            num_heads=4,
+            num_set_layers=1,
+            relation_hidden_dim=16,
+            ridge_dim=4,
+            mean_pool_structured_tokens=True,
+        ).eval()
+        context = {
+            name: value.unsqueeze(0).expand(2, *value.shape)
+            for name, value in self.context.items()
+        }
+        labels = self.labels.unsqueeze(0).expand(2, -1)
+        captured_shape: list[tuple[int, ...]] = []
+
+        def capture_shape(_module, inputs):
+            captured_shape.append(tuple(inputs[0].shape))
+
+        handle = classifier.memory_input_norm.register_forward_pre_hook(capture_shape)
+        try:
+            memories = classifier._class_memories_batched(context, labels)
+        finally:
+            handle.remove()
+        self.assertEqual(captured_shape, [(2, 8, 8)])
+        self.assertEqual(memories.shape, (2, 2, 8, 16))
+
     def test_simultaneous_slot_permutation_does_not_change_logits(self) -> None:
         expected = self.classifier(
             self.context, self.labels, self.query, self.query_instances
@@ -665,6 +734,35 @@ class BaseModelTest(unittest.TestCase):
     def test_architecture_version_is_22(self) -> None:
         self.assertEqual(self.model.architecture_version, 22)
         self.assertEqual(self.model._architecture_version.item(), 22)
+
+    def test_mean_pooling_model_is_v23_and_runs_end_to_end(self) -> None:
+        model = BaseModel(
+            input_dim=8,
+            meta_hidden_dim=16,
+            meta_num_heads=4,
+            meta_num_set_layers=1,
+            meta_relation_hidden_dim=16,
+            mean_pool_structured_tokens=True,
+            num_classes=2,
+        ).train()
+        logits, auxiliary = model(
+            self.x, self.y, self.mask_index, return_auxiliary=True
+        )
+        self.assertEqual(model.architecture_version, 23)
+        self.assertEqual(model._architecture_version.item(), 23)
+        self.assertEqual(logits.shape, (2, 2))
+        self.assertEqual(auxiliary["population_slot_weights"].shape, (2, 1))
+        torch.testing.assert_close(
+            auxiliary["population_slot_weights"], torch.ones(2, 1)
+        )
+        F.cross_entropy(logits, self.y[self.mask_index]).backward()
+        gradients = [
+            parameter.grad
+            for parameter in model.parameters()
+            if parameter.grad is not None
+        ]
+        self.assertTrue(gradients)
+        self.assertTrue(all(torch.isfinite(value).all() for value in gradients))
 
     def test_final_logits_are_invariant_to_per_bag_shift(self) -> None:
         shift = torch.randn(self.x.shape[0], 1, self.x.shape[-1])

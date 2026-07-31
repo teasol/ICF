@@ -1,9 +1,28 @@
 # Current experiments
 
-**Last updated**: `2026-07-31 10:21:00 KST`
-**Architecture Version**: `22` (`architecture_version = 22`)
+**Last updated**: `2026-07-31 15:38:49 KST`
+**Architecture Version**: v22 baseline / v23-A0 bag-mean ablation
 
 이 문서는 v22 기준 실험 프로토콜과 실행 명령어를 설명합니다. v21 retrieval 시대의 실험 기록은 [`history/v21_retrieval_experiments.md`](history/v21_retrieval_experiments.md)로 이관되었습니다.
+
+## Active: v23-A0 exact bag-mean ablation
+
+- Branch: `codex/v23-bag-mean`
+- Config: `configs/train_v23_medium_bag_mean.yaml`
+- Change: 각 bag의 `1 global + 36 slot-statistic + 3 tail = 40` token을
+  arithmetic mean하여 1개 embedding으로 만든다.
+- Context memory 입력 수: `context_bags × 40`이 아니라 `context_bags`.
+- Query population 입력도 36 slot token 대신 동일한 40-token mean 1개를 쓴다.
+- Direct ridge/attention global branch도 global spread 하나 대신 이 mean을 쓴다.
+- abundance/covariance/rare side evidence와 최종 fusion은 유지하여 변경 범위를
+  structured-token representation에 한정한다.
+- 기본값은 `false`여서 v22 동작은 보존된다. 활성화 시 checkpoint
+  `architecture_version=23`으로 기록되어 v22 checkpoint resume을 거부한다.
+- 학습은 original Medium context regime에서 scratch 20 epochs. Mixed-context
+  intervention을 섞지 않는다.
+- 판정: 1,000 pool-400 episode의 context 40/80/160/300 paired 비교에서
+  overall `+0.03` 또는 target task `+0.05`.
+- 구현 검증: 전체 unittest 123개 통과 (`696.503s`).
 
 > [!CAUTION]
 > **v22는 기존 체크포인트를 전부 무효화합니다.** retrieval 계층 제거로 `architecture_version`이 22로 올라갔고, `ModelInterface.on_load_checkpoint`가 v21 이하 체크포인트를 거부합니다. 아래 모든 실험은 **처음부터 다시** 돌려야 합니다.

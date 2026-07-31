@@ -1,0 +1,16 @@
+base_config: train_v22_medium.yaml
+
+# Architecture v23-A0: collapse each bag's 40 structured tokens to their exact
+# arithmetic mean before both the direct ridge/attention path and class memory.
+# The original Medium context distribution is retained for a clean architecture
+# comparison with v22.
+model_overrides:
+  mean_pool_structured_tokens: true
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v23_medium_bag_mean
+
+trainer:
+  max_epochs: 20

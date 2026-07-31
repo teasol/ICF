@@ -72,6 +72,24 @@ episode while using it for another.
 
 ## Recommended implementation order
 
+### T5-A0 — Exact mean baseline (active)
+
+Before adding typed token embeddings, run the cheapest bag-boundary ablation:
+
+- average the existing 40 structured tokens to exactly one vector per bag;
+- retain every labelled bag as a separate memory input;
+- apply the same mean to each query bag;
+- keep the original Medium context distribution and train from scratch.
+
+This intentionally discards token identity and within-bag higher-order structure.
+Its purpose is attribution, not an assumption that mean pooling is optimal. If it
+beats v22, loss of bag boundaries was more harmful than the crude within-bag
+average. If it fails, the result does not reject bag preservation; proceed to the
+typed learned pooling in T5-A.
+
+Implementation: `mean_pool_structured_tokens: true`,
+`configs/train_v23_medium_bag_mean.yaml`, branch `codex/v23-bag-mean`.
+
 ### T5-A — Typed, bag-preserving structured context branch
 
 Reuse the existing 40-token aggregator first, so this experiment isolates
@@ -148,4 +166,3 @@ for every evaluation.
 4. Confirm the promoted candidate on Hard and verify that gains remain at
    context 40/80.
 5. Keep ICI locked until a candidate passes both Medium and Hard.
-

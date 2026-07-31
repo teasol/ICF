@@ -1691,6 +1691,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
         covariance_ridge_logit_scale: float = 2.0,
         covariance_residual_scale: float = 0.25,
         covariance_relation: dict[str, object] | None = None,
+        mean_pool_structured_tokens: bool = False,
         num_classes: int = 2,
     ) -> None:
         super().__init__()
@@ -1727,6 +1728,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
         self.routing_temperature = float(routing_temperature)
         self.class_memory_tokens = int(class_memory_tokens)
         self.rare_evidence_fractions = rare_fractions
+        self.mean_pool_structured_tokens = bool(mean_pool_structured_tokens)
         relation_config = dict(covariance_relation or {})
         self.covariance_relation_enabled = bool(relation_config.get("enabled", False))
         self.covariance_relation_mode = str(
@@ -2338,12 +2340,24 @@ class StructuredPopulationMetaClassifier(nn.Module):
             dim=1,
         )
 
+    def _population_tokens(
+        self, representation: dict[str, torch.Tensor]
+    ) -> torch.Tensor:
+        """Return either all structured tokens or one exact mean token per bag."""
+        if self.mean_pool_structured_tokens:
+            return self._all_structured_tokens(representation).mean(
+                dim=-2, keepdim=True
+            )
+        return self._flatten_slot_tokens(representation)
+
     def _class_memories(
         self,
         context: dict[str, torch.Tensor],
         context_labels: torch.Tensor,
     ) -> torch.Tensor:
         context_tokens = self._all_structured_tokens(context)
+        if self.mean_pool_structured_tokens:
+            context_tokens = context_tokens.mean(dim=1, keepdim=True)
         memories: list[torch.Tensor] = []
         for class_index in range(self.num_classes):
             class_tokens = context_tokens[context_labels == class_index].reshape(
@@ -2365,7 +2379,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
         query: dict[str, torch.Tensor],
         class_memories: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        query_tokens = self._flatten_slot_tokens(query)
+        query_tokens = self._population_tokens(query)
         encoded_query = self.slot_input_projection(self.slot_input_norm(query_tokens))
         importance_logits = self.slot_importance(query_tokens).squeeze(-1)
         token_weights = F.softmax(
@@ -2661,6 +2675,8 @@ class StructuredPopulationMetaClassifier(nn.Module):
             (context["global_summary"].unsqueeze(2), flat_slots, context["tails"]),
             dim=2,
         )
+        if self.mean_pool_structured_tokens:
+            context_tokens = context_tokens.mean(dim=2, keepdim=True)
         episodes, context_count, tokens_per_bag, _ = context_tokens.shape
         flat_tokens = context_tokens.reshape(
             episodes, context_count * tokens_per_bag, self.token_dim
@@ -2692,9 +2708,23 @@ class StructuredPopulationMetaClassifier(nn.Module):
         class_memories: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         raw_slots = query["slots"]
-        query_tokens = raw_slots.reshape(
-            raw_slots.shape[0], raw_slots.shape[1], -1, raw_slots.shape[-1]
-        )
+        if self.mean_pool_structured_tokens:
+            flat_slots = raw_slots.reshape(
+                raw_slots.shape[0], raw_slots.shape[1], -1, raw_slots.shape[-1]
+            )
+            all_tokens = torch.cat(
+                (
+                    query["global_summary"].unsqueeze(2),
+                    flat_slots,
+                    query["tails"],
+                ),
+                dim=2,
+            )
+            query_tokens = all_tokens.mean(dim=2, keepdim=True)
+        else:
+            query_tokens = raw_slots.reshape(
+                raw_slots.shape[0], raw_slots.shape[1], -1, raw_slots.shape[-1]
+            )
         episodes, queries, slots, _ = query_tokens.shape
         encoded_query = self.slot_input_projection(self.slot_input_norm(query_tokens))
         importance_logits = self.slot_importance(query_tokens).squeeze(-1)
@@ -2766,11 +2796,34 @@ class StructuredPopulationMetaClassifier(nn.Module):
         query_instances: torch.Tensor,
         return_auxiliary: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        context_global_tokens = context["global_summary"]
+        query_global_tokens = query["global_summary"]
+        if self.mean_pool_structured_tokens:
+            context_global_tokens = torch.cat(
+                (
+                    context["global_summary"].unsqueeze(2),
+                    context["slots"].reshape(
+                        *context["slots"].shape[:2], -1, self.token_dim
+                    ),
+                    context["tails"],
+                ),
+                dim=2,
+            ).mean(dim=2)
+            query_global_tokens = torch.cat(
+                (
+                    query["global_summary"].unsqueeze(2),
+                    query["slots"].reshape(
+                        *query["slots"].shape[:2], -1, self.token_dim
+                    ),
+                    query["tails"],
+                ),
+                dim=2,
+            ).mean(dim=2)
         global_shape_logits, global_shape_auxiliary = (
             self.global_shape_classifier.forward_batched(
-                context["global_summary"],
+                context_global_tokens,
                 context_labels,
-                query["global_summary"],
+                query_global_tokens,
                 return_auxiliary=True,
             )
         )
@@ -2935,10 +2988,15 @@ class StructuredPopulationMetaClassifier(nn.Module):
         if context["tails"].shape[1] != query["tails"].shape[1]:
             raise ValueError("Context and query tail counts must match.")
 
+        context_global_tokens = context["global_summary"]
+        query_global_tokens = query["global_summary"]
+        if self.mean_pool_structured_tokens:
+            context_global_tokens = self._all_structured_tokens(context).mean(dim=1)
+            query_global_tokens = self._all_structured_tokens(query).mean(dim=1)
         global_shape_logits, global_shape_auxiliary = self.global_shape_classifier(
-            context["global_summary"],
+            context_global_tokens,
             context_labels,
-            query["global_summary"],
+            query_global_tokens,
             return_auxiliary=True,
         )
         class_memories = self._class_memories(context, context_labels)
@@ -3116,6 +3174,7 @@ class BaseModel(nn.Module):
         meta_fusion_residual_scale: float = 0.10,
         meta_covariance_ridge_logit_scale: float = 2.0,
         meta_covariance_residual_scale: float = 0.25,
+        mean_pool_structured_tokens: bool = False,
         covariance_relation: dict[str, object] | None = None,
         num_classes: int = 2,
     ) -> None:
@@ -3169,8 +3228,10 @@ class BaseModel(nn.Module):
             covariance_ridge_logit_scale=meta_covariance_ridge_logit_scale,
             covariance_residual_scale=meta_covariance_residual_scale,
             covariance_relation=covariance_relation,
+            mean_pool_structured_tokens=mean_pool_structured_tokens,
             num_classes=self.num_classes,
         )
+        self.architecture_version = 23 if mean_pool_structured_tokens else 22
         self.register_buffer(
             "_architecture_version",
             torch.tensor(self.architecture_version, dtype=torch.long),
