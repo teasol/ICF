@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-31 18:28:00 KST`
-**Status**: v23-A0 exact bag-mean 50-epoch **학습 완료** (best epoch 43 `val_ce_loss=0.5912154`). **v24 learned bag projection 50-epoch 학습 시작** (PID `2811875`, epoch 0). v23 평가와 v24 평가 모두 대기. ICI 잠금 유지.
+**Last updated**: `2026-07-31 18:58:00 KST`
+**Status**: v23-A0 exact bag-mean 50-epoch **학습 완료** (best epoch 43 `val_ce_loss=0.5912154`). **v24-A0 learned bag projection 50-epoch 학습 완료** (best epoch 45 `val_ce_loss=0.5976237`). v23/v24 평가 모두 대기. ICI 잠금 유지.
 **Read first if you are picking this up**: §3의 **v24-A0 bag-projection 실행 기록**, §3의 v23-A0 완료 기록, §6 Action Plan.
 **Branches**: `codex/v23-bag-mean` = v23-A0/v24-A0 실험 / `main` = `v22` 기준선 / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
@@ -120,7 +120,7 @@ v22 공식 best `0.5946`보다 `0.0034` 낮습니다. 104-episode val AUROC는
 context 40/80/160/300, v22 paired)는 아직 실행 전입니다** — 사용자 지시
 대기 중. ICI는 계속 잠급니다.
 
-### ⏳ v24-A0 learned bag projection: 50-epoch 학습 시작 (2026-07-31)
+### ✅ v24-A0 learned bag projection: 50-epoch 완료 (2026-07-31)
 
 exact mean(v23) 대신 **learned linear projection**으로 bag을 1토큰으로
 압축합니다. Slot을 12→1로 줄여 bag당 `1 global + 3 slot-statistic + 3 tail
@@ -132,12 +132,19 @@ exact mean(v23) 대신 **learned linear projection**으로 bag을 1토큰으로
 | Branch / implementation | `codex/v23-bag-mean`, commit `26b2b27` |
 | Config | `configs/train_v24_medium_bag_proj.yaml` (`project_structured_tokens: true`, slot 1 / density slot 1, `max_epochs=50`) |
 | Run | `20260731_182755`, scratch Medium 50 epochs |
-| PID | `2811875` |
+| **완료 상태** | **`max_epochs=50` 도달, 정상 종료** |
+| **Best `val_ce_loss`** | **0.5976237** @ epoch 45 (마지막 epoch 49: 0.59819) |
+| Best val AUROC | 0.7339473 (104-episode training val; 최종 판정용 아님) |
+| Best checkpoint | `checkpoints/20260731_182755/v24_medium_bag_proj/epoch=045-val_ce_loss=0.5976.ckpt` |
 | Model size | 8.4M trainable params (v22 6.57M + bag_token_projection ≈1.8M) |
 | Training log | `logs/20260731_182755/v24_medium_bag_proj.out` |
-| Launcher log | `logs/20260731_182755/v24_medium_bag_proj_launcher.out` |
-| Checkpoints | `checkpoints/20260731_182755/v24_medium_bag_proj/` |
+| Metrics | `logs/v24_medium_bag_proj/version_0/metrics.csv` |
 | Verification | 신규 테스트 5개 포함 `test_base_model` + `test_model_interface` **76개 통과** (`553.453s`) |
+
+> [!NOTE]
+> 훈련 val CE `0.5976`은 v22(0.5946)와 v23-A0(0.5912)보다 높습니다. slot을
+> 1개로 줄인 정보 손실 영향으로 보이며, 최종 판정은 1,000 pool-400 episodes
+> context `40/80/160/300` paired 비교로만 합니다.
 
 판정 계획: v23/v24 둘 다 1,000 pool-400 episodes, context `40/80/160/300`에서
 v22(`predictions/v22_medium_baseline_pool400_curve/`)와 paired episode-cluster
