@@ -869,6 +869,7 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         fixed_episode_count: int | None = None,
         generation_device: str = "cpu",
         shape_group_size: int = 1,
+        parallel_cuda_generation: bool = True,
         difficulty_curriculum_episodes: int = 0,
         effect_scale_start: float | tuple[float, float] = (1.0, 1.0),
         effect_scale_end: float | tuple[float, float] = (1.0, 1.0),
@@ -925,6 +926,7 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         self.difficulty_curriculum_episodes = difficulty_curriculum_episodes
         self.effect_scale_start = effect_scale_start
         self.shape_group_size = int(shape_group_size)
+        self.parallel_cuda_generation = bool(parallel_cuda_generation)
         self.effect_scale_end = effect_scale_end
         self.return_oracle_diagnostics = bool(return_oracle_diagnostics)
         self.return_task_metadata = bool(return_task_metadata)
@@ -974,6 +976,7 @@ class SyntheticEpisodeDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
             len(indices) <= 1
             or self.seed is not None
             or self._generation_device().type != "cuda"
+            or not self.parallel_cuda_generation
         ):
             return [self[index] for index in indices]
         start = self._sample_count

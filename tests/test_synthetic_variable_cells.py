@@ -263,6 +263,19 @@ class VariableCellCountTest(unittest.TestCase):
                 training_query_range=(5, 12),
             )
 
+    def test_parallel_cuda_generation_can_be_disabled(self) -> None:
+        dataset = SyntheticEpisodeDataset(
+            episodes_per_epoch=2,
+            num_bags=6,
+            num_cells=2,
+            latent_dim=2,
+            output_dim=4,
+            mlp_hidden_dim=4,
+            mlp_num_layers=1,
+            parallel_cuda_generation=False,
+        )
+        self.assertFalse(dataset.parallel_cuda_generation)
+
     def test_cell_count_varies_between_episodes(self) -> None:
         generator = build_generator((8, 12))
         observed = {
