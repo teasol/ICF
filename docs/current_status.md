@@ -1,8 +1,8 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-31 16:35:00 KST`
-**Status**: v23-A0 exact bag-mean Medium scratch 20 epochs 완료. Best epoch 19 `val_ce_loss=0.59337`; 다음 단계는 1,000-episode paired context curve 평가. ICI 잠금 유지.
-**Read first if you are picking this up**: §3의 **“v23-A0 exact bag-mean 완료”**와 §6 Action Plan.
+**Last updated**: `2026-07-31 17:05:16 KST`
+**Status**: v23-A0 exact bag-mean Medium을 epoch 19 체크포인트에서 총 50 epochs까지 재개 학습 중. PID `2671747`; 완료 후 1,000-episode paired context curve 평가. ICI 잠금 유지.
+**Read first if you are picking this up**: §3의 **“v23-A0 exact bag-mean: 50-epoch 재개 중”**와 §6 Action Plan.
 **Branches**: `codex/v23-bag-mean` = v23-A0 실험 / `main` = `v22` 기준선 / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: 기본 `22`; `mean_pool_structured_tokens: true`이면 checkpoint version `23`
@@ -75,7 +75,7 @@ v22/v23 checkpoint version 분리, end-to-end backward를 포함한 전체 unitt
 
 ## 3. 실험 현황
 
-### ✅ v23-A0 exact bag-mean 완료 (2026-07-31)
+### ⏳ v23-A0 exact bag-mean: 50-epoch 재개 중 (2026-07-31)
 
 각 bag의 `1 global + 36 slot-statistic + 3 tail = 40` structured token을
 exact arithmetic mean 1개로 압축했습니다. Context와 query 모두 같은
@@ -97,9 +97,25 @@ checkpoint는 `architecture_version=23`입니다.
 | Logs / metrics | `logs/20260731_155635/v23_medium_bag_mean.out`; `logs/v23_medium_bag_mean/version_0/metrics.csv` |
 | Verification | 전체 unittest **123개 통과** (`696.503s`) |
 
+20-epoch 경계에서 validation CE와 total loss가 모두 run best였고,
+epoch 16→19 CE가 `0.59550→0.59452→0.59369→0.59337`로 연속 개선되어
+추가 수렴 여지를 확인합니다. `last.ckpt`의 model/optimizer/scheduler/global
+step을 복원하여 총 50 epochs까지 연장했습니다.
+
+| 재개 항목 | 값 |
+|---|---|
+| Config commit | `4d784dc` (`episode_batch_size=8`, `shape_group_size=8`, `max_epochs=50`) |
+| Resume source | `checkpoints/20260731_155635/v23_medium_bag_mean/last.ckpt` |
+| Active epoch range | epoch 20~49 (추가 30 epochs) |
+| PID | `2671747` |
+| Training log | `logs/20260731_v23_bag_mean_50e_resume/v23_medium_bag_mean_50e.out` |
+| Launcher log | `logs/20260731_v23_bag_mean_50e_resume/v23_medium_bag_mean_50e_launcher.out` |
+| Checkpoints | `checkpoints/20260731_v23_bag_mean_50e_resume/v23_medium_bag_mean_50e/` |
+| Initial verification | checkpoint state 전체 복원, epoch 20에서 512 steps/epoch로 정상 시작 |
+
 v22 공식 best CE `0.5946`보다 약 `0.0012` 낮지만 사실상 작은 차이이며,
 104-episode val AUROC는 분산이 커서 승패 판정에 쓰지 않습니다. 다음
-Action은 best epoch 19를 v22 공식 checkpoint와 동일한 1,000 pool-400
+Action은 50-epoch run의 best checkpoint를 v22 공식 checkpoint와 동일한 1,000 pool-400
 episodes, context `40/80/160/300`에서 평가하고 paired episode-cluster
 bootstrap으로 비교하는 것입니다. Overall `+0.03` 또는 target task
 `+0.05`가 없으면 exact mean은 폐기하고 typed learned bag pooling(T5-A)로
