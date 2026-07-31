@@ -1,0 +1,24 @@
+base_config: train_v22_medium.yaml
+
+data_overrides:
+  episode_batch_size: 2
+  cuda_prefetch: false
+  train_dataset_kwargs:
+    parallel_cuda_generation: false
+    num_bags: [40, 317]
+    training_context_sizes: [40, 80, 120, 160, 180, 240, 300]
+    training_context_jitter: 5
+    training_query_range: [5, 12]
+
+trainer:
+  # Preserve the official Medium effective batch of eight episodes/update.
+  accumulate_grad_batches: 4
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v22_medium_context300_ft
+
+model_kwargs:
+  training_context_sizes: [40, 80, 120, 160, 180, 240, 300]
+  training_context_jitter: 5

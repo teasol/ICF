@@ -208,6 +208,8 @@ Batch 2/accumulation 4는 유지하되, 대형 online generation의 transient bu
 
 Hard best epoch 44 checkpoint에서 epoch 45~49를 잇는 5-epoch fine-tuning은 완료됐습니다. Epoch별 val CE는 `0.6867/0.6889/0.6853/0.6864/0.6890`이며 best epoch 47도 기존 Hard best `0.6839`를 넘지 못했습니다. Best fine-tuned checkpoint의 pool-400, 1,000-episode AUROC는 context 40/80/160/300에서 `0.5331/0.5553/0.5842/0.5977`, log loss는 `0.6992/0.6901/0.6798/0.6762`입니다. 기존 curve는 pool 220이라 엄밀한 paired 비교가 아니므로, 동일 pool 400 원본 checkpoint 대조 평가를 PID `2530921`로 실행 중입니다.
 
+Medium에서도 같은 context 분포를 시험하는 파생 config `configs/train_v22_medium_context300.yaml`을 추가합니다. 공식 Medium epoch 13 checkpoint에서 남은 epoch 14~19를 fine-tune하고, 원본/fine-tuned checkpoint를 동일 pool 400·context 40/80/160/300에서 비교합니다. 성공 기준은 실제 ICI 범위인 40/80에서의 paired 개선이며, state oracle-mask AUROC 0.9013과 latent 1.0은 모델이 받지 못하는 정보를 사용하므로 참고용 비현실적 상한으로만 표시합니다.
+
 ### Stage 3: ICI 실데이터 — 최종 테스트 (후보 확정 후 1회)
 
 - **Config**: `configs/train_v22_ici_finetune.yaml` (fine-tune), `configs/train_v22_ici_scratch.yaml` (scratch 대조군).
