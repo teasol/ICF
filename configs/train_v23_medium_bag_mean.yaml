@@ -7,10 +7,15 @@ base_config: train_v22_medium.yaml
 model_overrides:
   mean_pool_structured_tokens: true
 
+data_overrides:
+  episode_batch_size: 8
+  dataset_kwargs:
+    shape_group_size: 8
+
 logger:
   name: csv
   save_dir: logs
   experiment_name: v23_medium_bag_mean
 
 trainer:
-  max_epochs: 20
+  max_epochs: 50
