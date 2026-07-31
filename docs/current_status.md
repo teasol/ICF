@@ -1,7 +1,8 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-31 15:56:50 KST`
-**Latest experiment state**: v23-A0 exact bag-mean Medium scratch 20-epoch 학습 실행 중. PID `2564701`, run `20260731_155635`; 초기 sanity check와 GPU training 진입 확인. ICI 잠금 유지.
+**Last updated**: `2026-07-31 16:35:00 KST`
+**Status**: v23-A0 exact bag-mean Medium scratch 20 epochs 완료. Best epoch 19 `val_ce_loss=0.59337`; 다음 단계는 1,000-episode paired context curve 평가. ICI 잠금 유지.
+**Read first if you are picking this up**: §3의 **“v23-A0 exact bag-mean 완료”**와 §6 Action Plan.
 **Branches**: `codex/v23-bag-mean` = v23-A0 실험 / `main` = `v22` 기준선 / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: 기본 `22`; `mean_pool_structured_tokens: true`이면 checkpoint version `23`
@@ -27,22 +28,14 @@
 | ✅ **T4 context 병목 확인** | context 10→20→40→80→160에서 AUROC 0.5084→0.5193→0.5312→0.5505→0.5737로 단조 증가 |
 
 **다음 할 일 — v23-A0 bag-mean attribution**
-1. `configs/train_v23_medium_bag_mean.yaml` scratch Medium 학습 완료 및 best CE 확인.
-2. 동일 1,000 pool-400 episode, context 40/80/160/300에서 v22와 paired 비교.
+1. v23-A0 best epoch 19를 동일 1,000 pool-400 episode, context 40/80/160/300에서 v22와 paired 비교.
+2. `scripts/compare_predictions.py`로 episode-cluster paired delta와 CI 확인.
 3. overall `+0.03` 또는 target task `+0.05`가 없으면 mean pooling은 폐기하고 typed bag encoder(T5-A)로 이동.
 4. **ICI는 개선 후보가 합성 Medium+Hard에서 확정될 때까지 계속 잠금.**
 
 구현 검증: exact mean, unbatched/batched bag-count preservation,
 v22/v23 checkpoint version 분리, end-to-end backward를 포함한 전체 unittest
 **123개 통과** (`696.503s`).
-
-실행:
-- PID: `2564701`
-- log: `logs/20260731_155635/v23_medium_bag_mean.out`
-- launcher: `logs/20260731_155635/v23_medium_bag_mean_launcher.out`
-- checkpoints: `checkpoints/20260731_155635/v23_medium_bag_mean/`
-- 시작 확인: CUDA device 0 사용, v23 model 6.6M parameters, sanity validation
-  2/2 통과 후 epoch 0 training 진입.
 
 **작업 규칙 4가지**
 - 평가는 `--val-episodes 1000`, 비교는 `scripts/compare_predictions.py` (paired cluster bootstrap).
@@ -81,6 +74,36 @@ v22/v23 checkpoint version 분리, end-to-end backward를 포함한 전체 unitt
 ---
 
 ## 3. 실험 현황
+
+### ✅ v23-A0 exact bag-mean 완료 (2026-07-31)
+
+각 bag의 `1 global + 36 slot-statistic + 3 tail = 40` structured token을
+exact arithmetic mean 1개로 압축했습니다. Context와 query 모두 같은
+mean을 사용하고, class-memory에는 `bags × 40`이 아니라 bag당 1개가
+입력됩니다. 기존 v22 동작은 기본값 `false`로 보존되며 활성화한
+checkpoint는 `architecture_version=23`입니다.
+
+| 항목 | 값 |
+|---|---|
+| Branch / implementation | `codex/v23-bag-mean`, commit `8edd7c1` |
+| Config | `configs/train_v23_medium_bag_mean.yaml` |
+| Run | `20260731_155635`, scratch Medium 20 epochs / 10,240 steps |
+| Completion | launcher가 `training completed successfully` 기록; PID 종료 |
+| Best checkpoint | `checkpoints/20260731_155635/v23_medium_bag_mean/epoch=019-val_ce_loss=0.5934.ckpt` |
+| Last checkpoint | `checkpoints/20260731_155635/v23_medium_bag_mean/last.ckpt` |
+| Best `val_ce_loss` | **0.5933738** @ epoch 19 |
+| Epoch 19 val AUROC | 0.7322822 (104-episode training val; 최종 판정용 아님) |
+| Highest run val AUROC | 0.7379618 @ epoch 8 (동일한 작은 104-episode val) |
+| Logs / metrics | `logs/20260731_155635/v23_medium_bag_mean.out`; `logs/v23_medium_bag_mean/version_0/metrics.csv` |
+| Verification | 전체 unittest **123개 통과** (`696.503s`) |
+
+v22 공식 best CE `0.5946`보다 약 `0.0012` 낮지만 사실상 작은 차이이며,
+104-episode val AUROC는 분산이 커서 승패 판정에 쓰지 않습니다. 다음
+Action은 best epoch 19를 v22 공식 checkpoint와 동일한 1,000 pool-400
+episodes, context `40/80/160/300`에서 평가하고 paired episode-cluster
+bootstrap으로 비교하는 것입니다. Overall `+0.03` 또는 target task
+`+0.05`가 없으면 exact mean은 폐기하고 typed learned bag pooling(T5-A)로
+진행합니다. ICI는 계속 잠급니다.
 
 ### ✅ v22 공식 기준선 (2026-07-30 갱신 — **1,000 episode 기준**)
 

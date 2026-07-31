@@ -1,6 +1,6 @@
 # Current experiments
 
-**Last updated**: `2026-07-31 15:56:50 KST`
+**Last updated**: `2026-07-31 16:35:00 KST`
 **Architecture Version**: v22 baseline / v23-A0 bag-mean ablation
 
 이 문서는 v22 기준 실험 프로토콜과 실행 명령어를 설명합니다. v21 retrieval 시대의 실험 기록은 [`history/v21_retrieval_experiments.md`](history/v21_retrieval_experiments.md)로 이관되었습니다.
@@ -18,15 +18,16 @@
   structured-token representation에 한정한다.
 - 기본값은 `false`여서 v22 동작은 보존된다. 활성화 시 checkpoint
   `architecture_version=23`으로 기록되어 v22 checkpoint resume을 거부한다.
-- 학습은 original Medium context regime에서 scratch 20 epochs. Mixed-context
-  intervention을 섞지 않는다.
+- original Medium context regime의 scratch 20 epochs 학습 완료. Mixed-context
+  intervention은 섞지 않았다.
 - 판정: 1,000 pool-400 episode의 context 40/80/160/300 paired 비교에서
   overall `+0.03` 또는 target task `+0.05`.
 - 구현 검증: 전체 unittest 123개 통과 (`696.503s`).
-- 실행 중: PID `2564701`, log
-  `logs/20260731_155635/v23_medium_bag_mean.out`, checkpoints
-  `checkpoints/20260731_155635/v23_medium_bag_mean/`. CUDA 0 및 epoch 0
-  진입 확인.
+- 완료 run: `20260731_155635`; best epoch 19
+  `val_ce_loss=0.5933738`, checkpoint
+  `checkpoints/20260731_155635/v23_medium_bag_mean/epoch=019-val_ce_loss=0.5934.ckpt`.
+- 다음 실행: 동일 1,000 pool-400 episodes에서 v22/v23-A0 context
+  `40/80/160/300` curve를 만들고 episode-cluster paired 비교한다.
 
 > [!CAUTION]
 > **v22는 기존 체크포인트를 전부 무효화합니다.** retrieval 계층 제거로 `architecture_version`이 22로 올라갔고, `ModelInterface.on_load_checkpoint`가 v21 이하 체크포인트를 거부합니다. 아래 모든 실험은 **처음부터 다시** 돌려야 합니다.
