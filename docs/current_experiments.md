@@ -1,7 +1,7 @@
 # Current experiments
 
-**Last updated**: `2026-07-31 16:35:00 KST`
-**Architecture Version**: v22 baseline / v23-A0 bag-mean ablation
+**Last updated**: `2026-07-31 20:25:00 KST`
+**Architecture Version**: v22 baseline / v23-A0 bag-mean / v24-A0 bag projection / v24-B0 bottleneck projection
 
 이 문서는 v22 기준 실험 프로토콜과 실행 명령어를 설명합니다. v21 retrieval 시대의 실험 기록은 [`history/v21_retrieval_experiments.md`](history/v21_retrieval_experiments.md)로 이관되었습니다.
 
@@ -28,6 +28,25 @@
   `checkpoints/20260731_155635/v23_medium_bag_mean/epoch=019-val_ce_loss=0.5934.ckpt`.
 - 다음 실행: 동일 1,000 pool-400 episodes에서 v22/v23-A0 context
   `40/80/160/300` curve를 만들고 episode-cluster paired 비교한다.
+
+## Active: v24-A0 / v24-B0 learned bag projection
+
+- Branch: `codex/v23-bag-mean`
+- v24-A0 config: `configs/train_v24_medium_bag_proj.yaml`
+  - `project_structured_tokens: true`, slot 1 / density slot 1 → bag당 7 tokens
+    (`1 global + 3 slot stats + 3 tails`)을 concat(7×512=3584) →
+    `Linear(3584, 512)` → bag당 512-d 1토큰.
+  - 완료 run: `20260731_182755`, 50 epochs, best epoch 45
+    `val_ce_loss=0.5976237`.
+- v24-B0 config: `configs/train_v24_medium_bag_proj_bottleneck.yaml`
+  - 12 slot 유지 (40 tokens), 토큰별 전용 `Linear(512→64)` 40개 →
+    concat(40×64=2560) → `Linear(2560, 512)` → bag당 512-d 1토큰.
+    병목으로 projection 파라미터 ~2.62M (직결 40×512→512 ~10.5M 대비).
+  - 진행 중 run: `20260731_201252`, 50 epochs, PID `3033073`.
+- 두 variant 모두 `architecture_version=24`. `mean_pool`(v23)과는 상호배타,
+  v24-A0/B0 하위 variant는 state_dict 불일치로 구분됨.
+- 판정: v23과 동일 — 1,000 pool-400 episode의 context 40/80/160/300 paired
+  비교에서 overall `+0.03` 또는 target task `+0.05`.
 
 > [!CAUTION]
 > **v22는 기존 체크포인트를 전부 무효화합니다.** retrieval 계층 제거로 `architecture_version`이 22로 올라갔고, `ModelInterface.on_load_checkpoint`가 v21 이하 체크포인트를 거부합니다. 아래 모든 실험은 **처음부터 다시** 돌려야 합니다.

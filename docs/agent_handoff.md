@@ -1,7 +1,7 @@
 # Agent handoff guide
 
-**Last updated**: `2026-07-31 16:35:00 KST`
-**Architecture Version**: v22 baseline; `mean_pool_structured_tokens: true`인 v23-A0 ablation
+**Last updated**: `2026-07-31 20:25:00 KST`
+**Architecture Version**: v22 baseline; v23-A0(`mean_pool_structured_tokens: true`), v24-A0(`project_structured_tokens: true`), v24-B0(+ `projection_bottleneck_dim: 64`)
 
 이 문서는 BagPFN 저장소를 처음 맡은 coding agent가 안전하게 작업을 시작하기 위한 운영 및 핸드오프 지침입니다. 최신 개발 및 실험 진행 상황은 [`current_status.md`](current_status.md), 현재 모델 명세는 [`current_architecture.md`](current_architecture.md), 현재 실험 프로토콜은 [`current_experiments.md`](current_experiments.md)를 참고합니다.
 
@@ -19,7 +19,7 @@
 >    git log -n 5 --stat
 >    git diff HEAD~1 HEAD
 >    ```
-> 4. Living 문서 5개와 Git commit log/diff를 종합하여 v22 baseline과 활성 v23-A0 실험, 코드 수정 내역, 완료된 실험 수치, 미결 과제 및 다음 Action Plan을 100% 동일한 맥락으로 완벽히 이어받아야 합니다.
+> 4. Living 문서 5개와 Git commit log/diff를 종합하여 v22 baseline과 활성 v23-A0/v24-A0/v24-B0 실험, 코드 수정 내역, 완료된 실험 수치, 미결 과제 및 다음 Action Plan을 100% 동일한 맥락으로 완벽히 이어받아야 합니다.
 
 ---
 
@@ -106,7 +106,7 @@ scripts/launch_interactive_training.sh \
      - [`current_architecture.md`](current_architecture.md): Architecture v22 수학적 기술 명세 (retrieval 없음)
      - [`current_experiments.md`](current_experiments.md): 실험 전략(합성=결정 / ICI=최종 테스트), 검정력, 평가 프로토콜, Stage 1~3 실행 명령어
      - [`README.md`](README.md): 전체 문서 맵 및 갱신 규칙
-   - 최상위 Living 문서 5개는 항상 서로 100% 일관된 맥락을 유지합니다. 현재는 v22 baseline과 조건부 v23-A0 ablation을 명확히 구분합니다.
+   - 최상위 Living 문서 5개는 항상 서로 100% 일관된 맥락을 유지합니다. 현재는 v22 baseline과 조건부 v23-A0/v24-A0/v24-B0 ablation을 명확히 구분합니다.
 
 2. **`docs/history/` 하위 아카이빙 규칙 (Historical & Deep-Dive Docs)**:
    - 특정 시점의 딥다이브 분석서, 옛 버전 아키텍처 설계안, 과거 벤치마크 플랜(예: `v20_scalability_plan.md`, `retrieval_architecture_analysis.md`, `architecture_v18.md` 등)은 **모두 `docs/history/` 하위 폴더로 이동하여 보관**합니다.
@@ -117,7 +117,7 @@ scripts/launch_interactive_training.sh \
 
 1. **`configs/` 최상위 루트 유지 조건**:
    - 현재 활성 파이프라인에서 직접 사용하는 entry point config만 `configs/` 최상위에 유지합니다.
-   - v22 기준선 config와 현재 architecture candidate config(현재 `train_v23_medium_bag_mean.yaml`)를 유지하고, 폐기 확정 시 archive로 이동합니다.
+   - v22 기준선 config와 현재 architecture candidate config(`train_v23_medium_bag_mean.yaml`, `train_v24_medium_bag_proj.yaml`, `train_v24_medium_bag_proj_bottleneck.yaml`)를 유지하고, 폐기 확정 시 archive로 이동합니다.
    - ICI의 fold/seed는 config에 박지 않고 `--cv` / `--seed`로 주입합니다 (`scripts/launch_ici_protocol.sh`).
 2. **구버전 Config 아카이빙 조건**:
    - 구버전 아키텍처의 config는 `configs/archive/` 하위로 즉시 이관합니다: `archive/v18_v19/`, `archive/v20/`, `archive/v21_retrieval/`.
