@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-31 09:25:00 KST`
-**Latest experiment state**: T3-3 Hard 기준선 완료; ICI는 잠금 유지하고 Medium→Hard 성능 붕괴 attribution 단계로 전환.
+**Last updated**: `2026-07-31 09:27:00 KST`
+**Latest experiment state**: T4-0 Hard 접근성 감사 시작. state 상한 진단 PID `2494986` 실행 중; ICI 잠금 유지.
 **Branches**: `main` = `v22` (기본, 최신) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
@@ -471,6 +471,7 @@ Hard는 Medium과 비교해 9개 축이 동시에 바뀝니다: class separation
 
 **T4-0. 재학습 없는 접근성 감사 [먼저]**
 - Hard best checkpoint로 state `model_input`/`observable`/`oracle` 상한 재측정
+  - 실행 중: PID `2494986`, 로그 `logs/20260731_hard_accessibility/state_upper_bound.out`, 출력 `logs/v22_hard_state_upper_bound_1000ep.csv`
 - Hard config에서 covariance all-cell/oracle-mask 상한 재측정
 - effect scale 0.4/0.7 matched 평가로 Hard task 상대 약점이 생성기 scale 아티팩트인지 확인
 
