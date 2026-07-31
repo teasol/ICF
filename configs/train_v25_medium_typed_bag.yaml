@@ -1,0 +1,30 @@
+base_config: train_v24_medium_bag_proj_residual.yaml
+
+# Architecture v25 (T5-A): typed, bag-preserving structured context branch.
+# Adds learned token-type/tail-fraction identity embeddings to the 40
+# structured tokens (no slot-index embedding -- slots are per-episode
+# k-means cluster ids with no stable cross-bag identity, see baseline.py
+# StructuredPopulationMetaClassifier.__init__), pools them (independent
+# bottleneck + residual-mean projection, own weights) into one typed bag
+# embedding per bag, and feeds every context bag directly to a second
+# RidgeResidualMetaClassifier that preserves bag identity end-to-end (no
+# label-based class-memory collapse). Added as a small-initialized residual
+# beside the existing global branch; the old class-memory path
+# (project_structured_tokens: true, inherited from v24-B1 below) is kept
+# unchanged for ablation.
+model_overrides:
+  typed_bag_preserving_branch: true
+  typed_bag_bottleneck_dim: 64
+
+data_overrides:
+  episode_batch_size: 8
+  dataset_kwargs:
+    shape_group_size: 8
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v25_medium_typed_bag
+
+trainer:
+  max_epochs: 50

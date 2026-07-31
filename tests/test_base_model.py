@@ -659,6 +659,96 @@ class StructuredPopulationMetaClassifierTest(unittest.TestCase):
         proj = classifier._projected_bag_tokens(dummy_tokens)
         self.assertEqual(tuple(proj.shape), (2, 5, 8))
 
+    def _make_typed_bag_classifier(
+        self, bottleneck_dim: int | None = None
+    ) -> StructuredPopulationMetaClassifier:
+        return StructuredPopulationMetaClassifier(
+            token_dim=8,
+            hidden_dim=16,
+            num_heads=4,
+            num_set_layers=1,
+            relation_hidden_dim=16,
+            ridge_dim=4,
+            structured_tokens_per_bag=16,
+            typed_bag_preserving_branch=True,
+            typed_bag_num_slots=4,
+            typed_bag_num_tail_fractions=3,
+            typed_bag_bottleneck_dim=bottleneck_dim,
+        ).eval()
+
+    def test_typed_bag_token_identity_ids_match_layout(self) -> None:
+        # index 0 = global; 1-12 = 4 slots x (center, spread, rare); 13-15 = tails.
+        classifier = self._make_typed_bag_classifier()
+        self.assertEqual(
+            classifier.typed_bag_token_type_ids.tolist(),
+            [0] + [1, 2, 3] * 4 + [4, 4, 4],
+        )
+        self.assertEqual(
+            classifier.typed_bag_tail_fraction_ids.tolist(),
+            [0] + [0] * 12 + [1, 2, 3],
+        )
+        self.assertFalse(hasattr(classifier, "typed_bag_slot_index_ids"))
+        self.assertFalse(hasattr(classifier, "typed_bag_slot_index_embedding"))
+
+    def test_typed_bag_tokens_add_identity_embeddings(self) -> None:
+        classifier = self._make_typed_bag_classifier()
+        tokens = classifier._all_structured_tokens(self.query)
+        typed_tokens = tokens + classifier.typed_bag_token_type_embedding(
+            classifier.typed_bag_token_type_ids
+        ) + classifier.typed_bag_tail_fraction_embedding(
+            classifier.typed_bag_tail_fraction_ids
+        )
+        expected = classifier.typed_bag_token_projection(
+            torch.cat([typed_tokens.reshape(3, -1), typed_tokens.mean(dim=-2)], dim=-1)
+        )
+        actual = classifier._typed_bag_tokens(tokens)
+        self.assertEqual(actual.shape, (3, 8))
+        torch.testing.assert_close(actual, expected)
+
+    def test_typed_bag_bottleneck_uses_per_token_bottlenecks(self) -> None:
+        classifier = self._make_typed_bag_classifier(bottleneck_dim=4)
+        self.assertEqual(len(classifier.typed_bag_token_bottlenecks), 16)
+        for layer in classifier.typed_bag_token_bottlenecks:
+            self.assertEqual(layer.in_features, 8)
+            self.assertEqual(layer.out_features, 4)
+        self.assertEqual(
+            classifier.typed_bag_token_projection.in_features, 16 * 4 + 8
+        )
+        self.assertEqual(classifier.typed_bag_token_projection.out_features, 8)
+
+    def test_typed_bag_branch_does_not_change_class_memory_path(self) -> None:
+        classifier = StructuredPopulationMetaClassifier(
+            token_dim=8,
+            hidden_dim=16,
+            num_heads=4,
+            num_set_layers=1,
+            relation_hidden_dim=16,
+            ridge_dim=4,
+            project_structured_tokens=True,
+            structured_tokens_per_bag=16,
+            typed_bag_preserving_branch=True,
+            typed_bag_num_slots=4,
+            typed_bag_num_tail_fractions=3,
+        ).eval()
+        tokens = classifier._all_structured_tokens(self.query)
+        expected = classifier.bag_token_projection(tokens.reshape(3, -1)).unsqueeze(1)
+        actual = classifier._population_tokens(self.query)
+        self.assertEqual(actual.shape, (3, 1, 8))
+        torch.testing.assert_close(actual, expected)
+
+    def test_typed_bag_preserving_branch_requires_slot_and_tail_counts(self) -> None:
+        with self.assertRaisesRegex(ValueError, "typed_bag_num_slots"):
+            StructuredPopulationMetaClassifier(
+                token_dim=8,
+                hidden_dim=16,
+                num_heads=4,
+                num_set_layers=1,
+                relation_hidden_dim=16,
+                ridge_dim=4,
+                structured_tokens_per_bag=16,
+                typed_bag_preserving_branch=True,
+            )
+
     def test_simultaneous_slot_permutation_does_not_change_logits(self) -> None:
         expected = self.classifier(
             self.context, self.labels, self.query, self.query_instances
@@ -995,6 +1085,73 @@ class BaseModelTest(unittest.TestCase):
         ]
         self.assertTrue(gradients)
         self.assertTrue(all(torch.isfinite(value).all() for value in gradients))
+
+    def test_typed_bag_preserving_model_is_v25_and_runs_end_to_end(self) -> None:
+        model = BaseModel(
+            input_dim=8,
+            meta_hidden_dim=16,
+            meta_num_heads=4,
+            meta_num_set_layers=1,
+            meta_relation_hidden_dim=16,
+            aggregator_num_slots=4,
+            aggregator_num_density_slots=3,
+            project_structured_tokens=True,
+            projection_bottleneck_dim=4,
+            projection_residual_mean=True,
+            typed_bag_preserving_branch=True,
+            typed_bag_bottleneck_dim=4,
+            num_classes=2,
+        ).train()
+        logits, auxiliary = model(
+            self.x, self.y, self.mask_index, return_auxiliary=True
+        )
+        self.assertEqual(model.architecture_version, 25)
+        self.assertEqual(model._architecture_version.item(), 25)
+        self.assertEqual(logits.shape, (2, 2))
+        # Small-initialized residual: at init the typed-bag branch should
+        # contribute far less than the established global/population paths.
+        self.assertLess(
+            auxiliary["typed_bag_residual_scale"].item(), 0.05
+        )
+        F.cross_entropy(logits, self.y[self.mask_index]).backward()
+        gradients = [
+            parameter.grad
+            for parameter in model.parameters()
+            if parameter.grad is not None
+        ]
+        self.assertTrue(gradients)
+        self.assertTrue(all(torch.isfinite(value).all() for value in gradients))
+        typed_bag_grad_params = [
+            model.meta_classifier.typed_bag_token_type_embedding.weight,
+            model.meta_classifier.typed_bag_tail_fraction_embedding.weight,
+            model.meta_classifier.typed_bag_token_projection.weight,
+        ]
+        self.assertTrue(
+            all(parameter.grad is not None for parameter in typed_bag_grad_params)
+        )
+        self.assertTrue(
+            all(
+                torch.isfinite(parameter.grad).all()
+                for parameter in typed_bag_grad_params
+            )
+        )
+
+    def test_typed_bag_preserving_branch_defaults_off_and_stays_v24(self) -> None:
+        model = BaseModel(
+            input_dim=8,
+            meta_hidden_dim=16,
+            meta_num_heads=4,
+            meta_num_set_layers=1,
+            meta_relation_hidden_dim=16,
+            aggregator_num_slots=4,
+            aggregator_num_density_slots=3,
+            project_structured_tokens=True,
+            projection_bottleneck_dim=4,
+            projection_residual_mean=True,
+            num_classes=2,
+        ).eval()
+        self.assertEqual(model.architecture_version, 24)
+        self.assertFalse(hasattr(model.meta_classifier, "typed_bag_classifier"))
 
     def test_final_logits_are_invariant_to_per_bag_shift(self) -> None:
         shift = torch.randn(self.x.shape[0], 1, self.x.shape[-1])

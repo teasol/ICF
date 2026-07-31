@@ -1696,6 +1696,11 @@ class StructuredPopulationMetaClassifier(nn.Module):
         structured_tokens_per_bag: int | None = None,
         projection_bottleneck_dim: int | None = None,
         projection_residual_mean: bool = False,
+        typed_bag_preserving_branch: bool = False,
+        typed_bag_bottleneck_dim: int | None = None,
+        typed_bag_num_slots: int | None = None,
+        typed_bag_num_tail_fractions: int | None = None,
+        typed_bag_residual_scale: float = 0.02,
         num_classes: int = 2,
     ) -> None:
         super().__init__()
@@ -1726,6 +1731,8 @@ class StructuredPopulationMetaClassifier(nn.Module):
             raise ValueError("covariance_ridge_logit_scale must be positive.")
         if not 0 < covariance_residual_scale < 1:
             raise ValueError("covariance_residual_scale must be in (0, 1).")
+        if not 0 < typed_bag_residual_scale < 1:
+            raise ValueError("typed_bag_residual_scale must be in (0, 1).")
         self.token_dim = int(token_dim)
         self.hidden_dim = int(hidden_dim)
         self.num_classes = int(num_classes)
@@ -1780,6 +1787,87 @@ class StructuredPopulationMetaClassifier(nn.Module):
                     in_dim,
                     self.token_dim,
                 )
+        self.typed_bag_preserving_branch = bool(typed_bag_preserving_branch)
+        if self.typed_bag_preserving_branch:
+            if self.structured_tokens_per_bag is None or self.structured_tokens_per_bag < 1:
+                raise ValueError(
+                    "typed_bag_preserving_branch requires structured_tokens_per_bag >= 1."
+                )
+            if typed_bag_num_slots is None or typed_bag_num_tail_fractions is None:
+                raise ValueError(
+                    "typed_bag_preserving_branch requires typed_bag_num_slots and "
+                    "typed_bag_num_tail_fractions."
+                )
+            num_slots = int(typed_bag_num_slots)
+            num_tails = int(typed_bag_num_tail_fractions)
+            if 1 + 3 * num_slots + num_tails != self.structured_tokens_per_bag:
+                raise ValueError(
+                    "typed_bag_num_slots/typed_bag_num_tail_fractions do not match "
+                    "structured_tokens_per_bag."
+                )
+            # T5-A (typed, bag-preserving structured context branch): fixed
+            # token layout is [global] + [slot_0 center/spread/rare, ...,
+            # slot_{num_slots-1} center/spread/rare] + [tail_0, ..., tail_{k-1}]
+            # (see StructuredEpisodePopulationAggregator.forward and
+            # _all_structured_tokens). token_type: 0=global, 1=center,
+            # 2=spread, 3=rare, 4=tail. tail_fraction sentinel = 0 for tokens
+            # without a tail fraction (tail tokens use 1-indexed position).
+            #
+            # Deliberately NOT embedding slot index (unlike the T5-A design
+            # doc's original proposal): slots come from per-episode
+            # spherical k-means over context cells
+            # (_context_spherical_kmeans_anchors), so slot index is an
+            # arbitrary/exchangeable cluster id with no stable meaning across
+            # bags or episodes -- a global embedding keyed on it has no
+            # consistent target to learn (unlike token_type/tail_fraction,
+            # which name a fixed role/threshold every bag shares). v24's
+            # per-position bottleneck Linears already differentiate the 40
+            # positions more expressively than an additive slot-index
+            # embedding could, so nothing is lost by leaving it out.
+            token_type_ids = [0]
+            tail_fraction_ids = [0]
+            for _slot in range(num_slots):
+                token_type_ids.extend((1, 2, 3))
+                tail_fraction_ids.extend((0, 0, 0))
+            for tail in range(num_tails):
+                token_type_ids.append(4)
+                tail_fraction_ids.append(tail + 1)
+            self.register_buffer(
+                "typed_bag_token_type_ids",
+                torch.tensor(token_type_ids, dtype=torch.long),
+                persistent=False,
+            )
+            self.register_buffer(
+                "typed_bag_tail_fraction_ids",
+                torch.tensor(tail_fraction_ids, dtype=torch.long),
+                persistent=False,
+            )
+            self.typed_bag_token_type_embedding = nn.Embedding(5, self.token_dim)
+            self.typed_bag_tail_fraction_embedding = nn.Embedding(
+                num_tails + 1, self.token_dim
+            )
+            self.typed_bag_bottleneck_dim = (
+                None
+                if typed_bag_bottleneck_dim is None
+                else int(typed_bag_bottleneck_dim)
+            )
+            if self.typed_bag_bottleneck_dim is None:
+                in_dim = self.structured_tokens_per_bag * self.token_dim + self.token_dim
+                self.typed_bag_token_projection = nn.Linear(in_dim, self.token_dim)
+            else:
+                if self.typed_bag_bottleneck_dim < 1:
+                    raise ValueError("typed_bag_bottleneck_dim must be positive.")
+                self.typed_bag_token_bottlenecks = nn.ModuleList(
+                    [
+                        nn.Linear(self.token_dim, self.typed_bag_bottleneck_dim)
+                        for _ in range(self.structured_tokens_per_bag)
+                    ]
+                )
+                in_dim = (
+                    self.structured_tokens_per_bag * self.typed_bag_bottleneck_dim
+                    + self.token_dim
+                )
+                self.typed_bag_token_projection = nn.Linear(in_dim, self.token_dim)
         relation_config = dict(covariance_relation or {})
         self.covariance_relation_enabled = bool(relation_config.get("enabled", False))
         self.covariance_relation_mode = str(
@@ -1868,6 +1956,23 @@ class StructuredPopulationMetaClassifier(nn.Module):
             attention_residual_scale=attention_residual_scale,
             num_classes=num_classes,
         )
+        if self.typed_bag_preserving_branch:
+            self.typed_bag_classifier = RidgeResidualMetaClassifier(
+                token_dim=token_dim,
+                hidden_dim=hidden_dim,
+                num_heads=num_heads,
+                num_set_layers=num_set_layers,
+                relation_hidden_dim=relation_hidden_dim,
+                ridge_dim=ridge_dim,
+                ridge_lambda=ridge_lambda,
+                ridge_logit_scale=ridge_logit_scale,
+                attention_residual_scale=attention_residual_scale,
+                num_classes=num_classes,
+            )
+            typed_bag_logit = math.log(
+                typed_bag_residual_scale / (1.0 - typed_bag_residual_scale)
+            )
+            self.typed_bag_residual_logit = nn.Parameter(torch.tensor(typed_bag_logit))
         self.abundance_ridge_log_lambda = nn.Parameter(
             torch.tensor(math.log(ridge_lambda))
         )
@@ -2424,6 +2529,43 @@ class StructuredPopulationMetaClassifier(nn.Module):
             flat = torch.cat([flat, mean_token], dim=-1)
         return self.bag_token_projection(flat)
 
+    def _typed_bag_tokens(self, tokens: torch.Tensor) -> torch.Tensor:
+        """T5-A typed, bag-preserving branch: add learned token-type and
+        tail-fraction identity embeddings to a bag's structured tokens, then
+        reduce to one embedding per bag with an independent copy of the
+        v24-B1 bottleneck + residual-mean projection. Unlike
+        `_projected_bag_tokens`, this feeds a separate `typed_bag_classifier`
+        and never replaces the tokens consumed by
+        `_class_memories`/`_population_tokens`. No slot-index embedding is
+        added: slots are per-episode k-means cluster ids with no stable
+        cross-bag identity (see the constructor comment).
+        """
+        if tokens.shape[-2] != self.structured_tokens_per_bag:
+            raise ValueError(
+                "Structured token count does not match typed bag projection "
+                f"input: expected {self.structured_tokens_per_bag}, got "
+                f"{tokens.shape[-2]}."
+            )
+        typed_tokens = (
+            tokens
+            + self.typed_bag_token_type_embedding(self.typed_bag_token_type_ids)
+            + self.typed_bag_tail_fraction_embedding(self.typed_bag_tail_fraction_ids)
+        )
+        mean_token = typed_tokens.mean(dim=-2)
+        if self.typed_bag_bottleneck_dim is None:
+            flat = typed_tokens.reshape(*typed_tokens.shape[:-2], -1)
+        else:
+            compressed = torch.stack(
+                [
+                    self.typed_bag_token_bottlenecks[index](typed_tokens[..., index, :])
+                    for index in range(self.structured_tokens_per_bag)
+                ],
+                dim=-2,
+            )
+            flat = compressed.reshape(*compressed.shape[:-2], -1)
+        flat = torch.cat([flat, mean_token], dim=-1)
+        return self.typed_bag_token_projection(flat)
+
     def _population_tokens(
         self, representation: dict[str, torch.Tensor]
     ) -> torch.Tensor:
@@ -2957,6 +3099,40 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 return_auxiliary=True,
             )
         )
+        if self.typed_bag_preserving_branch:
+            context_typed_bag_tokens = self._typed_bag_tokens(
+                torch.cat(
+                    (
+                        context["global_summary"].unsqueeze(2),
+                        context["slots"].reshape(
+                            *context["slots"].shape[:2], -1, self.token_dim
+                        ),
+                        context["tails"],
+                    ),
+                    dim=2,
+                )
+            )
+            query_typed_bag_tokens = self._typed_bag_tokens(
+                torch.cat(
+                    (
+                        query["global_summary"].unsqueeze(2),
+                        query["slots"].reshape(
+                            *query["slots"].shape[:2], -1, self.token_dim
+                        ),
+                        query["tails"],
+                    ),
+                    dim=2,
+                )
+            )
+            typed_bag_logits, typed_bag_auxiliary = (
+                self.typed_bag_classifier.forward_batched(
+                    context_typed_bag_tokens,
+                    context_labels,
+                    query_typed_bag_tokens,
+                    return_auxiliary=True,
+                )
+            )
+            typed_bag_residual_scale = torch.sigmoid(self.typed_bag_residual_logit)
         class_memories = self._class_memories_batched(context, context_labels)
         population_attention_logits, population_weights = (
             self._population_memory_logits_batched(query, class_memories)
@@ -3055,6 +3231,8 @@ class StructuredPopulationMetaClassifier(nn.Module):
             logits = logits + (
                 self.covariance_relation_residual_scale * covariance_relation_logits
             )
+        if self.typed_bag_preserving_branch:
+            logits = logits + typed_bag_residual_scale * typed_bag_logits
         if not return_auxiliary:
             return logits
         episodes = context_labels.shape[0]
@@ -3094,6 +3272,16 @@ class StructuredPopulationMetaClassifier(nn.Module):
             "population_residual_scale": population_scale.expand(episodes),
             "tail_residual_scale": tail_scale.expand(episodes),
             "fusion_residual_scale": fusion_scale.expand(episodes),
+            **(
+                {
+                    "typed_bag_logits": typed_bag_logits,
+                    "typed_bag_residual_scale": typed_bag_residual_scale.expand(
+                        episodes
+                    ),
+                }
+                if self.typed_bag_preserving_branch
+                else {}
+            ),
         }
 
     def forward(
@@ -3136,6 +3324,20 @@ class StructuredPopulationMetaClassifier(nn.Module):
             query_global_tokens,
             return_auxiliary=True,
         )
+        if self.typed_bag_preserving_branch:
+            context_typed_bag_tokens = self._typed_bag_tokens(
+                self._all_structured_tokens(context)
+            )
+            query_typed_bag_tokens = self._typed_bag_tokens(
+                self._all_structured_tokens(query)
+            )
+            typed_bag_logits, typed_bag_auxiliary = self.typed_bag_classifier(
+                context_typed_bag_tokens,
+                context_labels,
+                query_typed_bag_tokens,
+                return_auxiliary=True,
+            )
+            typed_bag_residual_scale = torch.sigmoid(self.typed_bag_residual_logit)
         class_memories = self._class_memories(context, context_labels)
         population_attention_logits, population_weights = (
             self._population_memory_logits(query, class_memories)
@@ -3232,6 +3434,8 @@ class StructuredPopulationMetaClassifier(nn.Module):
             logits = logits + (
                 self.covariance_relation_residual_scale * covariance_relation_logits
             )
+        if self.typed_bag_preserving_branch:
+            logits = logits + typed_bag_residual_scale * typed_bag_logits
         if not return_auxiliary:
             return logits
         return logits, {
@@ -3267,6 +3471,14 @@ class StructuredPopulationMetaClassifier(nn.Module):
             "population_residual_scale": population_scale,
             "tail_residual_scale": tail_scale,
             "fusion_residual_scale": fusion_scale,
+            **(
+                {
+                    "typed_bag_logits": typed_bag_logits,
+                    "typed_bag_residual_scale": typed_bag_residual_scale,
+                }
+                if self.typed_bag_preserving_branch
+                else {}
+            ),
         }
 
 
@@ -3315,6 +3527,9 @@ class BaseModel(nn.Module):
         project_structured_tokens: bool = False,
         projection_bottleneck_dim: int | None = None,
         projection_residual_mean: bool = False,
+        typed_bag_preserving_branch: bool = False,
+        typed_bag_bottleneck_dim: int | None = None,
+        meta_typed_bag_residual_scale: float = 0.02,
         covariance_relation: dict[str, object] | None = None,
         num_classes: int = 2,
     ) -> None:
@@ -3381,10 +3596,16 @@ class BaseModel(nn.Module):
             structured_tokens_per_bag=structured_tokens_per_bag,
             projection_bottleneck_dim=projection_bottleneck_dim,
             projection_residual_mean=projection_residual_mean,
+            typed_bag_preserving_branch=typed_bag_preserving_branch,
+            typed_bag_bottleneck_dim=typed_bag_bottleneck_dim,
+            typed_bag_num_slots=aggregator_num_slots,
+            typed_bag_num_tail_fractions=len(tuple(aggregator_tail_fractions)),
+            typed_bag_residual_scale=meta_typed_bag_residual_scale,
             num_classes=self.num_classes,
         )
         self.architecture_version = (
-            24 if project_structured_tokens
+            25 if typed_bag_preserving_branch
+            else 24 if project_structured_tokens
             else 23 if mean_pool_structured_tokens
             else 22
         )

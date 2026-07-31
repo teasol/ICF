@@ -143,6 +143,31 @@ class ArchitectureCheckpointCompatibilityTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected v24, found 22"):
             interface.on_load_checkpoint(checkpoint)
 
+    def test_v25_model_rejects_v24_checkpoint(self) -> None:
+        # T5-A adds a new typed-bag-preserving branch (new embeddings + a
+        # second RidgeResidualMetaClassifier) on top of v24's state_dict, so
+        # a v24 checkpoint is missing weights v25 requires -- it must be
+        # rejected rather than partially loaded.
+        interface = ModelInterface(
+            model_src="src.models.baseline.BaseModel",
+            input_dim=8,
+            meta_hidden_dim=16,
+            meta_num_heads=4,
+            meta_num_set_layers=1,
+            meta_relation_hidden_dim=16,
+            meta_ridge_dim=4,
+            aggregator_num_slots=4,
+            aggregator_num_density_slots=3,
+            project_structured_tokens=True,
+            projection_bottleneck_dim=4,
+            projection_residual_mean=True,
+            typed_bag_preserving_branch=True,
+            typed_bag_bottleneck_dim=4,
+        )
+        checkpoint = {"state_dict": {"model._architecture_version": torch.tensor(24)}}
+        with self.assertRaisesRegex(RuntimeError, "Expected v25, found 24"):
+            interface.on_load_checkpoint(checkpoint)
+
 
 if __name__ == "__main__":
     unittest.main()
