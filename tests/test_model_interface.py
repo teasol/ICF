@@ -126,6 +126,23 @@ class ArchitectureCheckpointCompatibilityTest(unittest.TestCase):
         checkpoint = {"state_dict": {"model._architecture_version": torch.tensor(22)}}
         self.interface.on_load_checkpoint(checkpoint)
 
+    def test_v24_model_rejects_v22_checkpoint(self) -> None:
+        interface = ModelInterface(
+            model_src="src.models.baseline.BaseModel",
+            input_dim=8,
+            meta_hidden_dim=16,
+            meta_num_heads=4,
+            meta_num_set_layers=1,
+            meta_relation_hidden_dim=16,
+            meta_ridge_dim=4,
+            aggregator_num_slots=1,
+            aggregator_num_density_slots=1,
+            project_structured_tokens=True,
+        )
+        checkpoint = {"state_dict": {"model._architecture_version": torch.tensor(22)}}
+        with self.assertRaisesRegex(RuntimeError, "Expected v24, found 22"):
+            interface.on_load_checkpoint(checkpoint)
+
 
 if __name__ == "__main__":
     unittest.main()

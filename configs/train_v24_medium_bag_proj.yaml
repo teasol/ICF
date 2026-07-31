@@ -1,0 +1,27 @@
+base_config: train_v22_medium.yaml
+
+# Architecture v24: replace the exact-mean bag collapse (v23-A0) with a learned
+# linear projection.  Each bag's structured tokens -- 1 global summary + 1 slot
+# x 3 statistics (center/spread/rare) + 3 tail tokens = 7 tokens -- are
+# concatenated along the feature axis (7 * 512) and linearly projected to a
+# single 512-d token per bag.
+#
+# Slots are reduced from 12 to 1 so a bag collapses to 7 tokens before the
+# projection (v22/v23 keep 40 structured tokens).
+model_overrides:
+  project_structured_tokens: true
+  aggregator_num_slots: 1
+  aggregator_num_density_slots: 1
+
+data_overrides:
+  episode_batch_size: 8
+  dataset_kwargs:
+    shape_group_size: 8
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v24_medium_bag_proj
+
+trainer:
+  max_epochs: 20
