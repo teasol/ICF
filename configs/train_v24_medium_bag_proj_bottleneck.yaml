@@ -1,0 +1,27 @@
+base_config: train_v22_medium.yaml
+
+# Architecture v24-B0: learned bag projection with a per-token bottleneck.
+# Keeps all 12 slots -> 1 global + 36 slot statistics + 3 tails = 40 tokens.
+# Each of the 40 tokens passes through its own position-specific
+# Linear(512 -> 64), the 40 outputs are concatenated (40*64 = 2560) and
+# linearly projected to a single 512-d token per bag.
+#
+# Projection params: 40*(512*64) + 2560*512 ~= 2.62M, vs ~10.5M for a direct
+# 40*512 -> 512 concat projection, and vs v24-A0's single 7*512 -> 512 (~1.8M,
+# but with only 1 slot).
+model_overrides:
+  project_structured_tokens: true
+  projection_bottleneck_dim: 64
+
+data_overrides:
+  episode_batch_size: 8
+  dataset_kwargs:
+    shape_group_size: 8
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v24_medium_bag_proj_bottleneck
+
+trainer:
+  max_epochs: 50

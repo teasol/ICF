@@ -564,6 +564,79 @@ class StructuredPopulationMetaClassifierTest(unittest.TestCase):
         self.assertEqual(captured_shape, [(2, 8, 8)])
         self.assertEqual(memories.shape, (2, 2, 8, 16))
 
+    def test_bottleneck_projection_collapses_all_structured_tokens_per_bag(self) -> None:
+        # 4 slots -> 1 global + 4*3 slot statistics + 3 tails = 16 tokens.
+        classifier = StructuredPopulationMetaClassifier(
+            token_dim=8,
+            hidden_dim=16,
+            num_heads=4,
+            num_set_layers=1,
+            relation_hidden_dim=16,
+            ridge_dim=4,
+            project_structured_tokens=True,
+            structured_tokens_per_bag=16,
+            projection_bottleneck_dim=4,
+        ).eval()
+        tokens = classifier._all_structured_tokens(self.query)
+        compressed = torch.stack(
+            [
+                classifier.bag_token_bottlenecks[index](tokens[..., index, :])
+                for index in range(16)
+            ],
+            dim=-2,
+        )
+        expected = classifier.bag_token_projection(
+            compressed.reshape(3, -1)
+        ).unsqueeze(1)
+        actual = classifier._population_tokens(self.query)
+        self.assertEqual(actual.shape, (3, 1, 8))
+        torch.testing.assert_close(actual, expected)
+
+    def test_bottleneck_projection_preserves_one_context_item_per_bag(self) -> None:
+        classifier = StructuredPopulationMetaClassifier(
+            token_dim=8,
+            hidden_dim=16,
+            num_heads=4,
+            num_set_layers=1,
+            relation_hidden_dim=16,
+            ridge_dim=4,
+            project_structured_tokens=True,
+            structured_tokens_per_bag=16,
+            projection_bottleneck_dim=4,
+        ).eval()
+        captured_shape: list[tuple[int, ...]] = []
+
+        def capture_shape(_module, inputs):
+            captured_shape.append(tuple(inputs[0].shape))
+
+        handle = classifier.memory_input_norm.register_forward_pre_hook(capture_shape)
+        try:
+            classifier._class_memories(self.context, self.labels)
+        finally:
+            handle.remove()
+        self.assertEqual(captured_shape, [(4, 8), (4, 8)])
+
+    def test_bottleneck_projection_uses_per_token_bottlenecks(self) -> None:
+        classifier = StructuredPopulationMetaClassifier(
+            token_dim=8,
+            hidden_dim=16,
+            num_heads=4,
+            num_set_layers=1,
+            relation_hidden_dim=16,
+            ridge_dim=4,
+            project_structured_tokens=True,
+            structured_tokens_per_bag=16,
+            projection_bottleneck_dim=4,
+        ).eval()
+        self.assertEqual(len(classifier.bag_token_bottlenecks), 16)
+        for layer in classifier.bag_token_bottlenecks:
+            self.assertEqual(layer.in_features, 8)
+            self.assertEqual(layer.out_features, 4)
+        self.assertEqual(
+            classifier.bag_token_projection.in_features, 16 * 4
+        )
+        self.assertEqual(classifier.bag_token_projection.out_features, 8)
+
     def test_simultaneous_slot_permutation_does_not_change_logits(self) -> None:
         expected = self.classifier(
             self.context, self.labels, self.query, self.query_instances
@@ -848,6 +921,38 @@ class BaseModelTest(unittest.TestCase):
             aggregator_num_slots=1,
             aggregator_num_density_slots=1,
             project_structured_tokens=True,
+            num_classes=2,
+        ).train()
+        logits, auxiliary = model(
+            self.x, self.y, self.mask_index, return_auxiliary=True
+        )
+        self.assertEqual(model.architecture_version, 24)
+        self.assertEqual(model._architecture_version.item(), 24)
+        self.assertEqual(logits.shape, (2, 2))
+        self.assertEqual(auxiliary["population_slot_weights"].shape, (2, 1))
+        torch.testing.assert_close(
+            auxiliary["population_slot_weights"], torch.ones(2, 1)
+        )
+        F.cross_entropy(logits, self.y[self.mask_index]).backward()
+        gradients = [
+            parameter.grad
+            for parameter in model.parameters()
+            if parameter.grad is not None
+        ]
+        self.assertTrue(gradients)
+        self.assertTrue(all(torch.isfinite(value).all() for value in gradients))
+
+    def test_bottleneck_projection_model_is_v24_and_runs_end_to_end(self) -> None:
+        model = BaseModel(
+            input_dim=8,
+            meta_hidden_dim=16,
+            meta_num_heads=4,
+            meta_num_set_layers=1,
+            meta_relation_hidden_dim=16,
+            aggregator_num_slots=4,
+            aggregator_num_density_slots=3,
+            project_structured_tokens=True,
+            projection_bottleneck_dim=4,
             num_classes=2,
         ).train()
         logits, auxiliary = model(

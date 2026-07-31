@@ -1694,6 +1694,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
         mean_pool_structured_tokens: bool = False,
         project_structured_tokens: bool = False,
         structured_tokens_per_bag: int | None = None,
+        projection_bottleneck_dim: int | None = None,
         num_classes: int = 2,
     ) -> None:
         super().__init__()
@@ -1740,15 +1741,37 @@ class StructuredPopulationMetaClassifier(nn.Module):
         self.structured_tokens_per_bag = (
             None if structured_tokens_per_bag is None else int(structured_tokens_per_bag)
         )
+        self.projection_bottleneck_dim = (
+            None
+            if projection_bottleneck_dim is None
+            else int(projection_bottleneck_dim)
+        )
         if self.project_structured_tokens:
             if self.structured_tokens_per_bag is None or self.structured_tokens_per_bag < 1:
                 raise ValueError(
                     "project_structured_tokens requires structured_tokens_per_bag >= 1."
                 )
-            self.bag_token_projection = nn.Linear(
-                self.structured_tokens_per_bag * self.token_dim,
-                self.token_dim,
-            )
+            if self.projection_bottleneck_dim is None:
+                self.bag_token_projection = nn.Linear(
+                    self.structured_tokens_per_bag * self.token_dim,
+                    self.token_dim,
+                )
+            else:
+                if self.projection_bottleneck_dim < 1:
+                    raise ValueError("projection_bottleneck_dim must be positive.")
+                # v24-B0: one position-specific Linear(token_dim -> bottleneck)
+                # per structured token, then one Linear(tokens * bottleneck ->
+                # token_dim). Keeps all slots while shrinking the 40*512 input.
+                self.bag_token_bottlenecks = nn.ModuleList(
+                    [
+                        nn.Linear(self.token_dim, self.projection_bottleneck_dim)
+                        for _ in range(self.structured_tokens_per_bag)
+                    ]
+                )
+                self.bag_token_projection = nn.Linear(
+                    self.structured_tokens_per_bag * self.projection_bottleneck_dim,
+                    self.token_dim,
+                )
         relation_config = dict(covariance_relation or {})
         self.covariance_relation_enabled = bool(relation_config.get("enabled", False))
         self.covariance_relation_mode = str(
@@ -2363,15 +2386,28 @@ class StructuredPopulationMetaClassifier(nn.Module):
     def _projected_bag_tokens(self, tokens: torch.Tensor) -> torch.Tensor:
         """Reduce each bag's stacked structured tokens to one projected token.
 
-        Concatenates the per-bag structured tokens along the feature axis
-        (`num_tokens * token_dim`) and applies the learned linear projection.
+        v24-A0 concatenates the per-bag structured tokens along the feature axis
+        (`num_tokens * token_dim`) and applies one learned linear projection.
+        v24-B0 first applies a position-specific Linear(token_dim -> bottleneck)
+        to every token, then concatenates (`num_tokens * bottleneck`) and applies
+        the projection to 512.
         """
         if tokens.shape[-2] != self.structured_tokens_per_bag:
             raise ValueError(
-                "Structured token count does not match bag_token_projection input: "
+                "Structured token count does not match bag projection input: "
                 f"expected {self.structured_tokens_per_bag}, got {tokens.shape[-2]}."
             )
-        flat = tokens.reshape(*tokens.shape[:-2], -1)
+        if self.projection_bottleneck_dim is None:
+            flat = tokens.reshape(*tokens.shape[:-2], -1)
+            return self.bag_token_projection(flat)
+        compressed = torch.stack(
+            [
+                self.bag_token_bottlenecks[index](tokens[..., index, :])
+                for index in range(self.structured_tokens_per_bag)
+            ],
+            dim=-2,
+        )
+        flat = compressed.reshape(*compressed.shape[:-2], -1)
         return self.bag_token_projection(flat)
 
     def _population_tokens(
@@ -3263,6 +3299,7 @@ class BaseModel(nn.Module):
         meta_covariance_residual_scale: float = 0.25,
         mean_pool_structured_tokens: bool = False,
         project_structured_tokens: bool = False,
+        projection_bottleneck_dim: int | None = None,
         covariance_relation: dict[str, object] | None = None,
         num_classes: int = 2,
     ) -> None:
@@ -3327,6 +3364,7 @@ class BaseModel(nn.Module):
             mean_pool_structured_tokens=mean_pool_structured_tokens,
             project_structured_tokens=project_structured_tokens,
             structured_tokens_per_bag=structured_tokens_per_bag,
+            projection_bottleneck_dim=projection_bottleneck_dim,
             num_classes=self.num_classes,
         )
         self.architecture_version = (
