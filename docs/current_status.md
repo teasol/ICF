@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-31 15:38:49 KST`
-**Latest experiment state**: Medium plateau 뒤 architecture attribution 시작. 첫 최소 ablation은 각 bag의 40 structured token을 exact mean 1개로 압축하고 bag 단위를 유지하는 v23-A0. 구현·테스트 후 원래 Medium context 분포로 신규 학습 예정. ICI 잠금 유지.
+**Last updated**: `2026-07-31 15:56:50 KST`
+**Latest experiment state**: v23-A0 exact bag-mean Medium scratch 20-epoch 학습 실행 중. PID `2564701`, run `20260731_155635`; 초기 sanity check와 GPU training 진입 확인. ICI 잠금 유지.
 **Branches**: `codex/v23-bag-mean` = v23-A0 실험 / `main` = `v22` 기준선 / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: 기본 `22`; `mean_pool_structured_tokens: true`이면 checkpoint version `23`
@@ -27,7 +27,7 @@
 | ✅ **T4 context 병목 확인** | context 10→20→40→80→160에서 AUROC 0.5084→0.5193→0.5312→0.5505→0.5737로 단조 증가 |
 
 **다음 할 일 — v23-A0 bag-mean attribution**
-1. `configs/train_v23_medium_bag_mean.yaml`로 scratch Medium 학습.
+1. `configs/train_v23_medium_bag_mean.yaml` scratch Medium 학습 완료 및 best CE 확인.
 2. 동일 1,000 pool-400 episode, context 40/80/160/300에서 v22와 paired 비교.
 3. overall `+0.03` 또는 target task `+0.05`가 없으면 mean pooling은 폐기하고 typed bag encoder(T5-A)로 이동.
 4. **ICI는 개선 후보가 합성 Medium+Hard에서 확정될 때까지 계속 잠금.**
@@ -35,6 +35,14 @@
 구현 검증: exact mean, unbatched/batched bag-count preservation,
 v22/v23 checkpoint version 분리, end-to-end backward를 포함한 전체 unittest
 **123개 통과** (`696.503s`).
+
+실행:
+- PID: `2564701`
+- log: `logs/20260731_155635/v23_medium_bag_mean.out`
+- launcher: `logs/20260731_155635/v23_medium_bag_mean_launcher.out`
+- checkpoints: `checkpoints/20260731_155635/v23_medium_bag_mean/`
+- 시작 확인: CUDA device 0 사용, v23 model 6.6M parameters, sanity validation
+  2/2 통과 후 epoch 0 training 진입.
 
 **작업 규칙 4가지**
 - 평가는 `--val-episodes 1000`, 비교는 `scripts/compare_predictions.py` (paired cluster bootstrap).

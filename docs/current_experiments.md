@@ -1,6 +1,6 @@
 # Current experiments
 
-**Last updated**: `2026-07-31 15:38:49 KST`
+**Last updated**: `2026-07-31 15:56:50 KST`
 **Architecture Version**: v22 baseline / v23-A0 bag-mean ablation
 
 이 문서는 v22 기준 실험 프로토콜과 실행 명령어를 설명합니다. v21 retrieval 시대의 실험 기록은 [`history/v21_retrieval_experiments.md`](history/v21_retrieval_experiments.md)로 이관되었습니다.
@@ -23,6 +23,10 @@
 - 판정: 1,000 pool-400 episode의 context 40/80/160/300 paired 비교에서
   overall `+0.03` 또는 target task `+0.05`.
 - 구현 검증: 전체 unittest 123개 통과 (`696.503s`).
+- 실행 중: PID `2564701`, log
+  `logs/20260731_155635/v23_medium_bag_mean.out`, checkpoints
+  `checkpoints/20260731_155635/v23_medium_bag_mean/`. CUDA 0 및 epoch 0
+  진입 확인.
 
 > [!CAUTION]
 > **v22는 기존 체크포인트를 전부 무효화합니다.** retrieval 계층 제거로 `architecture_version`이 22로 올라갔고, `ModelInterface.on_load_checkpoint`가 v21 이하 체크포인트를 거부합니다. 아래 모든 실험은 **처음부터 다시** 돌려야 합니다.
