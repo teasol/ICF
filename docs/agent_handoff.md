@@ -15,9 +15,9 @@
 > 2. 접속한 AI Coding Agent는 세션 간 맥락 단절을 방지하기 위해 **`docs/` 최상위 루트의 Living `.md` 파일 5개만 최우선으로 즉시 정독**합니다.
 > 3. Living 문서 정독 직후, **반드시 Git 상태 및 최신 커밋 내역/Diff를 확인**하여 이전 세션의 정밀 코드 변경점과 작업 히스토리를 파악합니다:
 >    ```bash
->    git status
->    git log -n 5 --stat
->    git diff HEAD~1 HEAD
+>    timeout 3s git status -uno
+>    timeout 3s git log -n 5 --stat
+>    timeout 3s git diff HEAD~1 HEAD
 >    ```
 > 4. Living 문서 5개와 Git commit log/diff를 종합하여 v22 baseline과 활성 v23-A0/v24-A0/v24-B0 실험, 코드 수정 내역, 완료된 실험 수치, 미결 과제 및 다음 Action Plan을 100% 동일한 맥락으로 완벽히 이어받아야 합니다.
 
