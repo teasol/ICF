@@ -212,7 +212,9 @@ Medium에서도 같은 context 분포를 시험하는 파생 config `configs/tra
 
 Medium 원본 checkpoint의 1,000-episode curve는 context 40/80/160/300에서 AUROC `0.6757/0.7204/0.7654/0.7989`, log loss `0.6456/0.6100/0.5817/0.5639`입니다. 즉 현재 모델 자체가 많은 labeled context를 활용해 300에서 약 0.80까지 올라갑니다.
 
-초기 mixed-context fine-tuning은 epoch 19까지 완료됐고 best epoch 14 CE `0.5953`도 원본 `0.5946`을 넘지 못했습니다. 사용자 요청에 따라 이 시점에서 결론 내리지 않고 `max_epochs=100`으로 확장했습니다. Epoch 19 `last.ckpt`에서 optimizer/scheduler 상태까지 복원하여 PID `2544289`로 epoch 20~99를 실행 중입니다. 중간 epoch-14 context 평가와 oracle 진단은 중단했으며, 최종 best checkpoint에 동일 평가를 적용합니다.
+초기 mixed-context fine-tuning은 epoch 19까지 완료됐고 best epoch 14 CE `0.5953`도 원본 `0.5946`을 넘지 못했습니다. 100 epochs로 확장했지만 train/validation이 함께 plateau하여 epoch 31에서 중단했습니다. Epoch 31 CE `0.5947`도 공식 `0.5946`과 동률입니다.
+
+다음 단계는 [`architecture_v23_candidates.md`](architecture_v23_candidates.md)의 T5-A입니다. 기존 40-token bag aggregator는 먼저 유지하고, structured token에 type/slot/tail identity를 추가해 bag 단위 embedding을 만든 뒤 fixed 8-token class memory 대신 labelled context bag 전체에 direct ridge/cross-attention을 적용합니다. 이 후보가 실패할 때만 anchor-independent multi-resolution distribution sketch(T5-B)로 bag 내부 압축을 변경합니다.
 
 ### Stage 3: ICI 실데이터 — 최종 테스트 (후보 확정 후 1회)
 
