@@ -1,7 +1,7 @@
 # Agent handoff guide
 
-**Last updated**: `2026-07-31 20:25:00 KST`
-**Architecture Version**: v22 baseline; v23-A0(`mean_pool_structured_tokens: true`), v24-A0(`project_structured_tokens: true`), v24-B0(+ `projection_bottleneck_dim: 64`)
+**Last updated**: `2026-08-01 00:49:00 KST`
+**Architecture Version**: v22 baseline; v23-A0(`mean_pool_structured_tokens: true`), v24-A0(`project_structured_tokens: true`), v24-B0(`+ projection_bottleneck_dim: 64`), v24-B1(`+ projection_residual_mean: true`)
 
 이 문서는 BagPFN 저장소를 처음 맡은 coding agent가 안전하게 작업을 시작하기 위한 운영 및 핸드오프 지침입니다. 최신 개발 및 실험 진행 상황은 [`current_status.md`](current_status.md), 현재 모델 명세는 [`current_architecture.md`](current_architecture.md), 현재 실험 프로토콜은 [`current_experiments.md`](current_experiments.md)를 참고합니다.
 
