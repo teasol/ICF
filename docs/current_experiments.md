@@ -204,7 +204,9 @@ Context-size curve는 Hard best checkpoint, 동일 query, nested balanced contex
 
 구현 config는 `configs/train_v22_hard_context300.yaml`입니다. Training context 중심 `[40, 80, 120, 160, 180, 240, 300]`을 균등 선택하고 각 중심에 정수 `±5` jitter를 적용합니다. Query는 기존처럼 5~12개이며, dataset이 context+query 총 bag 수를 만들고 model interface가 실제 query 제거 후 context 범위 계약을 강제합니다. 최대 총 bag 수는 317입니다. 이 sampling은 train split에만 적용되며 validation/test 분포는 바뀌지 않습니다.
 
-Batch 2/accumulation 4는 유지하되, 대형 online generation과 다음 batch prefetch가 겹칠 때 순간 allocator OOM 경고가 확인되어 whole-batch `cuda_prefetch`는 끕니다. Prefetch-off 최대 경계 `(2, 317, 1500, 512)`, context 305의 generation+forward/backward 전체 peak는 74.5GB로 통과했습니다. Episode batch 내부 2-way CUDA generation은 유지되며 logger는 외부 인증이 필요 없는 local CSV를 사용합니다.
+Batch 2/accumulation 4는 유지하되, 대형 online generation의 transient buffer 중첩을 피하기 위해 whole-batch `cuda_prefetch`와 batch 내부 parallel CUDA generation을 모두 끕니다. 두 episode는 순차 생성 후 stack되므로 실제 forward/backward와 gradient 평균은 여전히 batch 2입니다. 최대 경계 `(2, 317, 1500, 512)`, context 305의 generation+forward/backward smoke는 74.5GB로 통과했습니다. Logger는 외부 인증이 필요 없는 local CSV를 사용합니다.
+
+Hard best epoch 44 checkpoint에서 epoch 45~49를 잇는 5-epoch 신호 확인 fine-tuning을 PID `2521372`로 실행 중입니다. 로그는 `logs/20260731_context300_ft/v22_hard_context300_ft_serial.out`, checkpoint 디렉터리는 `checkpoints/20260731_context300_ft/v22_hard_context300_ft_serial/`입니다.
 
 ### Stage 3: ICI 실데이터 — 최종 테스트 (후보 확정 후 1회)
 
