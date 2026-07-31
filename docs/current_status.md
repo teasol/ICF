@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
 **Last updated**: `2026-07-31 10:55:00 KST`
-**Latest experiment state**: Hard matched 대조 및 Medium baseline context curve 완료. Medium mixed-context fine-tuning epoch 16 진행 중(PID `2533126`). ICI 잠금 유지.
+**Latest experiment state**: Medium mixed-context fine-tuning 완료. Best epoch 14 `val_ce_loss=0.5953`; 동일 context curve 실행 중(PID `2542931`), state oracle-gap 진단 예약(PID `2543210`). ICI 잠금 유지.
 **Branches**: `main` = `v22` (기본, 최신) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
@@ -586,9 +586,22 @@ Hard는 Medium과 비교해 9개 축이 동시에 바뀝니다: class separation
 
 - 재학습 전 모델도 context 40→300에서 `+0.1232` 상승해 context 활용 능력이 분명하다. 다만 300에서도 overall 0.80이며, state task의 비현실적 oracle-mask 0.9013과는 직접 같은 지표가 아니므로 혼동하지 않는다.
 - Baseline 평가 로그: `logs/20260731_medium_context_baseline_eval/context_curve.out`; summary: `logs/v22_medium_baseline_pool400_curve_1000ep.csv`.
-- Mixed-context fine-tuning은 PID `2533126`, 현재 epoch 16 진행 중. Epoch 14/15 val CE는 `0.5953/0.5970`으로 원본 best `0.5946`을 아직 넘지 못했다.
+- Mixed-context fine-tuning 완료:
+
+| Epoch | val CE | val AUROC (104 episodes, 참고용) |
+|---:|---:|---:|
+| **14** | **0.5953** | 0.7340 |
+| 15 | 0.5970 | 0.7371 |
+| 16 | 0.5961 | 0.7387 |
+| 17 | 0.5955 | 0.7378 |
+| 18 | 0.5978 | 0.7344 |
+| 19 | 0.5953 | 0.7340 |
+
+- Best epoch 14도 원본 best CE `0.5946`을 넘지 못했다. CE 기준 개선 신호는 없다.
 - Fine-tuning 로그: `logs/20260731_medium_context300_ft/train.out`; checkpoints: `checkpoints/20260731_medium_context300_ft/v22_medium_context300_ft/`.
-- 완료 후 best fine-tuned checkpoint의 동일 curve와 `diagnose_state_upper_bound.py`를 실행한다. State oracle-mask `0.9013`/latent `1.0`은 정답 반응세포 또는 latent score를 사용하므로 달성 목표가 아니라 비현실적 참고 상한이다. 실제 성공 기준은 관측 입력만으로 context 40/80 및 overall AUROC가 개선되는지다.
+- Best epoch 14의 동일 pool-400 context 40/80/160/300 curve를 PID `2542931`로 실행 중이다. 로그: `logs/20260731_medium_context_ft_eval/context_curve.out`.
+- 위 평가 종료 후 `diagnose_state_upper_bound.py`가 대기 PID `2543210`으로 실행된다. 로그: `logs/20260731_medium_context_state_upper_bound/state_upper_bound.out`.
+- State oracle-mask `0.9013`/latent `1.0`은 정답 반응세포 또는 latent score를 사용하므로 달성 목표가 아니라 비현실적 참고 상한이다. 실제 성공 기준은 관측 입력만으로 context 40/80 및 overall AUROC가 개선되는지다.
 
 **T4-0. 재학습 없는 접근성 감사 [먼저]**
 - Hard best checkpoint로 state `model_input`/`observable`/`oracle` 상한 재측정
