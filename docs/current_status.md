@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-31 03:56:00 KST`
-**Latest experiment state**: T2 종료 커밋 `ab5e8b8`; T3-3 v22 Hard 기준선 학습 실행 중.
+**Last updated**: `2026-07-31 09:11:00 KST`
+**Latest experiment state**: T3-3 v22 Hard 기준선 학습·1,000-episode 평가 완료. 정확한 최신 커밋은 `git log` 기준으로 확인.
 **Branches**: `main` = `v22` (기본, 최신) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
@@ -23,12 +23,12 @@
 | 🎯 **진짜 약점은 `state`** | effect scale 통일 시 covariance는 composition과 동률, state만 전 구간 최하위 |
 | 📏 **val episode 1,000개 필요** | 104개는 CI 폭 0.074 + task당 ~20 episode로 판정 불가 |
 | 🛑 **Tier 2 (state) 종료** | 현재 모델 0.6217과 model-input probe 0.6196~0.6210이 동률. raw mean 관측 통계는 0.5273~0.5578 |
-| 🟡 **T3-3 Hard 기준선 실행 중** | PID 2247641, 50 epoch / 25,600 optimizer steps, `logs/20260731_035538/` |
+| ✅ **T3-3 Hard 기준선 완료** | best val CE 0.6839; AUROC 0.5483 [0.538, 0.558], 1,000 episodes |
 
-**다음 할 일**
-1. 🟡 **T3-3: v22 hard 기준선 완료 대기** — 실행 중. 완료 후 best checkpoint를 `--val-episodes 1000`으로 평가.
-2. ⬜ Medium/Hard 결과를 기준으로 생성기·문제 설정 재검토 여부 결정. 검증된 관측 descriptor 없이 새 state/covariance 구조를 추가하지 말 것.
-3. 🚫 **ICI는 건드리지 말 것** — 후보 확정 전까지 (§5).
+**다음 할 일 — 의사결정 게이트**
+1. 합성 계획 실험은 모두 완료됐습니다. 새 state/covariance 구조를 추가할 관측 근거는 없습니다.
+2. v22 Medium baseline을 최종 후보로 동결하고 ICI 1회 최종 테스트로 넘어갈지 결정해야 합니다. **ICI는 이 결정 전까지 건드리지 않습니다.**
+3. 후보를 동결하지 않는다면, 다음 구조 작업은 먼저 새로운 관측 가능 descriptor의 +0.05 이상 헤드룸을 입증해야 합니다.
 
 **작업 규칙 4가지**
 - 평가는 `--val-episodes 1000`, 비교는 `scripts/compare_predictions.py` (paired cluster bootstrap).
@@ -440,26 +440,29 @@ capture 0.155는 무작위 0.083보다 약 1.9배 낫지만, **fragmentation ent
 > (`predictions/synthetic_v22_baseline_1000ep.pt`, AUROC 0.7078 [0.696, 0.719])과
 > paired cluster bootstrap 비교할 것.
 
-### ➡ 다음 우선순위: **T3-3 v22 Hard 기준선**
+### ✅ T3-3 v22 Hard 기준선 완료 (2026-07-31)
 
-T3-1·T3-2가 판단 도구와 타깃을 정리했고, T2-1/T2-2가 사전 기준에 따라 state 구조 변경도 종료했습니다.
+- Run: `v22_hard_baseline`, 50 epoch / 25,600 optimizer steps, 정상 종료
+- Best checkpoint: `checkpoints/20260731_035538/v22_hard_baseline/epoch=044-val_ce_loss=0.6839.ckpt`
+- Best `val_ce_loss`: **0.6839** (epoch 44), v21 Phase 2 참고값 0.6845와 사실상 동일
+- 1,000-episode 평가: **AUROC 0.5483 [0.538, 0.558]**, Log Loss 0.6920, 15,373 query
+- 예측: `predictions/synthetic_v22_hard_baseline_1000ep.pt`
+- 로그: `logs/20260731_035538/v22_hard_baseline.out`
 
-- ✅ T3-1: matched effect scale에서 state가 상대적 약점임을 확인
-- ✅ T3-2: 판정 규모를 1,000 validation episodes로 확정
-- 🛑 T2: 현재 모델 0.6217 ≥ 테스트한 관측 descriptor 0.5273~0.6210 — 실행 가능한 헤드룸 없음
-- 🟡 **T3-3: v22 Hard 기준선 50 epoch 실행 중** — 남은 유일한 계획 실험
+| task | AUROC | episodes |
+|---|---:|---:|
+| combined | 0.6095 | 213 |
+| composition | 0.5614 | 204 |
+| interaction | 0.5298 | 200 |
+| state | 0.5167 | 177 |
+| covariance | 0.5103 | 206 |
 
-**실행 기록 (2026-07-31 03:55 KST)**
-- Run: `v22_hard_baseline`
-- Config: `configs/train_v22_hard_realworld.yaml`
-- 예산: 4,096 episodes/epoch ÷ batch 4 ÷ accumulation 2 = 512 optimizer steps/epoch; 50 epoch = **25,600 steps**
-- PID: `2247641`
-- 학습 로그: `logs/20260731_035538/v22_hard_baseline.out`
-- launcher 로그: `logs/20260731_035538/v22_hard_baseline_launcher.out`
-- checkpoint: `checkpoints/20260731_035538/v22_hard_baseline/`
-- 초기 검증: 프로세스 생존, CUDA 사용 확인, W&B 인증 및 trainer 시작 확인
+> [!IMPORTANT]
+> Hard regime에서는 전체도 0.55에 불과하고 state/covariance는 거의 무작위입니다. Medium에서 종료한 Tier 1/2 방향을 다시 열 관측 근거가 생긴 것은 아닙니다. v21의 `val_ce_loss`를 재현했으므로 v22 구현 이상보다는 문제 난이도 자체의 한계로 읽는 것이 타당합니다.
 
-완료 후 best checkpoint를 `scripts/evaluate_synthetic.py --val-episodes 1000`으로 평가해 v21 Hard 참고값(`val_ce_loss 0.6845`)과 분리 보고합니다.
+### ➡ 다음 우선순위: 최종 후보 동결 여부 결정
+
+사전에 계획한 Tier 1~3 합성 작업이 모두 끝났습니다. 구조 변경을 정당화할 관측 가능한 +0.05 헤드룸은 찾지 못했습니다. 다음 단계는 v22 Medium baseline을 최종 후보로 동결하고 ICI one-shot 프로토콜을 해제할지 결정하는 것입니다. ICI는 비가역적인 최종 테스트이므로 후보 동결 전에는 실행하지 않습니다.
 
 ### ~~Tier 2 — state 분기~~ — 🛑 **종료 (2026-07-31)**
 
@@ -482,8 +485,8 @@ CI 폭 104→0.074 / 400→0.035 / 1,000→0.021. task별은 1,000에서 0.045. 
 현재 104 episodes → CI 폭 0.060. Tier 1/2에서 기대하는 개선폭이 그보다 작다면 검출이 안 됩니다. `val_dataset_kwargs.episodes_per_epoch`를 늘려 CI를 좁히세요 (episode 수가 실질 표본 크기, §5).
 </details>
 
-**T3-3. Stage 2 (Hard) 기준선 — 유일하게 남은 Tier 3 항목.**
-`configs/train_v22_hard_realworld.yaml` 아직 v22로 미실행 (v21 Phase 2 참고값 `val_ce_loss 0.6845`). **Tier 2** 후보가 medium에서만 좋고 hard에서 무너지지 않는지 확인할 대조군입니다. 50 epoch 학습이 필요하므로 **Tier 2 후보가 나온 뒤에 돌리면 됩니다** (선행 조건 아님).
+**T3-3. ✅ 완료 (2026-07-31) — v22 Hard 기준선.**
+Best `val_ce_loss 0.6839`; 1,000-episode AUROC `0.5483 [0.538, 0.558]`. state 0.5167 / covariance 0.5103으로 거의 무작위이며, v21 Phase 2 CE 0.6845를 재현했습니다. 상세는 위 T3-3 완료 표 참고.
 
 ### ~~Tier 1 — 반응세포 식별 (Sparse Evidence)~~ — 🛑 **종료 (2026-07-29)**
 

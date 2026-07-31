@@ -1,6 +1,6 @@
 # Current experiments
 
-**Last updated**: `2026-07-31 03:56:00 KST`
+**Last updated**: `2026-07-31 09:11:00 KST`
 **Architecture Version**: `22` (`architecture_version = 22`)
 
 이 문서는 v22 기준 실험 프로토콜과 실행 명령어를 설명합니다. v21 retrieval 시대의 실험 기록은 [`history/v21_retrieval_experiments.md`](history/v21_retrieval_experiments.md)로 이관되었습니다.
@@ -129,10 +129,11 @@ v21의 K=24 retrieval을 제거한 근거는 [`current_status.md`](current_statu
 
 ### Stage 2: Hard 합성 사전학습
 - **Config**: `configs/train_v22_hard_realworld.yaml`
-- **🟡 v22 T3-3 실행 중 (2026-07-31 03:55 KST)**: run `v22_hard_baseline`, PID `2247641`, 50 epoch / 25,600 optimizer steps.
-- **로그**: `logs/20260731_035538/v22_hard_baseline.out`; checkpoint: `checkpoints/20260731_035538/v22_hard_baseline/`.
-- **참고 기준선 (v21 Phase 2)**: `val_ce_loss: 0.6845` @ 50 epoch.
-- 완료 후 best checkpoint를 `scripts/evaluate_synthetic.py --val-episodes 1000`으로 평가합니다.
+- **✅ v22 T3-3 완료 (2026-07-31)**: 50 epoch / 25,600 optimizer steps, best `val_ce_loss 0.6839` @ epoch 44.
+- **1,000-episode 평가**: AUROC `0.5483 [0.538, 0.558]`, Log Loss `0.6920`; state `0.5167`, covariance `0.5103`.
+- **Best checkpoint**: `checkpoints/20260731_035538/v22_hard_baseline/epoch=044-val_ce_loss=0.6839.ckpt`.
+- **예측/로그**: `predictions/synthetic_v22_hard_baseline_1000ep.pt`; `logs/20260731_035538/v22_hard_baseline.out`.
+- **v21 Phase 2 참고값**: `val_ce_loss 0.6845` — v22가 사실상 재현했습니다.
 
 ### Stage 2.5: 합성 검증 — **여기서 아키텍처를 결정합니다**
 
