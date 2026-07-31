@@ -1,11 +1,11 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-31 17:16:56 KST`
-**Status**: v23-A0 exact bag-mean Medium 50-epoch 재개 학습이 epoch 25 validation까지 완료. 현재 best epoch 21 `val_ce_loss=0.5933271`; PID `2671747` 생존. ICI 잠금 유지.
-**Read first if you are picking this up**: §9의 **“2026-07-31 세션 핸드오프”**, §3의 v23-A0 실행 기록, §6 Action Plan.
-**Branches**: `codex/v23-bag-mean` = v23-A0 실험 / `main` = `v22` 기준선 / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
+**Last updated**: `2026-07-31 18:28:00 KST`
+**Status**: v23-A0 exact bag-mean 50-epoch **학습 완료** (best epoch 43 `val_ce_loss=0.5912154`). **v24 learned bag projection 50-epoch 학습 시작** (PID `2811875`, epoch 0). v23 평가와 v24 평가 모두 대기. ICI 잠금 유지.
+**Read first if you are picking this up**: §3의 **v24-A0 bag-projection 실행 기록**, §3의 v23-A0 완료 기록, §6 Action Plan.
+**Branches**: `codex/v23-bag-mean` = v23-A0/v24-A0 실험 / `main` = `v22` 기준선 / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
-**Architecture Version**: 기본 `22`; `mean_pool_structured_tokens: true`이면 checkpoint version `23`
+**Architecture Version**: 기본 `22`; `mean_pool_structured_tokens: true`이면 `23`; `project_structured_tokens: true`이면 `24`
 **Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 해결하기 위한 Single Source of Truth (SSOT) living document.
 
 ---
@@ -75,7 +75,7 @@ v22/v23 checkpoint version 분리, end-to-end backward를 포함한 전체 unitt
 
 ## 3. 실험 현황
 
-### ⏳ v23-A0 exact bag-mean: 50-epoch 재개 중 (2026-07-31)
+### ✅ v23-A0 exact bag-mean: 50-epoch 완료 (2026-07-31)
 
 각 bag의 `1 global + 36 slot-statistic + 3 tail = 40` structured token을
 exact arithmetic mean 1개로 압축했습니다. Context와 query 모두 같은
@@ -102,24 +102,47 @@ epoch 16→19 CE가 `0.59550→0.59452→0.59369→0.59337`로 연속 개선되�
 추가 수렴 여지를 확인합니다. `last.ckpt`의 model/optimizer/scheduler/global
 step을 복원하여 총 50 epochs까지 연장했습니다.
 
-| 재개 항목 | 값 |
+| 50-epoch 재개 항목 | 값 |
 |---|---|
 | Config commit | `4d784dc` (`episode_batch_size=8`, `shape_group_size=8`, `max_epochs=50`) |
 | Resume source | `checkpoints/20260731_155635/v23_medium_bag_mean/last.ckpt` |
 | Active epoch range | epoch 20~49 (추가 30 epochs) |
-| PID | `2671747` |
+| PID | `2671747` (종료) |
+| **완료 상태** | **`max_epochs=50` 도달, 정상 종료** |
+| **50-epoch best** | **epoch 43 `val_ce_loss=0.5912154`, `val_auroc=0.7383`** |
+| Best checkpoint | `checkpoints/20260731_v23_bag_mean_50e_resume/v23_medium_bag_mean_50e/epoch=043-val_ce_loss=0.5912.ckpt` |
 | Training log | `logs/20260731_v23_bag_mean_50e_resume/v23_medium_bag_mean_50e.out` |
-| Launcher log | `logs/20260731_v23_bag_mean_50e_resume/v23_medium_bag_mean_50e_launcher.out` |
-| Checkpoints | `checkpoints/20260731_v23_bag_mean_50e_resume/v23_medium_bag_mean_50e/` |
-| Initial verification | checkpoint state 전체 복원, epoch 20에서 512 steps/epoch로 정상 시작 |
+| Metrics | `logs/v23_medium_bag_mean/version_1/metrics.csv` |
 
-v22 공식 best CE `0.5946`보다 약 `0.0012` 낮지만 사실상 작은 차이이며,
-104-episode val AUROC는 분산이 커서 승패 판정에 쓰지 않습니다. 다음
-Action은 50-epoch run의 best checkpoint를 v22 공식 checkpoint와 동일한 1,000 pool-400
-episodes, context `40/80/160/300`에서 평가하고 paired episode-cluster
-bootstrap으로 비교하는 것입니다. Overall `+0.03` 또는 target task
-`+0.05`가 없으면 exact mean은 폐기하고 typed learned bag pooling(T5-A)로
-진행합니다. ICI는 계속 잠급니다.
+50-epoch 연장으로 훈련 val CE가 `0.59337 → 0.59122`로 개선됐고
+v22 공식 best `0.5946`보다 `0.0034` 낮습니다. 104-episode val AUROC는
+분산이 커서 승패 판정에 쓰지 않습니다. **v23 50-epoch 평가(1,000 pool-400,
+context 40/80/160/300, v22 paired)는 아직 실행 전입니다** — 사용자 지시
+대기 중. ICI는 계속 잠급니다.
+
+### ⏳ v24-A0 learned bag projection: 50-epoch 학습 시작 (2026-07-31)
+
+exact mean(v23) 대신 **learned linear projection**으로 bag을 1토큰으로
+압축합니다. Slot을 12→1로 줄여 bag당 `1 global + 3 slot-statistic + 3 tail
+= 7` 토큰을 만들고, concat(`7×512=3584`) → `Linear(3584, 512)` → bag당
+512-d 1토큰을 생성합니다. 활성화 checkpoint는 `architecture_version=24`.
+
+| 항목 | 값 |
+|---|---|
+| Branch / implementation | `codex/v23-bag-mean`, commit `26b2b27` |
+| Config | `configs/train_v24_medium_bag_proj.yaml` (`project_structured_tokens: true`, slot 1 / density slot 1, `max_epochs=50`) |
+| Run | `20260731_182755`, scratch Medium 50 epochs |
+| PID | `2811875` |
+| Model size | 8.4M trainable params (v22 6.57M + bag_token_projection ≈1.8M) |
+| Training log | `logs/20260731_182755/v24_medium_bag_proj.out` |
+| Launcher log | `logs/20260731_182755/v24_medium_bag_proj_launcher.out` |
+| Checkpoints | `checkpoints/20260731_182755/v24_medium_bag_proj/` |
+| Verification | 신규 테스트 5개 포함 `test_base_model` + `test_model_interface` **76개 통과** (`553.453s`) |
+
+판정 계획: v23/v24 둘 다 1,000 pool-400 episodes, context `40/80/160/300`에서
+v22(`predictions/v22_medium_baseline_pool400_curve/`)와 paired episode-cluster
+bootstrap 비교. Overall `+0.03` 또는 target task `+0.05`가 없으면 폐기.
+ICI는 잠금 유지.
 
 ### ✅ v22 공식 기준선 (2026-07-30 갱신 — **1,000 episode 기준**)
 

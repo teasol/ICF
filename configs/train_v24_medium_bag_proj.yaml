@@ -24,4 +24,4 @@ logger:
   experiment_name: v24_medium_bag_proj
 
 trainer:
-  max_epochs: 20
+  max_epochs: 50
