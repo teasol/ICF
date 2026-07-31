@@ -14,6 +14,11 @@ data_overrides:
 trainer:
   accumulate_grad_batches: 4
 
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v22_hard_context300_ft
+
 model_kwargs:
   training_context_sizes: [40, 80, 120, 160, 180, 240, 300]
   training_context_jitter: 5
