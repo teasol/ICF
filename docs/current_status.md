@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-31 09:11:00 KST`
-**Latest experiment state**: T3-3 v22 Hard 기준선 학습·1,000-episode 평가 완료. 정확한 최신 커밋은 `git log` 기준으로 확인.
+**Last updated**: `2026-07-31 09:25:00 KST`
+**Latest experiment state**: T3-3 Hard 기준선 완료; ICI는 잠금 유지하고 Medium→Hard 성능 붕괴 attribution 단계로 전환.
 **Branches**: `main` = `v22` (기본, 최신) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
@@ -25,10 +25,11 @@
 | 🛑 **Tier 2 (state) 종료** | 현재 모델 0.6217과 model-input probe 0.6196~0.6210이 동률. raw mean 관측 통계는 0.5273~0.5578 |
 | ✅ **T3-3 Hard 기준선 완료** | best val CE 0.6839; AUROC 0.5483 [0.538, 0.558], 1,000 episodes |
 
-**다음 할 일 — 의사결정 게이트**
-1. 합성 계획 실험은 모두 완료됐습니다. 새 state/covariance 구조를 추가할 관측 근거는 없습니다.
-2. v22 Medium baseline을 최종 후보로 동결하고 ICI 1회 최종 테스트로 넘어갈지 결정해야 합니다. **ICI는 이 결정 전까지 건드리지 않습니다.**
-3. 후보를 동결하지 않는다면, 다음 구조 작업은 먼저 새로운 관측 가능 descriptor의 +0.05 이상 헤드룸을 입증해야 합니다.
+**다음 할 일 — 개선 방향 정리 및 Hard 붕괴 attribution**
+1. **재학습 없는 Hard 접근성 감사**: state/covariance의 `model_input`·`observable`·`oracle` 상한과 matched-effect 민감도를 Hard checkpoint에서 재측정.
+2. **Medium→Hard 누적 bridge ablation**: signal scarcity → nuisance → geometry/scale → optimization 순서로 한 요인군씩 바꿔 성능이 처음 무너지는 지점을 찾음.
+3. 관측 가능한 +0.05 task 헤드룸 또는 +0.03 overall 이득 근거가 생긴 요인만 구조/학습 변경 대상으로 승격.
+4. **ICI는 개선 후보가 합성 Medium+Hard에서 확정될 때까지 계속 잠금.**
 
 **작업 규칙 4가지**
 - 평가는 `--val-episodes 1000`, 비교는 `scripts/compare_predictions.py` (paired cluster bootstrap).
@@ -463,6 +464,29 @@ capture 0.155는 무작위 0.083보다 약 1.9배 낫지만, **fragmentation ent
 ### ➡ 다음 우선순위: 최종 후보 동결 여부 결정
 
 사전에 계획한 Tier 1~3 합성 작업이 모두 끝났습니다. 구조 변경을 정당화할 관측 가능한 +0.05 헤드룸은 찾지 못했습니다. 다음 단계는 v22 Medium baseline을 최종 후보로 동결하고 ICI one-shot 프로토콜을 해제할지 결정하는 것입니다. ICI는 비가역적인 최종 테스트이므로 후보 동결 전에는 실행하지 않습니다.
+
+### ➡ 다음 우선순위: T4 Medium→Hard 성능 붕괴 attribution
+
+Hard는 Medium과 비교해 9개 축이 동시에 바뀝니다: class separation `0.5~1.4→0.2~0.8`, rare fraction `2~8%→0.5~3%`, rare probability `0.15→0.25`, donor shift `0.35→0.70`, component shift `0.12→0.25`, noise `0.01→0.05`, latent dim `32→64`, cells `500~1000→500~1500`, 그리고 batch/accumulation·covariance rank가 달라집니다. 현재 결과만으로는 어느 변화가 AUROC `0.7078→0.5483` 붕괴를 만들었는지 알 수 없습니다.
+
+**T4-0. 재학습 없는 접근성 감사 [먼저]**
+- Hard best checkpoint로 state `model_input`/`observable`/`oracle` 상한 재측정
+- Hard config에서 covariance all-cell/oracle-mask 상한 재측정
+- effect scale 0.4/0.7 matched 평가로 Hard task 상대 약점이 생성기 scale 아티팩트인지 확인
+
+**T4-1. 누적 bridge ablation [T4-0 후]**
+1. **Signal scarcity**: class separation + rare fraction/probability
+2. **Nuisance**: donor shift + component shift + observation noise
+3. **Geometry/scale**: latent dim + cell/bag 범위
+4. **Optimization/model setting**: batch/accumulation + covariance rank
+
+Medium에서 시작해 위 그룹을 하나씩 Hard 값으로 바꾸고, 동일 optimizer-step 예산과 1,000-episode paired evaluation을 사용합니다. 처음 성능이 급락하는 그룹 안에서만 one-factor ablation을 합니다. 모든 조합을 탐색하지 않습니다.
+
+**판정 기준**
+- overall AUROC 차이 **+0.03 이상** 또는 target task **+0.05 이상**
+- episode cluster CI + paired bootstrap 필수
+- 관측 가능한 헤드룸이 없는 상태에서 새 architecture head 추가 금지
+- ICI는 Medium+Hard 후보 확정 전까지 실행 금지
 
 ### ~~Tier 2 — state 분기~~ — 🛑 **종료 (2026-07-31)**
 
