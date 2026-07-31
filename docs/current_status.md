@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
 **Last updated**: `2026-07-31 10:55:00 KST`
-**Latest experiment state**: T4 context-size curve 10/20/40/80/160 완료. Context 부족 병목 확인; 다음은 raw-cell 대 40-token information audit. ICI 잠금 유지.
+**Latest experiment state**: T4 context-size curve 완료 및 B200 large-context 학습 용량 확인. 다음은 40~160 context 학습 후보의 통제 실험. ICI 잠금 유지.
 **Branches**: `main` = `v22` (기본, 최신) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
@@ -27,9 +27,9 @@
 | ✅ **T4 context 병목 확인** | context 10→20→40→80→160에서 AUROC 0.5084→0.5193→0.5312→0.5505→0.5737로 단조 증가 |
 
 **다음 할 일 — 개선 방향 정리 및 Hard 붕괴 attribution**
-1. **raw-cell 대 40-token information audit**: 같은 episode/query/context에서 raw-cell observable descriptor와 현재 bag representation의 label-context 접근 가능 정보를 비교.
-2. context 증가와 bag 표현 개선을 분리한 뒤 근거가 있을 때만 token budget sweep(12/24/48 slots·tails)으로 진입.
-3. training episode/update scaling은 context·bag 표현 병목을 먼저 판정한 뒤 마지막에 수행.
+1. **large-context 학습 통제 실험**: 기존 38~95 context와 확장 40~160 context 학습을 동일 optimizer-update/학습-bag 예산에서 비교하고, 둘 다 40/80/160 context로 평가.
+2. 확장 학습이 실제 ICI 범위인 40~80에서도 개선되는지 판정. 160에서만 좋아지면 inference 표본 수 효과로 해석.
+3. 그다음 raw-cell 대 40-token information audit와 필요 시 token budget sweep(12/24/48 slots·tails)으로 진입.
 4. **ICI는 개선 후보가 합성 Medium+Hard에서 확정될 때까지 계속 잠금.**
 
 **작업 규칙 4가지**
@@ -498,6 +498,21 @@ Hard는 Medium과 비교해 9개 축이 동시에 바뀝니다: class separation
 - 실행 PID(종료): `2499444`; 로그: `logs/20260731_context_curve/context_curve.out`
 - Summary: `logs/v22_hard_context_curve_1000ep.csv`; predictions: `predictions/v22_hard_context_curve/context_{10,20,40,80,160}.pt`
 - Smoke: 2 episodes 전체 경로 성공; unit tests 3개 통과 (balanced/disjoint/nested 계약); 전체 unittest 114개 통과 (675.411초)
+
+**Large-context 학습 용량 점검 (B200 183,359 MiB)**
+- 현재 Hard 학습: `episode_batch_size=4`, `accumulate_grad_batches=2`, GPU 1장, BF16 mixed. 따라서 forward/backward당 4 episodes, optimizer update당 effective 8 episodes.
+- Episode는 50~100 bags, training query는 5~12 bags이므로 실제 학습 context 범위는 38~95 bags.
+- 현재 v22 6.57M 모델, batch 4, 1,500 cells/bag의 보수적 FP32 forward/backward 벤치:
+
+| 총 bags/episode | Peak allocated VRAM | Step time |
+|---:|---:|---:|
+| 100 | 47,043.9 MiB | 0.135 s |
+| 172 | 80,849.2 MiB | 0.213 s |
+| 220 | 103,384.9 MiB | 0.273 s |
+
+- 벤치는 bags 절반을 query로 둬 실제 training query 5~12보다 meta 경로가 더 무거운 보수적 조건이다. 따라서 `context 160 + query 최대 12 = 총 172 bags`는 현재 batch 4를 유지해도 충분한 여유가 있다.
+- 총 220 bags도 단일 model step은 통과했으므로 context 약 200까지는 유력하지만, CUDA online generation/prefetch를 포함한 end-to-end smoke 전에는 정식 상한으로 확정하지 않는다.
+- 실제 ICI context는 fold당 약 69명이므로 160-only 학습은 사용하지 않는다. 확장 범위 40~160으로 학습하고 표준 40/80 평가 성능이 개선될 때만 학습 효과로 인정한다.
 
 **T4-0. 재학습 없는 접근성 감사 [먼저]**
 - Hard best checkpoint로 state `model_input`/`observable`/`oracle` 상한 재측정
