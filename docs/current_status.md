@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-31 09:42:00 KST`
-**Latest experiment state**: T4-0 Hard state/covariance 감사 모두 관측 헤드룸 없음; matched-effect 0.4/0.7 PID `2495981` 실행 중. ICI 잠금 유지.
+**Last updated**: `2026-07-31 09:45:00 KST`
+**Latest experiment state**: T4-0 Hard state/covariance/matched-effect 감사 완료. 특정 task branch보다 bag/context/meta-learning 병목을 우선 진단; ICI 잠금 유지.
 **Branches**: `main` = `v22` (기본, 최신) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
@@ -485,7 +485,8 @@ Hard는 Medium과 비교해 9개 축이 동시에 바뀝니다: class separation
   - 완료: all-cell 최대 0.5044 [0.483, 0.525], 현재 모델 0.5103과 동률; oracle-mask covariance 최대 0.6074 [0.564, 0.652]
   - 산출물: `logs/v22_hard_covariance_upper_bound_1000ep.csv`; 로그 `logs/20260731_hard_accessibility/covariance_upper_bound.out`
 - effect scale 0.4/0.7 matched 평가로 Hard task 상대 약점이 생성기 scale 아티팩트인지 확인
-  - 실행 중: PID `2495981`, 로그 `logs/20260731_hard_accessibility/matched_effect.out`, 출력 `predictions/synthetic_v22_hard_scale{0.4,0.7}_1000ep.pt`
+  - 완료: scale 0.4 overall 0.5086 [0.500, 0.518], scale 0.7 overall 0.5282 [0.519, 0.538]; 모든 단일 task 0.498~0.531, combined만 scale 0.7에서 0.5645
+  - 산출물: `predictions/synthetic_v22_hard_scale{0.4,0.7}_1000ep.pt`; 로그 `logs/20260731_hard_accessibility/matched_effect.out`
 
 **T4-1. 누적 bridge ablation [T4-0 후]**
 1. **Signal scarcity**: class separation + rare fraction/probability
