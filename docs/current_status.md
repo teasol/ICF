@@ -1,8 +1,8 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-07-31 20:25:00 KST`
-**Status**: v23-A0(mean)/v24-A0(projection 1slot) 50-epoch **학습 완료**. **v24-B0(12-slot bottleneck projection) 50-epoch 학습 진행 중** (PID `3033073`, run `20260731_201252`, epoch 0, ~4.8 it/s). v23/v24 평가 모두 대기. ICI 잠금 유지.
-**Read first if you are picking this up**: §3의 **v24-B0 실행 기록**, §3의 v24-A0/v23-A0 완료 기록, §6 Action Plan, §9 세션 핸드오프.
+**Last updated**: `2026-07-31 21:48:00 KST`
+**Status**: v23-A0(mean)/v24-A0(proj 1slot)/v24-B0(bottleneck 12slot) 50-epoch **학습 3종 모두 완료**. (v24-B0 best epoch 46 `val_ce_loss 0.59232`). v23/v24 후보군 1,000-episode paired 평가 준비 완료. ICI 잠금 유지.
+**Read first if you are picking this up**: §3의 v24-B0 완료 기록, §3의 v24-A0/v23-A0 완료 기록, §6 Action Plan, §9 세션 핸드오프.
 **Branches**: `codex/v23-bag-mean` = v23-A0/v24-A0 실험 / `main` = `v22` 기준선 / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: 기본 `22`; `mean_pool_structured_tokens: true`이면 `23`; `project_structured_tokens: true`이면 `24`
@@ -151,7 +151,7 @@ v22(`predictions/v22_medium_baseline_pool400_curve/`)와 paired episode-cluster
 bootstrap 비교. Overall `+0.03` 또는 target task `+0.05`가 없으면 폐기.
 ICI는 잠금 유지.
 
-### ⏳ v24-B0 per-token bottleneck projection: 50-epoch 학습 시작 (2026-07-31)
+### ✅ v24-B0 per-token bottleneck projection: 50-epoch 완료 (2026-07-31)
 
 v24-A0가 slot 1개로 정보를 잃는 문제를 해결하기 위한 variant. **12 slot 유지**
 (40 tokens) + 토큰별 전용 `Linear(512→64)` 40개 적용 → concat(40×64=2560) →
@@ -163,13 +163,15 @@ v24-A0가 slot 1개로 정보를 잃는 문제를 해결하기 위한 variant. *
 | Branch / implementation | `codex/v23-bag-mean`, commit `b2fb9d0` |
 | Config | `configs/train_v24_medium_bag_proj_bottleneck.yaml` (`project_structured_tokens: true`, `projection_bottleneck_dim: 64`, 12 slot, `max_epochs=50`) |
 | Run | `20260731_201252`, scratch Medium 50 epochs |
-| PID | `3033073` |
+| **완료 상태** | **`max_epochs=50` 도달, 정상 종료** (PID `3033073` 종료) |
+| **Best `val_ce_loss`** | **0.5923204** @ epoch 46 (v22 baseline 0.5946 대비 -0.0023, v24-A0 0.5976 대비 -0.0053 개선) |
 | Model size | 9.2M trainable params (v22 6.57M + 병목 projection ≈2.62M) |
+| Best checkpoint | `checkpoints/20260731_201252/v24_medium_bag_proj_bottleneck/epoch=046-val_ce_loss=0.5923.ckpt` |
 | Training log | `logs/20260731_201252/v24_medium_bag_proj_bottleneck.out` |
 | Checkpoints | `checkpoints/20260731_201252/v24_medium_bag_proj_bottleneck/` |
 | Verification | 신규 테스트 4개 포함 `test_base_model` + `test_model_interface` **80개 통과** (`578.291s`) |
 
-판정: v23/v24-A0와 동일 기준 (1,000 pool-400, context 40/80/160/300, v22 paired).
+판정: v23/v24-A0/v24-B0 3종 모두 완료됨. 동일 기준 (1,000 pool-400, context 40/80/160/300, v22 paired) 평가 준비 완료.
 
 ### ✅ v22 공식 기준선 (2026-07-30 갱신 — **1,000 episode 기준**)
 
@@ -730,18 +732,16 @@ v21 조사의 결론("모든 비교가 노이즈였다")에 대응해 평가 체
   (20-epoch best 0.59337에서 연장 수렴, v22 0.5946 대비 -0.0034). §3 참고.
 - v24-A0 (learned projection, slot 1) 50-epoch **완료**: best epoch 45
   `val_ce_loss 0.5976237`. slot 1개 정보 손실로 훈련 val에서 v22/v23보다 높음. §3 참고.
-- v24-B0 (per-token bottleneck projection, slot 12 유지) 50-epoch **진행 중**:
-  PID `3033073`, run `20260731_201252`, 모델 9.2M params, epoch 0에서 ~4.8 it/s
-  (v24-A0 6.5 it/s보다 느림 — 40개 병목 레이어 비용). §3 참고.
+- v24-B0 (per-token bottleneck projection, slot 12 유지) 50-epoch **완료**:
+  best epoch 46 `val_ce_loss 0.5923204`. v24-A0 대비 -0.0053 개선, v22 대비 -0.0023 개선. §3 참고.
 - 구현: v24 learned projection (`26b2b27`), v24-B0 병목 (`b2fb9d0`).
   architecture_version 23/24 분리, 80 tests 통과.
 
 ### 다음 Action
 
-1. v24-B0 50-epoch 완료 확인 후 minimum `val_ce_loss` checkpoint 선택.
-2. v23 (epoch 43) / v24-A0 (epoch 45) / v24-B0 (best) 체크포인트를 동일
-   pool-400, 1,000 episodes, context `40/80/160/300`에서 평가.
-3. `scripts/compare_predictions.py`로 v22(`predictions/v22_medium_baseline_pool400_curve/`)와
+1. v23 (epoch 43) / v24-A0 (epoch 45) / v24-B0 (epoch 46) 3개 후보 체크포인트를
+   동일 pool-400, 1,000 episodes, context `40/80/160/300`에서 평가.
+2. `scripts/compare_predictions.py`로 v22(`predictions/v22_medium_baseline_pool400_curve/`)와
    episode-cluster paired delta + CI 계산.
-4. 판정: overall `+0.03` 또는 target task `+0.05`가 없으면 해당 후보 폐기.
+3. 판정: overall `+0.03` 또는 target task `+0.05`가 없으면 해당 후보 폐기.
 5. 합성 Medium+Hard 후보가 확정되기 전까지 ICI는 실행하지 않습니다.
