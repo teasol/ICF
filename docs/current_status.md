@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
 **Last updated**: `2026-07-31 10:55:00 KST`
-**Latest experiment state**: T4 mixed-context 5-epoch fine-tuning 완료. Best epoch 47 `val_ce_loss=0.6853`; 40/80/160/300 평가 실행 중(PID `2528070`). ICI 잠금 유지.
+**Latest experiment state**: T4 mixed-context checkpoint 40/80/160/300 평가 완료. 동일 pool-400 원본 checkpoint 대조 평가 실행 중(PID `2530921`). ICI 잠금 유지.
 **Branches**: `main` = `v22` (기본, 최신) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
@@ -549,9 +549,19 @@ Hard는 Medium과 비교해 9개 축이 동시에 바뀝니다: class separation
 | 49 | 0.6890 | 0.5626 |
 
 - 기존 Hard best CE `0.6839`를 넘지 못했으므로 CE 기준 개선 신호는 없다. 다만 104-episode AUROC는 불확실하므로 epoch 47 checkpoint를 동일 1,000-episode context curve로 최종 비교한다.
-- 평가: context 40/80/160/300, fixed query, pool 400 bags, PID `2528070`.
-- 평가 로그: `logs/20260731_context300_eval/context_curve.out`
-- 예정 산출물: `logs/v22_hard_context300_ft_curve_1000ep.csv`, `predictions/v22_hard_context300_ft_curve/context_{40,80,160,300}.pt`
+- Fine-tuned checkpoint 평가 완료: context 40/80/160/300, fixed query, pool 400 bags, 1,000 episodes.
+
+| Context | AUROC (episode-cluster 95% CI) | Log loss |
+|---:|---:|---:|
+| 40 | 0.5331 [0.525, 0.542] | 0.6992 |
+| 80 | 0.5553 [0.546, 0.565] | 0.6901 |
+| 160 | 0.5842 [0.575, 0.593] | 0.6798 |
+| 300 | 0.5977 [0.588, 0.607] | 0.6762 |
+
+- 로그: `logs/20260731_context300_eval/context_curve.out`
+- 산출물: `logs/v22_hard_context300_ft_curve_1000ep.csv`, `predictions/v22_hard_context300_ft_curve/context_{40,80,160,300}.pt`
+- 기존 curve는 pool 220이어서 직접 paired 비교할 수 없다. 동일 pool 400·동일 episode의 원본 Hard checkpoint 대조 평가를 PID `2530921`로 실행 중이다.
+- 대조 로그: `logs/20260731_context300_baseline_eval/context_curve.out`; 예정 summary: `logs/v22_hard_baseline_pool400_curve_1000ep.csv`
 
 **T4-0. 재학습 없는 접근성 감사 [먼저]**
 - Hard best checkpoint로 state `model_input`/`observable`/`oracle` 상한 재측정
