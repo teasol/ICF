@@ -637,6 +637,28 @@ class StructuredPopulationMetaClassifierTest(unittest.TestCase):
         )
         self.assertEqual(classifier.bag_token_projection.out_features, 8)
 
+    def test_bottleneck_projection_with_residual_mean(self) -> None:
+        classifier = StructuredPopulationMetaClassifier(
+            token_dim=8,
+            hidden_dim=16,
+            num_heads=4,
+            num_set_layers=1,
+            relation_hidden_dim=16,
+            ridge_dim=4,
+            project_structured_tokens=True,
+            structured_tokens_per_bag=16,
+            projection_bottleneck_dim=4,
+            projection_residual_mean=True,
+        ).eval()
+        self.assertEqual(len(classifier.bag_token_bottlenecks), 16)
+        self.assertEqual(
+            classifier.bag_token_projection.in_features, 16 * 4 + 8
+        )
+        self.assertEqual(classifier.bag_token_projection.out_features, 8)
+        dummy_tokens = torch.randn(2, 5, 16, 8)
+        proj = classifier._projected_bag_tokens(dummy_tokens)
+        self.assertEqual(tuple(proj.shape), (2, 5, 8))
+
     def test_simultaneous_slot_permutation_does_not_change_logits(self) -> None:
         expected = self.classifier(
             self.context, self.labels, self.query, self.query_instances

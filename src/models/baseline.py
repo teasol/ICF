@@ -1695,6 +1695,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
         project_structured_tokens: bool = False,
         structured_tokens_per_bag: int | None = None,
         projection_bottleneck_dim: int | None = None,
+        projection_residual_mean: bool = False,
         num_classes: int = 2,
     ) -> None:
         super().__init__()
@@ -1746,14 +1747,18 @@ class StructuredPopulationMetaClassifier(nn.Module):
             if projection_bottleneck_dim is None
             else int(projection_bottleneck_dim)
         )
+        self.projection_residual_mean = bool(projection_residual_mean)
         if self.project_structured_tokens:
             if self.structured_tokens_per_bag is None or self.structured_tokens_per_bag < 1:
                 raise ValueError(
                     "project_structured_tokens requires structured_tokens_per_bag >= 1."
                 )
             if self.projection_bottleneck_dim is None:
+                in_dim = self.structured_tokens_per_bag * self.token_dim
+                if self.projection_residual_mean:
+                    in_dim += self.token_dim
                 self.bag_token_projection = nn.Linear(
-                    self.structured_tokens_per_bag * self.token_dim,
+                    in_dim,
                     self.token_dim,
                 )
             else:
@@ -1768,8 +1773,11 @@ class StructuredPopulationMetaClassifier(nn.Module):
                         for _ in range(self.structured_tokens_per_bag)
                     ]
                 )
+                in_dim = self.structured_tokens_per_bag * self.projection_bottleneck_dim
+                if self.projection_residual_mean:
+                    in_dim += self.token_dim
                 self.bag_token_projection = nn.Linear(
-                    self.structured_tokens_per_bag * self.projection_bottleneck_dim,
+                    in_dim,
                     self.token_dim,
                 )
         relation_config = dict(covariance_relation or {})
@@ -2399,6 +2407,9 @@ class StructuredPopulationMetaClassifier(nn.Module):
             )
         if self.projection_bottleneck_dim is None:
             flat = tokens.reshape(*tokens.shape[:-2], -1)
+            if self.projection_residual_mean:
+                mean_token = tokens.mean(dim=-2)
+                flat = torch.cat([flat, mean_token], dim=-1)
             return self.bag_token_projection(flat)
         compressed = torch.stack(
             [
@@ -2408,6 +2419,9 @@ class StructuredPopulationMetaClassifier(nn.Module):
             dim=-2,
         )
         flat = compressed.reshape(*compressed.shape[:-2], -1)
+        if self.projection_residual_mean:
+            mean_token = tokens.mean(dim=-2)
+            flat = torch.cat([flat, mean_token], dim=-1)
         return self.bag_token_projection(flat)
 
     def _population_tokens(
@@ -3300,6 +3314,7 @@ class BaseModel(nn.Module):
         mean_pool_structured_tokens: bool = False,
         project_structured_tokens: bool = False,
         projection_bottleneck_dim: int | None = None,
+        projection_residual_mean: bool = False,
         covariance_relation: dict[str, object] | None = None,
         num_classes: int = 2,
     ) -> None:
@@ -3365,6 +3380,7 @@ class BaseModel(nn.Module):
             project_structured_tokens=project_structured_tokens,
             structured_tokens_per_bag=structured_tokens_per_bag,
             projection_bottleneck_dim=projection_bottleneck_dim,
+            projection_residual_mean=projection_residual_mean,
             num_classes=self.num_classes,
         )
         self.architecture_version = (

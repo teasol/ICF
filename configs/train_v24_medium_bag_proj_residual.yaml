@@ -1,0 +1,24 @@
+base_config: train_v22_medium.yaml
+
+# Architecture v24-B1: Per-token bottleneck projection with a residual mean shortcut.
+# Keeps all 12 slots -> 1 global + 36 slot statistics + 3 tails = 40 tokens.
+# Concat 40 per-token bottleneck outputs (40*64 = 2560) AND the exact arithmetic
+# mean token (512) -> total dimension 2560 + 512 = 3072.
+# Linear(3072 -> 512) projects to a single 512-d token per bag.
+model_overrides:
+  project_structured_tokens: true
+  projection_bottleneck_dim: 64
+  projection_residual_mean: true
+
+data_overrides:
+  episode_batch_size: 8
+  dataset_kwargs:
+    shape_group_size: 8
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v24_medium_bag_proj_residual
+
+trainer:
+  max_epochs: 50
