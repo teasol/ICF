@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
 **Last updated**: `2026-07-31 10:55:00 KST`
-**Latest experiment state**: T4 mixed-context checkpoint 40/80/160/300 평가 완료. 동일 pool-400 원본 checkpoint 대조 평가 실행 중(PID `2530921`). ICI 잠금 유지.
+**Latest experiment state**: Hard 동일 pool-400 대조 평가 실행 중(PID `2530921`). 종료 후 Medium baseline curve(PID `2533049`) → Medium mixed-context fine-tuning(PID `2533126`) 순차 실행 예약. ICI 잠금 유지.
 **Branches**: `main` = `v22` (기본, 최신) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `22` (`architecture_version = 22`)
@@ -562,6 +562,17 @@ Hard는 Medium과 비교해 9개 축이 동시에 바뀝니다: class separation
 - 산출물: `logs/v22_hard_context300_ft_curve_1000ep.csv`, `predictions/v22_hard_context300_ft_curve/context_{40,80,160,300}.pt`
 - 기존 curve는 pool 220이어서 직접 paired 비교할 수 없다. 동일 pool 400·동일 episode의 원본 Hard checkpoint 대조 평가를 PID `2530921`로 실행 중이다.
 - 대조 로그: `logs/20260731_context300_baseline_eval/context_curve.out`; 예정 summary: `logs/v22_hard_baseline_pool400_curve_1000ep.csv`
+
+**Medium context-to-oracle 실험**
+- 공식 checkpoint: `checkpoints/20260729_160643/v22_medium_fixed/epoch=013-val_ce_loss=0.5946.ckpt`; 기존 AUROC `0.7078 [0.696, 0.719]`.
+- Config: `configs/train_v22_medium_context300.yaml`; Hard와 같은 context 중심 `[40,80,120,160,180,240,300]±5`, batch 2/accumulation 4, 순차 CUDA generation.
+- GPU 직렬 실행:
+  1. Hard 대조 PID `2530921` 종료 대기.
+  2. Medium 원본 checkpoint pool-400 context 40/80/160/300 curve, 대기 PID `2533049`.
+  3. 위 평가 종료 후 epoch 13→20 mixed-context fine-tuning, 대기 PID `2533126`.
+- Baseline 평가 로그: `logs/20260731_medium_context_baseline_eval/context_curve.out`; 예정 summary: `logs/v22_medium_baseline_pool400_curve_1000ep.csv`.
+- Fine-tuning 로그: `logs/20260731_medium_context300_ft/train.out`; checkpoints: `checkpoints/20260731_medium_context300_ft/v22_medium_context300_ft/`.
+- 완료 후 best fine-tuned checkpoint의 동일 curve와 `diagnose_state_upper_bound.py`를 실행한다. State oracle-mask `0.9013`/latent `1.0`은 정답 반응세포 또는 latent score를 사용하므로 달성 목표가 아니라 비현실적 참고 상한이다. 실제 성공 기준은 관측 입력만으로 context 40/80 및 overall AUROC가 개선되는지다.
 
 **T4-0. 재학습 없는 접근성 감사 [먼저]**
 - Hard best checkpoint로 state `model_input`/`observable`/`oracle` 상한 재측정
