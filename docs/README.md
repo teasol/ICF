@@ -1,7 +1,7 @@
 # Documentation map
 
-**Last updated**: `2026-07-31 00:20:00 KST`
-**Architecture Version**: `22` (`architecture_version = 22`)
+**Last updated**: `2026-08-01 13:20:00 KST`
+**Architecture Version**: `24` (`architecture_version = 24`) — v24 확정 (residual + bottleneck bag projection)
 
 문서는 **새 대화 세션으로 접속하는 Agent가 최우선으로 읽는 Living 문서 5개(`docs/` 루트)**와 **과거 기록/딥다이브 분석서(`docs/history/`)**로 이원화하여 관리합니다.
 
@@ -33,6 +33,7 @@
 - [`history/candidate_a_b_comparison.md`](history/candidate_a_b_comparison.md): Candidate A vs B 20-epoch short training 및 v20 선정 결과
 - [`history/learnability_ladder.md`](history/learnability_ladder.md): ladder 설계와 단계 정의
 - [`history/nuisance_ablation_c4_d_d0_d4.md`](history/nuisance_ablation_c4_d_d0_d4.md): nuisance ablation 결과
+- [`history/architecture_v23_candidates.md`](history/architecture_v23_candidates.md): v23/v24 bag-collapse 후보 설계 및 T5-A/B/C 제안. **2026-08-01 v24 확정 결정과 T5-A 미해결 사유가 문서 상단에 기록됨**
 - [`history/medium_b200_baseline.md`](history/medium_b200_baseline.md): B200 medium baseline
 - [`history/synthetic_data_and_tasks.md`](history/synthetic_data_and_tasks.md): synthetic generator와 task 정의
 
@@ -43,6 +44,6 @@
 - **Living 문서 유지**: `docs/` 최상위 루트에는 오직 5개의 Living 문서만 유지합니다.
 - **Git 커밋 동기화**: 세션 핸드오프 시 작업을 남김없이 커밋하고 커밋 내역/diff를 `agent_handoff.md` 및 `current_status.md`에 반영합니다.
 - **아카이빙 규칙**: 특정 버전 딥다이브 보고서나 계획 문서는 완료 시 즉시 `docs/history/`로 이관하여 `docs/` 루트를 단순하고 가독성 높게 유지합니다.
-- **Config 루트 관리**: `configs/` 루트에는 활성화된 Architecture v22 entry point 4개(`train_v22_medium`, `train_v22_hard_realworld`, `train_v22_ici_finetune`, `train_v22_ici_scratch`)만 남기고 구버전(v18~v21)은 `configs/archive/`로 관리합니다. ICI의 fold/seed는 config가 아니라 `--cv`/`--seed`로 주입하므로 fold별 config를 만들지 않습니다.
+- **Config 루트 관리**: `configs/` 루트에는 확정된 v24 entry point(`train_v24_medium_bag_proj_residual.yaml`)와, ICI 파이프라인이 아직 참조하는 v22 entry point(`train_v22_medium`, `train_v22_hard_realworld`, `train_v22_ici_finetune`, `train_v22_ici_scratch` 등)를 유지합니다. 폐기된 v23/v24 candidate(`train_v23_medium_bag_mean`, `train_v24_medium_bag_proj`, `train_v24_medium_bag_proj_bottleneck`)는 `configs/archive/v23_v24_candidates/`로, 구버전(v18~v21)은 `configs/archive/`로 관리합니다. ICI의 fold/seed는 config가 아니라 `--cv`/`--seed`로 주입하므로 fold별 config를 만들지 않습니다.
 - **단일 출처화**: 동일한 수치나 진행 상태를 중복해 기록하지 않으며, 상태는 `current_status.md`에만 기록합니다.
 - **자율 연속 실행과 추적성**: `current_status.md`에 다음 Action과 판정 기준이 명확하면 재확인 없이 실행합니다. 각 논리 단위의 결과·명령·로그/산출물 경로·판단·후속 Action을 SSOT에 기록하고 Git 커밋하여 다른 작업공간이 즉시 이어받을 수 있게 합니다.

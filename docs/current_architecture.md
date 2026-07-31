@@ -1,9 +1,12 @@
 # Current architecture
 
-**Last updated**: `2026-07-29 10:10:00 KST`  
-**Code baseline**: Architecture Version `22` (`architecture_version = 22`)
+**Last updated**: `2026-08-01 13:20:00 KST`  
+**Code baseline**: Architecture Version `24` (`architecture_version = 24`) — **v24-B1 (residual + bottleneck bag projection) 확정 (2026-08-01)**
 
-이 문서는 현재 production config 및 코드베이스가 실제로 사용하는 Architecture v22 모델 구조와 수학적 계약을 설명합니다. v22는 v21에서 **retrieval 계층을 완전히 제거**한 버전이며, aggregator/meta-classifier 본체는 v21과 동일합니다. 최신 개발 상태는 [`current_status.md`](current_status.md), 실험 프로토콜은 [`current_experiments.md`](current_experiments.md)를 참고합니다.
+이 문서는 현재 production config(`configs/train_v24_medium_bag_proj_residual.yaml`)가 사용하는 Architecture v24 모델 구조와 수학적 계약을 설명합니다. v24는 v22(retrieval 없는 base, §2~§4는 v24에서도 그대로 유지)에 **bag 내부 40-token 구조화 요약을 1개 학습된 projection token으로 압축**하는 §3.5를 추가한 버전입니다. `project_structured_tokens=false`로 두면 코드는 그대로 v22 동작으로 되돌아갑니다 (§3.5 참고). 최신 개발 상태는 [`current_status.md`](current_status.md) §3 "최종 결정", 실험 프로토콜은 [`current_experiments.md`](current_experiments.md)를 참고합니다.
+
+> [!IMPORTANT]
+> **v24는 label 기반 class-memory 압축을 바꾸지 않았습니다.** `_class_memories`는 여전히 context bag을 `context_labels`로 나눠 class당 8개 memory token으로 pooling합니다 (§4, `src/models/baseline.py:2446`). v24가 바꾼 것은 그 이전 단계, 즉 **bag 하나를 몇 개의 토큰으로 요약하는지**(§3.5)뿐입니다.
 
 ---
 
@@ -74,6 +77,31 @@ aggregator가 각 bag을 40개 토큰(1 global + 12 slots × 3 통계 + 3 tail)�
 
 ---
 
+## 3.5. Bag Structured-Token Projection (v24, residual + bottleneck)
+
+v22/v23은 각 bag을 40개 structured token(1 global + 12 slots×3 + 3 tail)째로 분류기에 전달하거나(v22), 40개를 단순 arithmetic mean해 1개 token으로 줄였습니다(v23-A0, `mean_pool_structured_tokens: true`). **v24는 이 40개를 학습된 linear projection으로 압축해 1개 token으로 만듭니다** (`project_structured_tokens: true`). 확정된 v24는 아래 두 옵션을 모두 켠 residual + bottleneck variant(구 v24-B1)입니다.
+
+1. **Position-specific bottleneck** (`projection_bottleneck_dim: 64`): 40개 token 각각에 **전용** `Linear(512 → 64)`를 적용합니다(토큰 위치마다 별도 가중치, 총 40개). 그 결과를 concat하면 `40 × 64 = 2560`차원.
+2. **Residual exact-mean shortcut** (`projection_residual_mean: true`): 같은 40개 token의 정확한 arithmetic mean(512차원, v23-A0과 동일한 신호)을 위 2560차원 뒤에 concat합니다 → `2560 + 512 = 3072`차원.
+3. 최종 `Linear(3072 → 512)` 하나로 bag당 512차원 token 1개를 만듭니다.
+
+```text
+40 structured tokens (40 x 512)
+  -> [40개 위치별 전용 Linear(512, 64)]   (v24-B0에서 도입)
+  -> concat                                (40 x 64 = 2560)
+  -> concat with exact mean(40 tokens)     (2560 + 512 = 3072)   <- residual shortcut (v24-B1)
+  -> Linear(3072, 512)
+  -> 1 token (512-d) per bag
+```
+
+이 1-token 표현은 v22의 40-token 표현을 대체하여 `_population_tokens`(direct global/query branch)와 `_class_memories`(context bag → class-memory 압축 입력, §4)에 그대로 흘러갑니다. **`_class_memories`의 label 기반 grouping 로직 자체는 바뀌지 않습니다** — 압축되는 대상이 40 token에서 1 token으로 줄었을 뿐입니다.
+
+구현: `StructuredPopulationMetaClassifier._projected_bag_tokens` (`src/models/baseline.py:2395`), 생성자 분기 (`src/models/baseline.py:1751-1782`).
+
+`architecture_version`은 `project_structured_tokens=true`일 때 무조건 `24`입니다 (`mean_pool_structured_tokens`이면 `23`, 둘 다 false면 `22`; `src/models/baseline.py:3386`). bottleneck/residual 유무는 `architecture_version`에 반영되지 않고 **state_dict 형태**로만 구분됩니다 — v24-A0/B0/B1 체크포인트를 서로 다른 config로 로드하면 shape mismatch로 실패합니다. 확정된 production config는 `configs/train_v24_medium_bag_proj_residual.yaml` (`projection_bottleneck_dim: 64` + `projection_residual_mean: true`) 하나뿐입니다.
+
+---
+
 ## 4. Main Classification Branches & Logit Fusion
 
 실제 코드(`StructuredPopulationMetaClassifier`) 기준 2단 합성입니다.
@@ -120,26 +148,27 @@ config에서 직접 지정하는 고정값:
 ## 5. 모델 스펙 파라미터 (Model Parameter Specs)
 
 ```text
-Total Trainable Parameters : 6,566,811 (약 6.57M)
+Total Trainable Parameters : 9,450,000 (약 9.45M; v22 6.57M + residual bottleneck projection ~2.88M)
 Token Dimension           : 512
-Aggregator Output Tokens  : 40 tokens (1 global + 36 slot (12 slots x center/spread/rare) + 3 tail)
-Context Retrieval         : none (v22 removed it; full context per episode)
+Aggregator Output Tokens  : 1 token per bag (40 structured token을 §3.5 residual+bottleneck projection으로 압축)
+Context Retrieval         : none (v22에서 제거, v24도 유지)
 Meta Hidden Dimension     : 256
 Attention Heads           : 8
 Set Layers                : 1
 Ridge Dimension           : 64
 Precision                 : bf16-mixed
-Architecture Version      : 22
+Architecture Version      : 24
 ```
 
-파라미터 수는 `configs/train_v22_medium.yaml`의 `model` 섹션 기준 실측값입니다 (2026-07-29). v21 태그(`v21-retrieval-final`)에서 동일 kwargs로 측정해도 **6,566,811로 같습니다** — retrieval은 학습 파라미터가 없는 순수 연산 계층이었으므로 제거해도 가중치 수는 변하지 않습니다. (이전 문서에 적혀 있던 `6,614,248`은 근거를 찾을 수 없는 오래된 값이라 실측값으로 교체했습니다.)
+v22 파라미터 수(6,566,811, 2026-07-29 실측)는 `configs/train_v22_medium.yaml` 기준이며 현재는 폐기된 참고값입니다. v24 파라미터 수(9.45M)는 [`current_status.md`](current_status.md) §3 v24-B1 완료 기록의 실측값입니다.
 
 ---
 
 ## 6. Source of Truth 파일
 
-- Backbone & Version: `src/models/baseline.py` (`architecture_version = 22`)
+- Backbone & Version: `src/models/baseline.py` (`architecture_version = 24`)
 - Data Interface & Collators: `src/modules/data_interface.py`
 - Multi-task Loss & Metrics: `src/modules/model_interface.py`
-- Resolved Production Entry: `configs/train_v22_medium.yaml`
-- Architecture Verification Suites: `tests/test_base_model.py`, `tests/test_batched_episode_forward.py`
+- Resolved Production Entry: `configs/train_v24_medium_bag_proj_residual.yaml`
+- Architecture Verification Suites: `tests/test_base_model.py`, `tests/test_batched_episode_forward.py`, `tests/test_model_interface.py::test_bottleneck_projection_with_residual_mean`
+- 폐기된 v22 production entry(참조용): `configs/train_v22_medium.yaml`, `configs/train_v22_hard_realworld.yaml` 등 (ICI 파이프라인이 아직 참조 — §7 미완 항목)

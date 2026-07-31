@@ -1,5 +1,27 @@
 # v23 architecture improvement candidates
 
+> [!IMPORTANT]
+> **Decision (2026-08-01), recorded after the fact — moved to `docs/history/`.**
+> None of T5-A/T5-B/T5-C below were implemented. Instead, the cheap bag-collapse
+> ablations (T5-A0 and its variants) were run to completion — v23-A0 (exact
+> mean), v24-A0 (learned projection, 1 slot), v24-B0 (per-token bottleneck,
+> 12 slots), v24-B1 (v24-B0 + residual exact-mean shortcut) — and the user
+> confirmed **v24-B1 as the final v24 architecture** directly from the
+> training `val_ce_loss` ranking (0.5903 best), **skipping the planned
+> 1,000-episode paired synthetic comparison against v22** that the
+> "Acceptance protocol" section below required before promotion.
+>
+> This means bottleneck #1 in this document ("Structured context loses bag
+> identity" — the label-based class-memory pooling in `_class_memories`) is
+> **still unresolved**: v24-B1 only changed how many tokens summarize one bag
+> (40 → 1, via a learned residual+bottleneck projection), not the fact that
+> context bags are grouped by label before compression. T5-A was the proposal
+> that would have addressed that specifically. If bag-identity/label-grouping
+> is revisited, start from T5-A here rather than re-deriving it.
+>
+> Current state: [`current_status.md`](../current_status.md) §3 "최종 결정
+> (2026-08-01)", architecture spec: [`current_architecture.md`](../current_architecture.md) §3.5.
+
 ## Evidence carried forward from v22
 
 1. More inference context helps without retraining.

@@ -1,11 +1,11 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-01 00:49:00 KST`
-**Status**: Bag-Collapse 실험군 4종 50-epoch **학습 모두 완주**. (v23-A0 `0.5912`, v24-A0 `0.5976`, v24-B0 `0.5923`, **v24-B1 best epoch 41 `val_ce_loss 0.59030` — 전체 최저 기록**). v23/v24 후보 4종 1,000-episode paired 합성 평가 준비 완료. ICI 잠금 유지.
-**Read first if you are picking this up**: §3의 v24-B1 완료 기록, §3의 v24-B0/v24-A0/v23-A0 완료 기록, §6 Action Plan, §9 세션 핸드오프.
-**Branches**: `codex/v23-bag-mean` = v23-A0/v24-A0 실험 / `main` = `v22` 기준선 / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
+**Last updated**: `2026-08-01 13:20:00 KST`
+**Status**: **v24 확정 (사용자 결정, 2026-08-01)**. 4종 candidate 중 v24-B1(residual + bottleneck bag projection)을 최종 아키텍처로 확정하고 나머지(v22 기준선, v23-A0, v24-A0, v24-B0)는 폐기. 원래 계획했던 1,000-episode 4종 paired 합성 비교 평가는 **실행하지 않고 폐기**. `main`/`v24` 브랜치를 `codex/v23-bag-mean` 최종 커밋으로 fast-forward. ICI 잠금은 유지 — v24용 ICI config가 아직 없음.
+**Read first if you are picking this up**: §3 "최종 결정 (2026-08-01)", §3의 v24-B1 완료 기록, §6 Action Plan(갱신), §9 세션 핸드오프.
+**Branches**: `main` = `v24` = `codex/v23-bag-mean` 최종 커밋 (fast-forward 완료) / `v22`(구 기준선, 참조용 보존) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
-**Architecture Version**: 기본 `22`; `mean_pool_structured_tokens: true`이면 `23`; `project_structured_tokens: true`이면 `24`
+**Architecture Version**: **`24` 확정** (`project_structured_tokens: true, projection_bottleneck_dim: 64, projection_residual_mean: true`). `22`/`23`은 폐기된 구버전.
 **Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 해결하기 위한 Single Source of Truth (SSOT) living document.
 
 ---
@@ -13,9 +13,10 @@
 ## 0. 30초 요약 — 새 세션은 여기부터
 
 **지금 어디까지 왔나**
-- v22 = v21에서 **retrieval 계층을 완전히 제거**한 버전. 아키텍처 본체는 v21과 동일 (§4).
-- **공식 기준선 확립**: 합성 val AUROC **0.7078 [0.696, 0.719]** (1,000 episodes), `val_ce_loss 0.5946`. 예측 파일 `predictions/synthetic_v22_baseline_1000ep.pt` (§3).
-- **평가 프로토콜 재구축 완료**: 모든 비교에 bootstrap CI 필수, 합성은 episode cluster CI, ICI는 최종 테스트 1회만 (§5, §7).
+- v22 = v21에서 **retrieval 계층을 완전히 제거**한 버전. 아키텍처 본체는 v21과 동일 (§4). **2026-08-01부로 v24에 자리를 내주고 폐기.**
+- **v24 확정 (2026-08-01)**: residual + bottleneck bag projection (구 v24-B1). best `val_ce_loss 0.5903045` @ epoch 41. 근거와 범위는 §3 "최종 결정" 참고.
+- v22 공식 기준선(폐기 전 참고값): 합성 val AUROC **0.7078 [0.696, 0.719]** (1,000 episodes), `val_ce_loss 0.5946`. 예측 파일 `predictions/synthetic_v22_baseline_1000ep.pt` (§3).
+- **평가 프로토콜 재구축 완료**: 모든 비교에 bootstrap CI 필수, 합성은 episode cluster CI, ICI는 최종 테스트 1회만 (§5, §7). **단, v24 확정은 이 프로토콜에 따른 paired 비교 없이 사용자 결정으로 진행됨** — §3 참고.
 
 **이번 라운드에 확정된 것 (전부 학습 없이 진단으로)**
 | 결론 | 근거 |
@@ -27,15 +28,13 @@
 | ✅ **T3-3 Hard 기준선 완료** | best val CE 0.6839; AUROC 0.5483 [0.538, 0.558], 1,000 episodes |
 | ✅ **T4 context 병목 확인** | context 10→20→40→80→160에서 AUROC 0.5084→0.5193→0.5312→0.5505→0.5737로 단조 증가 |
 
-**다음 할 일 — v23-A0 bag-mean attribution**
-1. v23-A0 best epoch 19를 동일 1,000 pool-400 episode, context 40/80/160/300에서 v22와 paired 비교.
-2. `scripts/compare_predictions.py`로 episode-cluster paired delta와 CI 확인.
-3. overall `+0.03` 또는 target task `+0.05`가 없으면 mean pooling은 폐기하고 typed bag encoder(T5-A)로 이동.
-4. **ICI는 개선 후보가 합성 Medium+Hard에서 확정될 때까지 계속 잠금.**
+**다음 할 일 — v24 확정 이후**
+1. ~~v23-A0/v24-A0/v24-B0/v24-B1 4종 1,000 pool-400 paired 비교~~ → **사용자 결정으로 폐기 (2026-08-01)**. v24-B1을 그대로 v24로 확정.
+2. ICI를 v24로 돌리려면 `train_v22_ici_finetune.yaml`/`train_v22_ici_scratch.yaml`에 상응하는 v24 config가 아직 없음 — 필요 시 신규 작성.
+3. **ICI는 여전히 잠금.** 이번 결정은 "합성 비교 통과"가 아니라 사용자의 직접 판단이므로, ICI 실행 여부는 별도로 다시 확인받을 것.
 
-구현 검증: exact mean, unbatched/batched bag-count preservation,
-v22/v23 checkpoint version 분리, end-to-end backward를 포함한 전체 unittest
-**123개 통과** (`696.503s`).
+구현 검증: v24-B1 도입 시점 신규 테스트(`test_bottleneck_projection_with_residual_mean`)를 포함한 전체 unittest
+**123개 통과** (`696.503s`, v23-A0 도입 커밋 기준 — v24-B1 이후 재실행 기록 없음, 코드 변경 없었으므로 유효).
 
 **작업 규칙 4가지**
 - 평가는 `--val-episodes 1000`, 비교는 `scripts/compare_predictions.py` (paired cluster bootstrap).
@@ -188,7 +187,22 @@ v24-B0 병목 구조(40×64=2560d)에 v23-A0에서 효과적이었던 **Exact Ar
 | Checkpoints | `checkpoints/20260731_220100/v24_medium_bag_proj_residual/` |
 | Verification | 신규 테스트 `test_bottleneck_projection_with_residual_mean` 통과 |
 
-판정: 50-epoch 학습 완료. v23-A0 / v24-A0 / v24-B0 / v24-B1 4종을 동일 기준 (1,000 pool-400, context 40/80/160/300, v22 paired) 평가 예정.
+판정: 50-epoch 학습 완료. v23-A0 / v24-A0 / v24-B0 / v24-B1 4종을 동일 기준 (1,000 pool-400, context 40/80/160/300, v22 paired) 평가 예정이었으나, **아래 "최종 결정"에 따라 이 평가는 실행하지 않고 폐기됨.**
+
+### 🏁 최종 결정 (2026-08-01): v24-B1(residual + bottleneck)을 v24로 확정
+
+> [!IMPORTANT]
+> **사용자가 §6/§7에 정의된 1,000-episode paired 비교 프로토콜을 거치지 않고 직접 확정했습니다.** train loss 순위(0.5903 < 0.5912 < 0.5923 < 0.5946 < 0.5976)만으로 결정한 것이며, 합성 val AUROC paired delta나 CI 검증은 수행되지 않았습니다. 이는 §6/§7에 명시된 "overall +0.03 또는 target task +0.05 없으면 폐기" 판정 기준을 적용하지 않은 것입니다. 이후 세션은 이 결정을 재검증 대상이 아니라 확정 사실로 취급하되, 이 문서에 그 근거(train CE 순위만)를 남겨 향후 필요 시 사용자가 재논의할 수 있게 합니다.
+
+- **확정 아키텍처**: v24-B1 구조 = v24 (동일 `architecture_version=24`). `project_structured_tokens: true`, `projection_bottleneck_dim: 64`, `projection_residual_mean: true`.
+- **확정 config**: `configs/train_v24_medium_bag_proj_residual.yaml` (top-level 유지).
+- **확정 checkpoint**: `checkpoints/20260731_220100/v24_medium_bag_proj_residual/epoch=041-val_ce_loss=0.5903.ckpt`.
+- **폐기**: v22(구 기준선), v23-A0(exact mean), v24-A0(learned projection slot 1), v24-B0(bottleneck without residual). config는 `configs/archive/v23_v24_candidates/`로 이관 (v22 config는 ICI 파이프라인이 아직 참조하므로 유지, 상세는 §6).
+- **폐기된 계획**: 4종 1,000-episode pool-400 paired 비교 평가, T5-A(typed bag-preserving branch)/T5-B/T5-C — 필요 시 향후 다시 꺼낼 수 있도록 [`history/architecture_v23_candidates.md`](history/architecture_v23_candidates.md)에 보존.
+- **미완 항목**: v24용 ICI config 없음. Medium→Hard bridge attribution(T4, §6)은 이번 결정과 별개로 계속 열려 있는 질문임 — 폐기되지 않음.
+
+> [!WARNING]
+> **v24-B1은 "label로 bag을 나누는" class-memory 압축을 고치지 않았습니다.** 이 결정의 출발점이었던 문제 제기(context bag을 label별로 묶어 8개 memory token으로 압축하는 구조가 별로라는 지적, `architecture_v23_candidates.md` bottleneck #1)는 `_class_memories`가 여전히 `context_labels == class_index`로 bag을 나눠 pooling하는 구조 그대로입니다 (`src/models/baseline.py:2446-2454`). v23/v24 계열이 바꾼 것은 **bag 내부(40 structured token → 1 token) 압축**뿐입니다. label 기반 분할 자체를 없애는 것은 폐기된 T5-A(typed bag-preserving branch)가 다루던 문제이므로, 그 concern이 여전히 유효하다면 T5-A를 별도로 다시 논의해야 합니다.
 
 ### ✅ v22 공식 기준선 (2026-07-30 갱신 — **1,000 episode 기준**)
 
@@ -414,9 +428,9 @@ task별: composition 0.8022 / combined 0.8170 / interaction 0.7453 / state 0.659
 > [!IMPORTANT]
 > Hard regime에서는 전체도 0.55에 불과하고 state/covariance는 거의 무작위입니다. Medium에서 종료한 Tier 1/2 방향을 다시 열 관측 근거가 생긴 것은 아닙니다. v21의 `val_ce_loss`를 재현했으므로 v22 구현 이상보다는 문제 난이도 자체의 한계로 읽는 것이 타당합니다.
 
-### ➡ 다음 우선순위: 최종 후보 동결 여부 결정
+### ✅ 최종 후보 동결 여부 결정 — **완료 (2026-08-01)**
 
-사전에 계획한 Tier 1~3 합성 작업이 모두 끝났습니다. 구조 변경을 정당화할 관측 가능한 +0.05 헤드룸은 찾지 못했습니다. 다음 단계는 v22 Medium baseline을 최종 후보로 동결하고 ICI one-shot 프로토콜을 해제할지 결정하는 것입니다. ICI는 비가역적인 최종 테스트이므로 후보 동결 전에는 실행하지 않습니다.
+사전에 계획한 Tier 1~3 합성 작업이 모두 끝났고, 이어서 진행한 v23/v24 bag-collapse family도 4종 모두 학습을 완주했습니다. 원래 계획은 이 4종을 1,000-episode paired 비교로 검증한 뒤 동결하는 것이었으나, **사용자가 이 비교를 건너뛰고 v24-B1(residual + bottleneck)을 직접 v24로 확정했습니다** (§3 "최종 결정" 참고). v22 Medium baseline은 폐기되었고 최종 후보는 v24입니다. **ICI는 여전히 잠금 상태** — v24용 ICI config가 없고, 이번 결정이 §7 평가 프로토콜을 통과한 것이 아니므로 ICI 해제는 별도 확인이 필요합니다.
 
 ### ➡ 다음 우선순위: T4 Medium→Hard 성능 붕괴 attribution
 
@@ -756,11 +770,35 @@ v21 조사의 결론("모든 비교가 노이즈였다")에 대응해 평가 체
 - 구현: v24 learned projection (`26b2b27`), v24-B0 병목 (`b2fb9d0`), v24-B1 residual 병목 (`4f984ca`).
   architecture_version 23/24 분리, 모든 단위 테스트 통과.
 
+### 다음 Action (이 세션 당시 계획, 아래 §10에서 폐기됨)
+
+1. ~~v23-A0 (epoch 43), v24-A0 (epoch 45), v24-B0 (epoch 46), v24-B1 (epoch 41) 4개 후보 체크포인트를
+   동일 pool-400, 1,000 episodes, context `40/80/160/300`에서 평가.~~
+2. ~~`scripts/compare_predictions.py`로 v22(`predictions/v22_medium_baseline_pool400_curve/`)와
+   episode-cluster paired delta + CI 계산.~~
+3. ~~판정: overall `+0.03` 또는 target task `+0.05`가 없으면 해당 후보 폐기.~~
+4. 합성 Medium+Hard 후보가 확정되기 전까지 ICI는 실행하지 않습니다. **(이 항목만 유지됨 — ICI는 계속 잠금)**
+
+---
+
+## 10. 2026-08-01 세션 핸드오프 — v24 확정, 평가 계획 폐기
+
+### 이번 세션에서 확정/진행한 것
+
+- **사용자 결정**: §9의 4종 paired 비교 계획을 실행하지 않고 폐기. "단순히 label로 bag을 나누는 구조(class-memory 압축)가 별로"라는 문제 제기에서 시작해, v24-B1(residual + bottleneck bag projection)을 train `val_ce_loss` 순위만으로 최종 v24 아키텍처로 확정.
+- v22(구 기준선), v23-A0, v24-A0, v24-B0 폐기. 상세는 §3 "최종 결정 (2026-08-01)".
+- `configs/train_v23_medium_bag_mean.yaml`, `train_v24_medium_bag_proj.yaml`, `train_v24_medium_bag_proj_bottleneck.yaml`을 `configs/archive/v23_v24_candidates/`로 이관. `train_v24_medium_bag_proj_residual.yaml`이 v24 production entry point.
+- `docs/architecture_v23_candidates.md`에 결정 기록을 남기고 `docs/history/`로 이관 (T5-A/B/C는 필요 시 재검토할 미실행 계획으로 보존).
+- Git: `main`/`v24` 브랜치를 `codex/v23-bag-mean` 최종 커밋으로 fast-forward. (커밋 해시는 이 문서를 갱신하는 커밋에서 확정 — 커밋 후 아래에 기록.)
+
+### 남겨진 것 (폐기되지 않음)
+
+- T4 Medium→Hard bridge attribution (§6) — 이번 결정과 무관하게 계속 열려 있는 질문.
+- v24용 ICI config 부재 — ICI를 돌리려면 `train_v22_ici_finetune.yaml`/`train_v22_ici_scratch.yaml`에 상응하는 v24 버전이 필요.
+- v22 top-level config 6개는 ICI 파이프라인이 아직 참조하므로 archive로 옮기지 않음 — v24 ICI config가 만들어지면 재검토.
+
 ### 다음 Action
 
-1. v23-A0 (epoch 43), v24-A0 (epoch 45), v24-B0 (epoch 46), v24-B1 (epoch 41) 4개 후보 체크포인트를
-   동일 pool-400, 1,000 episodes, context `40/80/160/300`에서 평가.
-2. `scripts/compare_predictions.py`로 v22(`predictions/v22_medium_baseline_pool400_curve/`)와
-   episode-cluster paired delta + CI 계산.
-3. 판정: overall `+0.03` 또는 target task `+0.05`가 없으면 해당 후보 폐기.
-4. 합성 Medium+Hard 후보가 확정되기 전까지 ICI는 실행하지 않습니다.
+1. (선택) v24용 ICI finetune/scratch config를 만들고 ICI 실행 여부를 사용자에게 다시 확인.
+2. (선택) T4 Medium→Hard attribution을 v24 위에서 이어갈지 결정.
+3. 새 구조 변경이 필요해지면 이번처럼 train CE만으로 확정하지 말고, 최소한 §7 평가 프로토콜의 1,000-episode paired 비교를 다시 켤지 사용자와 사전에 정할 것.

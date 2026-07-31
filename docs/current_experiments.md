@@ -1,11 +1,11 @@
 # Current experiments
 
-**Last updated**: `2026-07-31 20:25:00 KST`
-**Architecture Version**: v22 baseline / v23-A0 bag-mean / v24-A0 bag projection / v24-B0 bottleneck projection
+**Last updated**: `2026-08-01 13:20:00 KST`
+**Architecture Version**: **v24 확정** (residual + bottleneck bag projection, `configs/train_v24_medium_bag_proj_residual.yaml`)
 
-이 문서는 v22 기준 실험 프로토콜과 실행 명령어를 설명합니다. v21 retrieval 시대의 실험 기록은 [`history/v21_retrieval_experiments.md`](history/v21_retrieval_experiments.md)로 이관되었습니다.
+이 문서는 v22 시절에 확립된 실험 프로토콜(§0~§1, Stage 3 ICI 절차)과 실행 명령어를 설명합니다. **2026-08-01, 사용자 결정으로 v23-A0/v24-A0/v24-B0/v24-B1 4종의 1,000-episode paired 비교 평가는 폐기되고 v24-B1이 그대로 v24로 확정되었습니다** — 상세: [`current_status.md`](current_status.md) §3 "최종 결정". 아래 두 섹션(v23-A0, v24-A0/B0)은 폐기된 candidate의 기록이며 더 이상 active가 아닙니다. v21 retrieval 시대의 실험 기록은 [`history/v21_retrieval_experiments.md`](history/v21_retrieval_experiments.md)로 이관되었습니다.
 
-## Active: v23-A0 exact bag-mean ablation
+## 폐기됨 (2026-08-01): v23-A0 exact bag-mean ablation
 
 - Branch: `codex/v23-bag-mean`
 - Config: `configs/train_v23_medium_bag_mean.yaml`
@@ -26,10 +26,10 @@
 - 완료 run: `20260731_155635`; best epoch 19
   `val_ce_loss=0.5933738`, checkpoint
   `checkpoints/20260731_155635/v23_medium_bag_mean/epoch=019-val_ce_loss=0.5934.ckpt`.
-- 다음 실행: 동일 1,000 pool-400 episodes에서 v22/v23-A0 context
-  `40/80/160/300` curve를 만들고 episode-cluster paired 비교한다.
+- ~~다음 실행: 동일 1,000 pool-400 episodes에서 v22/v23-A0 context
+  `40/80/160/300` curve를 만들고 episode-cluster paired 비교한다.~~ **실행되지 않음 — 2026-08-01 폐기.**
 
-## Active: v24-A0 / v24-B0 learned bag projection
+## 폐기됨 (2026-08-01): v24-A0 / v24-B0 learned bag projection
 
 - Branch: `codex/v23-bag-mean`
 - v24-A0 config: `configs/train_v24_medium_bag_proj.yaml`
@@ -42,14 +42,29 @@
   - 12 slot 유지 (40 tokens), 토큰별 전용 `Linear(512→64)` 40개 →
     concat(40×64=2560) → `Linear(2560, 512)` → bag당 512-d 1토큰.
     병목으로 projection 파라미터 ~2.62M (직결 40×512→512 ~10.5M 대비).
-  - 진행 중 run: `20260731_201252`, 50 epochs, PID `3033073`.
+  - 완료 run: `20260731_201252`, 50 epochs, best epoch 46 `val_ce_loss=0.5923204`.
 - 두 variant 모두 `architecture_version=24`. `mean_pool`(v23)과는 상호배타,
   v24-A0/B0 하위 variant는 state_dict 불일치로 구분됨.
-- 판정: v23과 동일 — 1,000 pool-400 episode의 context 40/80/160/300 paired
-  비교에서 overall `+0.03` 또는 target task `+0.05`.
+- ~~판정: v23과 동일 — 1,000 pool-400 episode의 context 40/80/160/300 paired
+  비교에서 overall `+0.03` 또는 target task `+0.05`.~~ **실행되지 않음 — 2026-08-01 폐기.**
+
+## ✅ 확정됨 (2026-08-01): v24-B1 residual + bottleneck bag projection = v24
+
+- Branch: `codex/v23-bag-mean` (main/v24로 fast-forward됨)
+- Config: `configs/train_v24_medium_bag_proj_residual.yaml` (`project_structured_tokens: true`,
+  `projection_bottleneck_dim: 64`, `projection_residual_mean: true`)
+- v24-B0 구조(40 token × 전용 `Linear(512→64)` → concat 2560) +
+  exact arithmetic mean(512d) residual shortcut → concat 3072 → `Linear(3072→512)`.
+- 완료 run: `20260731_220100`, 50 epochs, best epoch 41 `val_ce_loss=0.5903045`
+  (Bag-Collapse 계열 중 최저). Checkpoint
+  `checkpoints/20260731_220100/v24_medium_bag_proj_residual/epoch=041-val_ce_loss=0.5903.ckpt`.
+- **1,000-episode paired 합성 평가는 수행되지 않았습니다.** 확정은 train `val_ce_loss` 순위만으로
+  사용자가 직접 결정했습니다 — 상세와 미완 항목은 [`current_status.md`](current_status.md) §3 "최종 결정".
+- `_class_memories`의 label(context_labels) 기반 bag grouping/pooling은 이 확정으로도 바뀌지
+  않았습니다 — [`current_architecture.md`](current_architecture.md) §3.5 참고.
 
 > [!CAUTION]
-> **v22는 기존 체크포인트를 전부 무효화합니다.** retrieval 계층 제거로 `architecture_version`이 22로 올라갔고, `ModelInterface.on_load_checkpoint`가 v21 이하 체크포인트를 거부합니다. 아래 모든 실험은 **처음부터 다시** 돌려야 합니다.
+> **v22/v23-A0/v24-A0/v24-B0는 모두 폐기되었습니다.** 확정 config는 위 `train_v24_medium_bag_proj_residual.yaml` 하나뿐이며, 나머지 config는 `configs/archive/v23_v24_candidates/`로 이관되었습니다. ICI용 v24 config는 아직 없습니다 — Stage 3(§3 아래)는 여전히 v22 config를 참조하는 옛 절차입니다.
 
 ---
 
@@ -257,9 +272,12 @@ Medium 원본 checkpoint의 1,000-episode curve는 context 40/80/160/300에서 A
 
 초기 mixed-context fine-tuning은 epoch 19까지 완료됐고 best epoch 14 CE `0.5953`도 원본 `0.5946`을 넘지 못했습니다. 100 epochs로 확장했지만 train/validation이 함께 plateau하여 epoch 31에서 중단했습니다. Epoch 31 CE `0.5947`도 공식 `0.5946`과 동률입니다.
 
-다음 단계는 [`architecture_v23_candidates.md`](architecture_v23_candidates.md)의 T5-A입니다. 기존 40-token bag aggregator는 먼저 유지하고, structured token에 type/slot/tail identity를 추가해 bag 단위 embedding을 만든 뒤 fixed 8-token class memory 대신 labelled context bag 전체에 direct ridge/cross-attention을 적용합니다. 이 후보가 실패할 때만 anchor-independent multi-resolution distribution sketch(T5-B)로 bag 내부 압축을 변경합니다.
+**2026-08-01 갱신**: 이 단락이 가리키던 T5-A(typed bag-preserving branch)/T5-B(distribution sketch)는 실행되지 않았습니다. 대신 v23-A0/v24-A0/v24-B0/v24-B1 bag-collapse 계열을 먼저 시험했고, v24-B1(residual + bottleneck projection)이 train CE 최저치로 v24로 확정되었습니다 — 4종 paired 비교 및 T5-A/B는 사용자 결정으로 폐기했습니다. 기록은 [`history/architecture_v23_candidates.md`](history/architecture_v23_candidates.md), 결정 근거는 [`current_status.md`](current_status.md) §3을 참고하세요. T5-A가 다루던 "label 기반 class-memory 압축" 자체는 v24에서도 그대로 남아 있으므로, 그 지점을 다시 고치려면 T5-A를 별도로 재검토해야 합니다.
 
 ### Stage 3: ICI 실데이터 — 최종 테스트 (후보 확정 후 1회)
+
+> [!IMPORTANT]
+> **2026-08-01: 후보는 v24로 확정됐지만 이 config들은 아직 v22용입니다.** ICI를 v24로 돌리려면 `project_structured_tokens: true` 등 v24 model kwargs를 반영한 `train_v24_ici_finetune.yaml`/`train_v24_ici_scratch.yaml`을 먼저 만들어야 합니다. ICI는 여전히 잠금 상태입니다 — [`current_status.md`](current_status.md) §3/§10.
 
 - **Config**: `configs/train_v22_ici_finetune.yaml` (fine-tune), `configs/train_v22_ici_scratch.yaml` (scratch 대조군).
   fold와 seed는 config에 박아두지 않고 **`--cv` / `--seed`로 주입**합니다 (per-fold config 5개를 두던 방식은 폐기). config의 `seed: 42` / `cv: 0`은 아무것도 지정하지 않았을 때의 기본값일 뿐입니다.
