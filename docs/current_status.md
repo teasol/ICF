@@ -479,7 +479,7 @@ Hard는 Medium과 비교해 9개 축이 동시에 바뀝니다: class separation
 | 160 | 0.7654 [0.755, 0.775] | 0.5817 |
 | 300 | 0.7989 [0.790, 0.807] | 0.5639 |
 
-- 재학습 전 모델도 context 40→300에서 `+0.1232` 상승해 context 활용 능력이 분명하다. 다만 300에서도 overall 0.80이며, state task의 비현실적 oracle-mask 0.9013과는 직접 같은 지표가 아니므로 혼동하지 않는다.
+- 재학습 전 모델도 context 40→300에서 `+0.1232` 상승해 context 활용 능력이 분명하다. 다만 300에서도 overall 0.80이며, state task의 비현실적 oracle-mask 0.9013과는 직접 같은 지표가 아니므로 혼동하지 않습니다.
 - Baseline 평가 로그: `logs/20260731_medium_context_baseline_eval/context_curve.out`; summary: `logs/v22_medium_baseline_pool400_curve_1000ep.csv`.
 - Mixed-context fine-tuning 완료:
 
@@ -893,3 +893,33 @@ bag-preserving 분기를 추가해도 Medium에서는 아무 이득이 없었습
 ### Git 상태
 - 커밋 예정. 삭제 스크립트의 history 문서 내 참조(`learnability_ladder.md`,
   `v20_scalability_plan.md`)는 아카이브 문서라 그대로 둠.
+
+---
+
+## 14. 2026-08-02 세션 — src/scripts/tests 점검 및 v21 아카이브 정리
+
+사용자 지시로 `src`/`scripts`/`tests`를 점검했습니다.
+
+### `src/` — 변경 없음 (전부 사용 중)
+동적 import 경로(`dataset_src`/`optimizer_src`/`scheduler_src` via
+`src/modules/{data,model}_interface.py`의 `import_module`)로 8개 모듈 전부 런타임
+참조를 확인 — 삭제 대상 없음.
+
+### `scripts/` — v21 폐기 코드 제거 + 1건 복원
+- **삭제**: `scripts/archive/v21_retrieval/` (`benchmark_vram.py`, `run_vram_quick.py`,
+  `launch_phase{4,6,6b,6c}_5fold.sh`) — v21 완전 폐기. `scripts/archive/` 디렉터리 자체가
+  비워져 제거됨. living docs 참조 없음 (history 문서만 참조).
+- **⚠️ 복원**: `scripts/diagnose_context_size.py` — §13 정리에서 삭제했으나
+  `tests/test_context_size_diagnostic.py`가 `parse_sizes`/`split_indices`를 import하므로
+  **테스트 스위트가 깨질 수 있었음**. `a5dfcf8^`에서 복원. 교훈: 스크립트 삭제 전 tests/
+  의 `from scripts.* import` 의존성을 먼저 확인할 것.
+- **유지 (사용자 결정)**: smoke 3종(`ddp_smoke.py` 8-GPU, `gpu_train_smoke.py` FP16,
+  `medium_bf16_smoke.py` bf16) — 구식 정밀도/스케일이지만 보존.
+- 참조 무결성 검증 완료: 남은 `src`/`scripts`/`tests`의 `from scripts.* import`가
+  전부 실존 파일을 가리킴.
+
+### `tests/` — 변경 없음 (10개 전부 유효)
+- `test_learnability_ladder.py`는 실제로 fixed-episode-bank(`fixed_episode_count`) 기능
+  테스트 (파일명 오해 소지, 기능 유효).
+- 전체 unittest 실행은 이번엔 생략 (사용자 결정). 다음 코드 변경 시
+  `timeout 1500s ... -m unittest discover -s tests -p "test_*.py"` 필수.
