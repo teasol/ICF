@@ -359,7 +359,7 @@ task별: composition 0.8022 / combined 0.8170 / interaction 0.7453 / state 0.659
 
 ### ✅ 최종 후보 동결 여부 결정 — **완료 (2026-08-01)**
 
-사전에 계획한 Tier 1~3 합성 작업이 모두 끝났고, 이어서 진행한 v23/v24 bag-collapse family도 4종 모두 학습을 완주했습니다. 원래 계획은 이 4종을 1,000-episode paired 비교로 검증한 뒤 동결하는 것이었으나, **사용자가 이 비교를 건너뛰고 v24-B1(residual + bottleneck)을 직접 v24로 확정했습니다** (§3 "최종 결정" 참고). v22 Medium baseline은 폐기되었고 최종 후보는 v24입니다. **ICI는 여전히 잠금 상태** — v24용 ICI config가 없고, 이번 결정이 §7 평가 프로토콜을 통과한 것이 아니므로 ICI 해제는 별도 확인이 필요합니다.
+사전에 계획한 Tier 1~3 합성 작업이 모두 끝났고, 이어서 진행한 v23/v24 bag-collapse family도 4종 모두 학습을 완주했습니다. 원래 계획은 이 4종을 1,000-episode paired 비교로 검증한 뒤 동결하는 것이었으나, **사용자가 이 비교를 건너뛰고 v24-B1(residual + bottleneck)을 직접 v24로 확정했습니다** (§3 "최종 결정" 참고). v22 Medium baseline은 폐기되었고 최종 후보는 v24입니다. **ICI는 여전히 잠금 상태** — v24용 ICI config가 없고, 이번 결정이 §7 평가 프로토콜을 통과한 것이 아니므로 ICI 해제는 별도로 다시 확인이 필요합니다.
 
 ### ➡ 다음 우선순위: T4 Medium→Hard 성능 붕괴 attribution
 
@@ -407,7 +407,7 @@ Hard는 Medium과 비교해 9개 축이 동시에 바뀝니다: class separation
 
 - 벤치는 bags 절반을 query로 둬 실제 training query 5~12보다 meta 경로가 더 무거운 보수적 조건이다. 따라서 `context 160 + query 최대 12 = 총 172 bags`는 현재 batch 4를 유지해도 충분한 여유가 있다.
 - 총 220 bags도 단일 model step은 통과했으므로 context 약 200까지는 유력하지만, CUDA online generation/prefetch를 포함한 end-to-end smoke 전에는 정식 상한으로 확정하지 않는다.
-- 실제 ICI context는 fold당 약 69명이므로 large-context-only 학습은 사용하지 않는다. 작은 context를 포함한 mixed 학습을 하고 표준 40/80 평가 성능이 개선될 때만 학습 효과로 인정한다.
+- 실제 ICI context는 fold당 약 69명이므로 large-context-only 학습은 사용하지 않습니다. 작은 context를 포함한 mixed 학습을 하고 표준 40/80 평가 성능이 개선될 때만 학습 효과로 인정합니다.
 
 **Batch 2 / context 300 추가 점검**
 
@@ -464,7 +464,7 @@ Hard는 Medium과 비교해 9개 축이 동시에 바뀝니다: class separation
 | 160 | 0.5734 | 0.5842 | +0.0108 |
 | 300 | 0.5839 | 0.5977 | +0.0138 |
 
-- Fine-tuning 이득은 context가 클수록 증가하지만 사전 구조 후보 기준 overall `+0.03`에는 전 구간 미달한다. 실제 ICI 범위 40/80의 이득도 `+0.005~0.007`로 작다.
+- Fine-tuning 이득은 context가 클수록 증가하지만 사전 구조 후보 기준 overall `+0.03`에는 전 구간 미달합니다. 실제 ICI 범위 40/80의 이득도 `+0.005~0.007`로 작다.
 - 대조 로그: `logs/20260731_context300_baseline_eval/context_curve.out`; summary: `logs/v22_hard_baseline_pool400_curve_1000ep.csv`
 
 **Medium context-to-oracle 실험**
@@ -502,8 +502,8 @@ Hard는 Medium과 비교해 9개 축이 동시에 바뀝니다: class separation
 - 진행 확인: epoch 31의 42%, 경과 40분 43초, GPU 약 102.7 GiB, OOM/Traceback 없음. Epoch 20~30 val CE는 `0.5955~0.5999`; mixed-context 전체 best는 여전히 epoch 14의 `0.5953`이며 공식 원본 best `0.5946`을 넘지 못했다.
 - 사용자 판단에 따라 epoch 31 validation 완료 후 run을 중단했다. Epoch 31 CE `0.5947`, AUROC `0.7351`로 공식 CE `0.5946`과 사실상 동률이다. Train total/CE의 epoch 20~30 평균도 하락하지 않아 추가 epoch보다 architecture 개선으로 전환한다.
 - 상세 architecture 근거와 v23 후보: [`architecture_v23_candidates.md`](architecture_v23_candidates.md).
-- **다음 우선순위 T5-A**: 기존 40-token aggregator는 고정하고 token type/slot/tail identity를 부여한 뒤, bag 내부에서 structured embedding을 만들고 각 labelled bag을 fixed 8-token class memory 없이 direct ridge/cross-attention에 전달한다. 이 실험으로 episode-level context 압축과 bag-level 정보 손실을 먼저 분리한다.
-- State oracle-mask `0.9013`/latent `1.0`은 정답 반응세포 또는 latent score를 사용하므로 달성 목표가 아니라 비현실적 참고 상한이다. 실제 성공 기준은 관측 입력만으로 context 40/80 및 overall AUROC가 개선되는지다.
+- **다음 우선순위 T5-A**: 기존 40-token aggregator는 고정하고 token type/slot/tail identity를 부여한 뒤, bag 내부에서 structured embedding을 만들고 각 labelled bag을 fixed 8-token class memory 없이 direct ridge/cross-attention에 전달합니다. 이 실험으로 episode-level context 압축과 bag-level 정보 손실을 먼저 분리합니다.
+- State oracle-mask `0.9013`/latent `1.0`은 정답 반응세포 또는 latent score를 사용하므로 달성 목표가 아니라 비현실적 참고 상한입니다. 실제 성공 기준은 관측 입력만으로 context 40/80 및 overall AUROC가 개선되는지다.
 
 **T4-0. 재학습 없는 접근성 감사 [먼저]**
 - Hard best checkpoint로 state `model_input`/`observable`/`oracle` 상한 재측정
@@ -545,7 +545,7 @@ effect scale을 통일해 비교하니 covariance는 composition과 동률이고
 </details>
 
 **T3-2. ✅ 완료 (2026-07-30) — 권고: val episode 1,000개.**
-CI 폭 104→0.074 / 400→0.035 / 1,000→0.021. task별은 1,000에서 0.045. **task별 +0.05 미만을 노리면 2,000개 이상 필요.** 상세는 §3. 이 과정에서 공식 기준선도 1,000 episode 기준으로 갱신했습니다(0.7078).
+CI 폭 104→0.074 / 400→0.035 / 1,000→0.021. task별은 1,000에서 0.045. **task별 +0.05 미만을 노리는 실험은 1,000개로도 부족하므로 2,000개 이상 필요**합니다. 상세는 §3. 이 과정에서 공식 기준선도 1,000 episode 기준으로 갱신했습니다(0.7078).
 
 <details><summary>원래 T3-2 계획 (완료)</summary>
 현재 104 episodes → CI 폭 0.060. Tier 1/2에서 기대하는 개선폭이 그보다 작다면 검출이 안 됩니다. `val_dataset_kwargs.episodes_per_epoch`를 늘려 CI를 좁히세요 (episode 수가 실질 표본 크기, §5).
@@ -811,7 +811,7 @@ bag-preserving 분기를 추가해도 Medium에서는 아무 이득이 없었습
 
 ### 남겨진 것 / 다음 Action
 
-1. `configs/train_v24_easy.yaml`/`train_v25_easy.yaml` 커밋 (아직 untracked).
+1. ~~`configs/train_v24_easy.yaml`/`train_v25_easy.yaml` 커밋~~ → **완료** (`b6aacf7`에 이미 포함).
 2. v25 vs v24-B1 정식 paired win-rate 로그 확인, 문서에 최종 수치 기록.
 3. v25-easy 학습 완료 대기(속도 저하 원인 확인 포함) → v24-easy와 1,000-episode 평가로 비교.
 4. Easy tier에서도 v24-easy ≈ v25-easy로 갈리지 않으면 "이 아키텍처 계열 전체의 한계"
@@ -819,3 +819,36 @@ bag-preserving 분기를 추가해도 Medium에서는 아무 이득이 없었습
    Easy tier에서 유의미하게 갈리면 Medium이 ceiling/floor effect로 아키텍처 차이를
    가려온 것 → v25를 Medium에서 더 오래/다르게 학습해볼 근거가 생김.
 5. ICI는 계속 잠금 (변경 없음).
+
+---
+
+## 12. 2026-08-02 세션 — 프로젝트 폴더 정리 (checkpoint/log/prediction purge)
+
+사용자 지시로 폐기된 구버전 산출물을 정리했습니다. **코드/설정/문서는 불변**, 활성 run은
+그대로 유지됐습니다.
+
+### 삭제 내역 (모두 gitignore 대상 또는 git rm)
+- **`checkpoints/` 53GB → 3.3GB**: v19/v20/v21/v22-era run 디렉터리 128개(20260722~20260729) +
+  루트 느슨한 `.ckpt` 11개 + 폐기 확정 v23-A0/v24-A0/v24-B0 checkpoint
+  (`20260731_v23_bag_mean_50e_resume`, `20260731_155635`, `20260731_182755`, `20260731_201252`).
+  폐기된 candidate들의 수치는 `docs/history/v23_v24_bag_collapse_candidates.md`에 그대로 보존.
+- **`logs/` 819MB → 532MB**: 20260722~20260729 dated 로그 + v19/v20-era named 로그
+  (`tiranos/`, `pipeline_*`, `v19_covariance_candidates_*`, `2026072*_v19_*`) 삭제.
+- **`predictions/`**: v19/v20/v21 ICI 예측 15개 삭제 (`ici_*.pt`, `ici_predictions_*.pt`,
+  `v21_*_5fold.pt` 등). v22+ 합성 예측 및 curve는 유지.
+- **v18**: `experiments/v18_learnability_c4_d_d0_d4.yaml`, `results/v18/` 삭제 (git rm).
+
+### 유지 (활성/참조)
+- checkpoints: `20260729_160643`(v22 baseline 참고), `20260731_035538`(v22 Hard),
+  `20260731_220100`(v24 확정), `20260731_context300_ft`/`20260731_medium_context300_*`(T4),
+  `20260801_020144`(v25), `20260801_075144`(v24-easy), `20260801_235601`(v25-easy, 진행 중).
+- `data/`(14GB ICI 실데이터) 불변.
+
+> [!NOTE]
+> 향후 세션에서 이전에 참조되던 폐기 run checkpoint/log 경로를 찾을 경우, 해당 파일은
+> 위 정리로 삭제됐고 수치만 문서에 남아 있습니다.
+
+### Git 상태
+- `git rm` 반영: `experiments/v18_*`, `results/v18/*`. 그 외 삭제는 전부 gitignore 대상이라
+  git에 영향 없음. §11 "남겨진 것" item 1의 easy config 커밋은 이미 `b6aacf7`에서 완료됨
+  (문서 스테일 — 여기서 해소).
