@@ -852,3 +852,44 @@ bag-preserving 분기를 추가해도 Medium에서는 아무 이득이 없었습
 - `git rm` 반영: `experiments/v18_*`, `results/v18/*`. 그 외 삭제는 전부 gitignore 대상이라
   git에 영향 없음. §11 "남겨진 것" item 1의 easy config 커밋은 이미 `b6aacf7`에서 완료됨
   (문서 스테일 — 여기서 해소).
+
+---
+
+## 13. 2026-08-02 세션 — 문서 및 config 정리 (docs/config/scripts purge)
+
+사용자 지시로 v18/v19/v20-era 스테일 파일과 config를 정리했습니다. **코드(`src/`)와
+활성 config·스크립트·living docs는 불변**, README/핸드오프 문서는 현재 상태로 갱신.
+
+### 삭제 (git rm, 전부 구식/미참조)
+- **루트 스테일**: `MODEL_ARCHITECTURE_KO.md`(v18 문서), `main.sh`/`main_medium.sh`/
+  `main_minimum.sh`/`main_slurm.sh`/`test.sh`/`test_slurm.sh`(archive된 config·v16 checkpoint 참조).
+- **구버전 스크립트** (`scripts/` 17개): `run_learnability_ladder.sh`,
+  `run_sequential_pipeline.sh`, `run_v19_covariance_candidates.sh`, `sweep_csp_residual.py`,
+  `benchmark_scalability.py`, `check_population_oracle.py`, `check_training_budget.py`,
+  미참조 진단 `diagnose_{covariance_relations,covariance_subspace,local_geometry,
+  anchor_candidates,context_size,tail_covariance,v19_branches,bag_label_selection,
+  covariance_utilisation,oracle_covariance_upper_bound}.py`.
+- **learnability-era 모듈 config** (`configs/` 14개): `callbacks/learnability.yaml`,
+  `data/learnability_{a,b,manifold}.yaml`, `data/{synthetic,minimum}.yaml`,
+  `model/covariance32.yaml`, `optimizer/adamw_learnability_5e4.yaml`,
+  `scheduler/learnability.yaml`, `trainer/learnability_{a,b,d20}.yaml`,
+  `trainer/{csp_short8,minimum_ddp8}.yaml`.
+
+### 유지
+- `scripts/`: `train.py`, `evaluate_synthetic.py`, `compare_predictions.py`,
+  `evaluate_protocol.py`, `power_analysis.py`, `launch_interactive_training.sh`,
+  `launch_ici_protocol.sh`, living docs 참조 진단 4종(`diagnose_{cell_selection,
+  state_upper_bound,selection_gain_curve,oracle_slot_alignment}.py`), smoke 유틸.
+- `configs/` 최상위 10개 전부 (v24/v25/easy 활성 + v22 ICI/T4용) — 변경 없음.
+- `configs/` 모듈 서브폴더의 generic 조각(default/medium/logger/adamw 등) — 유지.
+
+### 문서 갱신
+- `README.md` 전면 갱신: v18 설명·`main*.sh` 사용법 제거 → v24 아키텍처 + `scripts/
+  launch_interactive_training.sh` 표준 런처 + 문서 맵으로 교체.
+- `docs/agent_handoff.md` §7-1: config 최상위 유지 목록을 현재 상태로 갱신 (v23/v24-A0/B0
+  config는 `configs/archive/v23_v24_candidates/` 이관 반영).
+- `docs/current_status.md` §12는 이전 checkpoint/log purge, §13은 본 문서/config purge 기록.
+
+### Git 상태
+- 커밋 예정. 삭제 스크립트의 history 문서 내 참조(`learnability_ladder.md`,
+  `v20_scalability_plan.md`)는 아카이브 문서라 그대로 둠.

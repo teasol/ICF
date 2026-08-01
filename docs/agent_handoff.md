@@ -117,7 +117,14 @@ scripts/launch_interactive_training.sh \
 
 1. **`configs/` 최상위 루트 유지 조건**:
    - 현재 활성 파이프라인에서 직접 사용하는 entry point config만 `configs/` 최상위에 유지합니다.
-   - v22 기준선 config와 현재 architecture candidate config(`train_v23_medium_bag_mean.yaml`, `train_v24_medium_bag_proj.yaml`, `train_v24_medium_bag_proj_bottleneck.yaml`)를 유지하고, 폐기 확정 시 archive로 이동합니다.
+   - 현재 `configs/` 최상위 유지 대상: v24 확정(`train_v24_medium_bag_proj_residual.yaml`),
+     v25 진행(`train_v25_medium_typed_bag.yaml`), Easy tier(`train_v24_easy.yaml`/`train_v25_easy.yaml`),
+     v22 기준선·참조용(`train_v22_medium.yaml` — `evaluate_synthetic.py` 기본 config,
+     `train_v22_medium_context300.yaml`/`train_v22_hard_context300.yaml`/`train_v22_hard_realworld.yaml` — T4,
+     `train_v22_ici_finetune.yaml`/`train_v22_ici_scratch.yaml` — ICI).
+   - 폐기 확정된 v23-A0/v24-A0/v24-B0 config(`train_v23_medium_bag_mean.yaml`,
+     `train_v24_medium_bag_proj.yaml`, `train_v24_medium_bag_proj_bottleneck.yaml`)는
+     `configs/archive/v23_v24_candidates/`로 이관됨.
    - ICI의 fold/seed는 config에 박지 않고 `--cv` / `--seed`로 주입합니다 (`scripts/launch_ici_protocol.sh`).
 2. **구버전 Config 아카이빙 조건**:
    - 구버전 아키텍처의 config는 `configs/archive/` 하위로 즉시 이관합니다: `archive/v18_v19/`, `archive/v20/`, `archive/v21_retrieval/`.
