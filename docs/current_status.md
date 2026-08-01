@@ -1,8 +1,8 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-01 14:10:00 KST`
-**Status**: v24 확정 유지. **v25 (T5-A typed bag-preserving branch) 구현 완료, unittest 141개 통과, scratch Medium 50-epoch 학습 진행 중** — 상세는 §3 "🧪 v25 (T5-A) 진행 중". `main`/`v24`는 그대로, 새 작업은 `codex/v25-typed-bag` 브랜치.
-**Read first if you are picking this up**: §3 "🧪 v25 (T5-A) 진행 중" (신규), §3 "최종 결정 (2026-08-01)" (v24 확정 배경), §6 Action Plan(갱신), §9 세션 핸드오프.
+**Last updated**: `2026-08-02 00:10:00 KST`
+**Status**: v24 확정 유지. **v25(T5-A) Medium 평가 완료 — v24-B1과 사실상 동률(승격 기준 미달)**. "이 아키텍처 계열 전체가 val CE 0.59 근처에서 막힌 것 아니냐"는 질문을 검증하기 위해 **Easy tier(v24-easy/v25-easy) 실험 진행 중** — v24-easy 완료(best CE 0.3499), **v25-easy는 학습 중이나 epoch당 v24-easy보다 ~10배 느림(원인 미조사, 다음 세션 확인 필요)**. 상세는 §11.
+**Read first if you are picking this up**: §11 (신규, 가장 중요), §3 "🧪 v25 (T5-A) 진행 중", §3 "최종 결정 (2026-08-01)" (v24 확정 배경), §6 Action Plan.
 **Branches**: `codex/v25-typed-bag` = v25 작업 중 (base: `v24`) / `main` = `v24` = `codex/v23-bag-mean` 최종 커밋 / `v22`(구 기준선, 참조용 보존) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `24` 확정 유지. **`25`는 아직 미확정 — v25 학습/평가 완료 후 판정.** (`project_structured_tokens: true, projection_bottleneck_dim: 64, projection_residual_mean: true` + `typed_bag_preserving_branch: true, typed_bag_bottleneck_dim: 64`). `22`/`23`은 폐기된 구버전.
@@ -74,101 +74,13 @@
 
 ## 3. 실험 현황
 
-### ✅ v23-A0 exact bag-mean: 50-epoch 완료 (2026-07-31)
+### ✅ v23-A0 / v24-A0 / v24-B0: 50-epoch 완료, 모두 폐기 (2026-07-31 완료 → 2026-08-01 폐기)
 
-각 bag의 `1 global + 36 slot-statistic + 3 tail = 40` structured token을
-exact arithmetic mean 1개로 압축했습니다. Context와 query 모두 같은
-mean을 사용하고, class-memory에는 `bags × 40`이 아니라 bag당 1개가
-입력됩니다. 기존 v22 동작은 기본값 `false`로 보존되며 활성화한
-checkpoint는 `architecture_version=23`입니다.
-
-| 항목 | 값 |
-|---|---|
-| Branch / implementation | `codex/v23-bag-mean`, commit `8edd7c1` |
-| Config | `configs/train_v23_medium_bag_mean.yaml` |
-| Run | `20260731_155635`, scratch Medium 20 epochs / 10,240 steps |
-| Completion | launcher가 `training completed successfully` 기록; PID 종료 |
-| Best checkpoint | `checkpoints/20260731_155635/v23_medium_bag_mean/epoch=019-val_ce_loss=0.5934.ckpt` |
-| Last checkpoint | `checkpoints/20260731_155635/v23_medium_bag_mean/last.ckpt` |
-| Best `val_ce_loss` | **0.5933738** @ epoch 19 |
-| Epoch 19 val AUROC | 0.7322822 (104-episode training val; 최종 판정용 아님) |
-| Highest run val AUROC | 0.7379618 @ epoch 8 (동일한 작은 104-episode val) |
-| Logs / metrics | `logs/20260731_155635/v23_medium_bag_mean.out`; `logs/v23_medium_bag_mean/version_0/metrics.csv` |
-| Verification | 전체 unittest **123개 통과** (`696.503s`) |
-
-20-epoch 경계에서 validation CE와 total loss가 모두 run best였고,
-epoch 16→19 CE가 `0.59550→0.59452→0.59369→0.59337`로 연속 개선되어
-추가 수렴 여지를 확인합니다. `last.ckpt`의 model/optimizer/scheduler/global
-step을 복원하여 총 50 epochs까지 연장했습니다.
-
-| 50-epoch 재개 항목 | 값 |
-|---|---|
-| Config commit | `4d784dc` (`episode_batch_size=8`, `shape_group_size=8`, `max_epochs=50`) |
-| Resume source | `checkpoints/20260731_155635/v23_medium_bag_mean/last.ckpt` |
-| Active epoch range | epoch 20~49 (추가 30 epochs) |
-| PID | `2671747` (종료) |
-| **완료 상태** | **`max_epochs=50` 도달, 정상 종료** |
-| **50-epoch best** | **epoch 43 `val_ce_loss=0.5912154`, `val_auroc=0.7383`** |
-| Best checkpoint | `checkpoints/20260731_v23_bag_mean_50e_resume/v23_medium_bag_mean_50e/epoch=043-val_ce_loss=0.5912.ckpt` |
-| Training log | `logs/20260731_v23_bag_mean_50e_resume/v23_medium_bag_mean_50e.out` |
-| Metrics | `logs/v23_medium_bag_mean/version_1/metrics.csv` |
-
-50-epoch 연장으로 훈련 val CE가 `0.59337 → 0.59122`로 개선됐고
-v22 공식 best `0.5946`보다 `0.0034` 낮습니다. 104-episode val AUROC는
-분산이 커서 승패 판정에 쓰지 않습니다. **v23 50-epoch 평가(1,000 pool-400,
-context 40/80/160/300, v22 paired)는 아직 실행 전입니다** — 사용자 지시
-대기 중. ICI는 계속 잠급니다.
-
-### ✅ v24-A0 learned bag projection: 50-epoch 완료 (2026-07-31)
-
-exact mean(v23) 대신 **learned linear projection**으로 bag을 1토큰으로
-압축합니다. Slot을 12→1로 줄여 bag당 `1 global + 3 slot-statistic + 3 tail
-= 7` 토큰을 만들고, concat(`7×512=3584`) → `Linear(3584, 512)` → bag당
-512-d 1토큰을 생성합니다. 활성화 checkpoint는 `architecture_version=24`.
-
-| 항목 | 값 |
-|---|---|
-| Branch / implementation | `codex/v23-bag-mean`, commit `26b2b27` |
-| Config | `configs/train_v24_medium_bag_proj.yaml` (`project_structured_tokens: true`, slot 1 / density slot 1, `max_epochs=50`) |
-| Run | `20260731_182755`, scratch Medium 50 epochs |
-| **완료 상태** | **`max_epochs=50` 도달, 정상 종료** |
-| **Best `val_ce_loss`** | **0.5976237** @ epoch 45 (마지막 epoch 49: 0.59819) |
-| Best val AUROC | 0.7339473 (104-episode training val; 최종 판정용 아님) |
-| Best checkpoint | `checkpoints/20260731_182755/v24_medium_bag_proj/epoch=045-val_ce_loss=0.5976.ckpt` |
-| Model size | 8.4M trainable params (v22 6.57M + bag_token_projection ≈1.8M) |
-| Training log | `logs/20260731_182755/v24_medium_bag_proj.out` |
-| Metrics | `logs/v24_medium_bag_proj/version_0/metrics.csv` |
-| Verification | 신규 테스트 5개 포함 `test_base_model` + `test_model_interface` **76개 통과** (`553.453s`) |
-
-> [!NOTE]
-> 훈련 val CE `0.5976`은 v22(0.5946)와 v23-A0(0.5912)보다 높습니다. slot을
-> 1개로 줄인 정보 손실 영향으로 보이며, 최종 판정은 1,000 pool-400 episodes
-> context `40/80/160/300` paired 비교로만 합니다.
-
-판정 계획: v23/v24 둘 다 1,000 pool-400 episodes, context `40/80/160/300`에서
-v22(`predictions/v22_medium_baseline_pool400_curve/`)와 paired episode-cluster
-bootstrap 비교. Overall `+0.03` 또는 target task `+0.05`가 없으면 폐기.
-ICI는 잠금 유지.
-
-### ✅ v24-B0 per-token bottleneck projection: 50-epoch 완료 (2026-07-31)
-
-v24-A0가 slot 1개로 정보를 잃는 문제를 해결하기 위한 variant. **12 slot 유지**
-(40 tokens) + 토큰별 전용 `Linear(512→64)` 40개 적용 → concat(40×64=2560) →
-`Linear(2560→512)` → bag당 512-d 1토큰. 직결 40×512→512(~10.5M) 대신
-병목으로 파라미터를 ~2.62M로 제한.
-
-| 항목 | 값 |
-|---|---|
-| Branch / implementation | `codex/v23-bag-mean`, commit `b2fb9d0` |
-| Config | `configs/train_v24_medium_bag_proj_bottleneck.yaml` (`project_structured_tokens: true`, `projection_bottleneck_dim: 64`, 12 slot, `max_epochs=50`) |
-| Run | `20260731_201252`, scratch Medium 50 epochs |
-| **완료 상태** | **`max_epochs=50` 도달, 정상 종료** (PID `3033073` 종료) |
-| **Best `val_ce_loss`** | **0.5923204** @ epoch 46 (v22 baseline 0.5946 대비 -0.0023, v24-A0 0.5976 대비 -0.0053 개선) |
-| Model size | 9.2M trainable params (v22 6.57M + 병목 projection ≈2.62M) |
-| Best checkpoint | `checkpoints/20260731_201252/v24_medium_bag_proj_bottleneck/epoch=046-val_ce_loss=0.5923.ckpt` |
-| Training log | `logs/20260731_201252/v24_medium_bag_proj_bottleneck.out` |
-| Checkpoints | `checkpoints/20260731_201252/v24_medium_bag_proj_bottleneck/` |
-| Verification | 신규 테스트 4개 포함 `test_base_model` + `test_model_interface` **80개 통과** (`578.291s`) |
+세 candidate 모두 Medium에서 scratch 50-epoch 완료했으나 (best `val_ce_loss`:
+v23-A0 exact mean `0.5912` / v24-A0 learned projection(slot 1) `0.5976` /
+v24-B0 per-token bottleneck(slot 12) `0.5923`) v24-B1이 최종 확정되며 함께
+폐기됐습니다. 전체 config/checkpoint/param-count 기록은
+[`history/v23_v24_bag_collapse_candidates.md`](history/v23_v24_bag_collapse_candidates.md)로 이관.
 
 ### ✅ v24-B1 residual bottleneck projection: 50-epoch 완료 (2026-07-31)
 
@@ -819,3 +731,91 @@ v21 조사의 결론("모든 비교가 노이즈였다")에 대응해 평가 체
 1. (선택) v24용 ICI finetune/scratch config를 만들고 ICI 실행 여부를 사용자에게 다시 확인.
 2. (선택) T4 Medium→Hard attribution을 v24 위에서 이어갈지 결정.
 3. 새 구조 변경이 필요해지면 이번처럼 train CE만으로 확정하지 말고, 최소한 §7 평가 프로토콜의 1,000-episode paired 비교를 다시 켤지 사용자와 사전에 정할 것.
+
+---
+
+## 11. 2026-08-02 세션 핸드오프 — v25 Medium 평가 완료(사실상 동률), Easy tier 실험 진행 중
+
+### v25(T5-A) Medium 1,000-episode pool-400 평가 — v24-B1과 사실상 동률, 승격 기준 미달
+
+§3 "v25 (T5-A) 진행 중"에서 이어감. scratch 50-epoch 학습 완료: best `val_ce_loss 0.5939` @ epoch 24
+(체크포인트 `checkpoints/20260801_020144/v25_medium_typed_bag/epoch=024-val_ce_loss=0.5939.ckpt`).
+이번 세션에서 v24-B1과 함께 처음으로 1,000-episode pool-400 context curve를 평가했습니다
+(v24-B1도 이전에는 이 평가를 받은 적이 없었음 — §3 "최종 결정"에서 스킵됐던 부분).
+
+| context | v24-B1 AUROC [CI] | v25 AUROC [CI] |
+|---:|---|---|
+| 40  | 0.6774 [0.666, 0.688] | 0.6792 [0.668, 0.690] |
+| 80  | 0.7223 [0.711, 0.732] | 0.7217 [0.710, 0.732] |
+| 160 | 0.7688 [0.758, 0.778] | 0.7685 [0.759, 0.778] |
+| 300 | 0.8036 [0.794, 0.812] | 0.8017 [0.792, 0.811] |
+
+예측 파일: `predictions/v24_medium_bag_proj_residual_pool400_curve/`, `predictions/v25_medium_typed_bag_pool400_curve/`.
+차이가 전부 CI 폭(±0.005~0.011)보다 훨씬 작아 **사실상 동률**입니다 — §6/§7 판정 기준(overall
++0.03 또는 target task +0.05)에 한참 못 미칩니다. 즉 **label 기반 class-memory를 우회하는
+bag-preserving 분기를 추가해도 Medium에서는 아무 이득이 없었습니다.**
+
+`scripts/compare_predictions.py`로 정식 paired win-rate 계산을 시도했으나 **주의**:
+1. 첫 시도에서 두 예측 파일이 동일 파일명(`context_40.pt` 등)이라 스크립트 내부 dict가
+   파일명(stem)을 key로 써서 하나가 덮어써지는 버그를 만났습니다 — 반드시 서로 다른 이름으로
+   복사한 뒤 비교할 것 (`/tmp/.../scratchpad/compare_tmp/{v24b1,v25}_context_{size}.pt`로 해결).
+2. 이 스크립트의 cluster bootstrap(5000 샘플, 순수 Python 루프)이 **매우 느립니다** —
+   context 40 하나에 CPU 700%대로 수십 분이 걸렸습니다. 세션 재시작으로 한 번 유실되어
+   `nohup ... & disown`으로 완전히 분리해 재실행했습니다 (PID `4153394`/`4153395`).
+   **이 정식 paired win-rate 결과는 아직 안 나왔을 수 있습니다** — 다음 세션은
+   `/tmp/claude-3564/-NHNHOME-kimds/f036ed83-abdf-4ebb-a5e9-d834e04e4f52/scratchpad/v25_vs_v24b1_compare_fixed2.log`를
+   먼저 확인할 것. 위 표의 개별 AUROC+CI만으로도 결론(동률)은 이미 명확합니다.
+
+### 🧪 Easy tier 실험 — "0.59가 이 아키텍처 계열의 물리적 한계 아니냐"는 질문 검증 중
+
+사용자 관찰: v22~v25(mean/projection/bottleneck/residual/typed-bag) 전부 val CE
+**0.5903~0.5976** 범위(폭 0.0073)에 몰려 있음. 과거 Tier 2 진단(§3 T2-1/T2-2: state AUROC가
+관측 가능한 최선의 probe와 이미 동률, oracle은 0.88~0.90)과 맞물려 "bag summary 압축 방식이
+아니라 이 아키텍처 계열 전체의 한계"라는 가설이 유력함. 이를 검증하기 위해 Hard tier가
+건드린 축을 정확히 반대 방향으로 돌린 **Easy tier**를 만들어 v24/v25 두 아키텍처만 재학습·비교합니다
+(6개 전부가 아니라 사용자 지시로 v24/v25만).
+
+**Easy tier 정의** (`configs/train_v24_easy.yaml` 헤더 주석에 Medium/Hard/Easy 전체 표 있음):
+
+| 축 | Medium | Hard | Easy |
+|---|---|---|---|
+| class_separation | [0.5, 1.4] | [0.2, 0.8] | **[1.2, 2.2]** |
+| donor_shift_scale | 0.35 | 0.70 | **0.15** |
+| donor_component_shift_scale | 0.12 | 0.25 | **0.06** |
+| observation_noise | 0.01 | 0.05 | **0.002** |
+| rare_response_probability | 0.15 | 0.25 | **0.05** |
+| rare_response_fraction | [0.02,0.08] | [0.005,0.03] | **[0.05,0.15]** |
+| response_mixture_effect_scale | 1.40 | (동일) | **1.80** |
+| response_state_effect_scale | [0.45,1.00] | (동일) | **[0.90,1.60]** |
+| response_covariance_effect_scale | [0.30,0.80] | (동일) | **[0.70,1.30]** |
+
+`num_bags`/`num_cells`/`latent_dim`은 안 건드림 — 분리 가능성/노이즈 축만 바꿔 "신호가
+많아지면 아키텍처가 갈리는가"만 순수하게 봅니다. Config: `configs/train_v24_easy.yaml`
+(base: v24-B1 confirmed config), `configs/train_v25_easy.yaml` (base: v25 config). **아직 git에
+커밋 안 됨(untracked)** — 다음 커밋에 포함할 것.
+
+**진행 상황**:
+- ✅ v24-easy: scratch 50-epoch 완료. Best `val_ce_loss` **0.3499** @ epoch 49
+  (Medium 0.59 대비 압도적으로 낮음 — Easy tier가 실제로 훨씬 쉬움을 확인).
+  Run `20260801_075144`, checkpoint `checkpoints/20260801_075144/v24_easy/epoch=049-val_ce_loss=0.3499.ckpt`,
+  로그 `logs/20260801_075144/v24_easy.out`.
+- 🔄 v25-easy: 학습 중, run `20260801_235601`, checkpoint dir `checkpoints/20260801_235601/v25_easy/`,
+  로그 `logs/20260801_235601/v25_easy.out`.
+  > [!WARNING]
+  > **v25-easy epoch당 속도가 v24-easy보다 약 10배 느립니다** (v24-easy 4.72 it/s / epoch ≈1:48
+  > vs v25-easy 0.45 it/s / epoch ≈19분). Medium에서는 v25가 v24-B1과 비슷한 속도였는데
+  > Easy tier에서만 이렇게 느려지는 이유는 아직 조사하지 않았습니다 — 이 속도가 유지되면
+  > 50 epoch에 **~16시간**이 걸립니다. 다음 세션은 (1) 이 프로세스가 아직 살아있는지
+  > `ps aux | grep train.py`로 먼저 확인하고, (2) 왜 느린지(데이터 생성 병목인지 typed-bag
+  > 분기의 ridge solve가 Easy tier의 특정 분포에서 더 오래 걸리는지) 확인할 것.
+
+### 남겨진 것 / 다음 Action
+
+1. `configs/train_v24_easy.yaml`/`train_v25_easy.yaml` 커밋 (아직 untracked).
+2. v25 vs v24-B1 정식 paired win-rate 로그 확인, 문서에 최종 수치 기록.
+3. v25-easy 학습 완료 대기(속도 저하 원인 확인 포함) → v24-easy와 1,000-episode 평가로 비교.
+4. Easy tier에서도 v24-easy ≈ v25-easy로 갈리지 않으면 "이 아키텍처 계열 전체의 한계"
+   가설이 강해짐 → v25(T5-A)는 최종 폐기, T5-B/T5-C 또는 완전히 다른 접근으로 이동 검토.
+   Easy tier에서 유의미하게 갈리면 Medium이 ceiling/floor effect로 아키텍처 차이를
+   가려온 것 → v25를 Medium에서 더 오래/다르게 학습해볼 근거가 생김.
+5. ICI는 계속 잠금 (변경 없음).

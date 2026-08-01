@@ -1,0 +1,44 @@
+base_config: train_v24_medium_bag_proj_residual.yaml
+
+# Easy tier: mirrors how train_v22_hard_realworld.yaml dialed Medium harder,
+# but inverted -- every axis Hard pushed toward more noise/less separation is
+# pushed the other way here. Purpose: check whether the v22-v25 bag-collapse
+# family only converges to ~0.59 val_ce_loss because Medium saturates all of
+# them near the same floor (ceiling/floor effect), or whether that's a real
+# per-architecture ceiling that persists even with much more signal.
+#
+#                          Medium          Hard            Easy (this file)
+# class_separation         [0.5, 1.4]      [0.2, 0.8]      [1.2, 2.2]
+# donor_shift_scale         0.35            0.70            0.15
+# donor_component_shift     0.12            0.25            0.06
+# observation_noise         0.01            0.05            0.002
+# rare_response_probability 0.15            0.25            0.05
+# rare_response_fraction    [0.02, 0.08]    [0.005, 0.03]   [0.05, 0.15]
+# response_mixture_effect_scale    1.40                     1.80
+# response_state_effect_scale      [0.45, 1.00]              [0.90, 1.60]
+# response_covariance_effect_scale [0.30, 0.80]              [0.70, 1.30]
+#
+# num_bags/num_cells/latent_dim left at Medium values -- only the axes that
+# directly control class separability/noise are touched, so a regression is
+# unambiguously about signal strength, not generator structure.
+data_overrides:
+  episode_batch_size: 8
+  dataset_kwargs:
+    shape_group_size: 8
+    class_separation: [1.2, 2.2]
+    donor_shift_scale: 0.15
+    donor_component_shift_scale: 0.06
+    observation_noise: 0.002
+    rare_response_probability: 0.05
+    rare_response_fraction: [0.05, 0.15]
+    response_mixture_effect_scale: 1.80
+    response_state_effect_scale: [0.90, 1.60]
+    response_covariance_effect_scale: [0.70, 1.30]
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v24_easy
+
+trainer:
+  max_epochs: 50
