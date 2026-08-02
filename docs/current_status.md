@@ -1,16 +1,15 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-03` (v26 학습 완료, CLS 프로브 §17, E7 재검정 §18, 정규화 천장 프로브 §19, no-L2 ablation 완료·음성 §20, Musk zero-shot §21)
-**Status**: **v24가 현재 확정 baseline (변경 없음)**. **v24 no-L2 ablation(per-cell L2 제거) 완료 —
-음성 결과**: best `val_ce_loss 0.5925` vs v24 `0.5903` (+0.0022 나쁨, §20) → 모델이 이미
-global_summary/covariance로 magnitude를 받으므로 이 방향 종료. Musk(Musk2) MIL zero-shot 테스트:
-**AUROC 0.7766 [0.667, 0.878]** (§21) — in-context 메타러닝의 OOD 전이 신호. v26(CLS-token pooling)
-학습 완료 — `0.5908`, v24와 사실상 동률, 1,000-episode 평가는 사용자가 skip 결정. 재학습 없는 진단
-3종 완료: CLS attention 프로브(§17, 균등→24-CLS 미추진), E7 재검정(§18, INCONCLUSIVE→Path B 기각
-쪽), 정규화 천장 프로브(§19, "배운 정규화" 방향 기각). v25는 2026-08-02 폐기 확정(변경 없음).
-**Read first if you are picking this up**: §21 (Musk zero-shot — 최신), §20 (no-L2 ablation 완료·음성),
-§19 (정규화 천장 프로브), §18 (E7 재검정·Path B 판정), §17 (v26 학습 완료·CLS 프로브 판정), §16
-(v26 구현·학습, v26/v27/v29 폐기), §15 (이전 세션 마무리), §11 (v25 평가·폐기), §3 (실험 현황·최종 결정).
+**Last updated**: `2026-08-03` (Musk-like easy 생성기 실험 학습 중 §22 — 최신; CLS §17, E7 §18, 정규화 §19, no-L2 §20, Musk zero-shot §21)
+**Status**: **v24가 현재 확정 baseline (변경 없음)**, 단 **전략 전환** — 생성기 개선 실험 시작: 합성
+생성기가 너무 lossy라 모델이 데이터 정보 한계(~0.70)에 갇혔다고 판정하고, **Musk 수준으로 bag을
+분리 가능한 "musk-like easy" 데이터**(§22)를 생성해 학습 중(PID 846636, ~2h). 분리성 검증: current
+입력 ridge **0.894**(원래 0.636), 스모크 val_loss **0.485**(원래 0.692). 완료되면 "0.70 한계 = 데이터
+lossiness" 가설 판정. 이전 결과: v26 학습 완료(0.5908, v24와 동률), no-L2 ablation 음성(0.5925),
+Musk zero-shot AUROC 0.777(§21), 재학습 없는 진단 3종 완료(§17-19). v25는 2026-08-02 폐기 확정.
+**Read first if you are picking this up**: §22 (Musk-like easy 생성기 실험 학습 중 — 최신), §21 (Musk
+zero-shot), §20 (no-L2 ablation 음성), §19 (정규화 천장 프로브), §18 (E7 재검정·Path B), §17 (v26·CLS
+프로브), §16 (v26/v27/v29 폐기), §3 (실험 현황·최종 결정).
 **Branches**: `main` = `v24` 확정 (현재 SSOT) / 참고용 `v22`·`v24`·`v19`·`codex/v23-bag-mean` / v25는 태그 **`v25-typed-bag-final`**로 보존 (브랜치 삭제) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `24`가 여전히 확정 baseline. **`26`(CLS-token pooling)은 2026-08-02 구현 완료, scratch 학습 실행 중 — 평가 전** (§16). `25`(T5-A)는 폐기 확정 (§11). `22`/`23`도 폐기된 구버전.
@@ -1312,3 +1311,42 @@ zero-padding**(모델 input_dim=512; OOD 브리지로 명시, 화학 descriptor�
 
 **다음 Action (사용자 판단)**: ① Musk 정식 검증(projection/MIL baseline) 진행 여부, ② no-L2 학습
 완료 후 v24와 비교(§20 계속), ③ 경로 A/ICI 관점.
+
+## 22. 2026-08-03 — 전략 전환: 생성기 개선 (Musk-like easy 데이터) — 학습 중
+
+**배경/판정**: 사용자 전략 전환 — "현재 합성 생성기가 너무 lossy해서 세포 신원이 관측 불가능하고
+(oracle 0.93, per-cell 선형 0.70), 그래서 모델이 데이터 정보 한계(~0.70)에 갇혀 있다. 모델 문제가
+아니라 **데이터 생성 문제**다. 목표를 **적당한 난이도에서 bag을 완벽히 구분**(= Musk 수준)으로 잡고
+그에 맞는 데이터를 생성하자." 이 전환은 §19/§20의 음성 결과(정규화·선택 변경 모두 0.70 천장)와
+일치하며, E7-NL 대신 **생성기 강화**로 "데이터가 분리 가능하면 모델이 완벽히 분류하는가"를 직접 검증.
+
+**변경**: `configs/train_v24_musklike_easy.yaml` (base: v24 확정, arch는 v24 유지) — 생성기 응답을
+지배적으로 강화: `rare_response_probability 0`(전 응답이 명확한 분율), `response_mixture_effect_scale
+2.5`, `response_state_effect_scale [1.5,3.0]`, `response_covariance_effect_scale [1.0,2.0]`,
+`response_score_scale 1.5`, `response_score_min_margin 0.15`, `class_separation [1.0,2.0]`,
+`observation_noise 0.005`.
+
+**분리 가능성 검증 (재학습 없음, `diagnose_normalization_ceiling.py` 500 eps)**:
+| 정규화 | 원래 Medium ridge | Musk-like Easy ridge |
+|---|---:|---:|
+| centered mean+var | 0.685 | **0.927** [0.918,0.936] |
+| current(=모델 입력) mean+var | 0.636 | **0.894** [0.884,0.903] |
+
+per-task(`current` mean_var): composition 0.958 / state 0.883 / covariance 0.751 / interaction 0.886 /
+combined 0.959 → **Musk 수준(~0.9+) 분리 가능성 달성**. 데이터가 bag 레벨에서 명확히 분리됨.
+
+**스모크 (1-epoch, 실 Lightning 루프)**: NaN/크래시 없음 — **val_loss 0.485 vs 원래 Medium 0.692**
+(epoch 1부터 큰 차이 — 데이터가 분리 가능하면 모델 손실이 크게 낮아지는 초기 신호). (CUDACachingAllocator
+OOM 경고 1회는 이전과 동일한 일시적 현상, 회복됨.)
+
+**학습 실행 중**: Run `v24_musklike_easy`, scratch 50 epoch. PID `846636`, 시작 2026-08-03 04:28 KST.
+- 로그: `logs/20260803_042852/v24_musklike_easy.out`, 체크포인트: `checkpoints/20260803_042852/v24_musklike_easy/`
+- 초기: epoch 0, ~4.5 it/s 정상. 완료까지 ~1.8~2h.
+
+**성공 기준**: best val_ce가 v24 Medium(`0.5903`)을 크게 하회하고(→ AUROC ~0.85+ 예상) bag 분류가
+근완벽 → **"0.70 한계는 데이터 lossiness 때문" 가설 확정** → 이후 세포 신원 활용(선택 학습)을 이
+쉬운 데이터 위에서 재검증 가능. 반대로 val_ce가 0.59 근처에 머물면 → 데이터가 분리 가능해도 모델이
+못 쓰는 것 → 모델/아키텍처 문제가 별도로 존재.
+
+**다음 Action (학습 완료 후)**: ① best val_ce/AUROC로 가설 판정, ② 성공 시 세포 신원 활용 실험
+(메커니즘 A/B)을 이 데이터 위에서 진행, ③ 필요 시 생성기 코드 수준 개선(크기 채널 보존 등).

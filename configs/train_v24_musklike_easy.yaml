@@ -1,0 +1,37 @@
+base_config: train_v24_medium_bag_proj_residual.yaml
+
+# v24 architecture on a redesigned, LESS-LOSSY "musk-like" data distribution.
+#
+# Hypothesis (2026-08-03): the current synthetic generator is too lossy for
+# cell-identity to matter (oracle 0.93, per-cell linear ceiling 0.70), so the
+# model is capped at ~0.70 bag AUROC regardless of architecture. This config
+# makes the RESPONSE dominant at MODERATE difficulty so that bag
+# classification is near-perfect (Musk-level ~0.9-1.0), testing whether the
+# model can then classify perfectly -- i.e. whether the plateau was a
+# data-generation problem rather than a model problem.
+#
+# Changes vs configs/data/medium.yaml:
+#   * no rare responses (response affects a clear cell fraction, not 2-8%)
+#   * much stronger response effect scales (composition/state/covariance)
+#   * stronger response score + margin
+#   * more separated components, less observation noise
+# Target separability check: closed-form ridge on bag mean+variance should be
+# ~0.9+ (see scripts/diagnose_normalization_ceiling.py --config THIS).
+data_overrides:
+  dataset_kwargs:
+    rare_response_probability: 0.0
+    response_mixture_effect_scale: 2.5
+    response_state_effect_scale: [1.5, 3.0]
+    response_covariance_effect_scale: [1.0, 2.0]
+    response_score_scale: 1.5
+    response_score_min_margin: 0.15
+    class_separation: [1.0, 2.0]
+    observation_noise: 0.005
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v24_musklike_easy
+
+trainer:
+  max_epochs: 50
