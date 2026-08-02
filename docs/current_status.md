@@ -1,8 +1,13 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-02 23:24 KST` (세션 진행 중 — v26 학습 실행 중, epoch 11/50)
-**Status**: **v24가 현재 확정 baseline (변경 없음)**, **v26(CLS-token pooling) scratch 학습 실행 중** — epoch 11/50, best `val_ce_loss 0.5947`@epoch8 (v24 확정 기록 `0.5903`에 근접·아직 미달, 평가 전이라 의미 없는 비교 — 최종 판정은 학습 완료 후 1,000-episode paired 비교로). 아직 승격/폐기 미판정. v25(T5-A)는 2026-08-02 폐기 확정(변경 없음). 오늘 세션에서 v26/v27/v29 설계 제안서를 비판적으로 검토(§16)하고, 그 근거로 학습 없는 게이트 3종(E2/E7/A4, §6.1)을 실행한 뒤, 제안서들과 다른 별도 아이디어(CLS-token pooling)를 `architecture_version=26`으로 구현·학습 시작. 상세는 §16(가장 최신)·§15(이전 세션 마무리)·§11(v25 평가)·§3(실험 현황).
-**Read first if you are picking this up**: §16 (이번 세션, v26 구현·학습·문서 정리 — 가장 중요), §15 (직전 세션 마무리), §11 (v25 평가·폐기), §3 (실험 현황·최종 결정).
+**Last updated**: `2026-08-03` (v26 학습 완료, CLS attention 진단 프로브 완료 — §17)
+**Status**: **v24가 현재 확정 baseline (변경 없음)**. v26(CLS-token pooling) 50-epoch scratch
+학습 **완료** — best `val_ce_loss 0.5908`@epoch 49, v24(`0.5903`)와 사실상 동률. 재학습 없는
+CLS attention 프로브(§17)가 **"CLS attention은 반응세포를 선택하지 못함(균등, lift 1.003×)"**을
+실측 → 사용자 제안 **24-CLS+self-attention은 전제 반증으로 미추진 권고**. 1,000-episode 평가는
+사용자가 skip 결정(로스 기준 개선 불가 판단). v25는 2026-08-02 폐기 확정(변경 없음).
+**Read first if you are picking this up**: §17 (2026-08-03, 최신 — v26 학습 완료·프로브 판정·다음 Action),
+§16 (v26 구현·학습, v26/v27/v29 폐기), §15 (이전 세션 마무리), §11 (v25 평가·폐기), §3 (실험 현황·최종 결정).
 **Branches**: `main` = `v24` 확정 (현재 SSOT) / 참고용 `v22`·`v24`·`v19`·`codex/v23-bag-mean` / v25는 태그 **`v25-typed-bag-final`**로 보존 (브랜치 삭제) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `24`가 여전히 확정 baseline. **`26`(CLS-token pooling)은 2026-08-02 구현 완료, scratch 학습 실행 중 — 평가 전** (§16). `25`(T5-A)는 폐기 확정 (§11). `22`/`23`도 폐기된 구버전.
@@ -1087,3 +1092,51 @@ cross-attention으로 직접 요약해 41번째 토큰으로 추가** — 는 �
    `probe_component_selection_bound.py`, `probe_split_context.py`)는 아직 `scripts/`로
    이관·커밋되지 않음 — 필요 시 처리.
 5. E2b(fusion scale 상한 해제 FT)는 E2 결과상 생략 권고, 사용자 판단 필요.
+
+## 17. 2026-08-03 세션 — v26 학습 완료 + CLS attention 진단 프로브 (24-CLS 제안 사전검정)
+
+**배경**: v26(CLS-token pooling) scratch 학습 완료 — best `val_ce_loss 0.5908`@epoch 49
+(checkpoint `epoch=049-val_ce_loss=0.5908.ckpt`, `last.ckpt` 동일 값). v24 확정 `0.5903`과
+사실상 동률(Δ+0.0005 열세). 사용자가 "CLS 토큰 24개 + 토큰 간 self-attention"으로 확장하는
+방안을 제안. §16의 승격 기준상 1,000-episode 평가가 원칙이지만, 사용자는 로스 기준으로
+"0.1 이상 개선은 나올 수 없다"며 평가 skip을 결정하고 **재학습 없는 사전검정 프로브만** 요청.
+
+**프로브 (access-capacity 구분)**: `scripts/diagnose_cls_attention.py` — 학습된 v26
+`last.ckpt` 사용, val stream(seed 50042)에서 1,000 episodes, `_normalize_bags`+`_bag_view`로
+`_forward_dense`가 `ClassTokenPooling`에 주는 입력을 그대로 재현 후 cross-attention
+`need_weights=True`로 per-head 가중치를 뽑아 cell-level로 `responsive_instance_mask`와 대조.
+**소스 코드 수정 없음.** 실행: `--episodes 1000`, 산출물
+`logs/20260802_225848/v26_cls_attention_probe.csv`.
+
+**결과 (cell level, 0.5 = 무작위; T1-A 세포선택은 ~0.50)**:
+
+| 지표 | 값 |
+|---|---|
+| 전체 AUROC (head 평균) | **0.5027** |
+| per-head AUROC | h0 0.4982 / h1 0.5017 / h2 0.5037 / h3 0.5006 (best 0.5037) |
+| per-task AUROC | composition 0.5042, state 0.4974, covariance 0.5044, interaction 0.4980, combined 0.5041 |
+| attention mass share on responsive | 0.1534 (base rate 0.1529) → **lift 1.003×** |
+| per-bag AUROC 평균 (양 클래스 bag만) | 0.5014 |
+
+**판정 — access-limited (b), 24-CLS+self-attention 전제 반증**: 학습된 CLS cross-attention이
+반응세포를 전혀 선택하지 못함. attention이 사실상 **균등(uniform, lift 1.003×)** → CLS 토큰은
+전역 평균과 다름없는 readout으로 붕괴 → v26 ≈ v24 동률의 직접적 원인. "readout 용량 부족(1개 →
+24개)"이 아니라 "**관측 manifold에서 반응세포 신원에 접근 불가**"가 병목임을 확정. 이는
+T1-A(세포선택 ~0.50)·T1-C(purity 0.128~0.23)·split-quality capture 0.150≈base rate와 **4번째
+독립 확인**이며, §16의 0.70 정보 상한(비지도 slot 요약 기준)은 readout 용량이 아니라 세포 신원
+접근 문제라는 결론을 강화. oracle 2-slot 0.93의 격차는 "어느 세포가 반응인지 아는 것"에만 달려
+있고, 그 지식을 관측값·학습 readout으로 얻는 경로는 이제 네 번 모두 닫힘.
+
+**권고**: 24 CLS 토큰 + self-attention **미추진** (2h scratch 학습 비용 대비 기대 이득 없음 —
+학습된 attention이 균등이므로 24개를 늘려도 균등 readout 24개일 뿐). 남은 방향은 §16의
+**경로 A(저위험: context/label 효율)** — (4) bag 분할 ridge 유효 n 2배(A4 약효) → (1) block별
+shrinkage 학습 → (2) context 크기 명시 조건화 → (3) 작은 context(40~80) 학습 분포 — 또는
+ICI 관점에서 v24/v26용 config 작성 여부 재확인.
+
+**산출물/명령**:
+- 스크립트: `scripts/diagnose_cls_attention.py`
+- 결과: `logs/20260802_225848/v26_cls_attention_probe.csv`
+- 재실행: `python scripts/diagnose_cls_attention.py --config configs/train_v26_medium_cls_token_pool.yaml --checkpoint checkpoints/20260802_225848/v26_medium_cls_token_pool/last.ckpt --episodes 1000`
+
+**다음 Action (사용자 판단 필요)**: ① v26 1,000-episode 평가 skip 유지 여부(결론에 영향 없음 —
+동률 확정이면 v26 폐기 경로), ② 경로 A 재개 여부, ③ v24/v26 ICI config 작성 여부.
