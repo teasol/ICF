@@ -1245,9 +1245,12 @@ experiment `v24_medium_no_l2`, 50 epoch).
 
 **검증**: ① config build 확인 (flag 반영, arch 24, per-cell norm 0.73~5.5로 다양), ②
 `tests.test_base_model` 88개 통과 (신규 테스트 포함), ③ 1-epoch smoke (실제 Lightning 루프,
-limit 64/16) — NaN/크래시 없음, train_loss 0.715 / val_loss 0.692. ④ 전체 unittest 수트
-백그라운드 실행 중. (스모크 중 CUDACachingAllocator OOM 경고 1회 — 배치 크기 그대로라
-일시적·무해, 학습 지속 확인.)
+limit 64/16) — NaN/크래시 없음, train_loss 0.715 / val_loss 0.692. ④ **전체 unittest 수트 완료:
+154개 중 153개 통과, 1개 에러** — 에러는 `tests/test_learnability_ladder.py`가 archive된
+v18/v19 config들의 `trainer: learnability_d20` 참조에서 발생(해당 config는 `a5dfcf8` 정리에서
+삭제된 **기존 결함**, §16에 "이번 변경과 무관, 조치하지 않음"으로 이미 기록됨). 본 변경은
+통과 테스트 +1만 추가, 회귀 없음. (스모크 중 CUDACachingAllocator OOM 경고 1회 — 배치 크기
+그대로라 일시적·무해, 학습 지속 확인.)
 
 **학습 실행 중**: Run `v24_medium_no_l2`, scratch Medium 50 epoch (v24와 동일 방식).
 - PID `615588` (launcher). 시작 2026-08-03 02:11 KST.
