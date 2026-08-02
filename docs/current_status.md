@@ -1,13 +1,16 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-03` (v26 학습 완료, CLS attention 진단 프로브 완료 — §17)
+**Last updated**: `2026-08-03` (v26 학습 완료, CLS attention 프로브 §17, E7 재검정 §18)
 **Status**: **v24가 현재 확정 baseline (변경 없음)**. v26(CLS-token pooling) 50-epoch scratch
 학습 **완료** — best `val_ce_loss 0.5908`@epoch 49, v24(`0.5903`)와 사실상 동률. 재학습 없는
 CLS attention 프로브(§17)가 **"CLS attention은 반응세포를 선택하지 못함(균등, lift 1.003×)"**을
-실측 → 사용자 제안 **24-CLS+self-attention은 전제 반증으로 미추진 권고**. 1,000-episode 평가는
-사용자가 skip 결정(로스 기준 개선 불가 판단). v25는 2026-08-02 폐기 확정(변경 없음).
-**Read first if you are picking this up**: §17 (2026-08-03, 최신 — v26 학습 완료·프로브 판정·다음 Action),
-§16 (v26 구현·학습, v26/v27/v29 폐기), §15 (이전 세션 마무리), §11 (v25 평가·폐기), §3 (실험 현황·최종 결정).
+실측 → **24-CLS+self-attention 미추진 권고**. E7 재검정(§18)이 **기존 INCONCLUSIVE 재현(ALL
+purity@10% 0.351) + 전 구간 스윕(1%에서도 0.476 < 0.50, covariance 폐기 문턱 아래)으로 Path B
+기각 쪽 강화**. 1,000-episode 평가는 사용자가 skip 결정(로스 기준 개선 불가 판단). v25는
+2026-08-02 폐기 확정(변경 없음).
+**Read first if you are picking this up**: §18 (E7 재검정·Path B 판정 — 최신), §17 (v26 학습
+완료·CLS 프로브 판정), §16 (v26 구현·학습, v26/v27/v29 폐기), §15 (이전 세션 마무리),
+§11 (v25 평가·폐기), §3 (실험 현황·최종 결정).
 **Branches**: `main` = `v24` 확정 (현재 SSOT) / 참고용 `v22`·`v24`·`v19`·`codex/v23-bag-mean` / v25는 태그 **`v25-typed-bag-final`**로 보존 (브랜치 삭제) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `24`가 여전히 확정 baseline. **`26`(CLS-token pooling)은 2026-08-02 구현 완료, scratch 학습 실행 중 — 평가 전** (§16). `25`(T5-A)는 폐기 확정 (§11). `22`/`23`도 폐기된 구버전.
@@ -1140,3 +1143,50 @@ ICI 관점에서 v24/v26용 config 작성 여부 재확인.
 
 **다음 Action (사용자 판단 필요)**: ① v26 1,000-episode 평가 skip 유지 여부(결론에 영향 없음 —
 동률 확정이면 v26 폐기 경로), ② 경로 A 재개 여부, ③ v24/v26 ICI config 작성 여부.
+
+## 18. 2026-08-03 — E7 재검정: 지도 component-selection 상한 재확인 (Path B 관문)
+
+**배경**: §16의 E7 게이트가 INCONCLUSIVE(ALL purity 0.3351, 게이트 0.30~0.50 사이)로 남아
+Path B(미분 가능 분할 + oracle mask 보조 손실, ~2h 학습) 착수 여부 판정이 막혀 있음. 원래
+scratchpad 스크립트(`probe_component_selection_bound.py`)가 커밋되지 않아 저장소에 없어,
+문서화된 방법론(`docs/history/architecture_v28_analysis_ceiling_and_gates.md` §6.1)대로
+`scripts/diagnose_component_selection_bound.py`를 새로 구현·재검정. **재학습 없음, 모델 로딩 없음**
+(순수 세포 기하).
+
+**방법**: v24 분할 관점에서 각 bag의 세포 단위 **held-out Fisher 판별**(bag 정확히 반분 fit/held,
+bag당 4회 독립 분할 평균, d=(mean_pos−mean_neg)/var) → held-out AUROC + **purity@k**(모델이 실제
+쓰는 선택 비율 1/5/10/15/20%), 1,000 episodes, bag-level bootstrap 95% CI. 실행:
+`python scripts/diagnose_component_selection_bound.py --config configs/train_v24_medium_bag_proj_residual.yaml --episodes 1000`
+
+**결과 — 기존 E7 재현 확인 + 전 구간 스윕**:
+
+| task | bags | base | heldAUROC | p@1% | p@5% | p@10% | p@15% | p@20% |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| ALL | 77,558 | 0.157 | 0.7167 | 0.476 | 0.395 | **0.351** | 0.322 | 0.301 |
+| composition | 15,261 | 0.208 | 0.6855 | 0.458 | 0.403 | 0.371 | 0.350 | 0.335 |
+| state | 14,204 | 0.120 | 0.7450 | **0.514** | 0.410 | 0.351 | 0.313 | 0.285 |
+| covariance | 16,482 | 0.115 | 0.6980 | 0.421 | 0.332 | **0.286** | 0.258 | 0.238 |
+| interaction | 15,812 | 0.139 | 0.7331 | **0.504** | 0.410 | 0.357 | 0.324 | 0.298 |
+| combined | 15,799 | 0.204 | 0.7246 | 0.485 | 0.425 | 0.391 | 0.368 | 0.351 |
+
+기존 E7 대비: ALL heldAUROC 0.7167 vs 0.7207, ALL purity@10% 0.3507 vs 0.3351, covariance purity
+0.286 vs 0.2726 → **재현 성공** (원래 E7은 약 10% 선택 기준이었던 것으로 보임).
+
+**판정 — 게이트 문자상 여전히 INCONCLUSIVE(0.30~0.50), 그러나 증거 무게는 Path B 기각 쪽**:
+- **가장 유리한 1% 선택에서도 ALL purity 0.476 < 0.50** (모델이 실제 쓰는 5~15% 구간은 0.32~0.40).
+- Path B가 가장 직접 노리는 **covariance는 전 구간에서 폐기 문턱 아래(0.286@10%)** — F6/covariance는
+  cell-selection이 아니라 dispersion 신호라는 기존 결론과 정합.
+- enrichment는 2~3x에 그침. 세포 라벨을 직접 주는 부정행위 상한에서조차 이 수준.
+- 유일한 밝은 구간은 **state/interaction @1%(0.514/0.504)** 뿐인데, 이는 비현실적으로 공격적인 선택
+  비율 + 세포 라벨 부정행위 상한이고, bag 라벨만 받는 실제 조건(T1-C 2: purity 0.128)에서는 도달 불가.
+- T1-C 1 이득 곡선(순도 0.40 → covariance +0.107, 그러나 covariance는 에피소드의 5% → 전체 ~+0.005)과
+  합치면, **Path B의 기대 전체 이득은 작고 ICI 과적합 리스크를 정당화하지 못함**.
+
+**결론**: Path B를 **full-path 투자로 추진하지 않는다**는 방향 강화. 남는 협소한 선택지는 §6.1의 원래
+권고대로 "composition/combined 위주로만 범위를 좁힌 실험"(purity 0.36~0.39로 상대적 최고)뿐이며,
+이마저도 사용자 판단 필요. 나머지 실질 후보는 §17과 동일: 경로 A(저위험) 또는 ICI 관점.
+
+**산출물/명령**:
+- 스크립트: `scripts/diagnose_component_selection_bound.py`
+- 결과: `logs/e7_retest_20260803.csv`
+- 재실행: 위 명령 (`--episodes` 조정 가능)
