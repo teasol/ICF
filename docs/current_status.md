@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-02 00:10:00 KST`
-**Status**: v24 확정 유지. **v25(T5-A) Medium 평가 완료 — v24-B1과 사실상 동률(승격 기준 미달)**. "이 아키텍처 계열 전체가 val CE 0.59 근처에서 막힌 것 아니냐"는 질문을 검증하기 위해 **Easy tier(v24-easy/v25-easy) 실험 진행 중** — v24-easy 완료(best CE 0.3499), **v25-easy는 학습 중이나 epoch당 v24-easy보다 ~10배 느림(원인 미조사, 다음 세션 확인 필요)**. 상세는 §11.
+**Last updated**: `2026-08-02 04:00:00 KST`
+**Status**: v24 확정 유지. **v25(T5-A) Medium 평가 완료 — v24-B1과 사실상 동률(승격 기준 미달)**. "이 아키텍처 계열 전체가 val CE 0.59 근처에서 막힌 것 아니냐"는 질문을 검증하기 위해 **Easy tier(v24-easy/v25-easy) 실험 진행 중** — **v24-easy 완료(best CE 0.3499), v25-easy 완료(best CE 0.3473, 초기 10x 저하는 transient로 해소, 총 ~4h)**. **현재 v24-easy vs v25-easy 1,000-episode 비교 평가 백그라운드 실행 중 (PID 242818)** — 완료 후 paired 비교로 "아키텍처 계열 한계" 가설 판정. 상세는 §11.
 **Read first if you are picking this up**: §11 (신규, 가장 중요), §3 "🧪 v25 (T5-A) 진행 중", §3 "최종 결정 (2026-08-01)" (v24 확정 배경), §6 Action Plan.
 **Branches**: `codex/v25-typed-bag` = v25 작업 중 (base: `v24`) / `main` = `v24` = `codex/v23-bag-mean` 최종 커밋 / `v22`(구 기준선, 참조용 보존) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
@@ -799,15 +799,21 @@ bag-preserving 분기를 추가해도 Medium에서는 아무 이득이 없었습
   (Medium 0.59 대비 압도적으로 낮음 — Easy tier가 실제로 훨씬 쉬움을 확인).
   Run `20260801_075144`, checkpoint `checkpoints/20260801_075144/v24_easy/epoch=049-val_ce_loss=0.3499.ckpt`,
   로그 `logs/20260801_075144/v24_easy.out`.
-- 🔄 v25-easy: 학습 중, run `20260801_235601`, checkpoint dir `checkpoints/20260801_235601/v25_easy/`,
-  로그 `logs/20260801_235601/v25_easy.out`.
-  > [!WARNING]
-  > **v25-easy epoch당 속도가 v24-easy보다 약 10배 느립니다** (v24-easy 4.72 it/s / epoch ≈1:48
-  > vs v25-easy 0.45 it/s / epoch ≈19분). Medium에서는 v25가 v24-B1과 비슷한 속도였는데
-  > Easy tier에서만 이렇게 느려지는 이유는 아직 조사하지 않았습니다 — 이 속도가 유지되면
-  > 50 epoch에 **~16시간**이 걸립니다. 다음 세션은 (1) 이 프로세스가 아직 살아있는지
-  > `ps aux | grep train.py`로 먼저 확인하고, (2) 왜 느린지(데이터 생성 병목인지 typed-bag
-  > 분기의 ridge solve가 Easy tier의 특정 분포에서 더 오래 걸리는지) 확인할 것.
+- ✅ **v25-easy: scratch 50-epoch 완료 (2026-08-02 03:49)**. Best `val_ce_loss`
+  **0.3473** @ epoch 45 (v24-easy 0.3499 대비 $-0.0026$ 근소 우위).
+  Run `20260801_235601`, checkpoint `checkpoints/20260801_235601/v25_easy/epoch=045-val_ce_loss=0.3473.ckpt`
+  (top-3: e45 0.3473 / e47 0.3495 / e49 0.3494), 로그 `logs/20260801_235601/v25_easy.out`.
+  > [!NOTE]
+  > **속도 저하 10x 경고는 해소됨 (transient)**: 초기 epoch만 0.45~0.5 it/s로 느렸고
+  > (epoch 0~1 기준), 후반 epoch는 4.3 it/s까지 회복. 총 50 epoch을 **약 3시간 50분**에
+  > 완료 (16시간 예상보다 훨씬 빠름). 원인은 데이터 생성 warm-up/캐싱으로 추정되며
+  > 지속적인 병목은 아님.
+
+- 🔄 **v24-easy vs v25-easy 1,000-episode 비교 평가 실행 중** (2026-08-02):
+  PID `242818`(bash 래퍼)/`242823`(v24-easy) — v24-easy → v25-easy 순차 평가.
+  로그 `logs/20260802_easy_eval/easy_1000ep.out`, 출력 예정
+  `predictions/v24_easy_1000ep.pt` / `predictions/v25_easy_1000ep.pt`.
+  완료 후 `scripts/compare_predictions.py`로 paired 비교 → §11 "남겨진 것" item 4 판정 기준 적용.
 
 ### 남겨진 것 / 다음 Action
 
