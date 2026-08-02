@@ -1,20 +1,24 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-02` (세션 종료)
-**Status**: **v24 확정 유지** — 유일한 활성 아키텍처. **v25(T5-A) 폐기 확정 (2026-08-02)**: Medium(맥락 의존 trade-off)·Easy(Δ+0.0033) 모두 승격 기준 미달, Easy paired 추가 비교는 사용자 결정으로 취소. **폴더/문서/config/src/scripts/tests 정리 완료**, 브랜치 정리 완료(main=현재 SSOT, v25 태그 보존). 오픈: T4 Medium→Hard attribution, ICI 잠금. 상세는 §15(마무리)·§11(평가)·§3(실험 현황).
-**Read first if you are picking this up**: §15 (이번 세션 마무리, 가장 중요), §11 (v25 평가·폐기), §3 (실험 현황·최종 결정), §6 Action Plan.
+**Last updated**: `2026-08-02 23:24 KST` (세션 진행 중 — v26 학습 실행 중, epoch 11/50)
+**Status**: **v24가 현재 확정 baseline (변경 없음)**, **v26(CLS-token pooling) scratch 학습 실행 중** — epoch 11/50, best `val_ce_loss 0.5947`@epoch8 (v24 확정 기록 `0.5903`에 근접·아직 미달, 평가 전이라 의미 없는 비교 — 최종 판정은 학습 완료 후 1,000-episode paired 비교로). 아직 승격/폐기 미판정. v25(T5-A)는 2026-08-02 폐기 확정(변경 없음). 오늘 세션에서 v26/v27/v29 설계 제안서를 비판적으로 검토(§16)하고, 그 근거로 학습 없는 게이트 3종(E2/E7/A4, §6.1)을 실행한 뒤, 제안서들과 다른 별도 아이디어(CLS-token pooling)를 `architecture_version=26`으로 구현·학습 시작. 상세는 §16(가장 최신)·§15(이전 세션 마무리)·§11(v25 평가)·§3(실험 현황).
+**Read first if you are picking this up**: §16 (이번 세션, v26 구현·학습·문서 정리 — 가장 중요), §15 (직전 세션 마무리), §11 (v25 평가·폐기), §3 (실험 현황·최종 결정).
 **Branches**: `main` = `v24` 확정 (현재 SSOT) / 참고용 `v22`·`v24`·`v19`·`codex/v23-bag-mean` / v25는 태그 **`v25-typed-bag-final`**로 보존 (브랜치 삭제) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
-**Architecture Version**: `24` 확정 유지. **`25`(T5-A typed bag-preserving)는 2026-08-02 폐기 확정** — Medium/Easy 모두 승격 기준 미달 (§11 "판정 근거 종합", §3 v25 배너). `22`/`23`도 폐기된 구버전.
+**Architecture Version**: `24`가 여전히 확정 baseline. **`26`(CLS-token pooling)은 2026-08-02 구현 완료, scratch 학습 실행 중 — 평가 전** (§16). `25`(T5-A)는 폐기 확정 (§11). `22`/`23`도 폐기된 구버전.
 **Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 해결하기 위한 Single Source of Truth (SSOT) living document.
 
 ---
 
 ## 0. 30초 요약 — 새 세션은 여기부터
 
-> **2026-08-02 갱신**: v25(T5-A) 폐기 확정 + 프로젝트 정리 3단계 + 브랜치 정리 완료.
-> 현재 상태는 **v24 확정 유지 (유일한 활성 아키텍처)**. 최신 마무리는 **§15**, 평가·판정은
-> §11, 실험 현황은 §3 참고.
+> **2026-08-02 갱신 (이어짐)**: v25(T5-A) 폐기 확정 이후, 외부에서 제안된 v26(EC-MoE)/
+> v27(AC-ICAR)/v29(SP-SAT) 설계안을 비판적으로 검토(§16, 전부 미구현 폐기 →
+> `docs/history/`로 이관)하고, 그 검토의 근거를 실측하는 학습 없는 게이트 3종을
+> 실행(E2 FAIL / E7 INCONCLUSIVE / A4 약한 효과, §6.1). 이 결과와는 별개로 사용자가
+> 제안한 **CLS-token cross-attention pooling** 아이디어를 `architecture_version=26`으로
+> 구현하고 지금 50-epoch scratch 학습 중(§16). **아직 평가 전이므로 v24가 여전히
+> 확정 baseline입니다.**
 
 **지금 어디까지 왔나**
 - v22 = v21에서 **retrieval 계층을 완전히 제거**한 버전. 아키텍처 본체는 v21과 동일 (§4). **2026-08-01부로 v24에 자리를 내주고 폐기.**
@@ -828,106 +832,15 @@ Medium/Easy 양쪽에서 승격 기준 미달 → **v25 최종 폐기 확정 (20
 
 ---
 
-## 12. 2026-08-02 세션 — 프로젝트 폴더 정리 (checkpoint/log/prediction purge)
+## 12-14. 2026-08-02 세션 — 폴더/문서·config/src·scripts·tests 정리 3단계
 
-사용자 지시로 폐기된 구버전 산출물을 정리했습니다. **코드/설정/문서는 불변**, 활성 run은
-그대로 유지됐습니다.
-
-### 삭제 내역 (모두 gitignore 대상 또는 git rm)
-- **`checkpoints/` 53GB → 3.3GB**: v19/v20/v21/v22-era run 디렉터리 128개(20260722~20260729) +
-  루트 느슨한 `.ckpt` 11개 + 폐기 확정 v23-A0/v24-A0/v24-B0 checkpoint
-  (`20260731_v23_bag_mean_50e_resume`, `20260731_155635`, `20260731_182755`, `20260731_201252`).
-  폐기된 candidate들의 수치는 `docs/history/v23_v24_bag_collapse_candidates.md`에 그대로 보존.
-- **`logs/` 819MB → 532MB**: 20260722~20260729 dated 로그 + v19/v20-era named 로그
-  (`tiranos/`, `pipeline_*`, `v19_covariance_candidates_*`, `2026072*_v19_*`) 삭제.
-- **`predictions/`**: v19/v20/v21 ICI 예측 15개 삭제 (`ici_*.pt`, `ici_predictions_*.pt`,
-  `v21_*_5fold.pt` 등). v22+ 합성 예측 및 curve는 유지.
-- **v18**: `experiments/v18_learnability_c4_d_d0_d4.yaml`, `results/v18/` 삭제 (git rm).
-
-### 유지 (활성/참조)
-- checkpoints: `20260729_160643`(v22 baseline 참고), `20260731_035538`(v22 Hard),
-  `20260731_220100`(v24 확정), `20260731_context300_ft`/`20260731_medium_context300_*`(T4),
-  `20260801_020144`(v25), `20260801_075144`(v24-easy), `20260801_235601`(v25-easy, 진행 중).
-- `data/`(14GB ICI 실데이터) 불변.
-
-> [!NOTE]
-> 향후 세션에서 이전에 참조되던 폐기 run checkpoint/log 경로를 찾을 경우, 해당 파일은
-> 위 정리로 삭제됐고 수치만 문서에 남아 있습니다.
-
-### Git 상태
-- `git rm` 반영: `experiments/v18_*`, `results/v18/*`. 그 외 삭제는 전부 gitignore 대상이라
-  git에 영향 없음. §11 "남겨진 것" item 1의 easy config 커밋은 이미 `b6aacf7`에서 완료됨
-  (문서 스테일 — 여기서 해소).
-
----
-
-## 13. 2026-08-02 세션 — 문서 및 config 정리 (docs/config/scripts purge)
-
-사용자 지시로 v18/v19/v20-era 스테일 파일과 config를 정리했습니다. **코드(`src/`)와
-활성 config·스크립트·living docs는 불변**, README/핸드오프 문서는 현재 상태로 갱신.
-
-### 삭제 (git rm, 전부 구식/미참조)
-- **루트 스테일**: `MODEL_ARCHITECTURE_KO.md`(v18 문서), `main.sh`/`main_medium.sh`/
-  `main_minimum.sh`/`main_slurm.sh`/`test.sh`/`test_slurm.sh`(archive된 config·v16 checkpoint 참조).
-- **구버전 스크립트** (`scripts/` 17개): `run_learnability_ladder.sh`,
-  `run_sequential_pipeline.sh`, `run_v19_covariance_candidates.sh`, `sweep_csp_residual.py`,
-  `benchmark_scalability.py`, `check_population_oracle.py`, `check_training_budget.py`,
-  미참조 진단 `diagnose_{covariance_relations,covariance_subspace,local_geometry,
-  anchor_candidates,context_size,tail_covariance,v19_branches,bag_label_selection,
-  covariance_utilisation,oracle_covariance_upper_bound}.py`.
-- **learnability-era 모듈 config** (`configs/` 14개): `callbacks/learnability.yaml`,
-  `data/learnability_{a,b,manifold}.yaml`, `data/{synthetic,minimum}.yaml`,
-  `model/covariance32.yaml`, `optimizer/adamw_learnability_5e4.yaml`,
-  `scheduler/learnability.yaml`, `trainer/learnability_{a,b,d20}.yaml`,
-  `trainer/{csp_short8,minimum_ddp8}.yaml`.
-
-### 유지
-- `scripts/`: `train.py`, `evaluate_synthetic.py`, `compare_predictions.py`,
-  `evaluate_protocol.py`, `power_analysis.py`, `launch_interactive_training.sh`,
-  `launch_ici_protocol.sh`, living docs 참조 진단 4종(`diagnose_{cell_selection,
-  state_upper_bound,selection_gain_curve,oracle_slot_alignment}.py`), smoke 유틸.
-- `configs/` 최상위 10개 전부 (v24/v25/easy 활성 + v22 ICI/T4용) — 변경 없음.
-- `configs/` 모듈 서브폴더의 generic 조각(default/medium/logger/adamw 등) — 유지.
-
-### 문서 갱신
-- `README.md` 전면 갱신: v18 설명·`main*.sh` 사용법 제거 → v24 아키텍처 + `scripts/
-  launch_interactive_training.sh` 표준 런처 + 문서 맵으로 교체.
-- `docs/agent_handoff.md` §7-1: config 최상위 유지 목록을 현재 상태로 갱신 (v23/v24-A0/B0
-  config는 `configs/archive/v23_v24_candidates/` 이관 반영).
-- `docs/current_status.md` §12는 이전 checkpoint/log purge, §13은 본 문서/config purge 기록.
-
-### Git 상태
-- 커밋 예정. 삭제 스크립트의 history 문서 내 참조(`learnability_ladder.md`,
-  `v20_scalability_plan.md`)는 아카이브 문서라 그대로 둠.
-
----
-
-## 14. 2026-08-02 세션 — src/scripts/tests 점검 및 v21 아카이브 정리
-
-사용자 지시로 `src`/`scripts`/`tests`를 점검했습니다.
-
-### `src/` — 변경 없음 (전부 사용 중)
-동적 import 경로(`dataset_src`/`optimizer_src`/`scheduler_src` via
-`src/modules/{data,model}_interface.py`의 `import_module`)로 8개 모듈 전부 런타임
-참조를 확인 — 삭제 대상 없음.
-
-### `scripts/` — v21 폐기 코드 제거 + 1건 복원
-- **삭제**: `scripts/archive/v21_retrieval/` (`benchmark_vram.py`, `run_vram_quick.py`,
-  `launch_phase{4,6,6b,6c}_5fold.sh`) — v21 완전 폐기. `scripts/archive/` 디렉터리 자체가
-  비워져 제거됨. living docs 참조 없음 (history 문서만 참조).
-- **⚠️ 복원**: `scripts/diagnose_context_size.py` — §13 정리에서 삭제했으나
-  `test_context_size_diagnostic.py`가 import → `a5dfcf8^`에서 복원. 교훈: 스크립트 삭제 전 tests/
-  의 `from scripts.* import` 의존성을 먼저 확인할 것.
-- **유지 (사용자 결정)**: smoke 3종(`ddp_smoke.py` 8-GPU, `gpu_train_smoke.py` FP16,
-  `medium_bf16_smoke.py` bf16) — 구식 정밀도/스케일이지만 보존.
-- 참조 무결성 검증 완료: 남은 `src`/`scripts`/`tests`의 `from scripts.* import`가
-  전부 실존 파일을 가리킴.
-
-### `tests/` — 변경 없음 (10개 전부 유효)
-- `test_learnability_ladder.py`는 실제로 fixed-episode-bank(`fixed_episode_count`) 기능
-  테스트 (파일명 오해 소지, 기능 유효).
-- 전체 unittest 실행은 이번엔 생략 (사용자 결정). 다음 코드 변경 시
-  `timeout 1500s ... -m unittest discover -s tests -p "test_*.py"` 필수.
+> 아카이브됨 (2026-08-02, 핸드오프 정리): checkpoint/log/prediction purge(53GB→3.3GB),
+> 구버전 문서·config·스크립트 삭제, src/scripts/tests 참조 무결성 점검 기록. 전문:
+> [`history/archive.md`](history/archive.md) §12-14.
+>
+> **하나만 아직 열려 있음**: §13의 config 삭제가 `test_d_stages_differ_only_in_selected_nuisance`를
+> 깨뜨림 (`configs/trainer/learnability_d20.yaml` 삭제, §16에서 발견·미조치) — 상세는
+> archive.md §13 경고 참고.
 
 ---
 
@@ -963,3 +876,214 @@ Medium/Easy 양쪽에서 승격 기준 미달 → **v25 최종 폐기 확정 (20
 2. T4 attribution 재개 여부 (context-size curve는 §6에 이미 완료, raw-cell vs 40-token
    정보량 audit가 다음).
 3. v24 ICI config 작성 후 ICI 실행 여부 재확인.
+
+---
+
+## 16. 2026-08-02 세션 (이어짐) — v26/v27/v29 설계안 검토, 학습 없는 게이트 3종,
+## CLS-token pooling(v26) 구현·학습 시작, 제안서 archive
+
+### 배경
+
+§15 마무리 이후 같은 세션에서, 외부(다른 agent/사용자)가 작성한 신규 아키텍처
+제안서 3건이 `docs/`에 추가됐습니다:
+- `architecture_v26_proposal.md` — EC-MoE (Episode-Conditional MoE), 작성: DeepSeek V4 Pro
+- `architecture_v27_proposal.md` — AC-ICAR (16-token + Riemannian branch), 작성: Antigravity AI
+- `architecture_v29_proposal.md` — SP-SAT (40-token 보존 + slot-parallel self-attention),
+  작성: Antigravity AI (사용자 아이디어 기반)
+
+세 문서를 코드베이스 실측 근거와 대조해 비판적으로 분석했고(`docs/architecture_v28_proposal.md`
+작성, 제 이름으로), 그 분석에서 나온 핵심 발견과 사전등록 게이트를 실제로 실행했습니다.
+
+### `docs/architecture_v28_proposal.md` 전체 내용 이관 (archive 전 보존)
+
+`architecture_v28_proposal.md`를 `docs/history/`로 archive하면서(docs 최상위에는
+5개 living 문서만 두는 것이 원칙이라 — `agent_handoff.md` §6), 그 안의 실측 데이터와
+근거를 여기로 전부 옮겨 적습니다. 원문 archive 위치는 §16 끝부분 참고.
+
+**증거 카탈로그 (F1~F11, 전부 이 문서 다른 절에서 실측된 값)**:
+
+| # | 사실 | 근거 |
+|---|---|---|
+| F1 | v22(40 token) `0.5946` vs v24(1 token) `0.5903` — 압축이 더 좋았다 | §3 |
+| F2 | v25(bag-preserving, +4.4M params) Medium 동률, Easy Δ+0.0033 | §11 |
+| F3 | v22~v25 val CE 전부 `0.5903~0.5976` (폭 0.0073) | §11 |
+| F4 | state: 모델 `0.6217` = 모델 입력 토큰 probe `0.6210` | §3 T2-2 |
+| F5 | state observable raw mean `0.5478`; oracle mask `0.8819~0.9013` | §3 T2-2 |
+| F6 | effect scale 통일 시 covariance(0.6594)≈composition(0.6488), state만 최하위 | §3 T3-1 |
+| F7 | context 40→300에서 v24 AUROC `0.6774→0.8036` (+0.126) | §11 |
+| F8 | 세포 선택 점수 4종 전부 AUROC ~0.50; slot capture 0.155, fragmentation 0.963 | §3 T1-A/T1-B |
+| F9 | 이득 곡선 선형: purity 0.11→1.00에서 covariance 0.517→0.888 | §3 T1-C 1 |
+| F10 | bag 라벨 기반 세포 선택 purity 0.128 (무작위 0.110) → Tier 1 종료 | §3 T1-C 2 |
+| F11 | v25가 작은 context(40)에서 유의하게 우세, 큰 context(300)에서 열세 | §11 |
+
+**핵심 발견 (학습 없는 1,000-episode 감사, `diagnose_state_upper_bound.py`와 동일
+스트림·분할 — T2-2의 `0.6217`/`0.9013`과 직접 비교 가능)**:
+
+학습 파라미터 0개의 closed-form ridge가 v24의 slot별 충분통계(logit π, mean, log var)를
+그대로 받으면 overall AUROC **0.700**이 나와, 학습된 9.45M 파라미터 v24(**0.708**)와
+task별 ±0.02 이내로 사실상 동률입니다.
+
+| variant | 차원 | ALL [95% CI] | composition | state | covariance | interaction | combined |
+|---|---:|---|---:|---:|---:|---:|---:|
+| bag_global (K=1, 분할 없음) | 32 | 0.6299 [0.619,0.640] | 0.7005 | 0.5538 | 0.5438 | 0.5715 | 0.7341 |
+| v24 분할, π만 (≈현 ridge 입력) | 12 | 0.6240 [0.613,0.635] | 0.6611 | 0.5636 | 0.5410 | 0.5878 | 0.7245 |
+| v24 분할, π+log σ² | 396 | 0.6569 [0.645,0.667] | 0.7315 | 0.5762 | 0.5593 | 0.6076 | 0.7656 |
+| **v24 분할, π+μ** | 396 | **0.7001 [0.687,0.711]** | 0.7901 | 0.6186 | 0.5885 | 0.6441 | 0.8060 |
+| v24 분할, π+μ+log σ² | 780 | 0.6947 [0.682,0.706] | 0.7837 | 0.6155 | 0.5842 | 0.6411 | 0.8016 |
+| 동, 방향만 (반경 폐기) | 780 | 0.6972 [0.685,0.708] | 0.7864 | 0.6188 | 0.5854 | 0.6425 | 0.8037 |
+| PCA k-means K=12 | 780 | 0.6908 [0.678,0.702] | 0.7730 | 0.5903 | 0.5886 | 0.6419 | 0.8061 |
+| PCA k-means K=48 | 3120 | 0.6768 [0.664,0.689] | 0.7522 | 0.5804 | 0.5682 | 0.6227 | 0.8063 |
+| **oracle 2-slot (responsive/배경)** | 130 | **0.9346 [0.929,0.940]** | 0.9374 | 0.9698 | 0.7585 | 0.9678 | 0.9790 |
+| *참조: 학습된 v24/v22 모델* | 9.45M | *0.7078* | *0.7729* | *0.6215* | *0.6216* | *0.6628* | *0.8201* |
+
+부수 결과: **π만(12차원)으로도 0.624** — 즉 v24의 `_abundance_ridge_logits`는 이미
+상한의 대부분을 담고 있음. **반경 채널은 무관**(방향만 0.6972 vs 전체 0.6947, CI 겹침).
+**K를 늘리면 나빠짐**(K=48이 K=12보다 −0.014, 분할 세분화는 답이 아님). **covariance만
+모델(0.622)이 probe(0.589)보다 나음** → v24 전용 covariance branch는 실제로 일하고
+있으므로 어떤 재설계에서도 유지해야 함.
+
+**분할 품질 (1,000 episodes)**: v24(hard argmax, K=12) purity 0.2260/capture 0.1502,
+PCA-32 k-means K=12 purity 0.2374, K=48 purity 0.3477/capture 0.0503. v24 soft
+assignment의 정규화 엔트로피는 0.5404 — 할당이 뭉개진 게 아니라 **뭉치는 축이
+responsive component가 아님**(capture 0.150 ≈ base rate 0.154).
+
+**T1-C 2 재검정 (component 단위 다변량 규칙, 400 episodes) — 분할 발견 경로 세
+번째로 폐쇄**: K=12/24/48에서 purity(선택) 0.19~0.23, base rate 대비 거의 무작위.
+**oracle이 최적 slot을 골라줘도 purity 상한이 K=48에서 0.346** — 실패 원인은 고르는
+규칙이 아니라 이 분할 계열 자체가 responsive component를 담아내지 못하는 것. 예외는
+combined task(purity 0.431 @ K=48, base 0.183 — 세 채널이 동시에 걸려 신호가 가장
+강할 때만 선택이 작동).
+
+**결론**: v22~v25의 val CE 0.0073 정체는 아키텍처 탐색 실패가 아니라 "비지도
+population slot으로 요약한 bag"이라는 특징 집합 자체의 정보 상한(≈0.70)이며, 그
+상한 아래에서 토큰 구성·융합·routing을 바꾸는 제안(v23~v25 전부, 그리고 v26/v27/v29)은
+구조적으로 ±0.02 안에서 움직입니다. 올바른 분할이 있으면 0.93까지 가능하지만
+(oracle 2-slot), 그 분할을 관측값·bag 라벨로 찾는 경로는 세 번 독립적으로 닫혔습니다
+(세포 선택 T1-A/T1-C 2, 분할 품질 §4.4, component 재검정 T1-C 2 재검정).
+
+**v26(EC-MoE)/v27(AC-ICAR) 비판 요지** (전문은 `docs/history/`의 각 archived 문서 및
+그 상단 배너 참고):
+- 둘 다 동기 수치가 Hard tier 값을 Medium 논증에 섞어 씀 (실측 Medium: state 0.6215,
+  covariance 0.6216 — Hard 값 0.52/0.55가 아님).
+- v24 융합은 `global(계수 1.0, 고정) + sigmoid-gated residual 3개`인데, 둘 다 이를
+  softmax simplex(`Σg=1`)로 바꾸자고 제안 — simplex 제약이 지배 항 global의 계수를
+  1.0→0.2~0.5로 축소시켜 logit 크기가 붕괴하는 설계 버그.
+- v26의 Top-2 sparse routing은 이 구조에서 연산 절감이 없음(어차피 4 branch 전부
+  계산) — 불연속 gradient만 추가.
+- v26의 load balancing(`1/K` 목표)은 token 단위 routing용 공식을 episode 단위
+  routing(`episode_batch_size=8`)에 그대로 씀 — `f_k` 추정 불가.
+- v24에서 slot-level population routing은 이미 **no-op**임(`project_structured_tokens`
+  후 bag당 토큰이 1개라 softmax가 항상 1.0) — 그런데도 v22와 성능이 같았음(F1). 이
+  경로 위에 더 정교한 routing을 얹는 v26/v27 전제를 약화시키는 강한 증거.
+- v27의 16-token은 v22 40-token의 부분집합에 가까움(slot spread 12채널 소실).
+  eigenvector 기반 covariance basis token은 부호/회전이 임의라 잘 정의된 함수가 아님.
+- v27의 Riemannian branch는 실측 결과 실행 불가: 512×512 batched `eigh`가 step당
+  1.99s로 v24(0.135~0.273s) 대비 7~15배, 인접 고유값 최소 간격이 `2.97e-07`이라
+  backward의 `1/(λi−λj)` 항이 `bf16-mixed`에서 불안정(이 저장소가 bf16-mixed를
+  강제하는 정확히 그 이유와 충돌). shrinkage는 condition number만 고치고 eigen-gap은
+  못 고침(uniform shift는 간격 보존).
+- v27은 T2-2를 오독 — raw mean probe(0.5478)와 oracle(0.8819)의 격차를 "요약
+  손실"로 돌렸지만, 실제로는 모델 입력 토큰 probe(0.6210)가 이미 raw mean보다
+  훨씬 높고 모델(0.6217)과 동률 — 격차의 원인은 요약 방식이 아니라
+  `responsive_instance_mask`(정답 세포 선택) 접근 여부.
+
+**남은 두 경로 (§5, E7/A4로 각각 사전검정 완료 — 결과는 바로 아래 표)**:
+- **경로 A (저위험)**: context/label 효율. 후보 우선순위 4→1→2→3: (4) bag을 반으로
+  쪼개 ridge 유효 n을 2배로(재학습 불필요, A4로 검정 완료) → (1) block별 shrinkage
+  학습(현재 λ는 전역 스칼라 1개, context 작을 때 자동으로 강한 정규화) → (2) context
+  크기를 명시 조건화 → (3) 작은 context(40~80)에 집중한 학습 분포.
+- **경로 B (고위험·고수익)**: `responsive_instance_mask`(세포별)로 **분할 모듈만**
+  보조 손실 학습 `L = L_CE + 0.10·L_rank + λ1·CE(할당, mask) + λ2·‖π̂-π_oracle‖²`.
+  분할을 미분 가능하게(현재 `_context_anchors`는 고정 random 버퍼 + argmax, gradient
+  안 흐름 — episode 공유 prototype + bag별 mixing weight, soft E-M으로 교체 필요).
+  추론 시 오라클 미사용, meta-training에서만 사용. 위험: 합성 특화 과적합(ICI 전이
+  실패), §4.5 결과상 관측값 신호가 거의 없어 학습 자체가 안 될 수 있음(→ E7로 사전검정).
+  구현 시 `slot_std`가 `[bags,cells,K,512]`를 물리 생성하는 부분(`baseline.py:903`)을
+  `E_k[x²]-(E_k[x])²` 항등식으로 바꿔야 K 확장이 무료가 됨.
+
+**근거 코드 위치**: 분할 미학습(`baseline.py:501-503,737-745,747-817`) · slot별
+통계 이미 계산(`:898-915`) · identity-aligned ridge가 metadata 2채널만 받음
+(`:915,2774-2830,3345-3348`) · slot 경로가 방향만 받음(`:547-564`) · v24 slot
+routing no-op(`:2570-2580,2614-2620`) · additive residual 융합(`:2766-2773`) ·
+routing entropy/balance loss 존재하나 weight 0(`model_interface.py:530-550`) ·
+K 확장 병목(`baseline.py:903`) · oracle 특징=(fraction,mean,variance)
+(`synthetic_data.py:550-563`) · oracle abundance plumbing 존재, 최적화 미참여
+(`:1152-1157`, `model_interface.py:646`) · covariance는 64-d random projection
+sketch(`baseline.py:512-518,566-600`) · 반응 효과는 component 1개에만
+(`synthetic_data.py:458-511`) · 관측 manifold가 episode마다 새 random MLP
+(`:754-767`).
+
+### 사전등록 게이트 3종 실행 결과 (§6.1, 전부 1,000/1,000/400 episode 실측)
+
+| 게이트 | 무엇을 검증 | 결과 |
+|---|---|---|
+| **E2** | v26/v27의 gating 전제: 학습된 v24 고정, episode마다 fusion 가중치를 query 라벨에 대해 직접 최적화한 oracle 상한 | **FAIL** — 최적 λ에서 delta 정확히 `0.0000`. 모든 task도 ±0.0002 이내. **v26 폐기 확정, v27의 routing 부분 폐기 확정** |
+| **E7** | v29가 재사용하는 population-slot 분할의 지도학습 상한 (세포 라벨로 held-out Fisher 판별) | **INCONCLUSIVE** — overall purity `0.3351` (게이트: ≥0.50 진행/<0.30 폐기, 그 사이). covariance만 단독으로 게이트 아래(`0.2726`) |
+| **A4** | context bag을 반으로 쪼개 ridge 유효 표본만 늘리는 재학습 없는 조작 | **약함** — ctx40 `+0.0035`(P=0.950)로 방향은 맞으나 ctx160에서 소멸(`-0.0001`). 3시간 투자(A1)를 정당화하기엔 근거 부족 |
+
+세 게이트 모두 "확실한 승격"을 주지 못했고, 이는 §4.3의 0.70 상한 가설과 일관됩니다.
+
+### v26/v27/v29 최종 판정 — 전부 미구현 폐기, `docs/history/`로 이관
+
+- `docs/history/architecture_v26_proposal_ec_moe_rejected.md` — E2로 폐기
+- `docs/history/architecture_v27_proposal_ac_icar_rejected.md` — v22<v24 선례 + E2 +
+  Riemannian branch 실측 비용(§3.4: 512×512 batched `eigh` step당 1.99s, v24 대비
+  7~15배, 인접 고유값 간격 `2.97e-07`로 `bf16-mixed` backward 불안정 위험)로 폐기
+- `docs/history/architecture_v29_proposal_sp_sat_rejected.md` — v22<v24 선례 + E7(분할
+  상한 불확실)로 폐기
+- `docs/architecture_v28_proposal.md`(제 분석/실측 문서)도 `docs/history/`로 이관했습니다
+  (2026-08-02, 사용자 지시 — "docs 최상위에는 5개 living 문서만" 원칙 유지). 원문의
+  실측 데이터·근거·code reference는 전부 위 절로 옮겨 적어서 유실 없음.
+
+### 대안: 사용자 제안 CLS-token pooling → `architecture_version=26`으로 실제 구현
+
+v29(SP-SAT)의 문제의식(40토큰이 이미 압축돼 정보가 없다)에는 동의하되, 그 해법(40토큰
+위에 self-attention을 더 크게)은 "이미 있는 정보를 재조합할 뿐 새 정보를 만들지 못한다"는
+논리로 반대했습니다. 대신 사용자가 제안한 대안 — **raw cell 전체(N개)를 학습된 CLS
+cross-attention으로 직접 요약해 41번째 토큰으로 추가** — 는 기존 population-slot 분할에
+전혀 의존하지 않는 별도 정보 경로라서 §4.3/E7의 상한 논리에 안 걸립니다. 이걸 구현했습니다.
+
+- **설계**: `ClassTokenPooling`(`src/models/baseline.py`) — 학습되는 CLS 쿼리가 bag의
+  모든 raw cell을 key/value로 cross-attention (self-attention 아님 — cell 수 최대
+  1,500 기준 O(N²) 대신 O(N)으로, v27이 겪은 종류의 비용 폭증을 피함). 기존 40개
+  구조화 토큰은 완전히 그대로 두고 41번째로 concat. `cls_token_pooling: true`로만
+  켜짐(기본 off, 꺼져 있으면 v24와 100% 동일).
+- **버그 발견 및 수정**: unit test(단일 에피소드 경로)는 다 통과했지만, 실제 학습에
+  쓰이는 **4D 배치 경로**(`forward_batched`, `_class_memories_batched`,
+  `_population_memory_logits_batched`)에 "40토큰 조립" 로직이 **별도로 3중 인라인
+  복제**되어 있어 cls_token을 빠뜨리고 있었습니다. 공용 헬퍼
+  `_all_structured_tokens_batched`로 통합해 수정 (실제 벤치마크 스크립트로 실행해보고서야
+  발견 — unit test만으로는 안 잡히는 유형의 버그였음).
+- **검증**: 신규 unit test 9개 추가, 전체 unittest **152/153 통과**(나머지 1개는
+  `configs/trainer/learnability_d20.yaml` 삭제로 인한 기존 결함, `a5dfcf8`에서 이미
+  삭제됨 — 이번 변경과 무관, 조치하지 않음). 실제 v24 config 기준 벤치마크: **step time
+  +6.9%, 파라미터 9.45M→11.62M(+23%), VRAM 증가 거의 없음**. 1-epoch 스모크 트레이닝
+  (실제 Lightning 루프) 크래시/NaN 없음 확인 후 본 학습 착수.
+- **Config**: `configs/train_v26_medium_cls_token_pool.yaml` (base: v24 확정 config).
+- **학습 실행 중**: Run `20260802_225848`, scratch Medium 50 epoch (v22~v25와 동일 방식,
+  warm-start 아님). PID `375725`(launcher).
+  - 학습 로그: `logs/20260802_225848/v26_medium_cls_token_pool.out`
+  - Launcher 로그: `logs/20260802_225848/v26_medium_cls_token_pool_launcher.out`
+  - 체크포인트: `checkpoints/20260802_225848/v26_medium_cls_token_pool/`
+  - Sanity check 통과, ~4 it/s로 정상 진행 확인 (2026-08-02 22:59 KST). 512 steps/epoch ×
+    50 epoch 기준 완료까지 약 1.8~2시간 예상.
+  - **진행 업데이트 (23:24 KST)**: epoch 11/50 진행 중, PID `375803`(torchrun worker)
+    생존 확인. Checkpoint 저장 정상: `epoch=007-val_ce_loss=0.5954.ckpt`,
+    `epoch=008-val_ce_loss=0.5947.ckpt`, `epoch=010-val_ce_loss=0.5955.ckpt`.
+    Best `val_ce_loss 0.5947`@epoch8 — v24 확정 기록(`0.5903`@epoch41)에 근접하지만
+    아직 미달이며, 학습 초반(epoch 8/50)이라 **이 시점 비교는 아무 의미가 없습니다**.
+    반드시 50-epoch 완주 후 최종 best checkpoint로 §6/§7 프로토콜 평가할 것.
+
+> [!IMPORTANT]
+> **v24는 여전히 확정 baseline입니다.** 이 학습은 아직 평가 전이므로, 완료 후 §6/§7
+> 프로토콜(1,000-episode paired, overall +0.03 또는 target task +0.05)로 v24-B1과
+> 비교하기 전까지 v26을 확정/승격하지 않습니다.
+
+### 다음 Action
+1. 학습 완료 대기 (`logs/20260802_225848/v26_medium_cls_token_pool.out` 확인).
+2. best checkpoint로 1,000-episode pool-400 context curve 평가 → v24-B1과 paired 비교.
+3. 승격 기준(+0.03/+0.05) 통과 여부로 v26 확정/폐기 판정.
+4. scratchpad의 검증된 진단 스크립트(`probe_oracle_gating.py`,
+   `probe_component_selection_bound.py`, `probe_split_context.py`)는 아직 `scripts/`로
+   이관·커밋되지 않음 — 필요 시 처리.
+5. E2b(fusion scale 상한 해제 FT)는 E2 결과상 생략 권고, 사용자 판단 필요.

@@ -1,0 +1,35 @@
+base_config: train_v24_medium_bag_proj_residual.yaml
+
+# Architecture v26 (CLS-token pooling): this is the actual, implemented v26 --
+# not the earlier EC-MoE (Episode-Conditional Mixture-of-Experts) design in
+# docs/history/architecture_v26_proposal.md, which never got past the design
+# stage and was killed by the E2 oracle-gating check (2026-08-02, see
+# docs/architecture_v28_proposal.md SS6.1: even a query-label-cheating oracle
+# gained delta 0.0000 over v24's fixed fusion weights). That proposal's number
+# is reused here for the design that replaced it in discussion.
+#
+# Keeps v24-B1's 40 structured tokens exactly as they are and adds one more: a
+# learned CLS query cross-attends over every raw cell in the bag (key/value)
+# and the attended output becomes structured token #41. Unlike the other 40
+# tokens, this one does not depend on the per-episode population-slot
+# partition (_context_anchors) at all -- it is trained end-to-end and can in
+# principle attend to whichever cells the classification loss rewards
+# attending to.
+#
+# Cross-attention (CLS as query, cells as key/value), not full self-attention
+# among cells: self-attention over up to ~1,500 raw cells per bag would cost
+# O(N^2) per bag, roughly two orders of magnitude more than the O(N * 12) the
+# rest of the aggregator spends. Cross-attention from one query token costs
+# O(N). Measured overhead on the real config: +6.9% step time, +2.17M params
+# (9.45M -> 11.62M), negligible extra VRAM (see current_status.md).
+model_overrides:
+  cls_token_pooling: true
+  cls_token_heads: 4
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v26_medium_cls_token_pool
+
+trainer:
+  max_epochs: 50

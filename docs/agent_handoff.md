@@ -1,7 +1,7 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-02 12:30:00 KST`
-**Architecture Version**: **v24 확정** — residual + bottleneck bag projection (구 v24-B1): `project_structured_tokens: true`, `projection_bottleneck_dim: 64`, `projection_residual_mean: true`. v22(구 기준선)/v23-A0/v24-A0/v24-B0는 폐기. Config: `configs/train_v24_medium_bag_proj_residual.yaml`. 상세 결정 근거: [`current_status.md`](current_status.md) §3 최종 결정. **v25(T5-A typed bag-preserving branch)는 2026-08-02 폐기 확정** (Medium/Easy 평가 모두 승격 기준 미달) — [`current_status.md`](current_status.md) §3 "v25 (T5-A) 폐기 확정" 및 §11 "판정 근거 종합" 참고. v25 config는 `configs/archive/v25_typed_bag/`, 태그 `v25-typed-bag-final`로 보존.
+**Last updated**: `2026-08-02 23:00:00 KST`
+**Architecture Version**: **v24가 여전히 확정 baseline** — residual + bottleneck bag projection (구 v24-B1): `project_structured_tokens: true`, `projection_bottleneck_dim: 64`, `projection_residual_mean: true`. v22(구 기준선)/v23-A0/v24-A0/v24-B0는 폐기. Config: `configs/train_v24_medium_bag_proj_residual.yaml`. 상세 결정 근거: [`current_status.md`](current_status.md) §3 최종 결정. **v25(T5-A typed bag-preserving branch)는 2026-08-02 폐기 확정** (Medium/Easy 평가 모두 승격 기준 미달) — [`current_status.md`](current_status.md) §3/§11 참고. v25 config는 `configs/archive/v25_typed_bag/`, 태그 `v25-typed-bag-final`로 보존. **`26`(CLS-token pooling, `cls_token_pooling: true`)은 2026-08-02 구현 완료, scratch 학습 실행 중 — 아직 평가 전, v24를 대체하지 않음.** 같은 날 제안된 v26(EC-MoE)/v27(AC-ICAR)/v29(SP-SAT) 설계안은 학습 없는 게이트(E2/E7/A4)로 검토 후 전부 미구현 폐기, `docs/history/`로 이관 — [`current_status.md`](current_status.md) §16 참고.
 
 이 문서는 BagPFN 저장소를 처음 맡은 coding agent가 안전하게 작업을 시작하기 위한 운영 및 핸드오프 지침입니다. 최신 개발 및 실험 진행 상황은 [`current_status.md`](current_status.md), 현재 모델 명세는 [`current_architecture.md`](current_architecture.md), 현재 실험 프로토콜은 [`current_experiments.md`](current_experiments.md)를 참고합니다.
 
@@ -118,6 +118,8 @@ scripts/launch_interactive_training.sh \
 1. **`configs/` 최상위 루트 유지 조건**:
    - 현재 활성 파이프라인에서 직접 사용하는 entry point config만 `configs/` 최상위에 유지합니다.
    - 현재 `configs/` 최상위 유지 대상: v24 확정(`train_v24_medium_bag_proj_residual.yaml`),
+     v26 평가 중(`train_v26_medium_cls_token_pool.yaml` — CLS-token pooling, scratch 학습
+     실행/평가 중, 승격/폐기 판정 전까지 유지),
      v22 기준선·참조용(`train_v22_medium.yaml` — `evaluate_synthetic.py` 기본 config,
      `train_v22_medium_context300.yaml`/`train_v22_hard_context300.yaml`/`train_v22_hard_realworld.yaml` — T4,
      `train_v22_ici_finetune.yaml`/`train_v22_ici_scratch.yaml` — ICI).

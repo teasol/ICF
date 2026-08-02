@@ -5,6 +5,7 @@ import torch.nn.functional as F
 
 from src.models.baseline import (
     BaseModel,
+    ClassTokenPooling,
     EpisodePopulationAggregator,
     MeanAggregator,
     MeanResidualAggregator,
@@ -286,6 +287,97 @@ class StructuredEpisodePopulationAggregatorTest(unittest.TestCase):
         torch.testing.assert_close(expected, actual, atol=2e-4, rtol=2e-4)
         torch.testing.assert_close(reliability, rotated_reliability)
 
+    def test_cls_token_included_when_enabled_and_zero_when_disabled(self) -> None:
+        torch.manual_seed(24)
+        bags = [torch.randn(20 + index, 8) for index in range(5)]
+        context_mask = torch.tensor([True, True, True, False, False])
+        enabled = StructuredEpisodePopulationAggregator(
+            input_dim=8, num_slots=4, context_samples_per_bag=6,
+            include_cls_token=True, cls_token_heads=4,
+        ).eval()
+        representation = enabled(bags, context_mask)
+        self.assertEqual(representation["cls_token"].shape, (5, 8))
+        self.assertFalse(torch.equal(representation["cls_token"], torch.zeros(5, 8)))
+
+        disabled = StructuredEpisodePopulationAggregator(
+            input_dim=8, num_slots=4, context_samples_per_bag=6,
+        ).eval()
+        self.assertFalse(disabled.include_cls_token)
+        representation = disabled(bags, context_mask)
+        self.assertEqual(representation["cls_token"].shape, (5, 8))
+        torch.testing.assert_close(representation["cls_token"], torch.zeros(5, 8))
+
+    def test_cls_token_is_invariant_to_instance_order(self) -> None:
+        torch.manual_seed(25)
+        aggregator = StructuredEpisodePopulationAggregator(
+            input_dim=8, num_slots=4, context_samples_per_bag=6,
+            include_cls_token=True, cls_token_heads=4,
+        ).eval()
+        bags = [torch.randn(20 + index, 8) for index in range(5)]
+        context_mask = torch.tensor([True, True, True, False, False])
+        expected = aggregator(bags, context_mask)["cls_token"]
+        actual = aggregator(
+            [bag[torch.randperm(len(bag))] for bag in bags], context_mask
+        )["cls_token"]
+        torch.testing.assert_close(expected, actual, atol=1e-5, rtol=1e-5)
+
+    def test_cls_token_matches_between_dense_and_list_paths(self) -> None:
+        # The dense path (_forward_dense, used when all bags in an episode
+        # share one cell count) and the per-bag list path (used for real,
+        # variable-cell-count data) must agree exactly on the same input --
+        # otherwise training (always dense) and ICI evaluation (often list)
+        # would silently use two different pooling functions.
+        torch.manual_seed(26)
+        aggregator = StructuredEpisodePopulationAggregator(
+            input_dim=8, num_slots=4, context_samples_per_bag=6,
+            include_cls_token=True, cls_token_heads=4,
+        ).eval()
+        dense_bags = torch.randn(5, 20, 8)
+        context_mask = torch.tensor([True, True, True, False, False])
+        dense_result = aggregator(dense_bags, context_mask)["cls_token"]
+        list_result = aggregator(list(dense_bags.unbind(0)), context_mask)["cls_token"]
+        torch.testing.assert_close(dense_result, list_result, atol=1e-5, rtol=1e-5)
+
+
+class ClassTokenPoolingTest(unittest.TestCase):
+    def test_output_shape(self) -> None:
+        torch.manual_seed(27)
+        pooling = ClassTokenPooling(token_dim=8, num_heads=4).eval()
+        instances = torch.randn(3, 15, 8)
+        token = pooling(instances)
+        self.assertEqual(token.shape, (3, 8))
+        self.assertTrue(torch.isfinite(token).all())
+
+    def test_invariant_to_cell_order(self) -> None:
+        torch.manual_seed(28)
+        pooling = ClassTokenPooling(token_dim=8, num_heads=4).eval()
+        instances = torch.randn(2, 12, 8)
+        expected = pooling(instances)
+        permutation = torch.randperm(instances.shape[1])
+        actual = pooling(instances[:, permutation])
+        torch.testing.assert_close(expected, actual, atol=1e-5, rtol=1e-5)
+
+    def test_gradients_are_finite(self) -> None:
+        torch.manual_seed(29)
+        pooling = ClassTokenPooling(token_dim=8, num_heads=4).train()
+        instances = torch.randn(4, 10, 8, requires_grad=True)
+        token = pooling(instances)
+        token.sum().backward()
+        gradients = [p.grad for p in pooling.parameters() if p.grad is not None]
+        self.assertTrue(gradients)
+        self.assertTrue(all(torch.isfinite(g).all() for g in gradients))
+        self.assertIsNotNone(instances.grad)
+        self.assertTrue(torch.isfinite(instances.grad).all())
+
+    def test_rejects_wrong_token_dim(self) -> None:
+        pooling = ClassTokenPooling(token_dim=8, num_heads=4)
+        with self.assertRaises(ValueError):
+            pooling(torch.randn(2, 10, 6))
+
+    def test_rejects_non_divisible_heads(self) -> None:
+        with self.assertRaises(ValueError):
+            ClassTokenPooling(token_dim=8, num_heads=3)
+
 
 class SetCrossAttentionMetaClassifierTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -398,6 +490,7 @@ class StructuredPopulationMetaClassifierTest(unittest.TestCase):
             "slot_covariance_sketch": torch.randn(8, 4, 12),
             "slot_covariance_reliability": torch.rand(8, 4).add(0.1),
             "covariance_matrix": torch.eye(6).repeat(8, 1, 1),
+            "cls_token": torch.randn(8, 8),
         }
         self.query = {
             "global_summary": torch.randn(3, 8),
@@ -408,6 +501,7 @@ class StructuredPopulationMetaClassifierTest(unittest.TestCase):
             "slot_covariance_sketch": torch.randn(3, 4, 12),
             "slot_covariance_reliability": torch.rand(3, 4).add(0.1),
             "covariance_matrix": torch.eye(6).repeat(3, 1, 1),
+            "cls_token": torch.randn(3, 8),
         }
         self.query_instances = [torch.randn(13 + index, 8) for index in range(3)]
         self.labels = torch.tensor([0, 1, 0, 1, 0, 1, 0, 1])
@@ -1152,6 +1246,94 @@ class BaseModelTest(unittest.TestCase):
         ).eval()
         self.assertEqual(model.architecture_version, 24)
         self.assertFalse(hasattr(model.meta_classifier, "typed_bag_classifier"))
+
+    def test_cls_token_pooling_model_is_v26_and_runs_end_to_end(self) -> None:
+        model = BaseModel(
+            input_dim=8,
+            meta_hidden_dim=16,
+            meta_num_heads=4,
+            meta_num_set_layers=1,
+            meta_relation_hidden_dim=16,
+            aggregator_num_slots=4,
+            aggregator_num_density_slots=3,
+            project_structured_tokens=True,
+            projection_bottleneck_dim=4,
+            projection_residual_mean=True,
+            cls_token_pooling=True,
+            cls_token_heads=4,
+            num_classes=2,
+        ).train()
+        logits, auxiliary = model(
+            self.x, self.y, self.mask_index, return_auxiliary=True
+        )
+        self.assertEqual(model.architecture_version, 26)
+        self.assertEqual(model._architecture_version.item(), 26)
+        self.assertEqual(logits.shape, (2, 2))
+        # This config's structured tokens: 1 global + 3*4 slot stats + 3 tails
+        # = 16, + 1 cls token = 17. The per-position bottleneck list must
+        # grow by exactly one position to match.
+        self.assertEqual(model.meta_classifier.structured_tokens_per_bag, 17)
+        self.assertEqual(len(model.meta_classifier.bag_token_bottlenecks), 17)
+        F.cross_entropy(logits, self.y[self.mask_index]).backward()
+        gradients = [
+            parameter.grad
+            for parameter in model.parameters()
+            if parameter.grad is not None
+        ]
+        self.assertTrue(gradients)
+        self.assertTrue(all(torch.isfinite(value).all() for value in gradients))
+        cls_pooling_params = list(
+            model.aggregator.cls_token_pooling.parameters()
+        )
+        self.assertTrue(cls_pooling_params)
+        self.assertTrue(
+            all(parameter.grad is not None for parameter in cls_pooling_params)
+        )
+        self.assertTrue(
+            all(
+                torch.isfinite(parameter.grad).all()
+                for parameter in cls_pooling_params
+            )
+        )
+
+    def test_cls_token_pooling_defaults_off_and_stays_v24(self) -> None:
+        model = BaseModel(
+            input_dim=8,
+            meta_hidden_dim=16,
+            meta_num_heads=4,
+            meta_num_set_layers=1,
+            meta_relation_hidden_dim=16,
+            aggregator_num_slots=4,
+            aggregator_num_density_slots=3,
+            project_structured_tokens=True,
+            projection_bottleneck_dim=4,
+            projection_residual_mean=True,
+            num_classes=2,
+        ).eval()
+        self.assertEqual(model.architecture_version, 24)
+        self.assertFalse(model.aggregator.include_cls_token)
+        self.assertFalse(hasattr(model.aggregator, "cls_token_pooling"))
+        # 1 global + 3*4 slot stats + 3 tails, no cls token.
+        self.assertEqual(model.meta_classifier.structured_tokens_per_bag, 16)
+
+    def test_cls_token_pooling_with_typed_bag_branch_raises(self) -> None:
+        with self.assertRaises(NotImplementedError):
+            BaseModel(
+                input_dim=8,
+                meta_hidden_dim=16,
+                meta_num_heads=4,
+                meta_num_set_layers=1,
+                meta_relation_hidden_dim=16,
+                aggregator_num_slots=4,
+                aggregator_num_density_slots=3,
+                project_structured_tokens=True,
+                projection_bottleneck_dim=4,
+                projection_residual_mean=True,
+                typed_bag_preserving_branch=True,
+                typed_bag_bottleneck_dim=4,
+                cls_token_pooling=True,
+                num_classes=2,
+            )
 
     def test_final_logits_are_invariant_to_per_bag_shift(self) -> None:
         shift = torch.randn(self.x.shape[0], 1, self.x.shape[-1])

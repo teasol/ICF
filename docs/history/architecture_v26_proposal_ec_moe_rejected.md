@@ -1,5 +1,14 @@
 # Architecture v26 Proposal: Episode-Conditional Mixture-of-Experts Meta-Classifier
 
+> [!IMPORTANT]
+> **폐기 확정 (archived 2026-08-02).** `docs/architecture_v28_proposal.md` §2와
+> §6.1의 E2 실측(학습된 v24를 고정하고 episode마다 5개 fusion scalar를 query
+> 라벨에 대해 직접 최적화한 oracle gating 상한)에서 delta가 정확히 0.0000이
+> 나왔습니다 — 이 문서가 전제하는 "episode-conditional gating이 도움이 된다"는
+> 가설이 구현 전에 학습 없이 반증됨. `architecture_version=26`은 이 제안을
+> 대체한 다른 설계(CLS-token pooling, `configs/train_v26_medium_cls_token_pool.yaml`)가
+> 대신 사용합니다. 원문은 그대로 보존.
+
 **작성일**: `2026-08-02`  
 **작성자**: GitHub Copilot (DeepSeek V4 Pro)  
 **기반**: v24 확정 아키텍처의 실험적 한계 분석  

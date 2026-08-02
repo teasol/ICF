@@ -397,6 +397,59 @@ class EpisodePopulationAggregator(nn.Module):
         }
 
 
+class ClassTokenPooling(nn.Module):
+    """Learned cross-attention pooling over every raw cell in a bag.
+
+    A single learned CLS query attends over all N cell instances (key/value)
+    and the attended result becomes one additional structured token. Unlike
+    the population-slot tokens, which are built from a fixed, per-episode
+    k-means-style partition (`_context_anchors`), this aggregation has no
+    dependence on that partition and is trained end-to-end against the
+    classification loss -- it can in principle learn to weight whichever
+    cells the loss rewards, rather than being confined to the anchors'
+    population coordinate system.
+
+    Cross-attention (CLS as query, cells as key/value) rather than full
+    self-attention among cells: self-attention over up to ~1,500 raw cells
+    per bag costs O(N^2) per bag, roughly two orders of magnitude more than
+    the O(N * num_slots) the rest of the aggregator spends per bag. A single
+    query token attending over the cells costs O(N) and captures the same
+    "one learned summary of the whole bag" intent without that blowup.
+    """
+
+    def __init__(self, token_dim: int = 512, num_heads: int = 4) -> None:
+        super().__init__()
+        if token_dim < 1 or num_heads < 1:
+            raise ValueError("token_dim and num_heads must be positive.")
+        if token_dim % num_heads != 0:
+            raise ValueError("token_dim must be divisible by num_heads.")
+        self.token_dim = int(token_dim)
+        self.cls_seed = nn.Parameter(torch.randn(1, self.token_dim) / math.sqrt(self.token_dim))
+        self.input_norm = nn.LayerNorm(self.token_dim)
+        self.cross_attention = nn.MultiheadAttention(
+            self.token_dim, num_heads, batch_first=True
+        )
+        self.attention_norm = nn.LayerNorm(self.token_dim)
+        self.ffn = nn.Sequential(
+            nn.Linear(self.token_dim, 2 * self.token_dim),
+            nn.GELU(),
+            nn.Linear(2 * self.token_dim, self.token_dim),
+        )
+        self.output_norm = nn.LayerNorm(self.token_dim)
+
+    def forward(self, instances: torch.Tensor) -> torch.Tensor:
+        """instances: [bags, cells, token_dim] (uniform cell count per call). Returns [bags, token_dim]."""
+        if instances.ndim != 3 or instances.shape[-1] != self.token_dim:
+            raise ValueError("instances must be [bags, cells, token_dim].")
+        bags = instances.shape[0]
+        query = self.cls_seed.unsqueeze(0).expand(bags, -1, -1).to(instances.dtype)
+        normed = self.input_norm(instances)
+        attended, _ = self.cross_attention(query, normed, normed, need_weights=False)
+        token = self.attention_norm(query + attended)
+        token = self.output_norm(token + self.ffn(token))
+        return token.squeeze(1)
+
+
 class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
     """Hybrid density/rare population coordinates with multi-statistic slots.
 
@@ -424,6 +477,8 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         covariance_sketch_dim: int | None = None,
         covariance_mode: str = "covariance",
         covariance_shrinkage: float = 0.0,
+        include_cls_token: bool = False,
+        cls_token_heads: int = 4,
     ) -> None:
         # Deliberately initialize nn.Module directly: anchor construction is
         # inherited, while the v13 compressed projections are not retained.
@@ -489,6 +544,11 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         self.covariance_shrinkage = float(covariance_shrinkage)
         self.slot_covariance_descriptor = "correlation"
         self.emit_covariance_matrix = False
+        self.include_cls_token = bool(include_cls_token)
+        if self.include_cls_token:
+            self.cls_token_pooling = ClassTokenPooling(
+                token_dim=self.input_dim, num_heads=int(cls_token_heads)
+            )
         candidate_index = torch.arange(
             1, self.context_samples_per_bag + 1, dtype=torch.float32
         )[:, None]
@@ -994,6 +1054,11 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 if self.emit_covariance_matrix
                 else centered_delta.new_zeros((num_bags, 1, 1))
             ),
+            "cls_token": (
+                self.cls_token_pooling(instances)
+                if self.include_cls_token
+                else global_summary.new_zeros((num_bags, self.input_dim))
+            ),
         }
         if not return_auxiliary:
             return representation
@@ -1059,7 +1124,13 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         dispersions: list[torch.Tensor] = []
         slot_means: list[torch.Tensor] = []
         selected_counts: list[list[int]] = []
+        cls_tokens: list[torch.Tensor] = []
         for bag, centered_delta in zip(bags, centered_deltas):
+            cls_tokens.append(
+                self.cls_token_pooling(bag.unsqueeze(0)).squeeze(0)
+                if self.include_cls_token
+                else bag.new_zeros(self.input_dim)
+            )
             normalized = F.normalize(bag.float(), dim=-1)
             similarity = normalized @ anchors.float().T
             assignment = torch.softmax(
@@ -1180,6 +1251,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 if self.emit_covariance_matrix
                 else centered_deltas[0].new_zeros((len(centered_deltas), 1, 1))
             ),
+            "cls_token": torch.stack(cls_tokens),
         }
         if not return_auxiliary:
             return representation
@@ -1701,6 +1773,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
         typed_bag_num_slots: int | None = None,
         typed_bag_num_tail_fractions: int | None = None,
         typed_bag_residual_scale: float = 0.02,
+        include_cls_token: bool = False,
         num_classes: int = 2,
     ) -> None:
         super().__init__()
@@ -1745,6 +1818,14 @@ class StructuredPopulationMetaClassifier(nn.Module):
             raise ValueError(
                 "mean_pool_structured_tokens and project_structured_tokens "
                 "are mutually exclusive."
+            )
+        self.include_cls_token = bool(include_cls_token)
+        if self.include_cls_token and typed_bag_preserving_branch:
+            raise NotImplementedError(
+                "include_cls_token with typed_bag_preserving_branch is not "
+                "supported: the typed-bag token-type/tail-fraction embeddings "
+                "are sized from typed_bag_num_slots/typed_bag_num_tail_fractions "
+                "only and do not have a role for the extra cls token position."
             )
         self.structured_tokens_per_bag = (
             None if structured_tokens_per_bag is None else int(structured_tokens_per_bag)
@@ -2451,7 +2532,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
         expected_keys = {
             "global_summary", "slots", "tails", "slot_metadata",
             "covariance_sketch", "slot_covariance_sketch",
-            "slot_covariance_reliability", "covariance_matrix",
+            "slot_covariance_reliability", "covariance_matrix", "cls_token",
         }
         if set(representation) != expected_keys:
             raise ValueError(f"{name} has invalid structured representation keys.")
@@ -2460,6 +2541,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
         tails = representation["tails"]
         metadata = representation["slot_metadata"]
         covariance_sketch = representation["covariance_sketch"]
+        cls_token = representation["cls_token"]
         if global_summary.ndim != 2 or global_summary.shape[-1] != self.token_dim:
             raise ValueError(f"{name} global-summary tokens have an invalid shape.")
         if (
@@ -2478,6 +2560,12 @@ class StructuredPopulationMetaClassifier(nn.Module):
             raise ValueError(f"{name} slot metadata have an invalid shape.")
         if covariance_sketch.ndim != 2 or covariance_sketch.shape[0] != global_summary.shape[0]:
             raise ValueError(f"{name} covariance sketches have an invalid shape.")
+        if (
+            cls_token.ndim != 2
+            or cls_token.shape[0] != global_summary.shape[0]
+            or cls_token.shape[-1] != self.token_dim
+        ):
+            raise ValueError(f"{name} cls token has an invalid shape.")
 
     @staticmethod
     def _flatten_slot_tokens(representation: dict[str, torch.Tensor]) -> torch.Tensor:
@@ -2487,14 +2575,14 @@ class StructuredPopulationMetaClassifier(nn.Module):
     def _all_structured_tokens(
         self, representation: dict[str, torch.Tensor]
     ) -> torch.Tensor:
-        return torch.cat(
-            (
-                representation["global_summary"].unsqueeze(1),
-                self._flatten_slot_tokens(representation),
-                representation["tails"],
-            ),
-            dim=1,
-        )
+        parts = [
+            representation["global_summary"].unsqueeze(1),
+            self._flatten_slot_tokens(representation),
+            representation["tails"],
+        ]
+        if self.include_cls_token:
+            parts.append(representation["cls_token"].unsqueeze(1))
+        return torch.cat(parts, dim=1)
 
     def _projected_bag_tokens(self, tokens: torch.Tensor) -> torch.Tensor:
         """Reduce each bag's stacked structured tokens to one projected token.
@@ -2896,17 +2984,31 @@ class StructuredPopulationMetaClassifier(nn.Module):
             )
         return logits.to(output_dtype)
 
+    def _all_structured_tokens_batched(
+        self, representation: dict[str, torch.Tensor]
+    ) -> torch.Tensor:
+        """Batched (`[episodes, bags, tokens, token_dim]`) equivalent of
+        `_all_structured_tokens`. Kept as one shared helper because the 4D
+        batched path (`forward_batched`, `_class_memories_batched`) duplicates
+        this token-stacking logic in several places; drifting one copy and
+        not the others is exactly how the cls token was first missed here."""
+        slots = representation["slots"]
+        flat_slots = slots.reshape(slots.shape[0], slots.shape[1], -1, slots.shape[-1])
+        parts = [
+            representation["global_summary"].unsqueeze(2),
+            flat_slots,
+            representation["tails"],
+        ]
+        if self.include_cls_token:
+            parts.append(representation["cls_token"].unsqueeze(2))
+        return torch.cat(parts, dim=2)
+
     def _class_memories_batched(
         self,
         context: dict[str, torch.Tensor],
         context_labels: torch.Tensor,
     ) -> torch.Tensor:
-        slots = context["slots"]
-        flat_slots = slots.reshape(slots.shape[0], slots.shape[1], -1, slots.shape[-1])
-        context_tokens = torch.cat(
-            (context["global_summary"].unsqueeze(2), flat_slots, context["tails"]),
-            dim=2,
-        )
+        context_tokens = self._all_structured_tokens_batched(context)
         if self.project_structured_tokens:
             context_tokens = self._projected_bag_tokens(context_tokens).unsqueeze(2)
         elif self.mean_pool_structured_tokens:
@@ -2943,30 +3045,10 @@ class StructuredPopulationMetaClassifier(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         raw_slots = query["slots"]
         if self.project_structured_tokens:
-            flat_slots = raw_slots.reshape(
-                raw_slots.shape[0], raw_slots.shape[1], -1, raw_slots.shape[-1]
-            )
-            all_tokens = torch.cat(
-                (
-                    query["global_summary"].unsqueeze(2),
-                    flat_slots,
-                    query["tails"],
-                ),
-                dim=2,
-            )
+            all_tokens = self._all_structured_tokens_batched(query)
             query_tokens = self._projected_bag_tokens(all_tokens).unsqueeze(2)
         elif self.mean_pool_structured_tokens:
-            flat_slots = raw_slots.reshape(
-                raw_slots.shape[0], raw_slots.shape[1], -1, raw_slots.shape[-1]
-            )
-            all_tokens = torch.cat(
-                (
-                    query["global_summary"].unsqueeze(2),
-                    flat_slots,
-                    query["tails"],
-                ),
-                dim=2,
-            )
+            all_tokens = self._all_structured_tokens_batched(query)
             query_tokens = all_tokens.mean(dim=2, keepdim=True)
         else:
             query_tokens = raw_slots.reshape(
@@ -3047,49 +3129,17 @@ class StructuredPopulationMetaClassifier(nn.Module):
         query_global_tokens = query["global_summary"]
         if self.project_structured_tokens:
             context_global_tokens = self._projected_bag_tokens(
-                torch.cat(
-                    (
-                        context["global_summary"].unsqueeze(2),
-                        context["slots"].reshape(
-                            *context["slots"].shape[:2], -1, self.token_dim
-                        ),
-                        context["tails"],
-                    ),
-                    dim=2,
-                )
+                self._all_structured_tokens_batched(context)
             )
             query_global_tokens = self._projected_bag_tokens(
-                torch.cat(
-                    (
-                        query["global_summary"].unsqueeze(2),
-                        query["slots"].reshape(
-                            *query["slots"].shape[:2], -1, self.token_dim
-                        ),
-                        query["tails"],
-                    ),
-                    dim=2,
-                )
+                self._all_structured_tokens_batched(query)
             )
         elif self.mean_pool_structured_tokens:
-            context_global_tokens = torch.cat(
-                (
-                    context["global_summary"].unsqueeze(2),
-                    context["slots"].reshape(
-                        *context["slots"].shape[:2], -1, self.token_dim
-                    ),
-                    context["tails"],
-                ),
-                dim=2,
+            context_global_tokens = self._all_structured_tokens_batched(
+                context
             ).mean(dim=2)
-            query_global_tokens = torch.cat(
-                (
-                    query["global_summary"].unsqueeze(2),
-                    query["slots"].reshape(
-                        *query["slots"].shape[:2], -1, self.token_dim
-                    ),
-                    query["tails"],
-                ),
-                dim=2,
+            query_global_tokens = self._all_structured_tokens_batched(
+                query
             ).mean(dim=2)
         global_shape_logits, global_shape_auxiliary = (
             self.global_shape_classifier.forward_batched(
@@ -3100,29 +3150,14 @@ class StructuredPopulationMetaClassifier(nn.Module):
             )
         )
         if self.typed_bag_preserving_branch:
+            # include_cls_token and typed_bag_preserving_branch are mutually
+            # exclusive (enforced in __init__), so the helper's cls-token
+            # branch is always a no-op here.
             context_typed_bag_tokens = self._typed_bag_tokens(
-                torch.cat(
-                    (
-                        context["global_summary"].unsqueeze(2),
-                        context["slots"].reshape(
-                            *context["slots"].shape[:2], -1, self.token_dim
-                        ),
-                        context["tails"],
-                    ),
-                    dim=2,
-                )
+                self._all_structured_tokens_batched(context)
             )
             query_typed_bag_tokens = self._typed_bag_tokens(
-                torch.cat(
-                    (
-                        query["global_summary"].unsqueeze(2),
-                        query["slots"].reshape(
-                            *query["slots"].shape[:2], -1, self.token_dim
-                        ),
-                        query["tails"],
-                    ),
-                    dim=2,
-                )
+                self._all_structured_tokens_batched(query)
             )
             typed_bag_logits, typed_bag_auxiliary = (
                 self.typed_bag_classifier.forward_batched(
@@ -3531,6 +3566,8 @@ class BaseModel(nn.Module):
         typed_bag_bottleneck_dim: int | None = None,
         meta_typed_bag_residual_scale: float = 0.02,
         covariance_relation: dict[str, object] | None = None,
+        cls_token_pooling: bool = False,
+        cls_token_heads: int = 4,
         num_classes: int = 2,
     ) -> None:
         super().__init__()
@@ -3553,6 +3590,8 @@ class BaseModel(nn.Module):
             covariance_sketch_dim=aggregator_covariance_sketch_dim,
             covariance_mode=aggregator_covariance_mode,
             covariance_shrinkage=aggregator_covariance_shrinkage,
+            include_cls_token=cls_token_pooling,
+            cls_token_heads=cls_token_heads,
         )
         relation_config = dict(covariance_relation or {})
         self.aggregator.slot_covariance_descriptor = str(
@@ -3563,12 +3602,14 @@ class BaseModel(nn.Module):
             and relation_config.get("granularity") == "subspace"
         )
         # Bag = 1 global summary + num_slots * 3 (center/spread/rare) slot
-        # statistics + len(tail_fractions) tail tokens.  For the v24 learned
-        # projection these are concatenated and linearly mapped to one token.
+        # statistics + len(tail_fractions) tail tokens (+ 1 cls-pooled token,
+        # see cls_token_pooling). For the v24 learned projection these are
+        # concatenated and linearly mapped to one token.
         structured_tokens_per_bag = (
             1
             + 3 * int(aggregator_num_slots)
             + len(tuple(aggregator_tail_fractions))
+            + (1 if cls_token_pooling else 0)
         )
         self.meta_classifier = StructuredPopulationMetaClassifier(
             token_dim=self.input_dim,
@@ -3601,10 +3642,19 @@ class BaseModel(nn.Module):
             typed_bag_num_slots=aggregator_num_slots,
             typed_bag_num_tail_fractions=len(tuple(aggregator_tail_fractions)),
             typed_bag_residual_scale=meta_typed_bag_residual_scale,
+            include_cls_token=cls_token_pooling,
             num_classes=self.num_classes,
         )
+        # v26 = cls_token_pooling (CLS cross-attention over raw cells, see
+        # configs/train_v26_medium_cls_token_pool.yaml). This is the design
+        # that ended up using the v26 slot -- the earlier EC-MoE proposal
+        # that first claimed that number was rejected before implementation
+        # (docs/history/architecture_v26_proposal.md) after the E2
+        # oracle-gating check found zero headroom in episode-conditional
+        # fusion (docs/architecture_v28_proposal.md SS6.1).
         self.architecture_version = (
-            25 if typed_bag_preserving_branch
+            26 if cls_token_pooling
+            else 25 if typed_bag_preserving_branch
             else 24 if project_structured_tokens
             else 23 if mean_pool_structured_tokens
             else 22

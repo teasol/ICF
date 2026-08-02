@@ -168,6 +168,28 @@ class ArchitectureCheckpointCompatibilityTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "Expected v25, found 24"):
             interface.on_load_checkpoint(checkpoint)
 
+    def test_v26_model_rejects_v24_checkpoint(self) -> None:
+        # cls_token_pooling adds a new ClassTokenPooling module (learned CLS
+        # cross-attention over raw cells) whose weights a v24 checkpoint does
+        # not have, so it must be rejected rather than partially loaded.
+        interface = ModelInterface(
+            model_src="src.models.baseline.BaseModel",
+            input_dim=8,
+            meta_hidden_dim=16,
+            meta_num_heads=4,
+            meta_num_set_layers=1,
+            meta_relation_hidden_dim=16,
+            meta_ridge_dim=4,
+            aggregator_num_slots=1,
+            aggregator_num_density_slots=1,
+            project_structured_tokens=True,
+            cls_token_pooling=True,
+            cls_token_heads=4,
+        )
+        checkpoint = {"state_dict": {"model._architecture_version": torch.tensor(24)}}
+        with self.assertRaisesRegex(RuntimeError, "Expected v26, found 24"):
+            interface.on_load_checkpoint(checkpoint)
+
 
 if __name__ == "__main__":
     unittest.main()
