@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
 **Last updated**: `2026-08-02 12:00:00 KST`
-**Status**: v24 확정 유지. **v25(T5-A) Medium paired 평가 — 맥락 의존적 trade-off** (v25 우세 @context40, v24-B1 압도 @context300, 승격 기준 미달). **Easy tier 완료 — v24-easy(0.9073) ≈ v25-easy(0.9106), delta +0.0033 승격 기준 미달** → "아키텍처 계열 전체 한계" 가설 강화, **v25 최종 폐기 권고 (사용자 판단 대기)**. Easy 정식 paired 비교 실행 중(PID 277412). 상세는 §11.
+**Status**: v24 확정 유지. **v25(T5-A) Medium paired 평가 — 맥락 의존적 trade-off** (v25 우세 @context40, v24-B1 압도 @context300, 승격 기준 미달). **Easy tier 완료 — v24-easy(0.9073) ≈ v25-easy(0.9106), delta +0.0033 승격 기준 미달** → "아키텍처 계열 전체 한계" 가설 강화. **v25 최종 폐기 확정, v24 유지** (Easy paired 추가 비교는 사용자 결정으로 취소). 상세는 §11.
 **Read first if you are picking this up**: §11 (신규, 가장 중요), §3 "🧪 v25 (T5-A) 진행 중", §3 "최종 결정 (2026-08-01)" (v24 확정 배경), §6 Action Plan.
 **Branches**: `codex/v25-typed-bag` = v25 작업 중 (base: `v24`) / `main` = `v24` = `codex/v23-bag-mean` 최종 커밋 / `v22`(구 기준선, 참조용 보존) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
@@ -839,9 +839,10 @@ bag-preserving 분기를 추가해도 Medium에서는 아무 이득이 없었습
   - 예측: `predictions/v24_easy_1000ep.pt`, `predictions/v25_easy_1000ep.pt`.
     로그: `logs/20260802_easy_eval/easy_1000ep.out`.
 
-- 🔄 **Easy tier 정식 paired 비교 실행 중** (2026-08-02, PID `277412`):
-  `compare_predictions.py predictions/v24_easy_1000ep.pt predictions/v25_easy_1000ep.pt`,
-  로그 `logs/20260802_easy_eval/easy_paired_compare.out`.
+- � **Easy tier 정식 paired 비교는 취소 (사용자 결정, 2026-08-02)**: marginal 평가
+  (위 표)만으로 v24-easy ≈ v25-easy (delta +0.0033, 승격 기준 미달)가 확인됐고,
+  v25는 어차피 폐기 확정이므로 paired win-rate 추가 계산 없이 종료.
+  **결론: v24 확정 유지 (v25 폐기).**
 
 ### 🏁 v25(T5-A) 판정 근거 종합 (2026-08-02)
 
@@ -864,9 +865,11 @@ repo 밖이므로 위 표로 기록 유지.)
 
 **결론 (판정 기준 §11 item 4 적용)**: Easy tier에서도 두 아키텍처가 갈리지 않으므로
 **"이 아키텍처 계열 전체의 한계" 가설이 강화됨.** v25(T5-A, typed bag-preserving)는
-Medium/Easy 양쪽에서 승격 기준 미달 → **v25 최종 폐기 권고**, T5-B/T5-C 또는 완전히 다른
-접근으로 이동 검토. 단, v25가 작은 context(40)에서 유의하게 우세했던 점은
-ICI(~69 fold context)와 관련해 추가 검토 가치가 있음 — 사용자 판단 필요.
+Medium/Easy 양쪽에서 승격 기준 미달 → **v25 최종 폐기 확정 (2026-08-02), v24 유지**
+(Easy paired 추가 비교는 marginal delta +0.0033로 이미 승격 기준 미달임이 확인되어
+사용자 결정으로 취소). 다음 방향: T5-B/T5-C 또는 완전히 다른 접근으로 이동 검토.
+단, v25가 작은 context(40)에서 유의하게 우세했던 점은 ICI(~69 fold context)와 관련해
+향후 새 설계 시 참고 가치 있음.
 
 ### 남겨진 것 / 다음 Action
 
@@ -876,10 +879,9 @@ ICI(~69 fold context)와 관련해 추가 검토 가치가 있음 — 사용자 
 3. ~~v25-easy 학습 완료 대기 → v24-easy와 1,000-episode 평가로 비교~~ → **완료**
    (v24-easy 0.9073 vs v25-easy 0.9106, delta +0.0033).
 4. Easy tier에서도 갈리지 않으므로 **"아키텍처 계열 전체의 한계" 가설 강화 → v25(T5-A)
-   최종 폐기 권고, T5-B/T5-C 또는 완전히 다른 접근으로 이동 검토** — **사용자 판단 필요**.
-   진행 중: Easy 정식 paired 비교(PID 277412) 완료 후 최종 수치 기록.
-   Easy tier에서 유의미하게 갈리면 Medium이 ceiling/floor effect로 아키텍처 차이를
-   가려온 것 → v25를 Medium에서 더 오래/다르게 학습해볼 근거가 생김.
+   최종 폐기 확정 (2026-08-02), v24 유지**. Easy paired 추가 비교는 **사용자 결정으로
+   취소** (marginal delta +0.0033로 이미 승격 기준 미달, v25는 폐기 확정).
+   → 다음 방향: T5-B/T5-C 또는 완전히 다른 접근으로 이동 검토 (사용자 판단 필요).
 5. ICI는 계속 잠금 (변경 없음).
 
 ---
