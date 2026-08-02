@@ -54,6 +54,32 @@ class MeanAggregatorTest(unittest.TestCase):
         torch.testing.assert_close(spread, shifted_spread, atol=2e-6, rtol=2e-6)
         torch.testing.assert_close(delta, shifted_delta, atol=2e-6, rtol=2e-6)
 
+    def test_bag_centered_l2_normalize_flag_controls_magnitude(self) -> None:
+        torch.manual_seed(31)
+        bag = torch.randn(3, 20, 8) + 1.0  # non-zero mean so centering matters
+        with_l2 = StructuredEpisodePopulationAggregator(
+            input_dim=8, num_slots=4, context_samples_per_bag=6,
+            bag_centered_l2_normalize=True,
+        ).eval()
+        without_l2 = StructuredEpisodePopulationAggregator(
+            input_dim=8, num_slots=4, context_samples_per_bag=6,
+            bag_centered_l2_normalize=False,
+        ).eval()
+        centered_with, _, delta = with_l2._bag_view(bag)
+        centered_without, _, _ = without_l2._bag_view(bag)
+        # L2 path (default): every cell vector is on the unit sphere.
+        torch.testing.assert_close(
+            centered_with.float().norm(dim=-1),
+            torch.ones(3, 20),
+            atol=1e-4,
+            rtol=1e-4,
+        )
+        # No-L2 path: classification instances are exactly the centered deltas,
+        # preserving per-cell deviation magnitudes (which genuinely vary).
+        torch.testing.assert_close(centered_without, delta, atol=1e-6, rtol=1e-6)
+        norms = centered_without.float().norm(dim=-1)
+        self.assertGreater(norms.max().item(), norms.min().item() + 1e-3)
+
     def test_covariance_sketch_is_shift_and_instance_order_invariant(self) -> None:
         torch.manual_seed(29)
         aggregator = StructuredEpisodePopulationAggregator(

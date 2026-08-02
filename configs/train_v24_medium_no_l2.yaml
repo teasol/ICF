@@ -1,0 +1,21 @@
+base_config: train_v24_medium_bag_proj_residual.yaml
+
+# Architecture v24 ablation: drop the per-cell L2 normalization in _bag_view,
+# keeping the centered deviation magnitudes. Motivation: the normalization-
+# ceiling probe (docs/current_status.md SS19) measured a closed-form ridge on
+# per-bag mean+variance at 0.6846 for centered (magnitude-preserving) cells vs
+# 0.6363 for the current centered+L2 input -- the L2 step discards deviation
+# magnitude worth ~0.05 AUROC to a sufficient-stat ridge. This training run
+# checks whether the full model (slots + fusion) can exploit that magnitude.
+# Downstream slot assignment and token encoders re-normalize internally, so
+# this only exposes real magnitudes to the slot/tail statistics.
+model_overrides:
+  bag_centered_l2_normalize: false
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v24_medium_no_l2
+
+trainer:
+  max_epochs: 50

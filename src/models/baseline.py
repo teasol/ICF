@@ -472,6 +472,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         tail_fractions: Sequence[float] = (0.01, 0.05, 0.15),
         min_tail_instances: int = 1,
         bag_centered_representation: bool = True,
+        bag_centered_l2_normalize: bool = True,
         global_summary: str = "centered_spread",
         use_raw_mean_branch: bool = False,
         covariance_sketch_dim: int | None = None,
@@ -537,6 +538,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         self.min_tail_instances = int(min_tail_instances)
         self.slot_statistic_count = 3
         self.bag_centered_representation = bool(bag_centered_representation)
+        self.bag_centered_l2_normalize = bool(bag_centered_l2_normalize)
         self.global_summary = str(global_summary)
         self.use_raw_mean_branch = bool(use_raw_mean_branch)
         self.covariance_sketch_dim = int(covariance_sketch_dim)
@@ -614,9 +616,18 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             centered_delta.float().square().mean(dim=-2) + 1e-6
         )
         if self.bag_centered_representation:
-            classification_instances = F.normalize(
-                centered_delta.float(), dim=-1, eps=1e-6
-            ).to(bag.dtype)
+            if self.bag_centered_l2_normalize:
+                classification_instances = F.normalize(
+                    centered_delta.float(), dim=-1, eps=1e-6
+                ).to(bag.dtype)
+            else:
+                # Keep the deviation magnitude: the normalization-ceiling probe
+                # (docs/current_status.md SS19) found per-cell L2 normalization
+                # discards magnitude information worth ~0.05 AUROC to a
+                # sufficient-stat ridge. Downstream slot assignment and the
+                # token encoders re-normalize internally, so this only exposes
+                # real magnitudes to the slot/tail statistics.
+                classification_instances = centered_delta
             summary = global_spread.to(bag.dtype)
         else:
             classification_instances = bag
@@ -3535,6 +3546,7 @@ class BaseModel(nn.Module):
         aggregator_tail_fractions: Sequence[float] = (0.01, 0.05, 0.15),
         aggregator_min_tail_instances: int = 1,
         bag_centered_representation: bool = True,
+        bag_centered_l2_normalize: bool = True,
         global_summary: str = "centered_spread",
         use_raw_mean_branch: bool = False,
         aggregator_covariance_sketch_dim: int | None = None,
@@ -3585,6 +3597,7 @@ class BaseModel(nn.Module):
             tail_fractions=aggregator_tail_fractions,
             min_tail_instances=aggregator_min_tail_instances,
             bag_centered_representation=bag_centered_representation,
+            bag_centered_l2_normalize=bag_centered_l2_normalize,
             global_summary=global_summary,
             use_raw_mean_branch=use_raw_mean_branch,
             covariance_sketch_dim=aggregator_covariance_sketch_dim,
