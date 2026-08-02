@@ -1263,3 +1263,40 @@ v18/v19 config들의 `trainer: learnability_d20` 참조에서 발생(해당 conf
 1) val_ce_loss가 0.5903보다 낮은지, 2) 승격 시 1,000-episode paired 평가(사용자 판단,
 §16 기준 +0.03/+0.05). §19의 기대는 "작고 불확실" — 모델이 global_summary/covariance로
 magnitude를 이미 받으므로, val_ce 개선이 없으면 이 방향도 종료.
+
+## 21. 2026-08-03 — Zero-shot Musk (Musk2) MIL 벤치마크 테스트
+
+**배경**: 사용자 요청 — `/NHNHOME/kimds/Data/Musk/musk.pkl`로 **Musk MIL 벤치마크** 테스트 파일 작성.
+Musk2: 102개 분자(bag), 각 bag은 컨포머 인스턴스(166 화학 descriptor, 1~1044개), bag 라벨은
+"아무 컨포머라도 musk면 양성". 전형적 multiple-instance 문제로 BagPFN(bag 단위 in-context
+meta-classifier)의 자연스러운 테스트 대상.
+
+**방법**: `scripts/test_musk.py` — **leave-one-out 에피소드 스윕**: 각 bag을 query로, 나머지 101개를
+labeled context로 모델 forward(`model.model(x, y, mask_index)`, 가변 길이 bag 리스트 지원). **166→512
+zero-padding**(모델 input_dim=512; OOD 브리지로 명시, 화학 descriptor에 대한 학습 시맨틱 없음 —
+분포 이동 baseline). v24 확정 checkpoint(`epoch=041, val_ce 0.5903`) 사용, fp32 추론. 예측:
+`predictions/musk_v24_zero_shot.pt`.
+
+**결과 (zero-shot, v24 확정 체크포인트, 102 bag)**:
+
+| 지표 | 값 |
+|---|---|
+| AUROC | **0.7766** [0.667, 0.878] |
+| Accuracy | 0.7157 |
+| Balanced accuracy | 0.6477 (sens 0.359 / spec 0.937) |
+| Log loss | 0.5833 |
+| predicted positive | 18/102 |
+
+**해석**: 합성 학습 모델이 OOD(166차원 chemical descriptor zero-pad)임에도 **zero-shot AUROC 0.78**로
+무작위(0.5)를 크게 상회 — **in-context 메타러닝이 classic MIL 벤치마크로 전이됨**을 보여주는 유망 신호.
+단 보수적으로 행동(sens 0.359 / spec 0.937, 양성 18/102만 예측)하고, n=102 소규모로 CI가 넓음
+([0.667, 0.878]). 이는 탐색적 결과이므로, 정식 벤치마크 비교를 위해서는 ① 166→512 학습 projection,
+② MIL baseline(mi-SVM 등)과의 대조, ③ 적절한 CV 프로토콜이 필요.
+
+**산출물/명령**:
+- 스크립트: `scripts/test_musk.py`
+- 예측: `predictions/musk_v24_zero_shot.pt`
+- 재실행: `python scripts/test_musk.py --data /NHNHOME/kimds/Data/Musk/musk.pkl --config configs/train_v24_medium_bag_proj_residual.yaml --checkpoint checkpoints/20260731_220100/v24_medium_bag_proj_residual/epoch=041-val_ce_loss=0.5903.ckpt`
+
+**다음 Action (사용자 판단)**: ① Musk 정식 검증(projection/MIL baseline) 진행 여부, ② no-L2 학습
+완료 후 v24와 비교(§20 계속), ③ 경로 A/ICI 관점.
