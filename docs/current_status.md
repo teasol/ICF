@@ -1,16 +1,16 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-03` (v26 학습 완료, CLS 프로브 §17, E7 재검정 §18, 정규화 천장 프로브 §19, v24 no-L2 ablation 학습 시작 §20)
-**Status**: **v24가 현재 확정 baseline (변경 없음)**. **v24 no-L2 ablation(per-cell L2 제거) scratch
-학습 실행 중**(§20, PID 615588, ~2h) — §19 정규화 천장 프로브(centered 0.685 vs current 0.636)에
-기반한 실험. v26(CLS-token pooling) 학습은 완료 — best `val_ce_loss 0.5908`, v24(`0.5903`)와
-사실상 동률, 1,000-episode 평가는 사용자가 skip 결정. 재학습 없는 진단 3종 완료: CLS attention
-프로브(§17, 균등→24-CLS 미추진), E7 재검정(§18, INCONCLUSIVE 재현→Path B 기각 쪽), 정규화 천장
-프로브(§19, L2가 −0.048 손실이나 whitening은 반응 공분산을 지워 악화 — "배운 정규화" 방향 기각).
-v25는 2026-08-02 폐기 확정(변경 없음).
-**Read first if you are picking this up**: §20 (v24 no-L2 ablation 학습 중 — 최신), §19 (정규화
-천장 프로브), §18 (E7 재검정·Path B 판정), §17 (v26 학습 완료·CLS 프로브 판정), §16 (v26 구현·학습,
-v26/v27/v29 폐기), §15 (이전 세션 마무리), §11 (v25 평가·폐기), §3 (실험 현황·최종 결정).
+**Last updated**: `2026-08-03` (v26 학습 완료, CLS 프로브 §17, E7 재검정 §18, 정규화 천장 프로브 §19, no-L2 ablation 완료·음성 §20, Musk zero-shot §21)
+**Status**: **v24가 현재 확정 baseline (변경 없음)**. **v24 no-L2 ablation(per-cell L2 제거) 완료 —
+음성 결과**: best `val_ce_loss 0.5925` vs v24 `0.5903` (+0.0022 나쁨, §20) → 모델이 이미
+global_summary/covariance로 magnitude를 받으므로 이 방향 종료. Musk(Musk2) MIL zero-shot 테스트:
+**AUROC 0.7766 [0.667, 0.878]** (§21) — in-context 메타러닝의 OOD 전이 신호. v26(CLS-token pooling)
+학습 완료 — `0.5908`, v24와 사실상 동률, 1,000-episode 평가는 사용자가 skip 결정. 재학습 없는 진단
+3종 완료: CLS attention 프로브(§17, 균등→24-CLS 미추진), E7 재검정(§18, INCONCLUSIVE→Path B 기각
+쪽), 정규화 천장 프로브(§19, "배운 정규화" 방향 기각). v25는 2026-08-02 폐기 확정(변경 없음).
+**Read first if you are picking this up**: §21 (Musk zero-shot — 최신), §20 (no-L2 ablation 완료·음성),
+§19 (정규화 천장 프로브), §18 (E7 재검정·Path B 판정), §17 (v26 학습 완료·CLS 프로브 판정), §16
+(v26 구현·학습, v26/v27/v29 폐기), §15 (이전 세션 마무리), §11 (v25 평가·폐기), §3 (실험 현황·최종 결정).
 **Branches**: `main` = `v24` 확정 (현재 SSOT) / 참고용 `v22`·`v24`·`v19`·`codex/v23-bag-mean` / v25는 태그 **`v25-typed-bag-final`**로 보존 (브랜치 삭제) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `24`가 여전히 확정 baseline. **`26`(CLS-token pooling)은 2026-08-02 구현 완료, scratch 학습 실행 중 — 평가 전** (§16). `25`(T5-A)는 폐기 확정 (§11). `22`/`23`도 폐기된 구버전.
@@ -1263,6 +1263,18 @@ v18/v19 config들의 `trainer: learnability_d20` 참조에서 발생(해당 conf
 1) val_ce_loss가 0.5903보다 낮은지, 2) 승격 시 1,000-episode paired 평가(사용자 판단,
 §16 기준 +0.03/+0.05). §19의 기대는 "작고 불확실" — 모델이 global_summary/covariance로
 magnitude를 이미 받으므로, val_ce 개선이 없으면 이 방향도 종료.
+
+**최종 결과 (2026-08-03, 학습 완료)**: 50-epoch 완주, 프로세스 종료, GPU 해제. **best
+`val_ce_loss 0.5925`@epoch 32** (top-k: 0.5925/0.5926/0.5930, 이후 개선 없음) —
+**v24 확정(`0.5903`)보다 +0.0022 나쁨.**
+> [!IMPORTANT]
+> **음성 결과 — 이 방향 종료.** §19의 예측대로, per-cell L2가 충분통계 수준의 ridge 천장에선
+> −0.048이었지만 전체 모델은 global_summary(spread)·covariance 경로로 이미 magnitude를
+> 공급받아, L2 제거가 개선을 주지 못했다. val_ce가 v24보다 나쁘므로 1,000-episode 평가는
+> 불필요(승격 후보 아님). `bag_centered_l2_normalize` 플래그는 기본 `true`(기존 동작)라 v24에
+> 영향 없음 — 코드는 남기되 비활성.
+> 재확인: 1-epoch 스모크 이후 전체 unittest 154/153 통과 + 기존 learnability_d20 결함 1건(§20).
+> 체크포인트: `checkpoints/20260803_021140/v24_medium_no_l2/epoch=032-val_ce_loss=0.5925.ckpt`
 
 ## 21. 2026-08-03 — Zero-shot Musk (Musk2) MIL 벤치마크 테스트
 
