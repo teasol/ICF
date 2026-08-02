@@ -1,16 +1,16 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-03` (v26 학습 완료, CLS attention 프로브 §17, E7 재검정 §18)
+**Last updated**: `2026-08-03` (v26 학습 완료, CLS 프로브 §17, E7 재검정 §18, 정규화 천장 프로브 §19)
 **Status**: **v24가 현재 확정 baseline (변경 없음)**. v26(CLS-token pooling) 50-epoch scratch
 학습 **완료** — best `val_ce_loss 0.5908`@epoch 49, v24(`0.5903`)와 사실상 동률. 재학습 없는
-CLS attention 프로브(§17)가 **"CLS attention은 반응세포를 선택하지 못함(균등, lift 1.003×)"**을
-실측 → **24-CLS+self-attention 미추진 권고**. E7 재검정(§18)이 **기존 INCONCLUSIVE 재현(ALL
-purity@10% 0.351) + 전 구간 스윕(1%에서도 0.476 < 0.50, covariance 폐기 문턱 아래)으로 Path B
-기각 쪽 강화**. 1,000-episode 평가는 사용자가 skip 결정(로스 기준 개선 불가 판단). v25는
-2026-08-02 폐기 확정(변경 없음).
-**Read first if you are picking this up**: §18 (E7 재검정·Path B 판정 — 최신), §17 (v26 학습
-완료·CLS 프로브 판정), §16 (v26 구현·학습, v26/v27/v29 폐기), §15 (이전 세션 마무리),
-§11 (v25 평가·폐기), §3 (실험 현황·최종 결정).
+진단 3종: ① CLS attention 프로브(§17) — 균등, 반응세포 미선택 → 24-CLS+SA 미추진, ② E7 재검정
+(§18) — INCONCLUSIVE 재현, Path B 기각 쪽 강화, ③ 정규화 천장 프로브(§19) — per-cell L2가
+충분통계 천장을 −0.048 떨어뜨리나(부분 확인), "배운 정규화(whitening)"는 반응 공분산을 지워
+오히려 악화(0.597) → 사용자 가설의 제안 방향 실측 기각, 정규화는 0.1 레버 아님. 1,000-episode
+평가는 사용자가 skip 결정(로스 기준 개선 불가 판단). v25는 2026-08-02 폐기 확정(변경 없음).
+**Read first if you are picking this up**: §19 (정규화 천장 프로브 — 최신), §18 (E7 재검정·Path B
+판정), §17 (v26 학습 완료·CLS 프로브 판정), §16 (v26 구현·학습, v26/v27/v29 폐기), §15 (이전
+세션 마무리), §11 (v25 평가·폐기), §3 (실험 현황·최종 결정).
 **Branches**: `main` = `v24` 확정 (현재 SSOT) / 참고용 `v22`·`v24`·`v19`·`codex/v23-bag-mean` / v25는 태그 **`v25-typed-bag-final`**로 보존 (브랜치 삭제) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `24`가 여전히 확정 baseline. **`26`(CLS-token pooling)은 2026-08-02 구현 완료, scratch 학습 실행 중 — 평가 전** (§16). `25`(T5-A)는 폐기 확정 (§11). `22`/`23`도 폐기된 구버전.
@@ -1190,3 +1190,40 @@ bag당 4회 독립 분할 평균, d=(mean_pos−mean_neg)/var) → held-out AURO
 - 스크립트: `scripts/diagnose_component_selection_bound.py`
 - 결과: `logs/e7_retest_20260803.csv`
 - 재실행: 위 명령 (`--episodes` 조정 가능)
+
+## 19. 2026-08-03 — 정규화 천장 프로브: 고정 정규화가 천장을 제한하는가 (사용자 가설 검증)
+
+**배경**: 사용자 가설 — "제거할 패턴(기증자/배경 구조)은 cross-feature이고, 현재 per-feature centering +
+per-cell L2 정규화(`_bag_view`)가 그걸 잘못 제거하거나 정보를 잃는다. 지울 패턴을 배우면 천장이
+올라갈 수 있다." 이를 재학습 없이 검증.
+
+**방법**: `scripts/diagnose_normalization_ceiling.py` — 모델 없이, 각 에피소드 세포를 5가지 정규화로
+변환 후 per-bag 충분통계(mean/mean_var/cov-sketch)로 **닫힌 해 ridge**(λ=1.0, 0 학습 파라미터) 천장
+측정. 1,000 episodes, seed 50042. `whiten_ctx` = **context 세포로 whitening 변환을 학습해 적용**
+("지울 패턴을 배운다"의 저비용 구현, query 누출 없음). 참조: F-시리즈 v24 slot ridge 0.700, bag_global 0.630.
+
+**결과 (ALL AUROC, mean+var)**: **centered 0.6846 [0.675,0.696]** > current 0.6363 [0.626,0.648] >
+whiten_ctx 0.5972 > raw 0.5748 > zscore 0.5054. Per-task(mean_var)에서 centered가 전 task 최고
+(composition 0.760/state 0.621/covariance 0.599/interaction 0.639/combined 0.783); covariance에서
+centered 0.599 vs whiten_ctx 0.528. 산출물 `logs/normalization_ceiling_20260803.csv`.
+
+**판정 — 사용자 가설은 "부분 확인 + 제안 방향은 실측 기각"**:
+1. **부분 확인 (정량화됨)**: `current`의 per-cell L2 정규화가 편차 크기(magnitude)를 지워 충분통계
+   수준에서 천장을 **−0.048**(0.685→0.636) 떨어뜨린다. "정규화 토큰이 정보를 잃는다"는 직관은
+   맞고, 그 비용이 이제 측정됨.
+2. **"지울 패턴을 배운다"(whitening)는 더 나쁨**: whiten_ctx(0.597) < current(0.636) < centered(0.685).
+   이유는 명확 — whitening이 제거하는 cross-feature 공분산 구조가 **반응 신호 자체**(특히 covariance
+   task 0.528로 붕괴)이기 때문. "지울 패턴"과 "반응인 패턴"이 겹친다. **이 방향은 실측으로 닫힘.**
+3. **흥미로운 부수 발견**: `centered` mean+var(0.685) ≈ v24 slot ridge 천장(0.70). 즉 **0.70 천장의
+   실체는 "centered bag의 평균+분산"이지 12-slot 구조가 아님**. 그리고 이 수치(0.685)는 v24 모델
+   (0.708)보다 **낮음** — 모델은 per-cell L2에도 불구하고 global_summary(spread)·covariance sketch
+   경로로 magnitude를 이미 공급받아 그 이상을 뽑는다.
+4. **결론**: 정규화는 0.1 로스 레버가 아님. 최선 정규화(centered)도 기존 0.70 천장을 넘지 못하고,
+   모델은 이미 그 위(0.708). 유일하게 실행 가능한 nugget = per-cell L2 제거(centered 유지) 학습
+   실험이나, 모델이 다른 경로로 magnitude를 받으므로 기대 이득은 작고 불확실(사용자 판단).
+
+**산출물/명령**:
+- 스크립트: `scripts/diagnose_normalization_ceiling.py`
+- 결과: `logs/normalization_ceiling_20260803.csv`
+- 재실행: `python scripts/diagnose_normalization_ceiling.py --episodes 1000 --bootstrap 300`
+  (bootstrap은 그룹 Python 루프라 2000이면 ~7분, 300 권장 — §19 참고)
