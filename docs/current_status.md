@@ -125,7 +125,8 @@ v24-B0 병목 구조(40×64=2560d)에 v23-A0에서 효과적이었던 **Exact Ar
 > - Easy tier: v24-easy 0.9073 vs v25-easy 0.9106, delta +0.0033 — 갈리지 않음 → "아키텍처
 >   계열 전체 한계" 가설 강화.
 > - config는 `configs/archive/v25_typed_bag/`로 이관, 브랜치 `codex/v25-typed-bag`는
->   태그 `v25-typed-bag-final`로 보존 후 정리. 코드(`baseline.py`의 `typed_bag_*` 분기)는
+>   **태그 `v25-typed-bag-final`로 보존 후 로컬·원격 모두 삭제 (2026-08-02)**, main을
+>   현재 SSOT로 fast-forward. 코드(`baseline.py`의 `typed_bag_*` 분기)는
 >   gated 상태로 main에 잔존 (config만 비활성).
 > - 잔여 검토 가치: v25의 작은 context(40) 우세는 ICI(~69 fold context)와 관련해
 >   향후 T5-B/T5-C 설계 시 참고.
