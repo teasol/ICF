@@ -5,7 +5,7 @@
 **Read first if you are picking this up**: §11 (신규, 가장 중요), §3 "🧪 v25 (T5-A) 진행 중", §3 "최종 결정 (2026-08-01)" (v24 확정 배경), §6 Action Plan.
 **Branches**: `codex/v25-typed-bag` = v25 작업 중 (base: `v24`) / `main` = `v24` = `codex/v23-bag-mean` 최종 커밋 / `v22`(구 기준선, 참조용 보존) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
-**Architecture Version**: `24` 확정 유지. **`25`는 아직 미확정 — v25 학습/평가 완료 후 판정.** (`project_structured_tokens: true, projection_bottleneck_dim: 64, projection_residual_mean: true` + `typed_bag_preserving_branch: true, typed_bag_bottleneck_dim: 64`). `22`/`23`은 폐기된 구버전.
+**Architecture Version**: `24` 확정 유지. **`25`(T5-A typed bag-preserving)는 2026-08-02 폐기 확정** — Medium/Easy 모두 승격 기준 미달 (§11 "판정 근거 종합", §3 v25 배너). `22`/`23`도 폐기된 구버전.
 **Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 해결하기 위한 Single Source of Truth (SSOT) living document.
 
 ---
@@ -116,13 +116,27 @@ v24-B0 병목 구조(40×64=2560d)에 v23-A0에서 효과적이었던 **Exact Ar
 > [!WARNING]
 > **v24-B1은 "label로 bag을 나누는" class-memory 압축을 고치지 않았습니다.** 이 결정의 출발점이었던 문제 제기(context bag을 label별로 묶어 8개 memory token으로 압축하는 구조가 별로라는 지적, `architecture_v23_candidates.md` bottleneck #1)는 `_class_memories`가 여전히 `context_labels == class_index`로 bag을 나눠 pooling하는 구조 그대로입니다 (`src/models/baseline.py:2446-2454`). v23/v24 계열이 바꾼 것은 **bag 내부(40 structured token → 1 token) 압축**뿐입니다. label 기반 분할 자체를 없애는 것은 폐기된 T5-A(typed bag-preserving branch)가 다루던 문제이므로, 그 concern이 여전히 유효하다면 T5-A를 별도로 다시 논의해야 합니다.
 
-### 🧪 v25 (T5-A) 진행 중 (2026-08-01) — label 기반 class-memory 문제를 실제로 다루는 시도
+### 🗑️ v25 (T5-A) — **폐기 확정** (2026-08-02)
 
-위 경고에서 지적한 문제("label로 bag을 나누는" class-memory 압축)를 실제로 건드리기 위해, 폐기했던 T5-A(typed, bag-preserving structured context branch)를 v25로 되살렸습니다. v24-B1 확정 이후 새 브랜치 `codex/v25-typed-bag`에서 작업 중이며, `main`/`v24`는 손대지 않았습니다.
+> [!IMPORTANT]
+> **v25(T5-A, typed bag-preserving branch)는 2026-08-02 폐기 확정됨.**
+> - Medium 1,000-episode pool-400 paired 비교: v25 @context40 우세, @context300 열세,
+>   승격 기준(+0.03/+0.05) 전 구간 미달 (§11 "판정 근거 종합").
+> - Easy tier: v24-easy 0.9073 vs v25-easy 0.9106, delta +0.0033 — 갈리지 않음 → "아키텍처
+>   계열 전체 한계" 가설 강화.
+> - config는 `configs/archive/v25_typed_bag/`로 이관, 브랜치 `codex/v25-typed-bag`는
+>   태그 `v25-typed-bag-final`로 보존 후 정리. 코드(`baseline.py`의 `typed_bag_*` 분기)는
+>   gated 상태로 main에 잔존 (config만 비활성).
+> - 잔여 검토 가치: v25의 작은 context(40) 우세는 ICI(~69 fold context)와 관련해
+>   향후 T5-B/T5-C 설계 시 참고.
+
+원래 기록 (2026-08-01): label 기반 class-memory 문제("label로 bag을 나누는" class-memory 압축)를 실제로 건드리기 위해, 폐기했던 T5-A(typed, bag-preserving structured context branch)를 v25로 되살렸습니다. v24-B1 확정 이후 새 브랜치 `codex/v25-typed-bag`에서 작업 중이며, `main`/`v24`는 손대지 않았습니다.
 
 - **구조**: 기존 40개 structured token에 학습된 token-type(global/center/spread/rare/tail) + tail-fraction identity embedding을 더하고, v24-B1과 동일한 구조(전용 bottleneck `Linear(512→64)` × 40 + exact mean residual → `Linear(3072→512)`, 단 완전히 별도 가중치)로 bag당 1개 embedding으로 압축합니다. 이 embedding을 **두 번째** `RidgeResidualMetaClassifier`(`typed_bag_classifier`)에 label과 1:1로 정렬된 채로 그대로 통과시켜, `_class_memories`처럼 label별로 뭉쳐서 압축하지 않고 context bag 정체성을 끝까지 보존합니다. 결과 logit은 기존 최종 fusion 뒤에 `covariance_residual_scale`과 동일한 sigmoid-gated, 작게 초기화된 residual(`typed_bag_residual_scale`, 초기값 0.02)로 더합니다. **기존 class-memory 경로(`_class_memories`/`_population_tokens`)는 완전히 그대로 유지** — 두 경로를 나란히 두고 비교하기 위함입니다.
 - **원안(T5-A 문서)과의 의도적 차이**: slot-index embedding은 추가하지 않았습니다. slot은 episode마다 새로 도는 spherical k-means cluster id(`_context_spherical_kmeans_anchors`)라서 bag/episode 간 안정적인 의미가 없고, token-type/tail-fraction처럼 "모든 bag이 공유하는 고정된 역할/기준값"이 아니기 때문입니다. 상세 근거는 `src/models/baseline.py`의 `StructuredPopulationMetaClassifier.__init__` 주석 참고.
-- **Config**: `configs/train_v25_medium_typed_bag.yaml` (`base_config: train_v24_medium_bag_proj_residual.yaml` + `typed_bag_preserving_branch: true`, `typed_bag_bottleneck_dim: 64`).
+- **Config**: `configs/archive/v25_typed_bag/train_v25_medium_typed_bag.yaml` (폐기 후 이관.
+  원래 `base_config: train_v24_medium_bag_proj_residual.yaml` + `typed_bag_preserving_branch: true`,
+  `typed_bag_bottleneck_dim: 64`).
 - **architecture_version**: `25` (`typed_bag_preserving_branch=true`일 때 24/23/22보다 우선). v24 checkpoint는 거부됩니다 (신규 가중치 없음).
 - **구현 검증**: 전체 unittest **141개 통과** (`786.814s`). 신규 테스트: token-identity layout, typed pooling shape/값(bottleneck 유무), class-memory 경로 불변 확인, v25 architecture_version + checkpoint gating(v25가 v24 거부), BaseModel end-to-end forward+backward finite gradient.
 - **학습 실행 중**: Run `20260801_020144`, scratch Medium 50 epoch (v22~v24-B1과 동일 방식 — 사용자 결정으로 warm-start 아님). PID `3612802`(bash 래퍼) / torchrun worker `3612807`. 모델 13.9M trainable params (v22 6.57M + v24 residual bottleneck ~2.88M + 신규 typed-bag 분기 ~4.4M).
@@ -132,6 +146,7 @@ v24-B0 병목 구조(40×64=2560d)에 v23-A0에서 효과적이었던 **Exact Ar
   - Sanity check 통과, epoch 0 정상 진행 확인 (2026-08-01 02:02 KST). 완료까지 약 2~2.5시간 예상 (512 steps/epoch × 50 epoch, ~3 it/s).
 - **판정 계획**: 사용자 결정으로 **이번엔 §6/§7 원래 프로토콜대로 1,000-episode paired 합성 평가까지 수행**합니다 (v24 확정 때와 달리 train CE만으로 판단하지 않음). 완료 후 `scripts/evaluate_synthetic.py` → `scripts/compare_predictions.py`로 v24-B1과 paired 비교, overall `+0.03` 또는 target task `+0.05` 기준 적용.
 - **다음 Action**: 학습 완료 대기 → best checkpoint로 1,000 pool-400 episode, context 40/80/160/300 평가 → v24-B1과 paired 비교 → 승격/폐기 판정.
+- **결과 (2026-08-02)**: 위 프로토콜대로 Medium/Easy 평가 완료, 승격 기준 미달 → **폐기 확정** (§11 "판정 근거 종합", §3 v25 배너).
 
 ### ✅ v22 공식 기준선 (2026-07-30 갱신 — **1,000 episode 기준**)
 

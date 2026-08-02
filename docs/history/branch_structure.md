@@ -1,11 +1,15 @@
 # 브랜치 구조 및 버전 관리 정책
 
-**최종 갱신**: `2026-07-29`
+**최종 갱신**: `2026-08-02`
 **결정**: semver(0.1.0/0.2.0) 도입은 **폐기**. `architecture_version` 정수를 그대로 브랜치 이름으로 쓰는 방식으로 확정.
 
 ---
 
 ## 1. 브랜치 구조
+
+> [!IMPORTANT]
+> **현재 (2026-08-02)**: `main` = **v24 확정** (현재 개발선/SSOT). v25(T5-A)는 폐기 확정 —
+> 태그 `v25-typed-bag-final`로 보존. 아래는 역사적 v18→v22 구조 + 현재 v23/v24/v25 요약.
 
 ```
 128ff6f  ← 공통 조상 (v18 learnability ladder 시작점)
@@ -16,16 +20,25 @@
           │
           └── (v21 구간: ecf6199 … d8c2b2b — 별도 브랜치 없음, 히스토리로만 존재)
                  │
-                 └── v22 → HEAD    arch v22   [retrieval 제거, 평가 프로토콜 재구축]
-                      main → 같은 커밋 (기본 브랜치, 최신 개발선)
+                 └── v22 / main → arch v22  [retrieval 제거, 평가 프로토콜 재구축]
+                       │
+                       └── v23/v24 candidate line (codex/v23-bag-mean → v24 확정)
+                             └── main → arch v24  [residual+bottleneck bag projection, 현재 SSOT]
+                                   └── codex/v25-typed-bag → arch v25 [typed bag-preserving]
+                                         └── 🗑 폐기 (2026-08-02), 태그 v25-typed-bag-final로 보존
 ```
 
 | 브랜치 | `architecture_version` | 내용 |
 |---|---:|---|
 | `v18` | 18 | learnability ladder 실행 라인. 다른 서버(A6000)에서 관리. |
 | `v19` | 19 | shift-invariant covariance 아키텍처, Candidate A/B 비교 완료 시점. |
-| `v22` | 22 | 현재 개발선. retrieval 제거 + 평가 프로토콜 재구축. |
-| `main` | 22 | `v22`와 동일 커밋을 가리키는 **기본 브랜치**. |
+| `v22` | 22 | retrieval 제거 + 평가 프로토콜 재구축. 참고용 보존. |
+| `v24` | 24 | v24-B1 확정 지점. `main`과 동일 커밋. |
+| `main` | 24 | **기본 브랜치, 현재 개발선 (SSOT)** — v24 확정. |
+| `codex/v25-typed-bag` | 25 | v25(T5-A) 작업 브랜치. **폐기 확정 → 태그 `v25-typed-bag-final`로 보존 후 삭제.** |
+
+v25 폐기 사유와 평가 수치는 [`current_status.md`](../current_status.md) §3 v25 배너 및
+§11 "판정 근거 종합" 참고.
 
 ### v20, v21이 없는 이유
 
@@ -38,6 +51,7 @@
 |---|---|---|
 | `arch-v18-learnability-baseline` | `128ff6f` | v18 ladder D0–D5 baseline 동결 지점 |
 | `v21-retrieval-final` | v21 구간 마지막 | retrieval 계층이 살아 있던 마지막 상태 (복구용) |
+| `v25-typed-bag-final` | v25 마지막 상태 | v25(T5-A) 폐기 직전 상태 (복구/참고용) |
 
 ---
 

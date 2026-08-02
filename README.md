@@ -15,8 +15,9 @@ bag 내부 40-token 구조화 요약을 1개 학습 projection token으로 압�
 - 4대 수학 핵심 기술: ① Z-Score Bag Studentization ② Top-1% Sparse Evidence
   ③ Covariance Subspace Shrinkage(`subspace_shrinkage: 0.25`) ④ Auxiliary Pairwise Ranking Loss(`weight: 0.10`)
 - Precision: **`bf16-mixed` 필수** (공분산 스케치 역행렬 NaN 방지)
-- **진행 중**: v25(T5-A typed bag-preserving branch, 브랜치 `codex/v25-typed-bag`) +
-  Easy tier 실험 — [`docs/current_status.md`](docs/current_status.md) §3/§11
+- **폐기**: v25(T5-A typed bag-preserving branch)는 2026-08-02 폐기 확정 — Medium/Easy
+  평가 모두 승격 기준 미달. config는 `configs/archive/v25_typed_bag/`, 코드는
+  `typed_bag_*` 플래그로 gated 상태로 보존. 상세: [`docs/current_status.md`](docs/current_status.md) §3/§11
 - 상세 수학 명세: [`docs/current_architecture.md`](docs/current_architecture.md)
 
 ## 문서 맵 (Living Docs 5 + history)
@@ -52,8 +53,7 @@ scripts/launch_interactive_training.sh \
   <RUN_NAME> <CONFIG_PATH>
 ```
 
-- 학습 config: `configs/train_v24_medium_bag_proj_residual.yaml` (v24),
-  `configs/train_v25_medium_typed_bag.yaml` (v25) — 학습 후 `logs/{RUN_TIME}/`의 `.out` 로그로 정량 검증
+- 학습 config: `configs/train_v24_medium_bag_proj_residual.yaml` (v24 확정) — 학습 후 `logs/{RUN_TIME}/`의 `.out` 로그로 정량 검증
 - 합성 평가: `scripts/evaluate_synthetic.py --config ... --val-episodes 1000`
 - Paired 비교: `scripts/compare_predictions.py <pred_a.pt> <pred_b.pt>` (cluster bootstrap CI)
 - ICI 평가: `scripts/launch_ici_protocol.sh`
@@ -69,6 +69,7 @@ timeout 1500s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python \
 
 ## Git 규칙
 
-- 활성 브랜치: `codex/v25-typed-bag` (v25 작업 중, base: v24) / `main` = v24 확정 / `v22`·`v19` 참고용 보존
+- 활성 브랜치: `main` = v24 확정 (현재 SSOT) / `v22`·`v24`·`v19` 참고용 보존 / v25는
+  태그 `v25-typed-bag-final`로 보존 (폐기)
 - 논리 단위마다 커밋 + 상세 메시지 (`feat`/`docs`/`chore`/`test`)
 - 세션 종료 시 `current_status.md`에 결과·명령·경로 기록 후 커밋 (3원화 동기화 SSOT)

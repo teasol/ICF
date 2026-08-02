@@ -1,7 +1,7 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-01 14:10:00 KST`
-**Architecture Version**: **v24 확정** — residual + bottleneck bag projection (구 v24-B1): `project_structured_tokens: true`, `projection_bottleneck_dim: 64`, `projection_residual_mean: true`. v22(구 기준선)/v23-A0/v24-A0/v24-B0는 폐기. Config: `configs/train_v24_medium_bag_proj_residual.yaml`. 상세 결정 근거: [`current_status.md`](current_status.md) §3 최종 결정. **v25(T5-A typed bag-preserving branch)는 브랜치 `codex/v25-typed-bag`에서 학습 진행 중, 아직 미확정** — [`current_status.md`](current_status.md) §3 "🧪 v25 (T5-A) 진행 중" 참고.
+**Last updated**: `2026-08-02 12:30:00 KST`
+**Architecture Version**: **v24 확정** — residual + bottleneck bag projection (구 v24-B1): `project_structured_tokens: true`, `projection_bottleneck_dim: 64`, `projection_residual_mean: true`. v22(구 기준선)/v23-A0/v24-A0/v24-B0는 폐기. Config: `configs/train_v24_medium_bag_proj_residual.yaml`. 상세 결정 근거: [`current_status.md`](current_status.md) §3 최종 결정. **v25(T5-A typed bag-preserving branch)는 2026-08-02 폐기 확정** (Medium/Easy 평가 모두 승격 기준 미달) — [`current_status.md`](current_status.md) §3 "v25 (T5-A) 폐기 확정" 및 §11 "판정 근거 종합" 참고. v25 config는 `configs/archive/v25_typed_bag/`, 태그 `v25-typed-bag-final`로 보존.
 
 이 문서는 BagPFN 저장소를 처음 맡은 coding agent가 안전하게 작업을 시작하기 위한 운영 및 핸드오프 지침입니다. 최신 개발 및 실험 진행 상황은 [`current_status.md`](current_status.md), 현재 모델 명세는 [`current_architecture.md`](current_architecture.md), 현재 실험 프로토콜은 [`current_experiments.md`](current_experiments.md)를 참고합니다.
 
@@ -118,13 +118,13 @@ scripts/launch_interactive_training.sh \
 1. **`configs/` 최상위 루트 유지 조건**:
    - 현재 활성 파이프라인에서 직접 사용하는 entry point config만 `configs/` 최상위에 유지합니다.
    - 현재 `configs/` 최상위 유지 대상: v24 확정(`train_v24_medium_bag_proj_residual.yaml`),
-     v25 진행(`train_v25_medium_typed_bag.yaml`), Easy tier(`train_v24_easy.yaml`/`train_v25_easy.yaml`),
      v22 기준선·참조용(`train_v22_medium.yaml` — `evaluate_synthetic.py` 기본 config,
      `train_v22_medium_context300.yaml`/`train_v22_hard_context300.yaml`/`train_v22_hard_realworld.yaml` — T4,
      `train_v22_ici_finetune.yaml`/`train_v22_ici_scratch.yaml` — ICI).
-   - 폐기 확정된 v23-A0/v24-A0/v24-B0 config(`train_v23_medium_bag_mean.yaml`,
-     `train_v24_medium_bag_proj.yaml`, `train_v24_medium_bag_proj_bottleneck.yaml`)는
-     `configs/archive/v23_v24_candidates/`로 이관됨.
+   - 폐기 확정 config 이관: v23-A0/v24-A0/v24-B0(`train_v23_medium_bag_mean.yaml`,
+     `train_v24_medium_bag_proj.yaml`, `train_v24_medium_bag_proj_bottleneck.yaml`) →
+     `configs/archive/v23_v24_candidates/`; v25(`train_v25_medium_typed_bag.yaml`,
+     `train_v25_easy.yaml`) → `configs/archive/v25_typed_bag/`.
    - ICI의 fold/seed는 config에 박지 않고 `--cv` / `--seed`로 주입합니다 (`scripts/launch_ici_protocol.sh`).
 2. **구버전 Config 아카이빙 조건**:
    - 구버전 아키텍처의 config는 `configs/archive/` 하위로 즉시 이관합니다: `archive/v18_v19/`, `archive/v20/`, `archive/v21_retrieval/`.
