@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-02 04:00:00 KST`
-**Status**: v24 확정 유지. **v25(T5-A) Medium 평가 완료 — v24-B1과 사실상 동률(승격 기준 미달)**. "이 아키텍처 계열 전체가 val CE 0.59 근처에서 막힌 것 아니냐"는 질문을 검증하기 위해 **Easy tier(v24-easy/v25-easy) 실험 진행 중** — **v24-easy 완료(best CE 0.3499), v25-easy 완료(best CE 0.3473, 초기 10x 저하는 transient로 해소, 총 ~4h)**. **현재 v24-easy vs v25-easy 1,000-episode 비교 평가 백그라운드 실행 중 (PID 242818)** — 완료 후 paired 비교로 "아키텍처 계열 한계" 가설 판정. 상세는 §11.
+**Last updated**: `2026-08-02 12:00:00 KST`
+**Status**: v24 확정 유지. **v25(T5-A) Medium paired 평가 — 맥락 의존적 trade-off** (v25 우세 @context40, v24-B1 압도 @context300, 승격 기준 미달). **Easy tier 완료 — v24-easy(0.9073) ≈ v25-easy(0.9106), delta +0.0033 승격 기준 미달** → "아키텍처 계열 전체 한계" 가설 강화, **v25 최종 폐기 권고 (사용자 판단 대기)**. Easy 정식 paired 비교 실행 중(PID 277412). 상세는 §11.
 **Read first if you are picking this up**: §11 (신규, 가장 중요), §3 "🧪 v25 (T5-A) 진행 중", §3 "최종 결정 (2026-08-01)" (v24 확정 배경), §6 Action Plan.
 **Branches**: `codex/v25-typed-bag` = v25 작업 중 (base: `v24`) / `main` = `v24` = `codex/v23-bag-mean` 최종 커밋 / `v22`(구 기준선, 참조용 보존) / `v19` / `v18`(다른 서버) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
@@ -809,19 +809,59 @@ bag-preserving 분기를 추가해도 Medium에서는 아무 이득이 없었습
   > 완료 (16시간 예상보다 훨씬 빠름). 원인은 데이터 생성 warm-up/캐싱으로 추정되며
   > 지속적인 병목은 아님.
 
-- 🔄 **v24-easy vs v25-easy 1,000-episode 비교 평가 실행 중** (2026-08-02):
-  PID `242818`(bash 래퍼)/`242823`(v24-easy) — v24-easy → v25-easy 순차 평가.
-  로그 `logs/20260802_easy_eval/easy_1000ep.out`, 출력 예정
-  `predictions/v24_easy_1000ep.pt` / `predictions/v25_easy_1000ep.pt`.
-  완료 후 `scripts/compare_predictions.py`로 paired 비교 → §11 "남겨진 것" item 4 판정 기준 적용.
+- ✅ **v24-easy vs v25-easy 1,000-episode 평가 완료 (2026-08-02 11:40)**:
+
+  | 모델 | AUROC [CI] | Log loss |
+  |---|---|---|
+  | v24-easy | **0.9073** [0.901, 0.913] | 0.3828 |
+  | v25-easy | **0.9106** [0.904, 0.917] | 0.3761 |
+
+  - overall delta **+0.0033** — 승격 기준(+0.03)에 한참 미달. CI도 겹침.
+  - Per-task AUROC (모두 v25 근소 우위이나 threshold +0.05 미달):
+    composition 0.9439→0.9456 / state 0.8938→0.9010 / covariance 0.8186→0.8251 /
+    interaction 0.8914→0.8954 / combined 0.9532→0.9546.
+  - 예측: `predictions/v24_easy_1000ep.pt`, `predictions/v25_easy_1000ep.pt`.
+    로그: `logs/20260802_easy_eval/easy_1000ep.out`.
+
+- 🔄 **Easy tier 정식 paired 비교 실행 중** (2026-08-02, PID `277412`):
+  `compare_predictions.py predictions/v24_easy_1000ep.pt predictions/v25_easy_1000ep.pt`,
+  로그 `logs/20260802_easy_eval/easy_paired_compare.out`.
+
+### 🏁 v25(T5-A) 판정 근거 종합 (2026-08-02)
+
+**Medium (1,000-episode pool-400, paired 5000 bootstrap — 이전 세션에서 완료된 로그를 기록)**:
+
+| context | v24-B1 AUROC | v25 AUROC | P(v24-B1 beats v25) |
+|---|---:|---:|---:|
+| 40 | 0.6774 | 0.6792 | **0.04** (v25 우세) |
+| 80 | 0.7223 | 0.7217 | 0.77 (구분 불가) |
+| 160 | 0.7688 | 0.7685 | 0.65 (구분 불가) |
+| 300 | 0.8036 | 0.8017 | **1.00** (v24-B1 압도) |
+
+→ "사실상 동률"은 marginal CI 기준이며, paired bootstrap으로 보면 **맥락 의존적 trade-off**:
+v25(typed bag-preserving)는 작은 context(40)에서 유의하게 우세, 큰 context(300)에서
+v24-B1이 압도. 80/160은 구분 불가. 승격 기준(+0.03/+0.05)은 전 구간 미달.
+(paired 로그: `/tmp/claude-3564/.../v25_vs_v24b1_compare_fixed2.log` — scratchpad,
+repo 밖이므로 위 표로 기록 유지.)
+
+**Easy**: v24-easy ≈ v25-easy (+0.0033, 승격 기준 미달).
+
+**결론 (판정 기준 §11 item 4 적용)**: Easy tier에서도 두 아키텍처가 갈리지 않으므로
+**"이 아키텍처 계열 전체의 한계" 가설이 강화됨.** v25(T5-A, typed bag-preserving)는
+Medium/Easy 양쪽에서 승격 기준 미달 → **v25 최종 폐기 권고**, T5-B/T5-C 또는 완전히 다른
+접근으로 이동 검토. 단, v25가 작은 context(40)에서 유의하게 우세했던 점은
+ICI(~69 fold context)와 관련해 추가 검토 가치가 있음 — 사용자 판단 필요.
 
 ### 남겨진 것 / 다음 Action
 
 1. ~~`configs/train_v24_easy.yaml`/`train_v25_easy.yaml` 커밋~~ → **완료** (`b6aacf7`에 이미 포함).
-2. v25 vs v24-B1 정식 paired win-rate 로그 확인, 문서에 최종 수치 기록.
-3. v25-easy 학습 완료 대기(속도 저하 원인 확인 포함) → v24-easy와 1,000-episode 평가로 비교.
-4. Easy tier에서도 v24-easy ≈ v25-easy로 갈리지 않으면 "이 아키텍처 계열 전체의 한계"
-   가설이 강해짐 → v25(T5-A)는 최종 폐기, T5-B/T5-C 또는 완전히 다른 접근으로 이동 검토.
+2. ~~v25 vs v24-B1 정식 paired win-rate 로그 확인, 문서에 최종 수치 기록~~ → **완료**
+   (위 "판정 근거 종합" 표에 기록: v25 @40 우세, @300 열세, 80/160 구분 불가).
+3. ~~v25-easy 학습 완료 대기 → v24-easy와 1,000-episode 평가로 비교~~ → **완료**
+   (v24-easy 0.9073 vs v25-easy 0.9106, delta +0.0033).
+4. Easy tier에서도 갈리지 않으므로 **"아키텍처 계열 전체의 한계" 가설 강화 → v25(T5-A)
+   최종 폐기 권고, T5-B/T5-C 또는 완전히 다른 접근으로 이동 검토** — **사용자 판단 필요**.
+   진행 중: Easy 정식 paired 비교(PID 277412) 완료 후 최종 수치 기록.
    Easy tier에서 유의미하게 갈리면 Medium이 ceiling/floor effect로 아키텍처 차이를
    가려온 것 → v25를 Medium에서 더 오래/다르게 학습해볼 근거가 생김.
 5. ICI는 계속 잠금 (변경 없음).
