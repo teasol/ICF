@@ -1,13 +1,13 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-03` (Musk 0.95 로드맵: raw bag-stat token 학습 중 §23 — 최신; §22 가설 판정, CLS §17, E7 §18, 정규화 §19, no-L2 §20, Musk zero-shot §21)
+**Last updated**: `2026-08-03` (Musk 0.95 로드맵: raw-stat token 음성 판정 §23 — 최신; §22 가설 판정, CLS §17, E7 §18, 정규화 §19, no-L2 §20, Musk zero-shot §21)
 **Status**: **v24가 현재 확정 baseline (변경 없음)**. **전략 전환 성공** (§22): "0.70 한계 = 데이터
-lossiness" 가설 확정 (musk-like easy AUROC 0.951). 이제 **Musk 실데이터 0.95 목표** 진행 — 첫
-지렛대(입력 표현, `--preprocess raw` 0.803→0.822) 후, **두 번째 지렛대: raw bag-stat token
-(mean/skew/kurt)** 구현 완료(`7830b11`)하고 **scratch 학습 중** (PID 1115008, ~1.5h, §23).
-왜도/첨도는 새 신호(분산은 global_spread와 중복 제외). 완료 후 합성 val 유지 확인 + 실제 Musk
-0.85+ 목표. 이전 결과: v26(0.5908), no-L2 음성(0.5925), Musk zero-shot 0.777(§21), v25 폐기.
-**Read first if you are picking this up**: §23 (raw bag-stat token 학습 중 — 최신), §22 (Musk-like
+lossiness" 가설 확정 (musk-like easy AUROC 0.951). **Musk 실데이터 0.95 목표** 진행 중 — 지렛대 1
+(입력 표현, 0.803→0.822) 후, **지렛대 2(raw bag-stat token)는 음성 판정**: 합성 동률(0.9522)이나
+실제 Musk 0.7835로 centered(0.803/0.822) 미달 (§23). **Musk 기준 = centered musklike-easy 유지**.
+다음 지렛대: **MIL max/softmax 풀링(천장 ~0.90)**. 이전 결과: v26(0.5908), no-L2 음성(0.5925),
+Musk zero-shot 0.777(§21), v25 폐기.
+**Read first if you are picking this up**: §23 (raw-stat token 음성 판정 — 최신), §22 (Musk-like
 easy 가설 판정), §21 (Musk
 zero-shot), §20 (no-L2 ablation 음성), §19 (정규화 천장 프로브), §18 (E7 재검정·Path B), §17 (v26·CLS
 프로브), §16 (v26/v27/v29 폐기), §3 (실험 현황·최종 결정).
@@ -1431,10 +1431,29 @@ smoke finite(tokens 43), 적률 값 정확(exp 왜도~1.8/첨도~7.7, 가우시�
 - `train_v24_musklike_easy_mean_token.yaml` — `[mean]` 전용 (tokens 41)
 - (기각된 raw 직접 전달 `rawmean` config는 삭제)
 
-**학습 실행 중**: Run `v24_musklike_easy_rawstats`, scratch 50 epoch. PID `1115008`, 시작
-2026-08-03 11:06 KST. 로그 `logs/20260803_110607/v24_musklike_easy_rawstats.out`, 체크포인트
-`checkpoints/20260803_110607/v24_musklike_easy_rawstats/`. ~4.8 it/s 정상, 완료까지 ~1.5h.
+**학습 완료 (2026-08-03 12:38 KST, 11:06 시작)**: Run `v24_musklike_easy_rawstats`, scratch 50 epoch
+정상 완주, launcher "completed successfully". best `val_ce_loss 0.2468`@epoch 48 — centered 모델
+(`0.2552`)보다 소폭 개선. 로그 `logs/20260803_110607/`, 체크포인트
+`checkpoints/20260803_110607/v24_musklike_easy_rawstats/epoch=048-val_ce_loss=0.2468.ckpt`.
+> **버그 수정**: 가변 길이 bag(list 경로, 실제 Musk)에서 `torch.stack(raw_bags)` 실패 → per-bag
+> 통계 후 stack으로 수정, 커밋 `2008278`. unittest 153/154 통과.
 
-**성공 기준/다음 Action**: ① 합성 musk-like-easy val 1,000-ep AUROC가 centered 모델(0.951) 근처
-유지, ② 실제 Musk zero-shot AUROC가 centered 0.822 / raw 0.822 상회(→ 0.85+ 목표), ③ 결과에
-따라 MIL max/softmax 풀링(천장 ~0.90) 지렛대로 진행.
+**최종 결과 (2026-08-03, 1,000-ep 합성 + Musk)**: 예측 `predictions/synthetic_v24_musklike_easy_rawstats_1000ep.pt`,
+`predictions/musk_v24_musklike_easy_rawstats.pt`.
+
+| 모델 | 합성 val AUROC | 실제 Musk AUROC |
+|---|---:|---:|
+| centered (musklike_easy) | 0.9510 [0.946,0.956] | 0.8030 [0.705,0.889] / 0.8217 (raw) |
+| **rawstats (mean+skew+kurt)** | **0.9522** [0.948,0.957] | **0.7835** [0.681,0.876] |
+
+> [!IMPORTANT]
+> **음성 결과 — raw bag-stat token 지렛대 종료.** 합성은 동률(0.9522 vs 0.9510, log loss 0.278 vs
+> 0.284로 소폭 개선)이지만, **실제 Musk는 0.7835로 centered(0.803/0.822)보다 낮음.** 해석: 모델이
+> stat token을 합성(단위 cell) 분포에 맞춰 학습해서, Musk descriptor 통계(다른 scale/분포)에
+> 전이되지 않음. mean token(L2 정규화)은 분포가 일치하지만 학습된 의미(합성 donor centroid)가
+> Musk에 유용하지 않게 작동. → **학습에서 raw 통계를 추가하는 방향은 Musk 0.95에 도움이 안 됨.**
+> Musk 기준은 centered musklike-easy(0.803, `--preprocess raw`면 0.822)로 유지.
+
+**다음 Action**: ① (종료) raw-stat token 지렛대 — 음성, ② **MIL max/softmax 풀링(천장 ~0.90)** 지렛대로
+진행 — Musk의 "아무 인스턴스나 양성" 구조를 활용하는 가장 유망한 방향, ③ 필요 시 166→512 학습
+projection 또는 Musk LOO fine-tuning(단 zero-shot 포기).
