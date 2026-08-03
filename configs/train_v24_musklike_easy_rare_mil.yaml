@@ -1,0 +1,20 @@
+base_config: train_v24_musklike_easy_rare_baseline.yaml
+
+# Phase 1 DISCRIMINATOR — IA-MIL on rare-response data.
+#
+# Same data as train_v24_musklike_easy_rare_baseline.yaml (rare-response
+# separable) but WITH the nonlinear task-adaptive instance-attention MIL
+# channel. The rare-response regime is where instance identity matters, so
+# IA-MIL should clearly beat the baseline if the mechanism works.
+#
+# See docs/current_status.md SS23 for the Phase 1 validation plan.
+model_overrides:
+  use_instance_attention_mil: true
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v24_musklike_easy_rare_mil
+
+trainer:
+  max_epochs: 50

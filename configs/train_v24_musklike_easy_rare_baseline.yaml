@@ -1,0 +1,32 @@
+base_config: train_v24_musklike_easy.yaml
+
+# Phase 1 DISCRIMINATOR — baseline (centered, no IA-MIL) on rare-response data.
+#
+# Purpose: separate the "instance identity" signal from the saturated
+# musk-like-easy regime. Standard musk-like-easy makes EVERY cell respond
+# (rare_response_probability 0), so bag-level aggregates already carry the
+# signal and IA-MIL gains are invisible. Here only a small fraction of cells
+# respond (rare mode), so the label depends on WHICH cells carry the response —
+# the same structure as ICI (a rare responding cell subtype) and Musk
+# (any-positive conformer).
+#
+# Data: musklike-easy strong effect scales (still separable) + rare response
+#   rare_response_probability: 1.0   (every continuous response episode is rare)
+#   rare_response_fraction: [0.05, 0.15]  (5-15% of cells respond)
+#
+# This run is the BASELINE (centered v24, no IA-MIL). Pair it with
+# train_v24_musklike_easy_rare_mil.yaml (same data + IA-MIL). IA-MIL should
+# clearly win if the instance-attention mechanism actually finds the decisive
+# cells. See docs/current_status.md SS23.
+data_overrides:
+  dataset_kwargs:
+    rare_response_probability: 1.0
+    rare_response_fraction: [0.05, 0.15]
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v24_musklike_easy_rare_baseline
+
+trainer:
+  max_epochs: 50
