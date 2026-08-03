@@ -5,8 +5,10 @@
 lossiness" 가설 확정 (musk-like easy AUROC 0.951). **Musk 실데이터 0.95 목표** 진행 중 — 지렛대 1
 (입력 표현, 0.803→0.822) 후, **지렛대 2(raw bag-stat token)는 음성 판정**: 합성 동률(0.9522)이나
 실제 Musk 0.7835로 centered(0.803/0.822) 미달 (§23). **Musk 기준 = centered musklike-easy 유지**.
-**지렛대 3 = Phase 1 IA-MIL**(§24, `use_instance_attention_mil`) 구현 완료·학습 중: 주 실험
-`v24_musklike_easy_mil`(epoch ~45/50, best val_ce 0.2462) + rare-response 판별 2종(순차 큐 대기).
+**지렛대 3 = Phase 1 IA-MIL**(§24, `use_instance_attention_mil`) 구현 완료: 주 실험
+`v24_musklike_easy_mil` **50 epoch 완료** (best val_ce **0.2462**@39). rare-response 판별:
+`rare_baseline` 학습 중(epoch ~5/50), `rare_mil`은 큐 레이스 버그로 2회 OOM → **큐 버그 수정 완료,
+rare_baseline 종료 후 단독 재실행 예정**.
 이전 결과: v26(0.5908), no-L2 음성(0.5925), Musk zero-shot 0.777(§21), v25 폐기.
 **Read first if you are picking this up**: §24 (Phase 1 IA-MIL — 최신), §23 (raw-stat token 음성 판정), §22 (Musk-like
 easy 가설 판정), §21 (Musk
@@ -1475,17 +1477,23 @@ Musk(any-positive)·ICI(희귀 반응 세포 아형) 공통 병목.
 - 검증: batched/list/variable-length forward+backward finite, MIL 그라디언트 정상, 기본 config
   불변, unittest 153/154(기존 learnability_d20 결함 1건 무관)
 
-**학습 3종 (병렬 시도 → OOM 실패 → 순차 큐 대기)**:
+**학습 3종 (병렬 2회 OOM → 순차 큐 버그 수정)**:
 | Run | 데이터 | config | 상태 |
 |---|---|---|---|
-| `v24_musklike_easy_mil` (주) | musklike_easy + IA-MIL | `train_v24_musklike_easy_mil.yaml` | **학습 중** (PID 1372761, epoch ~45/50, best val_ce **0.2462**@39) |
-| `v24_musklike_easy_rare_baseline` (판별) | rare-response(5~15% cell 반응) + no-MIL | `train_v24_musklike_easy_rare_baseline.yaml` | **순차 큐 대기** |
-| `v24_musklike_easy_rare_mil` (판별) | rare-response + IA-MIL | `train_v24_musklike_easy_rare_mil.yaml` | **순차 큐 대기** |
+| `v24_musklike_easy_mil` (주) | musklike_easy + IA-MIL | `train_v24_musklike_easy_mil.yaml` | ✅ **50 epoch 완료** (best val_ce **0.2462**@39) |
+| `v24_musklike_easy_rare_baseline` (판별) | rare-response(5~15% cell 반응) + no-MIL | `train_v24_musklike_easy_rare_baseline.yaml` | 🟢 **학습 중** (19:08 재시작, epoch ~5/50, best 0.2876) |
+| `v24_musklike_easy_rare_mil` (판별) | rare-response + IA-MIL | `train_v24_musklike_easy_rare_mil.yaml` | ❌ **2회 OOM 실패** — 큐 수정 후 단독 재실행 필요 |
 
-- **OOM 실패 (17:32)**: 처음 3개를 GPU 1장에 병렬 실행했다가 `rare_baseline`/`rare_mil`이 CUDA OOM으로
-  exit 1 (mil PID 1372761 ~91GB + rare ~77GB → 178GB 초과). 로그의 `expandable_segments OOM` 확인.
-- **순차 큐**: 18:13부터 `scripts/queue_phase1_rare.sh`(PID 1468930)가 GPU 해제를 대기 중 — `mil` 완료
-  후 판별 2종을 1개씩 순차 실행 (커밋 `f3158cd`). 큐 로그: `/tmp/phase1_queue.log`.
+- **OOM 실패 ① (17:32)**: 3개 병렬 실행 → mil(91GB) + rare(77GB) 겹침 → rare 2종 exit 1.
+- **OOM 실패 ② (19:10)**: 순차 큐의 `wait_gpu_free`가 **레이스** — `launch_interactive_training.sh`가
+  detached worker를 백그라운드로 띄우고 즉시 반환 → 실행 직후 pgrep이 train.py를 아직 못 잡고 "GPU free"
+  오판 → rare_baseline과 rare_mil을 동시에 실행 → rare_mil 2차 OOM (107GB + 53GB → 178GB 초과).
+- **큐 버그 수정 (2026-08-03, 커밋 아래)**: `scripts/queue_phase1_rare.sh`에 `wait_launched_training_done`
+  추가 — 각 run을 실행한 뒤 **train.py가 실제로 뜰 때까지 폴링(grace 180s) 후 그 학습이 끝날 때까지 블록**.
+  기능 검증: mock 학습(2s 스폰 + 6s 실행)에 대해 8s 블록 확인, timeout 경로도 정상. 부가로 run 선택 인자
+  지원: `./queue_phase1_rare.sh <run...>` 로 원하는 run만 순차 실행.
+- **다음 Action**: `rare_baseline`(~20:50 완료 예상) 후 `./queue_phase1_rare.sh v24_musklike_easy_rare_mil`
+  로 rare_mil만 단독 실행. mil은 완료됐으니 1,000-ep 합성 평가 + Musk zero-shot 재측정 병행 가능.
 
 **판별 실험 논리**: musklike_easy는 전 cell 반응(separable, 0.951 포화)이라 IA-MIL 이득이 안 보임.
 rare-response(일부 cell만 반응)에서 "어느 cell이 반응하는가"가 중요 → IA-MIL이 baseline을 이기면
