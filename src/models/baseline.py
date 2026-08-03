@@ -1869,6 +1869,8 @@ class StructuredPopulationMetaClassifier(nn.Module):
         typed_bag_residual_scale: float = 0.02,
         include_cls_token: bool = False,
         raw_stat_tokens: Sequence[str] = (),
+        use_instance_attention_mil: bool = False,
+        mil_hidden_dim: int | None = None,
         num_classes: int = 2,
     ) -> None:
         super().__init__()
@@ -1916,6 +1918,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
             )
         self.include_cls_token = bool(include_cls_token)
         self.raw_stat_tokens = tuple(raw_stat_tokens)
+        self.use_instance_attention_mil = bool(use_instance_attention_mil)
         if self.include_cls_token and typed_bag_preserving_branch:
             raise NotImplementedError(
                 "include_cls_token with typed_bag_preserving_branch is not "
@@ -2246,6 +2249,38 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 )
             )
         )
+        if self.use_instance_attention_mil:
+            mil_hidden = int(mil_hidden_dim if mil_hidden_dim is not None else hidden_dim)
+            if mil_hidden < 1:
+                raise ValueError("mil_hidden_dim must be positive.")
+            self.mil_hidden_dim = mil_hidden
+            self.mil_instance_encoder = nn.Sequential(
+                nn.LayerNorm(token_dim),
+                nn.Linear(token_dim, mil_hidden),
+                nn.GELU(),
+                nn.Linear(mil_hidden, mil_hidden),
+                nn.GELU(),
+            )
+            self.mil_relevance_mlp = nn.Sequential(
+                nn.LayerNorm(2 * mil_hidden),
+                nn.Linear(2 * mil_hidden, mil_hidden),
+                nn.GELU(),
+                nn.Linear(mil_hidden, 1),
+            )
+            self.mil_score_head = nn.Sequential(
+                nn.LayerNorm(2 * mil_hidden),
+                nn.Linear(2 * mil_hidden, mil_hidden),
+                nn.GELU(),
+                nn.Linear(mil_hidden, 1),
+            )
+            self.mil_attention_log_scale = nn.Parameter(
+                torch.tensor(math.log(5.0))
+            )
+            self.mil_residual_logit = nn.Parameter(
+                torch.tensor(
+                    self._residual_scale_to_logit(0.10, self.minimum_tail_residual_scale)
+                )
+            )
 
     @staticmethod
     def _residual_scale_to_logit(scale: float, minimum: float) -> float:
@@ -3219,6 +3254,86 @@ class StructuredPopulationMetaClassifier(nn.Module):
         )
         return logits, stacked_scores, rare_counts
 
+    def _instance_attention_mil_logits_batched(
+        self,
+        query_instances: torch.Tensor,
+        class_memories: torch.Tensor,
+    ) -> torch.Tensor:
+        """Nonlinear, task-adaptive instance-attention MIL bag scoring (4D).
+
+        query_instances [E, Q, n, d], class_memories [E, C, T, h] -> [E, Q, C].
+
+        For each class c, relevance is a nonlinear MLP over (instance embedding,
+        class-memory context) -- not a plain cosine -- so which instances matter
+        is learned per task. Soft-attention pooling gives the bag embedding and
+        the max-attention instance embedding gives the MIL "any-positive" bias:
+        a single strongly matching instance is enough to raise that class logit.
+        """
+        episodes, queries, num_instances, _ = query_instances.shape
+        hidden = self.mil_hidden_dim
+        num_classes = class_memories.shape[1]
+        h = self.mil_instance_encoder(query_instances)          # [E,Q,n,H]
+        m = class_memories.mean(dim=-2)                         # [E,C,H]
+        h_e = h.unsqueeze(-2)                                   # [E,Q,n,1,H]
+        m_e = m.unsqueeze(1).unsqueeze(2)                       # [E,1,1,C,H]
+        pair = torch.cat(
+            (
+                h_e.expand(episodes, queries, num_instances, num_classes, hidden),
+                m_e.expand(episodes, queries, num_instances, num_classes, hidden),
+            ),
+            dim=-1,
+        )                                                       # [E,Q,n,C,2H]
+        relevance = self.mil_relevance_mlp(pair).squeeze(-1)    # [E,Q,n,C]
+        scale = self.mil_attention_log_scale.exp().clamp(0.1, 50.0)
+        attention = F.softmax(
+            scale.float() * relevance.float(), dim=-2
+        ).to(h.dtype)                                           # over n -> [E,Q,n,C]
+        z_soft = torch.einsum("eqnc,eqnh->eqch", attention, h)  # [E,Q,C,H]
+        max_index = attention.max(dim=-2).indices               # [E,Q,C]
+        z_max = torch.gather(
+            h,
+            -2,
+            max_index.unsqueeze(-1).expand(
+                episodes, queries, num_classes, hidden
+            ),
+        )                                                       # [E,Q,C,H]
+        z = torch.cat((z_soft, z_max), dim=-1)                  # [E,Q,C,2H]
+        return self.mil_score_head(z).squeeze(-1)               # [E,Q,C]
+
+    def _instance_attention_mil_logits(
+        self,
+        query_instances: Sequence[torch.Tensor],
+        class_memories: torch.Tensor,
+    ) -> torch.Tensor:
+        """Per-bag list-path equivalent (variable instance counts)."""
+        hidden = self.mil_hidden_dim
+        m = class_memories.mean(dim=-2)                         # [C,H]
+        num_classes = m.shape[0]
+        per_bag: list[torch.Tensor] = []
+        for bag in query_instances:
+            h = self.mil_instance_encoder(bag)                  # [n,H]
+            num_instances = h.shape[0]
+            h_e = h.unsqueeze(1)                                # [n,1,H]
+            m_e = m.unsqueeze(0)                                # [1,C,H]
+            pair = torch.cat(
+                (
+                    h_e.expand(num_instances, num_classes, hidden),
+                    m_e.expand(num_instances, num_classes, hidden),
+                ),
+                dim=-1,
+            )                                                   # [n,C,2H]
+            relevance = self.mil_relevance_mlp(pair).squeeze(-1)  # [n,C]
+            scale = self.mil_attention_log_scale.exp().clamp(0.1, 50.0)
+            attention = F.softmax(
+                scale.float() * relevance.float(), dim=0
+            ).to(h.dtype)                                       # over n -> [n,C]
+            z_soft = torch.einsum("nc,nh->ch", attention, h)    # [C,H]
+            max_index = attention.max(dim=0).indices            # [C]
+            z_max = h[max_index]                                # [C,H]
+            z = torch.cat((z_soft, z_max), dim=-1)              # [C,2H]
+            per_bag.append(self.mil_score_head(z).squeeze(-1))  # [C]
+        return torch.stack(per_bag)                             # [Q,C]
+
     def forward_batched(
         self,
         context: dict[str, torch.Tensor],
@@ -3370,6 +3485,11 @@ class StructuredPopulationMetaClassifier(nn.Module):
             )
         if self.typed_bag_preserving_branch:
             logits = logits + typed_bag_residual_scale * typed_bag_logits
+        if self.use_instance_attention_mil:
+            mil_logits = self._instance_attention_mil_logits_batched(
+                query_instances, class_memories
+            )
+            logits = logits + torch.sigmoid(self.mil_residual_logit) * mil_logits
         if not return_auxiliary:
             return logits
         episodes = context_labels.shape[0]
@@ -3573,6 +3693,11 @@ class StructuredPopulationMetaClassifier(nn.Module):
             )
         if self.typed_bag_preserving_branch:
             logits = logits + typed_bag_residual_scale * typed_bag_logits
+        if self.use_instance_attention_mil:
+            mil_logits = self._instance_attention_mil_logits(
+                query_instances, class_memories
+            )
+            logits = logits + torch.sigmoid(self.mil_residual_logit) * mil_logits
         if not return_auxiliary:
             return logits
         return logits, {
@@ -3641,6 +3766,8 @@ class BaseModel(nn.Module):
         global_summary: str = "centered_spread",
         use_raw_mean_branch: bool = False,
         raw_stat_tokens: Sequence[str] = (),
+        use_instance_attention_mil: bool = False,
+        mil_hidden_dim: int | None = None,
         aggregator_covariance_sketch_dim: int | None = None,
         aggregator_covariance_mode: str = "covariance",
         aggregator_covariance_shrinkage: float = 0.0,
@@ -3751,6 +3878,8 @@ class BaseModel(nn.Module):
             typed_bag_residual_scale=meta_typed_bag_residual_scale,
             include_cls_token=cls_token_pooling,
             raw_stat_tokens=raw_stat_tokens,
+            use_instance_attention_mil=use_instance_attention_mil,
+            mil_hidden_dim=mil_hidden_dim,
             num_classes=self.num_classes,
         )
         # v26 = cls_token_pooling (CLS cross-attention over raw cells, see

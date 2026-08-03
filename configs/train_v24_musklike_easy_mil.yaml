@@ -1,0 +1,34 @@
+base_config: train_v24_musklike_easy.yaml
+
+# Phase 1 IA-MIL (Instance-Attention MIL) — nonlinear, task-adaptive instance
+# aggregation added as a residual channel (user proposal, 2026-08-03).
+#
+# Motivations:
+#   * The existing per-instance path (`_rare_instance_logits`) is shallow and
+#     linear: LayerNorm + single Linear + cosine similarity + fixed top-k
+#     fractions, used only as a secondary fusion channel. The model never
+#     learns WHICH cells/conformers determine the label.
+#   * IA-MIL adds: a nonlinear per-instance MLP encoder, task-adaptive
+#     attention over instances conditioned on in-context class memories
+#     (relevance = MLP(h_i, pool(M_c)), not cosine), and soft+max attention
+#     pooling in embedding space. The max-attention instance gives the MIL
+#     "any-positive" inductive bias (one strong instance is enough).
+#   * Added as a residual channel (like covariance/typed_bag): no change to the
+#     existing fusion_scorer, backward compatible when flag is off.
+#
+# Validation plan (Phase 1, synthetic):
+#   * Primary: train here (musk-like-easy), check no regression on synthetic
+#     val (~0.951) and no NaN; per-task covariance/state not worse.
+#   * Discriminator: rare-response separable variant (only a fraction of cells
+#     respond) — IA-MIL should clearly beat the baseline where instance
+#     identity matters (the ICI-style signal). See docs/current_status.md SS23.
+model_overrides:
+  use_instance_attention_mil: true
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v24_musklike_easy_mil
+
+trainer:
+  max_epochs: 50
