@@ -1,14 +1,14 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-03` (Musk-like easy 가설 판정: "0.70 한계 = 데이터 lossiness" 확정 §22 — 최신; CLS §17, E7 §18, 정규화 §19, no-L2 §20, Musk zero-shot §21)
-**Status**: **v24가 현재 확정 baseline (변경 없음)**, 단 **전략 전환 성공 — 가설 판정 완료**: 합성
-생성기가 lossy라 모델이 데이터 정보 한계(~0.70)에 갇혔다는 가설을 **"musk-like easy" 데이터**(§22)
-학습으로 직접 검증 → best val_ce **0.2552** (v24 Medium 0.5903의 절반 이하), 1,000-episode AUROC
-**0.9510 [0.946, 0.956]** → **"0.70 한계 = 데이터 lossiness(생성기 문제)" 가설 확정**. 모델은 분리
-가능한 데이터에서 근완벽 분류(composition 0.978 / state 0.952 / covariance 0.865 / interaction 0.942 /
-combined 0.985). 이전 결과: v26 학습 완료(0.5908, v24와 동률), no-L2 ablation 음성(0.5925),
-Musk zero-shot AUROC 0.777(§21), 재학습 없는 진단 3종 완료(§17-19). v25는 2026-08-02 폐기 확정.
-**Read first if you are picking this up**: §22 (Musk-like easy 가설 판정 — 최신), §21 (Musk
+**Last updated**: `2026-08-03` (Musk 0.95 로드맵: raw bag-stat token 학습 중 §23 — 최신; §22 가설 판정, CLS §17, E7 §18, 정규화 §19, no-L2 §20, Musk zero-shot §21)
+**Status**: **v24가 현재 확정 baseline (변경 없음)**. **전략 전환 성공** (§22): "0.70 한계 = 데이터
+lossiness" 가설 확정 (musk-like easy AUROC 0.951). 이제 **Musk 실데이터 0.95 목표** 진행 — 첫
+지렛대(입력 표현, `--preprocess raw` 0.803→0.822) 후, **두 번째 지렛대: raw bag-stat token
+(mean/skew/kurt)** 구현 완료(`7830b11`)하고 **scratch 학습 중** (PID 1115008, ~1.5h, §23).
+왜도/첨도는 새 신호(분산은 global_spread와 중복 제외). 완료 후 합성 val 유지 확인 + 실제 Musk
+0.85+ 목표. 이전 결과: v26(0.5908), no-L2 음성(0.5925), Musk zero-shot 0.777(§21), v25 폐기.
+**Read first if you are picking this up**: §23 (raw bag-stat token 학습 중 — 최신), §22 (Musk-like
+easy 가설 판정), §21 (Musk
 zero-shot), §20 (no-L2 ablation 음성), §19 (정규화 천장 프로브), §18 (E7 재검정·Path B), §17 (v26·CLS
 프로브), §16 (v26/v27/v29 폐기), §3 (실험 현황·최종 결정).
 **Branches**: `main` = `v24` 확정 (현재 SSOT) / 참고용 `v22`·`v24`·`v19`·`codex/v23-bag-mean` / v25는 태그 **`v25-typed-bag-final`**로 보존 (브랜치 삭제) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
@@ -1406,3 +1406,35 @@ fine-tuning으로 0.83~0.90 천장 돌파, ④ 5-seed 앙상블로 n=102 분산 
 재검증, ② 생성기 코드 수준 개선(크기 채널 보존 등)으로 Medium에서도 분리 가능하게 만들기,
 ③ 필요 시 v24_Musk-easy를 추후 아키텍처 비교용 상한 데이터로 활용, ④ (사용자 판단) Musk 정식
 검증(166→512 학습 projection, MIL baseline 대조) 진행 여부.
+
+## 23. 2026-08-03 — Musk 0.95 로드맵: raw bag-stat token (mean/skew/kurt) 학습 중
+
+**배경**: Musk 0.95 목표의 두 번째 지렛대. 첫 지렛대(`--preprocess raw`, bag 평균 보존)로
+0.803→0.822 확인했지만 가중치가 학습 때 mean을 못 봤던 한계. 사용자 제안: centered+L2 입력은
+유지하고, **raw에서만 얻는 고차 통계량을 별도 token으로 추가**해 학습에서부터 mean/shape 신호를
+쓰게 한다.
+
+**중복 분석**: per-feature **분산은 `global_spread` summary(= std)와 중복** → 제외. **왜도(3차)/
+첨도(4차)는 새 신호** (모델은 1/2차 적률 + tail/rare 순서통계량만 보유) → 추가. 왜도/첨도는
+표준화 적률 비율이라 **scale-free → raw 전달**(정규화 불필요), mean은 **L2 정규화**(scale 의존이라
+합성↔Musk 일관성).
+
+**구현**: `include_bag_mean_token`(bool) → **`raw_stat_tokens: Sequence[str]`** (mean|variance|
+skewness|kurtosis)로 일반화. `_raw_stat_tokens()`가 centered 변환 전 raw cell에서 per-feature
+통계 계산. 각 통계 = 512-d token 1개, `structured_tokens_per_bag` = 40 + len. batched/list 양쪽
+경로, `_validate_representation`, `forward_episode_batch` 모두 연결. 커밋 `7830b11`. 검증: forward
+smoke finite(tokens 43), 적률 값 정확(exp 왜도~1.8/첨도~7.7, 가우시안 ~0/~3), unittest 153/154
+통과(기존 learnability_d20 결함 1건 무관).
+
+**config**:
+- `train_v24_musklike_easy_rawstats.yaml` — `raw_stat_tokens: [mean, skewness, kurtosis]` (tokens 43)
+- `train_v24_musklike_easy_mean_token.yaml` — `[mean]` 전용 (tokens 41)
+- (기각된 raw 직접 전달 `rawmean` config는 삭제)
+
+**학습 실행 중**: Run `v24_musklike_easy_rawstats`, scratch 50 epoch. PID `1115008`, 시작
+2026-08-03 11:06 KST. 로그 `logs/20260803_110607/v24_musklike_easy_rawstats.out`, 체크포인트
+`checkpoints/20260803_110607/v24_musklike_easy_rawstats/`. ~4.8 it/s 정상, 완료까지 ~1.5h.
+
+**성공 기준/다음 Action**: ① 합성 musk-like-easy val 1,000-ep AUROC가 centered 모델(0.951) 근처
+유지, ② 실제 Musk zero-shot AUROC가 centered 0.822 / raw 0.822 상회(→ 0.85+ 목표), ③ 결과에
+따라 MIL max/softmax 풀링(천장 ~0.90) 지렛대로 진행.
