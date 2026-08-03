@@ -796,5 +796,8 @@ bag-stat)와 지렛대 3(IA-MIL) 모두 음성으로 종료.
 **열린 과제 / 다음 Action (사용자 판단)**:
 1. **Phase 2**: 166→512 읽기 브리지 (IA-MIL 제외) 진행 여부.
 2. **ICI**: 여전히 잠금 — v24/v26용 ICI config 작성 + 실행은 사용자 재확인 필요.
-3. **Musk 0.95**: 지렛대 1 중심으로 다음 지렛대 후보 선정.
+3. **Musk 0.95**: 아키텍처 개선 proposal 작성 완료 — [`history/musk095_architecture_proposal.md`](history/musk095_architecture_proposal.md):
+   P0(5-seed 앙상블, 즉시) → P2(bag-mean 보존 채널, 합성 선검증) → P1(166→512 읽기 브리지) → P3(단순
+   인스턴스 풀링, 사전 게이트). 핵심 근거: `_bag_view` center+L2가 Musk 최고 신호(bag-mean, ridge 0.829)
+   를 삭제(0.554) + zero-padding OOD 브리지.
 

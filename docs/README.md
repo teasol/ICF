@@ -37,6 +37,7 @@
 - [`history/medium_b200_baseline.md`](history/medium_b200_baseline.md): B200 medium baseline
 - [`history/synthetic_data_and_tasks.md`](history/synthetic_data_and_tasks.md): synthetic generator와 task 정의
 - [`history/archive.md`](history/archive.md): **running archive** — `current_status.md`에서 해결·폐기되어 이관된 섹션 (v22 결정, 7-31~8-02 세션 핸드오프, v25/v26/v27/v29, §22 musk-like easy 가설, §23 raw-stat 음성, §24 IA-MIL 음성 등)
+- [`history/musk095_architecture_proposal.md`](history/musk095_architecture_proposal.md): **Musk 0.95 아키텍처 개선 제안 (2026-08-04)** — P0 앙상블 / P1 166→512 읽기 브리지 / P2 bag-mean 보존 채널 / P3 단순 인스턴스 풀링 (미구현, 사용자 판단 대기)
 - [`history/architecture_v26_proposal_ec_moe_rejected.md`](history/architecture_v26_proposal_ec_moe_rejected.md) / [`architecture_v27_proposal_ac_icar_rejected.md`](history/architecture_v27_proposal_ac_icar_rejected.md) / [`architecture_v29_proposal_sp_sat_rejected.md`](history/architecture_v29_proposal_sp_sat_rejected.md): 미구현 폐기된 설계안 (2026-08-02)
 
 ---
