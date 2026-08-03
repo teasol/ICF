@@ -131,5 +131,26 @@ scripts/launch_interactive_training.sh \
 2. **구버전 Config 아카이빙 조건**:
    - 구버전 아키텍처의 config는 `configs/archive/` 하위로 즉시 이관합니다: `archive/v18_v19/`, `archive/v20/`, `archive/v21_retrieval/`.
    - 폐기된 기능의 실행 스크립트도 같은 규칙으로 `scripts/archive/`(예: `scripts/archive/v21_retrieval/`)로 옮깁니다.
+
+   > [!IMPORTANT]
+   > **아카이빙·삭제 시 참조 검증 필수 (2026-08-04 신설).** `base_config`는
+   > `utils.py`의 `_load_train_config`가 **config 자기 디렉터리 기준**으로 해석하므로, config를 하위
+   > 폴더로 옮기면 상대경로가 조용히 깨집니다. 또 `resolve_config_group`은 모듈 조각을
+   > `configs/<group>/`에서만 찾으므로, 모듈 config를 삭제하면 이를 참조하는 **아카이브** config가
+   > 깨집니다. 실제로 2026-08-04까지 **모든** 아카이빙 커밋이 이 검증을 누락해 config 18개가
+   > 로드 불가 상태였고 unittest 1건이 상시 실패했습니다 (복구 기록: [`current_status.md`](current_status.md) §26).
+   > **아카이빙/삭제 커밋 전 반드시 아래를 통과시킬 것** (활성 config만이 아니라 **전체**):
+   > ```bash
+   > timeout 300s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -c "
+   > import sys; sys.path.insert(0,'.')
+   > from pathlib import Path
+   > from src.utils.utils import merge_train_config
+   > bad=[]
+   > for p in sorted(Path('configs').rglob('*.yaml')):
+   >     if 'base_config' not in p.read_text(): continue
+   >     try: merge_train_config(p)
+   >     except Exception as e: bad.append((p, e))
+   > print('failing:', len(bad)); [print(' ', p, e) for p, e in bad]"
+   > ```
 3. **모듈형 Component 설정 분리**:
    - `callbacks/`, `data/`, `logger/`, `model/`, `optimizer/`, `scheduler/`, `trainer/` 등 모듈 조각은 해당 서브폴더에 구성합니다.

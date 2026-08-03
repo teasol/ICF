@@ -1,4 +1,4 @@
-base_config: train_v22_medium.yaml
+base_config: ../../train_v22_medium.yaml
 
 # Architecture v24-B0: learned bag projection with a per-token bottleneck.
 # Keeps all 12 slots -> 1 global + 36 slot statistics + 3 tails = 40 tokens.

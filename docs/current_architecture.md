@@ -33,18 +33,46 @@ Query label은 representation, normalization, class memory, ridge 또는 covaria
 
 ## 2. 4대 수학적 핵심 기술 명세 (v19부터 유지)
 
-### ① Z-Score Bag Studentization (분산 스케일 정규화)
-각 Donor Bag $i$의 세포 표현 $x_{i, j} \in \mathbb{R}^{512}$에 대해 Donor Centroid $\mu_i$와 Standard Deviation $S_i$를 구하여 스튜던트화 정규화를 적용함:
+### ① Bag Centering + Per-Cell L2 Projection (구 "Z-Score Bag Studentization")
+
+> [!IMPORTANT]
+> **2026-08-04 코드 대조로 정정됨.** 이 절은 오래도록 per-feature 스튜던트화
+> ($\tilde{x} = (x-\mu_i)/(S_i+10^{-5})$)라고 기술해 왔으나, **코드는 $S_i$로 나누지 않습니다.**
+> 실제 구현(`_bag_view`, `src/models/baseline.py:618-644`)은 per-bag centering 후 **per-cell L2**로
+> 사영합니다. $S_i$는 나눗셈에 쓰이지 않고 `global_summary` 토큰으로 **출력**됩니다.
+> 참고로 문서가 기술했던 그 공식(진단 프로브의 `zscore` 변형)은 실측에서 **최하위**였습니다
+> (합성 Medium 0.5054, [`history/archive.md`](history/archive.md) §19). 상세: `current_status.md` §26.
+
+각 Donor Bag $i$의 세포 표현 $x_{i, j} \in \mathbb{R}^{512}$에 대해 Donor Centroid $\mu_i$와
+per-feature Standard Deviation $S_i$를 구합니다:
 
 $$\mu_i = \frac{1}{N_i} \sum_{j=1}^{N_i} x_{i, j}, \quad S_i = \sqrt{\frac{1}{N_i} \sum_{j=1}^{N_i} (x_{i, j} - \mu_i)^2 + 1e-6}$$
 
-$$\tilde{x}_{i, j} = \frac{x_{i, j} - \mu_i}{S_i + 1e-5}$$
+실제 적용되는 변환은 **centering + per-cell L2**입니다 (`bag_centered_representation=True`,
+`bag_centered_l2_normalize=True`가 기본):
+
+$$\delta_{i,j} = x_{i,j} - \mu_i, \qquad \tilde{x}_{i, j} = \frac{\delta_{i,j}}{\|\delta_{i,j}\|_2 + 10^{-6}}$$
+
+$S_i$는 **`global_summary` 토큰**으로 aggregator에 전달되며(나눗셈에 사용되지 않음), centering 전
+편차 $\delta_{i,j}$는 공분산 스케치 경로(`_covariance_sketch`, `_slot_covariance_sketch`)의 입력으로
+그대로 쓰입니다 — 즉 크기(magnitude) 정보는 L2로 지워지지 않고 이 두 경로로 공급됩니다.
+
+> **알려진 한계 (2026-08-04)**: per-bag centering은 $d$차원 공간을 **rank $(N_i-1)$** 부분공간으로
+> 사영합니다. $N_i$가 작으면 파괴적입니다 — $N_i = 1$이면 $\delta = 0$이므로 bag 전체가 0벡터가
+> 됩니다. 실데이터(Musk median 12 instances)에서 이것이 주 병목으로 측정되었습니다:
+> `current_status.md` §26 및 [`history/musk_transfer_diagnosis_v30_proposal.md`](history/musk_transfer_diagnosis_v30_proposal.md).
 
 ### ② Top-k Sparse Evidence Tokenization (Sub-1% 희귀세포 핀포인트 추출)
 97%+ 비반응 배경세포에 의해 0.5%~3% 희귀 세포 신호가 희석되는 현상을 방지함:
-- Bag 중심 $\mu_i$로부터 이상 거리(Outlier Distance) $d_{i, j} = \|\tilde{x}_{i, j}\|_2$ 산출.
 - 상위 1% ($k = \max(1, \lceil 0.01 \cdot N_i \rceil)$) 세포 인스턴스 $X_i^{sparse} \in \mathbb{R}^{k \times 512}$ 선별.
 - Class Memories $M_c \in \mathbb{R}^{8 \times 512}$ ($c \in \{0, 1\}$)와 Direct Cross-Attention 수행 후 residual logit 결합.
+
+> [!IMPORTANT]
+> **2026-08-04 정정**: 이 절은 선별 기준을 "Bag 중심 $\mu_i$로부터의 이상 거리
+> $d_{i,j} = \|\tilde{x}_{i,j}\|_2$"라고 기술해 왔으나, ①의 per-cell L2 때문에 코드에서
+> $\|\tilde{x}_{i,j}\|_2$는 **모든 세포에 대해 항등적으로 1.0**이며 순위를 만들 수 없습니다.
+> 실제 코드는 context anchor에 대한 **novelty**(`novelty = 1 - nearest_similarity`,
+> `baseline.py:1074-1075`, `1289-1290`)로 tail을 정렬합니다.
 
 ### ③ Covariance Subspace Shrinkage (노이즈 방어)
 - SNR-Adaptive Covariance Subspace Fitting의 Shrinkage 파라미터를 **`subspace_shrinkage: 0.25`**로 정밀화.

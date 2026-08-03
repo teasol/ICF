@@ -1,4 +1,4 @@
-base_config: train_v24_musklike_easy.yaml
+base_config: ../../train_v24_musklike_easy.yaml
 
 # Mean-token variant (user proposal, 2026-08-03): keep the model's normal
 # centered+L2 bag input (bag_centered_representation=True) and ADD the raw bag

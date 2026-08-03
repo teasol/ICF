@@ -240,8 +240,26 @@ def bag_statistics(bag: np.ndarray, mode: str, mean: np.ndarray, std: np.ndarray
     return np.concatenate([view.mean(axis=0), view.var(axis=0)])
 
 
-def ridge_loo(bags: list[np.ndarray], labels: np.ndarray, mode: str, penalty: float) -> np.ndarray:
-    """Leave-one-bag-out ridge. Pool statistics come from training bags only."""
+def ridge_loo(
+    bags: list[np.ndarray],
+    labels: np.ndarray,
+    mode: str,
+    penalty: float,
+    design_norm: str = "feature",
+) -> np.ndarray:
+    """Leave-one-bag-out ridge. Pool statistics come from training bags only.
+
+    `design_norm` controls how the bag-descriptor design matrix is scaled before
+    the ridge solve, and it is NOT a free choice -- it decides whether a diagonal
+    input rescaling is even observable:
+
+      "feature"  per-column standardization. Absorbs any per-feature affine map,
+                 so `poolz` becomes mathematically identical to `raw`.
+      "scalar"   context centering + one scalar RMS, preserving inter-feature
+                 geometry. This is what `diagnose_normalization_ceiling.py` does
+                 (see its `ridge_logits`), so use it for apples-to-apples
+                 comparison against the synthetic ceiling table.
+    """
     count = len(bags)
     scores = np.zeros(count)
     targets = labels * 2.0 - 1.0
@@ -260,7 +278,13 @@ def ridge_loo(bags: list[np.ndarray], labels: np.ndarray, mode: str, penalty: fl
         else:
             matrix = features
         location = matrix[train].mean(axis=0)
-        scale = np.maximum(matrix[train].std(axis=0), 1e-8)
+        if design_norm == "feature":
+            scale = np.maximum(matrix[train].std(axis=0), 1e-8)
+        elif design_norm == "scalar":
+            centered = matrix[train] - location
+            scale = max(float(np.sqrt((centered**2).mean())), 1e-8)
+        else:
+            raise ValueError(f"Unsupported design_norm: {design_norm}")
         standardized = (matrix - location) / scale
         design = standardized[train]
         gram = design.T @ design + penalty * np.eye(design.shape[1])
@@ -276,13 +300,15 @@ def report_ceiling(
     penalties: tuple[float, ...],
     samples: int,
     bound: int,
+    design_norm: str = "feature",
 ) -> None:
     print("== LOO ridge ceiling on bag [mean, var], by instance normalization ==")
     print("  (linear probe: zero-padding 166->512 is irrelevant here by construction)")
+    print(f"  design_norm={design_norm}" + ("  -- poolz is absorbed and equals raw" if design_norm == "feature" else "  -- matches diagnose_normalization_ceiling.py"))
     print(f"  {'normalization':14s}" + "".join(f"{'lam=' + str(p):>11s}" for p in penalties))
     cached: dict[str, dict[float, np.ndarray]] = {}
     for mode in NORMALIZATIONS:
-        cached[mode] = {p: ridge_loo(bags, labels, mode, p) for p in penalties}
+        cached[mode] = {p: ridge_loo(bags, labels, mode, p, design_norm) for p in penalties}
         row = "".join(f"{auroc(labels, cached[mode][p]):11.4f}" for p in penalties)
         print(f"  {mode:14s}{row}")
     print(f"\n  best penalty per normalization, stratified by query-bag cardinality:")
@@ -313,6 +339,13 @@ def main() -> None:
     parser.add_argument("--small-bound", type=int, default=4)
     parser.add_argument("--bootstrap", type=int, default=2000)
     parser.add_argument("--penalties", type=float, nargs="+", default=[1.0, 10.0, 100.0, 1000.0])
+    parser.add_argument(
+        "--design-norm",
+        choices=("feature", "scalar"),
+        default="feature",
+        help="Design-matrix scaling for the ceiling probe; 'scalar' matches "
+        "diagnose_normalization_ceiling.py and makes poolz observable.",
+    )
     args = parser.parse_args()
 
     ids, bags, labels = load_musk(args.data)
@@ -329,7 +362,13 @@ def main() -> None:
         print()
     if args.report in ("all", "ceiling"):
         report_ceiling(
-            bags, labels, sizes, tuple(args.penalties), args.bootstrap, args.small_bound
+            bags,
+            labels,
+            sizes,
+            tuple(args.penalties),
+            args.bootstrap,
+            args.small_bound,
+            args.design_norm,
         )
 
 

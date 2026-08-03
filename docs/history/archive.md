@@ -754,7 +754,11 @@ limit 64/16) — NaN/크래시 없음, train_loss 0.715 / val_loss 0.692. ④ **
 154개 중 153개 통과, 1개 에러** — 에러는 `tests/test_learnability_ladder.py`가 archive된
 v18/v19 config들의 `trainer: learnability_d20` 참조에서 발생(해당 config는 `a5dfcf8` 정리에서
 삭제된 **기존 결함**, §16에 "이번 변경과 무관, 조치하지 않음"으로 이미 기록됨). 본 변경은
-통과 테스트 +1만 추가, 회귀 없음. (스모크 중 CUDACachingAllocator OOM 경고 1회 — 배치 크기
+통과 테스트 +1만 추가, 회귀 없음.
+> **[2026-08-04 해소]** 이 상시 실패는 삭제된 `configs/trainer/{learnability_d20,csp_short8}.yaml`을
+> git(`a5dfcf8^`)에서 원본 복원하여 해결됐습니다. 현재 **unittest 154/154 통과**이며, `base_config`를
+> 가진 config 65개 전부 로드됩니다. 이후 문서에 나오는 "153/154 통과 + 기존 결함 1건" 표기는
+> 2026-08-04 이전 시점의 기록입니다. 상세: [`../current_status.md`](../current_status.md) §26. (스모크 중 CUDACachingAllocator OOM 경고 1회 — 배치 크기
 그대로라 일시적·무해, 학습 지속 확인.)
 
 **학습 실행 중**: Run `v24_medium_no_l2`, scratch Medium 50 epoch (v24와 동일 방식).

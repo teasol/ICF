@@ -171,7 +171,15 @@ def main() -> None:
     device = torch.device(args.device)
     projection = covariance_projection(device)
 
-    NORMALIZATIONS = ("raw", "centered", "current", "zscore", "whiten_ctx")
+    NORMALIZATIONS = (
+        "raw",
+        "centered",
+        "current",
+        "zscore",
+        "whiten_ctx",
+        "poolz",
+        "poolz_l2",
+    )
     FEATURES = ("mean", "mean_var", "mean_var_cov")
 
     # scores[(norm, feature, task)] -> list of per-episode query scores
@@ -205,6 +213,20 @@ def main() -> None:
             transformed["zscore"] = zscore
             w_mean, W = whiten_from_context(x[context].reshape(-1, x.shape[-1]))
             transformed["whiten_ctx"] = (raw - w_mean.unsqueeze(0)) @ W
+
+            # Context-pooled DIAGONAL standardization, with and without the
+            # per-cell L2 that `current` applies. Unlike `centered`/`zscore`
+            # these keep the between-bag mean (the dominant Musk signal, see
+            # docs/history/musk_transfer_diagnosis_v30_proposal.md SS1.3), and
+            # unlike `whiten_ctx` they do not remove cross-feature covariance --
+            # which SS19 found IS the response signal. Pooled over context bags
+            # only, so no query leakage.
+            pool = x[context].reshape(-1, x.shape[-1]).float()
+            pool_mean = pool.mean(dim=0)
+            pool_std = pool.std(dim=0).clamp_min(1e-6)
+            poolz = (raw - pool_mean) / pool_std
+            transformed["poolz"] = poolz
+            transformed["poolz_l2"] = torch.nn.functional.normalize(poolz, dim=-1)
 
             for norm, cells in transformed.items():
                 features = bag_features(cells, projection)

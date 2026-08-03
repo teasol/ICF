@@ -1,4 +1,4 @@
-base_config: train_v24_medium_bag_proj_residual.yaml
+base_config: ../../train_v24_medium_bag_proj_residual.yaml
 
 # Architecture v25 (T5-A): typed, bag-preserving structured context branch.
 # Adds learned token-type/tail-fraction identity embeddings to the 40

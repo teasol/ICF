@@ -1,4 +1,4 @@
-base_config: train_v22_medium.yaml
+base_config: ../../train_v22_medium.yaml
 
 # Architecture v23-A0: collapse each bag's 40 structured tokens to their exact
 # arithmetic mean before both the direct ridge/attention path and class memory.
