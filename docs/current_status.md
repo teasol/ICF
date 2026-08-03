@@ -1379,6 +1379,29 @@ log loss 0.58→0.54 — **분리 가능한 데이터로 학습한 모델이 실
 보정됨**(양성 예측 18→36). §22 "데이터가 분리 가능하면 모델이 신호를 잘 쓴다"는 방향이 실제
 데이터 전이에서도 방향성 있게 지지되는 탐색적 결과.
 
+**실제 Musk — 입력 표현 병목 진단 (2026-08-03, 0.95 목표 대비)**: 사용자 질문 "padding이 평균
+계산에 들어가는가?"에 대한 코드 검증 + 천장 프로브.
+
+- **답: padding은 평균 계산에 안 들어감.** `_bag_view`의 `bag.mean(dim=-2)`는 feature별 cell 평균이라
+  zero-padding 열(항상 0)은 평균 0 → 실제 166개 열 평균에 무영향. L2 norm(0²=0)도 동일.
+  따라서 "centering 후 padding" = "padding 후 centering" 수학적으로 동일(모델이 어차피 재-centering).
+- **진짜 병목: `_bag_view`가 bag 평균을 폐기** (summary = `global_spread`, bag_mean 미사용;
+  `projection_residual_mean`도 raw 평균이 아니라 구조화 토큰 평균). Musk에서 bag 평균(분자별
+  descriptor 프로필)이 최강 신호인데 제거됨.
+- **천장 프로브 (LOO ridge AUROC)**: raw mean+var **0.829** / centering만 **0.567** (↓0.26) /
+  L2만 0.742 / center+L2(=모델 입력) **0.554** / 인스턴스 약지도 → bag max·mean·softmax 풀링 **~0.90**.
+  → "centering이 신호를 죽인다"가 확정, padding이 아님.
+- **zero-shot 수정 (학습 파라미터 없음, config 오버라이드)**: `test_musk.py --preprocess raw`
+  (`bag_centered_representation=False`, `global_summary=raw_mean`, `use_raw_mean_branch=True`).
+  실측: bag_view **0.8030** → raw **0.8217** [0.733, 0.904], log loss 0.544→**0.511** (centered_no_l2는
+  0.7912). **bag 평균 보존이 실제 모델에서도 방향성 개선** — 사용자 직관 검증됨.
+- 커밋 `a9bb7b8` (test_musk.py `--preprocess` 추가).
+
+**다음 Action (0.95 목표)**: ① (완료) `--preprocess raw`로 bag 평균 보존 → 0.822, ② 다음 지렛대:
+MIL max/softmax 풀링(천장 ~0.90, 인스턴스 스코어링 + 풀링), ③ 비선형 인스턴스 인코더/Musk LOO
+fine-tuning으로 0.83~0.90 천장 돌파, ④ 5-seed 앙상블로 n=102 분산 감소. (Musk2 문헌 accuracy
+~0.85~0.90 — AUROC 0.95는 상위권 목표, 단계적 접근 필요.)
+
 **다음 Action**: ① 세포 신원 활용 실험(메커니즘 A/B — 선택 학습)을 이 분리 가능한 데이터 위에서
 재검증, ② 생성기 코드 수준 개선(크기 채널 보존 등)으로 Medium에서도 분리 가능하게 만들기,
 ③ 필요 시 v24_Musk-easy를 추후 아키텍처 비교용 상한 데이터로 활용, ④ (사용자 판단) Musk 정식
