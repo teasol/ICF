@@ -1,13 +1,14 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-03` (Musk-like easy 생성기 실험 학습 중 §22 — 최신; CLS §17, E7 §18, 정규화 §19, no-L2 §20, Musk zero-shot §21)
-**Status**: **v24가 현재 확정 baseline (변경 없음)**, 단 **전략 전환** — 생성기 개선 실험 시작: 합성
-생성기가 너무 lossy라 모델이 데이터 정보 한계(~0.70)에 갇혔다고 판정하고, **Musk 수준으로 bag을
-분리 가능한 "musk-like easy" 데이터**(§22)를 생성해 학습 중(PID 846636, ~2h). 분리성 검증: current
-입력 ridge **0.894**(원래 0.636), 스모크 val_loss **0.485**(원래 0.692). 완료되면 "0.70 한계 = 데이터
-lossiness" 가설 판정. 이전 결과: v26 학습 완료(0.5908, v24와 동률), no-L2 ablation 음성(0.5925),
+**Last updated**: `2026-08-03` (Musk-like easy 가설 판정: "0.70 한계 = 데이터 lossiness" 확정 §22 — 최신; CLS §17, E7 §18, 정규화 §19, no-L2 §20, Musk zero-shot §21)
+**Status**: **v24가 현재 확정 baseline (변경 없음)**, 단 **전략 전환 성공 — 가설 판정 완료**: 합성
+생성기가 lossy라 모델이 데이터 정보 한계(~0.70)에 갇혔다는 가설을 **"musk-like easy" 데이터**(§22)
+학습으로 직접 검증 → best val_ce **0.2552** (v24 Medium 0.5903의 절반 이하), 1,000-episode AUROC
+**0.9510 [0.946, 0.956]** → **"0.70 한계 = 데이터 lossiness(생성기 문제)" 가설 확정**. 모델은 분리
+가능한 데이터에서 근완벽 분류(composition 0.978 / state 0.952 / covariance 0.865 / interaction 0.942 /
+combined 0.985). 이전 결과: v26 학습 완료(0.5908, v24와 동률), no-L2 ablation 음성(0.5925),
 Musk zero-shot AUROC 0.777(§21), 재학습 없는 진단 3종 완료(§17-19). v25는 2026-08-02 폐기 확정.
-**Read first if you are picking this up**: §22 (Musk-like easy 생성기 실험 학습 중 — 최신), §21 (Musk
+**Read first if you are picking this up**: §22 (Musk-like easy 가설 판정 — 최신), §21 (Musk
 zero-shot), §20 (no-L2 ablation 음성), §19 (정규화 천장 프로브), §18 (E7 재검정·Path B), §17 (v26·CLS
 프로브), §16 (v26/v27/v29 폐기), §3 (실험 현황·최종 결정).
 **Branches**: `main` = `v24` 확정 (현재 SSOT) / 참고용 `v22`·`v24`·`v19`·`codex/v23-bag-mean` / v25는 태그 **`v25-typed-bag-final`**로 보존 (브랜치 삭제) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
@@ -1312,7 +1313,7 @@ zero-padding**(모델 input_dim=512; OOD 브리지로 명시, 화학 descriptor�
 **다음 Action (사용자 판단)**: ① Musk 정식 검증(projection/MIL baseline) 진행 여부, ② no-L2 학습
 완료 후 v24와 비교(§20 계속), ③ 경로 A/ICI 관점.
 
-## 22. 2026-08-03 — 전략 전환: 생성기 개선 (Musk-like easy 데이터) — 학습 중
+## 22. 2026-08-03 — 전략 전환: 생성기 개선 (Musk-like easy 데이터) — 가설 판정 완료
 
 **배경/판정**: 사용자 전략 전환 — "현재 합성 생성기가 너무 lossy해서 세포 신원이 관측 불가능하고
 (oracle 0.93, per-cell 선형 0.70), 그래서 모델이 데이터 정보 한계(~0.70)에 갇혀 있다. 모델 문제가
@@ -1339,14 +1340,29 @@ combined 0.959 → **Musk 수준(~0.9+) 분리 가능성 달성**. 데이터가 
 (epoch 1부터 큰 차이 — 데이터가 분리 가능하면 모델 손실이 크게 낮아지는 초기 신호). (CUDACachingAllocator
 OOM 경고 1회는 이전과 동일한 일시적 현상, 회복됨.)
 
-**학습 실행 중**: Run `v24_musklike_easy`, scratch 50 epoch. PID `846636`, 시작 2026-08-03 04:28 KST.
+**학습 완료 (2026-08-03 06:00 KST, 04:28 시작)**: Run `v24_musklike_easy`, scratch 50 epoch 정상 완주
+(`Trainer.fit stopped: max_epochs=50 reached`, launcher "completed successfully"). 프로세스 종료, GPU 해제.
 - 로그: `logs/20260803_042852/v24_musklike_easy.out`, 체크포인트: `checkpoints/20260803_042852/v24_musklike_easy/`
-- 초기: epoch 0, ~4.5 it/s 정상. 완료까지 ~1.8~2h.
+- 이상 없음: NaN/크래시 없음, 일시적 CUDACachingAllocator OOM 경고 2회만(회복됨, 기존과 동일).
 
-**성공 기준**: best val_ce가 v24 Medium(`0.5903`)을 크게 하회하고(→ AUROC ~0.85+ 예상) bag 분류가
-근완벽 → **"0.70 한계는 데이터 lossiness 때문" 가설 확정** → 이후 세포 신원 활용(선택 학습)을 이
-쉬운 데이터 위에서 재검증 가능. 반대로 val_ce가 0.59 근처에 머물면 → 데이터가 분리 가능해도 모델이
-못 쓰는 것 → 모델/아키텍처 문제가 별도로 존재.
+**최종 결과 (2026-08-03, 1,000-episode 정식 평가)**: best `val_ce_loss 0.2552`@epoch 40 —
+**v24 Medium(`0.5903`)의 절반 이하**. 예측: `predictions/synthetic_v24_musklike_easy_1000ep.pt`.
 
-**다음 Action (학습 완료 후)**: ① best val_ce/AUROC로 가설 판정, ② 성공 시 세포 신원 활용 실험
-(메커니즘 A/B)을 이 데이터 위에서 진행, ③ 필요 시 생성기 코드 수준 개선(크기 채널 보존 등).
+| 지표 | Musk-like easy (v24 arch) | v24 Medium (참고) |
+|---|---:|---:|
+| Best val_ce_loss | **0.2552** @ epoch 40 | 0.5903 @ epoch 41 |
+| 1,000-ep AUROC | **0.9510** [0.946, 0.956] | ~0.70 천장 (v22~v26 전부) |
+| Log loss | 0.2836 | — |
+| task: composition / state / covariance / interaction / combined | 0.978 / 0.952 / 0.865 / 0.942 / 0.985 | — |
+
+> [!IMPORTANT]
+> **가설 확정: "0.70 한계 = 데이터 lossiness(생성기 문제)"**. 모델이 분리 가능한 데이터에서
+> 근완벽 분류(AUROC 0.951) — 심지어 모델 입력 ridge 천장(current mean_var 0.894, centered
+> 0.927)보다 높아, 모델이 선형 bag 통계 이상의 신호(covariance 등)도 활용함을 시사. 반대로
+> Medium 데이터의 0.70 천장은 아키텍처 문제가 아니라 **생성기가 세포 신원을 잃게 만드는
+> lossiness** 때문이라는 §19/§20 음성 결과와도 일치. v24는 여전히 확정 baseline(이 실험은
+> 아키텍처가 아니라 데이터 가설 검증용).
+
+**다음 Action**: ① 세포 신원 활용 실험(메커니즘 A/B — 선택 학습)을 이 분리 가능한 데이터 위에서
+재검증, ② 생성기 코드 수준 개선(크기 채널 보존 등)으로 Medium에서도 분리 가능하게 만들기,
+③ 필요 시 v24_Musk-easy를 추후 아키텍처 비교용 상한 데이터로 활용.
