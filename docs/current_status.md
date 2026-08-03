@@ -1,13 +1,14 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-03` (Musk 0.95 로드맵: raw-stat token 음성 판정 §23 — 최신; §22 가설 판정, CLS §17, E7 §18, 정규화 §19, no-L2 §20, Musk zero-shot §21)
+**Last updated**: `2026-08-03` (Phase 1 IA-MIL §24 학습 중 — 최신; raw-stat 음성 §23, §22 가설 판정, CLS §17, E7 §18, 정규화 §19, no-L2 §20, Musk zero-shot §21)
 **Status**: **v24가 현재 확정 baseline (변경 없음)**. **전략 전환 성공** (§22): "0.70 한계 = 데이터
 lossiness" 가설 확정 (musk-like easy AUROC 0.951). **Musk 실데이터 0.95 목표** 진행 중 — 지렛대 1
 (입력 표현, 0.803→0.822) 후, **지렛대 2(raw bag-stat token)는 음성 판정**: 합성 동률(0.9522)이나
 실제 Musk 0.7835로 centered(0.803/0.822) 미달 (§23). **Musk 기준 = centered musklike-easy 유지**.
-다음 지렛대: **MIL max/softmax 풀링(천장 ~0.90)**. 이전 결과: v26(0.5908), no-L2 음성(0.5925),
-Musk zero-shot 0.777(§21), v25 폐기.
-**Read first if you are picking this up**: §23 (raw-stat token 음성 판정 — 최신), §22 (Musk-like
+**지렛대 3 = Phase 1 IA-MIL**(§24, `use_instance_attention_mil`) 구현 완료·학습 중: 주 실험
+`v24_musklike_easy_mil`(epoch ~45/50, best val_ce 0.2462) + rare-response 판별 2종(순차 큐 대기).
+이전 결과: v26(0.5908), no-L2 음성(0.5925), Musk zero-shot 0.777(§21), v25 폐기.
+**Read first if you are picking this up**: §24 (Phase 1 IA-MIL — 최신), §23 (raw-stat token 음성 판정), §22 (Musk-like
 easy 가설 판정), §21 (Musk
 zero-shot), §20 (no-L2 ablation 음성), §19 (정규화 천장 프로브), §18 (E7 재검정·Path B), §17 (v26·CLS
 프로브), §16 (v26/v27/v29 폐기), §3 (실험 현황·최종 결정).
@@ -1474,15 +1475,17 @@ Musk(any-positive)·ICI(희귀 반응 세포 아형) 공통 병목.
 - 검증: batched/list/variable-length forward+backward finite, MIL 그라디언트 정상, 기본 config
   불변, unittest 153/154(기존 learnability_d20 결함 1건 무관)
 
-**학습 3종 (병렬 → OOM → 순차 큐)**:
+**학습 3종 (병렬 시도 → OOM 실패 → 순차 큐 대기)**:
 | Run | 데이터 | config | 상태 |
 |---|---|---|---|
-| `v24_musklike_easy_mil` (주) | musklike_easy + IA-MIL | `train_v24_musklike_easy_mil.yaml` | **학습 중** (PID 1372761) |
-| `v24_musklike_easy_rare_baseline` (판별) | rare-response(5~15% cell 반응) + no-MIL | `train_v24_musklike_easy_rare_baseline.yaml` | 대기 |
-| `v24_musklike_easy_rare_mil` (판별) | rare-response + IA-MIL | `train_v24_musklike_easy_rare_mil.yaml` | 대기 |
+| `v24_musklike_easy_mil` (주) | musklike_easy + IA-MIL | `train_v24_musklike_easy_mil.yaml` | **학습 중** (PID 1372761, epoch ~45/50, best val_ce **0.2462**@39) |
+| `v24_musklike_easy_rare_baseline` (판별) | rare-response(5~15% cell 반응) + no-MIL | `train_v24_musklike_easy_rare_baseline.yaml` | **순차 큐 대기** |
+| `v24_musklike_easy_rare_mil` (판별) | rare-response + IA-MIL | `train_v24_musklike_easy_rare_mil.yaml` | **순차 큐 대기** |
 
-- **OOM**: 3개 병렬 시 GPU 183GB 초과(2개가 이미 ~168GB, 3번째 CUDA OOM) → **순차 실행**.
-  `scripts/queue_phase1_rare.sh`가 주 실험 종료 후 판별 2종을 순차 실행 (커밋 `f3158cd`).
+- **OOM 실패 (17:32)**: 처음 3개를 GPU 1장에 병렬 실행했다가 `rare_baseline`/`rare_mil`이 CUDA OOM으로
+  exit 1 (mil PID 1372761 ~91GB + rare ~77GB → 178GB 초과). 로그의 `expandable_segments OOM` 확인.
+- **순차 큐**: 18:13부터 `scripts/queue_phase1_rare.sh`(PID 1468930)가 GPU 해제를 대기 중 — `mil` 완료
+  후 판별 2종을 1개씩 순차 실행 (커밋 `f3158cd`). 큐 로그: `/tmp/phase1_queue.log`.
 
 **판별 실험 논리**: musklike_easy는 전 cell 반응(separable, 0.951 포화)이라 IA-MIL 이득이 안 보임.
 rare-response(일부 cell만 반응)에서 "어느 cell이 반응하는가"가 중요 → IA-MIL이 baseline을 이기면
