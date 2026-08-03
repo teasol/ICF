@@ -1,16 +1,15 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-03` (Phase 1 IA-MIL §24 학습 중 — 최신; raw-stat 음성 §23, §22 가설 판정, CLS §17, E7 §18, 정규화 §19, no-L2 §20, Musk zero-shot §21)
+**Last updated**: `2026-08-03` (Phase 1 IA-MIL §24 **판정: 음성** — 최신; raw-stat 음성 §23, §22 가설 판정, CLS §17, E7 §18, 정규화 §19, no-L2 §20, Musk zero-shot §21)
 **Status**: **v24가 현재 확정 baseline (변경 없음)**. **전략 전환 성공** (§22): "0.70 한계 = 데이터
 lossiness" 가설 확정 (musk-like easy AUROC 0.951). **Musk 실데이터 0.95 목표** 진행 중 — 지렛대 1
 (입력 표현, 0.803→0.822) 후, **지렛대 2(raw bag-stat token)는 음성 판정**: 합성 동률(0.9522)이나
 실제 Musk 0.7835로 centered(0.803/0.822) 미달 (§23). **Musk 기준 = centered musklike-easy 유지**.
-**지렛대 3 = Phase 1 IA-MIL**(§24, `use_instance_attention_mil`) 구현 완료: 주 실험
-`v24_musklike_easy_mil` **50 epoch 완료** (best val_ce **0.2462**@39). rare-response 판별:
-`rare_baseline` 학습 중(epoch ~5/50), `rare_mil`은 큐 레이스 버그로 2회 OOM → **큐 버그 수정 완료,
-rare_baseline 종료 후 단독 재실행 예정**.
-이전 결과: v26(0.5908), no-L2 음성(0.5925), Musk zero-shot 0.777(§21), v25 폐기.
-**Read first if you are picking this up**: §24 (Phase 1 IA-MIL — 최신), §23 (raw-stat token 음성 판정), §22 (Musk-like
+**지렛대 3 = Phase 1 IA-MIL**(§24, `use_instance_attention_mil`) **판정: 음성** — 합성 무회귀(0.9520),
+rare 판별 유의 열위(baseline 0.9492 vs mil 0.9224, P=1.00), Musk zero-shot 큰 회귀(0.8030→0.5545).
+기본 OFF 유지, v24 확정 baseline 유지. 이전 결과: v26(0.5908), no-L2 음성(0.5925), Musk zero-shot
+0.777(§21), v25 폐기.
+**Read first if you are picking this up**: §24 (Phase 1 IA-MIL 판정: 음성 — 최신), §23 (raw-stat token 음성 판정), §22 (Musk-like
 easy 가설 판정), §21 (Musk
 zero-shot), §20 (no-L2 ablation 음성), §19 (정규화 천장 프로브), §18 (E7 재검정·Path B), §17 (v26·CLS
 프로브), §16 (v26/v27/v29 폐기), §3 (실험 현황·최종 결정).
@@ -1461,7 +1460,7 @@ smoke finite(tokens 43), 적률 값 정확(exp 왜도~1.8/첨도~7.7, 가우시�
 **비선형·작업적응적 인스턴스 어텐션**으로 모델이 "어떤 세포/컨포머가 라벨을 결정하는가"를 학습
 (§24), ③ Musk 166→512 읽기 브리지(Phase 2) 후 실제 Musk 검증.
 
-## 24. 2026-08-03 — Phase 1 IA-MIL (Instance-Attention MIL) 구현·학습 중
+## 24. 2026-08-03 — Phase 1 IA-MIL (Instance-Attention MIL) — 판정: 음성
 
 **배경**: 사용자가 얕은 MIL 풀링 대신 "조금 더 복잡하고(비선형) 확실한" 방법 요구 — "지금 musk도
 못하는데 ICI를 어떻게 하겠어". 진단: 기존 per-instance 경로가 **얕고 선형**(LayerNorm + Linear 1개 +
@@ -1481,8 +1480,8 @@ Musk(any-positive)·ICI(희귀 반응 세포 아형) 공통 병목.
 | Run | 데이터 | config | 상태 |
 |---|---|---|---|
 | `v24_musklike_easy_mil` (주) | musklike_easy + IA-MIL | `train_v24_musklike_easy_mil.yaml` | ✅ **50 epoch 완료** (best val_ce **0.2462**@39) |
-| `v24_musklike_easy_rare_baseline` (판별) | rare-response(5~15% cell 반응) + no-MIL | `train_v24_musklike_easy_rare_baseline.yaml` | 🟢 **학습 중** (19:08 재시작, epoch ~5/50, best 0.2876) |
-| `v24_musklike_easy_rare_mil` (판별) | rare-response + IA-MIL | `train_v24_musklike_easy_rare_mil.yaml` | ❌ **2회 OOM 실패** — 큐 수정 후 단독 재실행 필요 |
+| `v24_musklike_easy_rare_baseline` (판별) | rare-response(5~15% cell 반응) + no-MIL | `train_v24_musklike_easy_rare_baseline.yaml` | ✅ **50 epoch 완료** (best val_ce 0.2639@48) |
+| `v24_musklike_easy_rare_mil` (판별) | rare-response + IA-MIL | `train_v24_musklike_easy_rare_mil.yaml` | ✅ **50 epoch 완료** (21:25 단독 재실행, best val_ce 0.2616@49) |
 
 - **OOM 실패 ① (17:32)**: 3개 병렬 실행 → mil(91GB) + rare(77GB) 겹침 → rare 2종 exit 1.
 - **OOM 실패 ② (19:10)**: 순차 큐의 `wait_gpu_free`가 **레이스** — `launch_interactive_training.sh`가
@@ -1492,12 +1491,34 @@ Musk(any-positive)·ICI(희귀 반응 세포 아형) 공통 병목.
   추가 — 각 run을 실행한 뒤 **train.py가 실제로 뜰 때까지 폴링(grace 180s) 후 그 학습이 끝날 때까지 블록**.
   기능 검증: mock 학습(2s 스폰 + 6s 실행)에 대해 8s 블록 확인, timeout 경로도 정상. 부가로 run 선택 인자
   지원: `./queue_phase1_rare.sh <run...>` 로 원하는 run만 순차 실행.
-- **다음 Action**: `rare_baseline`(~20:50 완료 예상) 후 `./queue_phase1_rare.sh v24_musklike_easy_rare_mil`
-  로 rare_mil만 단독 실행. mil은 완료됐으니 1,000-ep 합성 평가 + Musk zero-shot 재측정 병행 가능.
+- **순차 큐 재실행 (21:25)**: 큐 버그 수정 후 `./queue_phase1_rare.sh v24_musklike_easy_rare_mil`로
+  rare_mil 단독 재실행 → 23:00 **50 epoch 정상 완료** (수정된 큐가 스폰 대기→완료 블록 수행 확인).
+
+**평가 결과 (2026-08-03, 1,000-episode, best ckpt)**:
+| Run | 합성 AUROC [95% CI] | Log loss | Musk zero-shot AUROC |
+|---|---|---|---|
+| `mil` (주, musklike_easy) | **0.9520** [0.947, 0.957] | 0.2782 | **0.5545** [0.440, 0.672] ⚠️ |
+| `rare_baseline` (판별) | **0.9492** [0.945, 0.954] | 0.2891 | — |
+| `rare_mil` (판별) | **0.9224** [0.917, 0.928] | 0.3549 | — |
+
+- 예측 파일: `predictions/synthetic_{run}_1000ep.pt`, `predictions/musk_v24_musklike_easy_mil.pt`
+
+**판정 — Phase 1 IA-MIL 음성**:
+| 성공 기준 | 결과 | 판정 |
+|---|---|---|
+| ① 주: 합성 ≥0.94 무회귀 | 0.9520 (§22 easy 0.9510 / rawstats 0.9522와 동률) | ✅ |
+| ② 판별: IA-MIL > baseline 유의 | baseline 0.9492 vs mil 0.9224, paired P=1.00 | ❌ **IA-MIL 유의 열위** |
+| ③ (예비) Musk ~0.80 유지 | 0.5545 (vs §22 easy 0.8030) | ❌ **큰 회귀** |
+
+> [!IMPORTANT]
+> **`use_instance_attention_mil` 실효성 없음 → 기본 OFF 유지, v24 확정 baseline 유지.**
+> 합성 musklike_easy에선 무회귀(0.9520)지만, cell-identity 판별(rare)에서 유의 열위(P=1.00)이고
+> 실 Musk zero-shot에서 0.8030→0.5545로 급락. 학습 손실(best 0.2462)과 달리 평가·전이에서 IA-MIL
+> 잔차 채널이 해가 됨. Phase 2(166→512 읽기 브리지)는 **IA-MIL 채널 없이**만 고려(사용자 재확인).
+
+**다음 Action (제안)**: ① IA-MIL 채널 진단(과적합/스케일) 또는 폐기 결정, ② Musk 0.95 로드맵 복귀
+(지렛대 1 centered 표현 유지 — 현재 최고 0.822), ③ Phase 2 읽기 브리지는 IA-MIL 제외로 사용자 확인 후 진행.
 
 **판별 실험 논리**: musklike_easy는 전 cell 반응(separable, 0.951 포화)이라 IA-MIL 이득이 안 보임.
 rare-response(일부 cell만 반응)에서 "어느 cell이 반응하는가"가 중요 → IA-MIL이 baseline을 이기면
-**cell-identity 메커니즘 검증** (ICI 희귀 반응 세포와 동형).
-
-**성공 기준**: ① 주: 합성 val ≥ 0.94 무회귀 + NaN 없음, ② 판별: IA-MIL이 baseline보다 유의 우위,
-③ (예비) Musk 0.80 근처 유지. 통과 시 Phase 2(166→512 읽기 브리지 + IA-MIL) 진행.
+**cell-identity 메커니즘 검증** (ICI 희귀 반응 세포와 동형). → 결과적으로 IA-MIL이 유의 열위(P=1.00).
