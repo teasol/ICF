@@ -61,6 +61,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument(
+        "--preprocess",
+        choices=("bag_view", "raw", "centered_no_l2"),
+        default="bag_view",
+        help="How to map 166-d Musk descriptors into the model input. "
+        "bag_view     = model default (per-bag centering + per-cell L2). "
+        "               NOTE: this DISCARDS the bag mean, which is Musk's most "
+        "               informative signal (ridge ceiling 0.83 -> 0.55). "
+        "raw          = keep raw descriptors; summary = bag mean. Zero-shot "
+        "               config override (bag_centered_representation=False) "
+        "               that preserves the bag-mean signal. "
+        "centered_no_l2 = center only, keep magnitude "
+        "               (bag_centered_l2_normalize=False).",
+    )
     return parser.parse_args()
 
 
@@ -102,6 +116,15 @@ def main() -> None:
 
     config = merge_train_config(args.config.expanduser().resolve())
     config["seed"] = args.seed
+    # Zero-shot preprocessing overrides (no retraining). These are model __init__
+    # params (not in state_dict), so overriding them at inference only changes how
+    # Musk descriptors are mapped into the input; the weights are untouched.
+    if args.preprocess == "raw":
+        config["model"]["bag_centered_representation"] = False
+        config["model"]["global_summary"] = "raw_mean"
+        config["model"]["use_raw_mean_branch"] = True
+    elif args.preprocess == "centered_no_l2":
+        config["model"]["bag_centered_l2_normalize"] = False
     model = build_model(config)
     checkpoint = torch.load(args.checkpoint.expanduser().resolve(), map_location="cpu")
     model.on_load_checkpoint(checkpoint)
