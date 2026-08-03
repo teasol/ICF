@@ -1,0 +1,26 @@
+base_config: train_v24_musklike_easy.yaml
+
+# Mean-token variant (user proposal, 2026-08-03): keep the model's normal
+# centered+L2 bag input (bag_centered_representation=True) and ADD the raw bag
+# mean as an extra structured token.
+#
+# Rationale: feeding raw descriptors directly is OOD (already confirmed worse).
+# But the v24 default _bag_view discards the bag mean, so the model never sees
+# the mean during training -- its weights cannot exploit mean info even where
+# it dominates (real Musk descriptor profiles: ridge ceiling raw 0.83 vs
+# centered 0.55). This config trains the SAME separable musk-like-easy data
+# with an extra L2-normalized raw bag-mean token so the weights LEARN to use it.
+#
+# Re-evaluate after training:
+#   * synthetic musk-like-easy val (must stay near centered model's 0.951)
+#   * real Musk zero-shot (does it beat centered model's 0.822 / raw 0.822?)
+model_overrides:
+  raw_stat_tokens: [mean]
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v24_musklike_easy_mean_token
+
+trainer:
+  max_epochs: 50

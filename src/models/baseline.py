@@ -475,6 +475,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         bag_centered_l2_normalize: bool = True,
         global_summary: str = "centered_spread",
         use_raw_mean_branch: bool = False,
+        raw_stat_tokens: Sequence[str] = (),
         covariance_sketch_dim: int | None = None,
         covariance_mode: str = "covariance",
         covariance_shrinkage: float = 0.0,
@@ -541,6 +542,14 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         self.bag_centered_l2_normalize = bool(bag_centered_l2_normalize)
         self.global_summary = str(global_summary)
         self.use_raw_mean_branch = bool(use_raw_mean_branch)
+        valid_raw_stats = {"mean", "variance", "skewness", "kurtosis"}
+        unknown_stats = set(raw_stat_tokens) - valid_raw_stats
+        if unknown_stats:
+            raise ValueError(
+                f"Unknown raw_stat_tokens: {sorted(unknown_stats)} "
+                f"(valid: {sorted(valid_raw_stats)})."
+            )
+        self.raw_stat_tokens = tuple(raw_stat_tokens)
         self.covariance_sketch_dim = int(covariance_sketch_dim)
         self.covariance_mode = str(covariance_mode)
         self.covariance_shrinkage = float(covariance_shrinkage)
@@ -940,6 +949,48 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         return anchors.to(candidates.dtype)
 
 
+    def _raw_stat_tokens(
+        self, raw: torch.Tensor
+    ) -> dict[str, torch.Tensor]:
+        """Per-feature bag statistics computed from the RAW cells (before the
+        centered _bag_view transform). Each is a [..., 512] tensor keyed by
+        `stat_<name>`.
+
+        * mean: L2-normalized -- the raw bag mean is scale-dependent (Musk
+          descriptors span hundreds), so normalize to the unit sphere to match
+          the per-cell input distribution at inference. Preserves the mean
+          DIRECTION/profile, which is the informative part.
+        * variance: raw per-feature variance. NOTE: overlaps with the existing
+          `global_spread` summary (sqrt(variance)); provided for flexibility
+          but redundant by default.
+        * skewness / kurtosis: standardized 3rd/4th central moments, which are
+          scale-free by construction, so they are passed through raw and carry
+          genuinely new shape information the architecture does not otherwise
+          see (the existing summary/spread/covariance/tails cover 1st/2nd
+          moments and order statistics only).
+        """
+        names = set(self.raw_stat_tokens)
+        out: dict[str, torch.Tensor] = {}
+        if not names:
+            return out
+        mean = raw.mean(dim=-2)
+        centered = raw - raw.mean(dim=-2, keepdim=True)
+        if "mean" in names:
+            out["stat_mean"] = F.normalize(mean.float(), dim=-1).to(raw.dtype)
+        if "variance" in names:
+            out["stat_variance"] = centered.square().mean(dim=-2).to(raw.dtype)
+        if "skewness" in names or "kurtosis" in names:
+            std = torch.sqrt(centered.square().mean(dim=-2) + 1e-6)
+            if "skewness" in names:
+                out["stat_skewness"] = (
+                    (centered**3).mean(dim=-2) / (std**3 + 1e-6)
+                ).to(raw.dtype)
+            if "kurtosis" in names:
+                out["stat_kurtosis"] = (
+                    (centered**4).mean(dim=-2) / (std**4 + 1e-6)
+                ).to(raw.dtype)
+        return out
+
     def _forward_dense(
         self,
         instances: torch.Tensor,
@@ -948,6 +999,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         global_summary: torch.Tensor | None = None,
         covariance_sketch: torch.Tensor | None = None,
         centered_delta: torch.Tensor | None = None,
+        raw_stats: dict[str, torch.Tensor] | None = None,
     ) -> (
         dict[str, torch.Tensor]
         | tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]
@@ -1071,6 +1123,14 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 else global_summary.new_zeros((num_bags, self.input_dim))
             ),
         }
+        if self.raw_stat_tokens:
+            if raw_stats is None:
+                raise ValueError(
+                    "raw_stat_tokens requires precomputed raw_stats "
+                    "(callers must pass _raw_stat_tokens of the raw cells)."
+                )
+            for stat_name in self.raw_stat_tokens:
+                representation[f"stat_{stat_name}"] = raw_stats[f"stat_{stat_name}"]
         if not return_auxiliary:
             return representation
         return representation, {
@@ -1113,6 +1173,10 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         if context_mask.numel() != len(bags) or not torch.any(context_mask):
             raise ValueError("context_mask must identify at least one context bag.")
         anchors = self._context_anchors(bags, context_mask)
+        if self.raw_stat_tokens:
+            raw_stats = self._raw_stat_tokens(torch.stack(raw_bags))
+        else:
+            raw_stats = None
         if isinstance(instances, torch.Tensor):
             result = self._forward_dense(
                 torch.stack(bags),
@@ -1121,6 +1185,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 global_summary=torch.stack(global_summaries),
                 covariance_sketch=torch.stack(covariance_sketches),
                 centered_delta=torch.stack(centered_deltas),
+                raw_stats=raw_stats,
             )
             if return_auxiliary:
                 representation, auxiliary = result
@@ -1264,6 +1329,14 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             ),
             "cls_token": torch.stack(cls_tokens),
         }
+        if self.raw_stat_tokens:
+            per_bag_stats = [
+                self._raw_stat_tokens(bag.unsqueeze(0)) for bag in raw_bags
+            ]
+            for stat_name in self.raw_stat_tokens:
+                representation[f"stat_{stat_name}"] = torch.stack(
+                    [stats[f"stat_{stat_name}"] for stats in per_bag_stats]
+                ).to(centered_deltas[0].dtype)
         if not return_auxiliary:
             return representation
         return representation, {
@@ -1785,6 +1858,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
         typed_bag_num_tail_fractions: int | None = None,
         typed_bag_residual_scale: float = 0.02,
         include_cls_token: bool = False,
+        raw_stat_tokens: Sequence[str] = (),
         num_classes: int = 2,
     ) -> None:
         super().__init__()
@@ -1831,6 +1905,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 "are mutually exclusive."
             )
         self.include_cls_token = bool(include_cls_token)
+        self.raw_stat_tokens = tuple(raw_stat_tokens)
         if self.include_cls_token and typed_bag_preserving_branch:
             raise NotImplementedError(
                 "include_cls_token with typed_bag_preserving_branch is not "
@@ -2545,6 +2620,8 @@ class StructuredPopulationMetaClassifier(nn.Module):
             "covariance_sketch", "slot_covariance_sketch",
             "slot_covariance_reliability", "covariance_matrix", "cls_token",
         }
+        for stat_name in self.raw_stat_tokens:
+            expected_keys.add(f"stat_{stat_name}")
         if set(representation) != expected_keys:
             raise ValueError(f"{name} has invalid structured representation keys.")
         global_summary = representation["global_summary"]
@@ -2593,6 +2670,8 @@ class StructuredPopulationMetaClassifier(nn.Module):
         ]
         if self.include_cls_token:
             parts.append(representation["cls_token"].unsqueeze(1))
+        for stat_name in self.raw_stat_tokens:
+            parts.append(representation[f"stat_{stat_name}"].unsqueeze(1))
         return torch.cat(parts, dim=1)
 
     def _projected_bag_tokens(self, tokens: torch.Tensor) -> torch.Tensor:
@@ -3012,6 +3091,8 @@ class StructuredPopulationMetaClassifier(nn.Module):
         ]
         if self.include_cls_token:
             parts.append(representation["cls_token"].unsqueeze(2))
+        for stat_name in self.raw_stat_tokens:
+            parts.append(representation[f"stat_{stat_name}"].unsqueeze(2))
         return torch.cat(parts, dim=2)
 
     def _class_memories_batched(
@@ -3549,6 +3630,7 @@ class BaseModel(nn.Module):
         bag_centered_l2_normalize: bool = True,
         global_summary: str = "centered_spread",
         use_raw_mean_branch: bool = False,
+        raw_stat_tokens: Sequence[str] = (),
         aggregator_covariance_sketch_dim: int | None = None,
         aggregator_covariance_mode: str = "covariance",
         aggregator_covariance_shrinkage: float = 0.0,
@@ -3600,6 +3682,7 @@ class BaseModel(nn.Module):
             bag_centered_l2_normalize=bag_centered_l2_normalize,
             global_summary=global_summary,
             use_raw_mean_branch=use_raw_mean_branch,
+            raw_stat_tokens=raw_stat_tokens,
             covariance_sketch_dim=aggregator_covariance_sketch_dim,
             covariance_mode=aggregator_covariance_mode,
             covariance_shrinkage=aggregator_covariance_shrinkage,
@@ -3623,6 +3706,7 @@ class BaseModel(nn.Module):
             + 3 * int(aggregator_num_slots)
             + len(tuple(aggregator_tail_fractions))
             + (1 if cls_token_pooling else 0)
+            + len(tuple(raw_stat_tokens))
         )
         self.meta_classifier = StructuredPopulationMetaClassifier(
             token_dim=self.input_dim,
@@ -3656,6 +3740,7 @@ class BaseModel(nn.Module):
             typed_bag_num_tail_fractions=len(tuple(aggregator_tail_fractions)),
             typed_bag_residual_scale=meta_typed_bag_residual_scale,
             include_cls_token=cls_token_pooling,
+            raw_stat_tokens=raw_stat_tokens,
             num_classes=self.num_classes,
         )
         # v26 = cls_token_pooling (CLS cross-attention over raw cells, see
@@ -3718,6 +3803,10 @@ class BaseModel(nn.Module):
         flat_x = x.reshape(episodes * num_bags, num_instances, input_dim)
         classification_flat, global_summary, centered_delta = self.aggregator._bag_view(flat_x)
         covariance_sketch = self.aggregator._covariance_sketch(centered_delta)
+        if self.aggregator.raw_stat_tokens:
+            raw_stats = self.aggregator._raw_stat_tokens(flat_x)
+        else:
+            raw_stats = None
         classification_x = classification_flat.reshape_as(x)
         anchors = torch.stack(
             [
@@ -3739,6 +3828,7 @@ class BaseModel(nn.Module):
             global_summary=global_summary,
             covariance_sketch=covariance_sketch,
             centered_delta=centered_delta,
+            raw_stats=raw_stats,
         )
         representation = {
             name: tokens.reshape(episodes, num_bags, *tokens.shape[1:])

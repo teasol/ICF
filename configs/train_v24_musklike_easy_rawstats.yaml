@@ -1,0 +1,30 @@
+base_config: train_v24_musklike_easy.yaml
+
+# Raw higher-order bag-statistics variant (user proposal, 2026-08-03): keep
+# the model's normal centered+L2 bag input AND add raw bag statistics as extra
+# structured tokens.
+#
+# Overlap check (code): per-feature VARIANCE already appears as the existing
+# `global_spread` summary (= sqrt(variance)), so it is redundant and skipped.
+# SKEWNESS (3rd central moment) and KURTOSIS (4th) are genuinely new -- the
+# architecture only has 1st/2nd moments (mean/spread/covariance) plus tail /
+# rare order statistics, no shape (3rd/4th moment) signal.
+#
+# Normalization:
+#   * mean       : L2-normalized (scale-dependent; keeps synthetic <-> Musk
+#                  comparable, preserves the informative direction).
+#   * skew/kurt  : standardized moment ratios = scale-free, passed through raw.
+#
+# Re-evaluate after training:
+#   * synthetic musk-like-easy val (must stay near centered model's 0.951)
+#   * real Musk zero-shot (does it beat centered 0.822 / raw 0.822?)
+model_overrides:
+  raw_stat_tokens: [mean, skewness, kurtosis]
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v24_musklike_easy_rawstats
+
+trainer:
+  max_epochs: 50
