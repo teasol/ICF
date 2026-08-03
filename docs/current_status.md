@@ -1,16 +1,22 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-04` (IA-MIL 폐기·문서 정리 §25 — 최신; 지렛대 1~3 현황)
-**Status**: **v24가 확정 baseline (변경 없음)**. **Musk 실데이터 0.95 목표** 진행 중 — 현재 최고는
-**지렛대 1(centered 입력 표현, musklike-easy 학습) Musk zero-shot AUROC 0.822**. 지렛대 2(raw
-bag-stat token, §23)와 **지렛대 3(Phase 1 IA-MIL, §24) 모두 음성 판정 → IA-MIL은 2026-08-04 폐기**
-(configs/scripts 아카이빙, §25). `use_instance_attention_mil` 기본 OFF 유지, v24 확정 baseline 유지.
-열린 과제: ① Phase 2(166→512 읽기 브리지, IA-MIL 제외) 진행 여부, ② ICI 잠금 (v24용 ICI config 필요
-+ 사용자 재확인), ③ Musk 0.95 달성 전략. 이전 결과: v26 0.5908(v24와 동률, 미채택), no-L2 음성
-(0.5925), v25 폐기.
-**Read first if you are picking this up**: §25 (IA-MIL 폐기·정리 — 최신), §3 (실험 현황·최종 결정),
-§5 (실험 전략), §7 (평가 프로토콜). 해결·폐기된 세션/실험 기록(§11~§24, §22 musk-like easy 가설 /
-§23 raw-stat 음성 / §24 IA-MIL 음성 포함)은 [`history/archive.md`](history/archive.md) 참고.
+**Last updated**: `2026-08-04` (**§26 Musk 전이 재진단 — 최신**: P1/P2 기각 + v30(CFMT) 제안)
+**Status**: **v24가 확정 baseline (변경 없음)**. **§26에서 Musk 로드맵을 재설정**했습니다 —
+`musk095_architecture_proposal.md`의 **P1/P2는 기각, P3는 연기**. 진짜 병목은 "입력이 bag 평균을
+버린다"가 아니라 **per-bag centering이 작은 bag(Musk median 12, n≤4가 28%)을 rank 결핍으로
+소멸시키는 것**입니다: 소형 bag에서 uncentered 선형 천장 **0.967~0.975** vs 현 표현 **0.625**, 그리고
+학습된 4개 체크포인트 전부 소형 bag에서 **무작위 이하**(0.325~0.500). **목표를 0.95 → ~0.90으로
+하향** 권고(선형 천장 0.911~0.921). 현재 최고는 여전히 **Musk zero-shot AUROC 0.822**
+(musklike-easy + `--preprocess raw`). 지렛대 2(§23)·3(§24 IA-MIL)은 음성이나 **§24 게이트는 무효**로
+판정(생성기에 any-positive 과제 부재 + IA-MIL 크기 편향 +0.327).
+열린 과제: ① **ICI 블로킹 버그**(cell-축 zero-padding 미마스킹, §26) 수정 여부, ② B2→B1 순서 승인 및
+v30 승격, ③ 목표 0.90 하향 동의, ④ P1 완전 보류 여부. 이전 결과: v26 0.5908(동률, 미채택), no-L2
+음성(0.5925), v25 폐기.
+**Read first if you are picking this up**: **§26 (Musk 재진단·v30 제안 — 최신)** 및
+[`history/musk_transfer_diagnosis_v30_proposal.md`](history/musk_transfer_diagnosis_v30_proposal.md),
+그다음 §25 (IA-MIL 폐기·정리), §3 (실험 현황·최종 결정), §5 (실험 전략), §7 (평가 프로토콜).
+해결·폐기된 세션/실험 기록(§11~§24, §22 musk-like easy 가설 / §23 raw-stat 음성 / §24 IA-MIL 음성
+포함)은 [`history/archive.md`](history/archive.md) 참고.
 **Branches**: `main` = `v24` 확정 (현재 SSOT) / 참고용 `v22`·`v24`·`v19`·`codex/v23-bag-mean` / v25는 태그 **`v25-typed-bag-final`**로 보존 (브랜치 삭제) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Version**: `24` 확정 baseline (변경 없음). `26`(CLS-token pooling)은 2026-08-02 구현,
@@ -794,10 +800,91 @@ AUROC 0.822** — `checkpoints/20260803_042852/v24_musklike_easy/` (§22, 아카
 bag-stat)와 지렛대 3(IA-MIL) 모두 음성으로 종료.
 
 **열린 과제 / 다음 Action (사용자 판단)**:
-1. **Phase 2**: 166→512 읽기 브리지 (IA-MIL 제외) 진행 여부.
+1. **Phase 2**: 166→512 읽기 브리지 (IA-MIL 제외) 진행 여부 → **§26에서 보류 권고** (근거 부재).
 2. **ICI**: 여전히 잠금 — v24/v26용 ICI config 작성 + 실행은 사용자 재확인 필요.
+   **추가로 §26에서 ICI 블로킹 버그 발견** (cell-축 zero-padding 미마스킹).
 3. **Musk 0.95**: 아키텍처 개선 proposal 작성 완료 — [`history/musk095_architecture_proposal.md`](history/musk095_architecture_proposal.md):
    P0(5-seed 앙상블, 즉시) → P2(bag-mean 보존 채널, 합성 선검증) → P1(166→512 읽기 브리지) → P3(단순
    인스턴스 풀링, 사전 게이트). 핵심 근거: `_bag_view` center+L2가 Musk 최고 신호(bag-mean, ridge 0.829)
    를 삭제(0.554) + zero-padding OOD 브리지.
+   → **2026-08-04 §26에서 P1/P2 기각, P3 연기. 아래 §26 참조.**
+
+---
+
+## 26. 2026-08-04 — Musk 전이 재진단: P1/P2 기각 + v30(CFMT) 제안
+
+**상태**: 진단 완료(학습 없음, 전부 재현 가능) / 제안 미구현 — 사용자 판단 대기
+**문서**: [`history/musk_transfer_diagnosis_v30_proposal.md`](history/musk_transfer_diagnosis_v30_proposal.md)
+**신규 스크립트**: `scripts/diagnose_musk_cardinality.py` (체크포인트·학습 불필요)
+
+**핵심 결론**: §25의 proposal은 "입력 표현이 병목"이라는 **방향은 맞지만 메커니즘·수정 방향·검증
+경로가 모두 틀렸습니다.** 진짜 병목은 **per-bag centering이 작은 bag을 rank 결핍으로 소멸시키는 것**
+이며, 수정은 "raw bag 평균 채널 추가"(P2)가 아니라 **"centering 제거 + per-cell L2 유지"** 입니다.
+
+**측정 1 — Musk bag은 작다**: 102 bag, instances/bag **median 12** (min 1, p25 4, max 1044).
+**n≤4가 29개(28%), n≤2가 12개, n=1이 2개.** 반면 학습 분포는 `num_cells: [500,1000]`이고 **에피소드
+내 모든 bag이 동일 크기**. bag 크기 단독 AUROC 0.549 [0.436,0.665] → 라벨 누출 아님.
+
+**측정 2 — 학습된 4개 체크포인트 전부가 소형 bag에서 무작위 이하**:
+
+| 체크포인트 | ALL | **n≤4** | 5–10 | 11–34 | n>34 | pearson(prob, log n) |
+|---|---|---|---|---|---|---|
+| v24 Medium | 0.777 | **0.383** | 0.858 | 0.879 | 0.690 | +0.078 |
+| musklike-easy (현 최고) | 0.803 | **0.475** | 0.825 | 0.988 | 0.667 | +0.012 |
+| rawstats (§23 음성) | 0.783 | **0.500** | 0.817 | 0.958 | 0.556 | +0.032 |
+| IA-MIL (§24 음성) | 0.555 | **0.325** | 0.633 | 0.573 | 0.357 | **+0.327** |
+
+**측정 3 — Musk LOO ridge 천장 (λ 쓸기 + CI): 원 proposal의 순서가 역전**
+
+| 정규화 | 전체 | **n≤4** | n>4 |
+|---|---|---|---|
+| **center+L2 (현 모델 입력)** | 0.746 | **0.625** [0.21,0.96] | 0.765 |
+| center only | 0.763 | **0.475** [0.09,0.85] | 0.769 |
+| raw | 0.880 | **0.975** [0.88,1.00] | 0.881 |
+| **L2 only (centering 제거)** | **0.911** | 0.892 [0.73,1.00] | 0.911 |
+| **pool-z + L2** | **0.921** | **0.967** [0.87,1.00] | 0.913 |
+
+> [!IMPORTANT]
+> 소형 bag에서 **정보는 존재하지만(uncentered 0.967~0.975) centering이 파괴합니다(0.475~0.625).**
+> 모델 실측(0.475)은 그 구간 표현 천장(0.625)보다도 낮고, **표현을 uncentered로 바꾸면 천장이
+> 0.625 → 0.967~0.975로 +0.35 오릅니다.** (소형 구간 CI는 매우 넓음 — 양성 bag 5개.)
+> 또한 λ 4개 **전부**에서 **L2-only(0.911) > raw(0.880)** — 원 proposal의 "raw 0.829 >
+> L2 0.742"와 **반대**이며, 그 수치는 커밋된 스크립트가 없어 재현 불가였습니다.
+> ⇒ **per-cell L2는 해롭지 않고 이롭습니다. 범인은 centering 단독.** P2의 전제가 무너집니다.
+
+**측정 4 — P2는 합성에서 검증 자체가 불가능**: `configs/data/medium.yaml:61 normalize_output: true` →
+`synthetic_data.py:543 F.normalize(x, dim=-1)`로 **모든 합성 세포가 단위 노름**(musklike-easy도 상속).
+스케일/bag-평균 신호가 **구조적으로 부재** → 게이트 "합성 무회귀 ≥0.94"는 채널이 무시당해도 통과.
+§23 raw-stat token의 실패 메커니즘과 동일.
+
+**측정 5 (B0, 신규 실행) — 합성 소형 bag 천장** (`num_cells: [2,16]`, 300 ep):
+centered 0.7013 / current 0.6470 / **raw 0.6755** (§19 대형 bag: centered 0.6846 / current 0.6363 /
+raw 0.5748). → cardinality가 합성-Musk 선호 충돌의 주원인임은 확인되나 완전 역전은 아님.
+**⇒ `l2_only` 단독 적용은 현재 대형 bag 분포에서 합성 천장을 −0.062 낮춰 기각될 것. 반드시
+cardinality 샘플링을 먼저 넣어야 함(순서 B2 → B1).**
+
+**측정 6 — §24 IA-MIL 기각은 무효한 게이트**: 생성기는 라벨을 `torch.randint`로 **데이터 이전에**
+뽑으므로 **any-positive 과제가 아예 없음**. "rare 5~15%" 실측은 composition/combined(40% 에피소드)
+양성 **~75~91% 반응(541~591 cells)**, state/cov(60%)는 **두 클래스 반응 세포 수가 동일**(라벨은
+shift 부호). + IA-MIL은 **크기 편향 도입**(+0.327). → 인스턴스 수준 기여가 무용하다는 증거가 아님.
+
+**신규 발견 결함 3건**:
+1. **ICI 블로킹 버그**: `src/datasets/base_data.py`가 cell 축을 `target_cells`(1000)까지 **마스크 없이
+   zero-padding** → 0 행이 `_bag_view`의 `bag.mean(dim=-2)`·`global_spread`를 오염. **ICI 잠금 해제 전
+   필수 수정.**
+2. **문서-코드 모순**: `current_architecture.md` 기술 ①은 `(x−μ)/(S+1e-5)`라 명시하나 코드는
+   **per-cell L2**로 나눔. 기술 ②의 `d=‖x̃‖₂`는 코드에서 **항등적 1.0**. (문서의 그 공식 `zscore`는
+   §19에서 최하위 0.5054로 측정된 변형.)
+3. **아카이브 config 로드 불가**: `configs/archive/ia_mil/train_v24_musklike_easy_{rare_baseline,rare_mil}.yaml`
+   의 `base_config`가 상대 경로로 해석되어 `FileNotFoundError` — 커밋 `69577a5`의 회귀, §24 재현 불가.
+
+**제안 (v30 CFMT)**: S0b 정확성 복구 → **S1 B2 cardinality-faithful 샘플링**(bag별 log-uniform[1,1024],
+아키텍처 무변경) → **S2 B1 `l2_only` 표현**(B2 위에서만) → S3 2차 통계 shrinkage(1차 적률에는 금지 —
+평균 shrinkage는 소형 bag에서 0.967→0.833으로 해로움) → S4 생성기 확장(스케일 + any-positive) →
+S5 P2·MIL 재검토 → S6 ICI.
+**목표 재정의: Musk 0.95 → ~0.90** (선형 천장 0.911~0.921; 0.95를 지지하는 신호원 없음) **+ n≤4 ≥0.80
+층화 보고 필수.**
+
+**다음 Action (사용자 판단)**: ① ICI 패딩 버그 즉시 수정 여부, ② B2→B1 순서 승인 및 v30 승격 여부,
+③ 목표 0.90 하향 동의 여부, ④ P1 완전 보류 여부. 상세: 제안 문서 §5.
 
