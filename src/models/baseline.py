@@ -1174,7 +1174,20 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             raise ValueError("context_mask must identify at least one context bag.")
         anchors = self._context_anchors(bags, context_mask)
         if self.raw_stat_tokens:
-            raw_stats = self._raw_stat_tokens(torch.stack(raw_bags))
+            if isinstance(instances, torch.Tensor):
+                # Dense path: all bags share one shape, stack is safe.
+                raw_stats = self._raw_stat_tokens(torch.stack(raw_bags))
+            else:
+                # List path: bags can have different instance counts (e.g. real
+                # Musk). _raw_stat_tokens on a 2D bag returns [512]; stack over
+                # bags -> [num_bags, 512], matching the per-bag token shape.
+                per_bag_stats = [
+                    self._raw_stat_tokens(bag) for bag in raw_bags
+                ]
+                raw_stats = {
+                    name: torch.stack([stats[name] for stats in per_bag_stats])
+                    for name in per_bag_stats[0]
+                }
         else:
             raw_stats = None
         if isinstance(instances, torch.Tensor):
@@ -1330,13 +1343,10 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             "cls_token": torch.stack(cls_tokens),
         }
         if self.raw_stat_tokens:
-            per_bag_stats = [
-                self._raw_stat_tokens(bag.unsqueeze(0)) for bag in raw_bags
-            ]
             for stat_name in self.raw_stat_tokens:
-                representation[f"stat_{stat_name}"] = torch.stack(
-                    [stats[f"stat_{stat_name}"] for stats in per_bag_stats]
-                ).to(centered_deltas[0].dtype)
+                representation[f"stat_{stat_name}"] = raw_stats[
+                    f"stat_{stat_name}"
+                ].to(centered_deltas[0].dtype)
         if not return_auxiliary:
             return representation
         return representation, {
