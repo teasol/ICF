@@ -1454,6 +1454,39 @@ smoke finite(tokens 43), 적률 값 정확(exp 왜도~1.8/첨도~7.7, 가우시�
 > Musk에 유용하지 않게 작동. → **학습에서 raw 통계를 추가하는 방향은 Musk 0.95에 도움이 안 됨.**
 > Musk 기준은 centered musklike-easy(0.803, `--preprocess raw`면 0.822)로 유지.
 
-**다음 Action**: ① (종료) raw-stat token 지렛대 — 음성, ② **MIL max/softmax 풀링(천장 ~0.90)** 지렛대로
-진행 — Musk의 "아무 인스턴스나 양성" 구조를 활용하는 가장 유망한 방향, ③ 필요 시 166→512 학습
-projection 또는 Musk LOO fine-tuning(단 zero-shot 포기).
+**다음 Action**: ① (종료) raw-stat token 지렛대 — 음성, ② (진행) **Phase 1 IA-MIL** — 얕은 풀링 대신
+**비선형·작업적응적 인스턴스 어텐션**으로 모델이 "어떤 세포/컨포머가 라벨을 결정하는가"를 학습
+(§24), ③ Musk 166→512 읽기 브리지(Phase 2) 후 실제 Musk 검증.
+
+## 24. 2026-08-03 — Phase 1 IA-MIL (Instance-Attention MIL) 구현·학습 중
+
+**배경**: 사용자가 얕은 MIL 풀링 대신 "조금 더 복잡하고(비선형) 확실한" 방법 요구 — "지금 musk도
+못하는데 ICI를 어떻게 하겠어". 진단: 기존 per-instance 경로가 **얕고 선형**(LayerNorm + Linear 1개 +
+cosine + 고정 top-k, 보조 채널). 모델이 "어떤 인스턴스가 결정적인가"를 배우는 메커니즘 부재 =
+Musk(any-positive)·ICI(희귀 반응 세포 아형) 공통 병목.
+
+**구현** (`use_instance_attention_mil`, 기본 OFF — 완전 호환, 커밋 `e0620ac`):
+- `mil_instance_encoder`: LayerNorm + 2층 MLP → 비선형 인스턴스 임베딩
+- `mil_relevance_mlp`: MLP(h_i, 클래스 메모리 맥락) → **작업적응적** 관련도 (cosine 아님)
+- 어텐션 soft-pool(Σa_ic·h_i) + **max-attention 인스턴스**(any-positive 편향) → `mil_score_head`
+- **잔차 채널**로 추가(covariance/typed_bag와 동일 패턴, fusion_scorer 불변)
+- batched(4D 학습) + list(가변 길이, Musk/ICI) 양쪽 경로
+- 검증: batched/list/variable-length forward+backward finite, MIL 그라디언트 정상, 기본 config
+  불변, unittest 153/154(기존 learnability_d20 결함 1건 무관)
+
+**학습 3종 (병렬 → OOM → 순차 큐)**:
+| Run | 데이터 | config | 상태 |
+|---|---|---|---|
+| `v24_musklike_easy_mil` (주) | musklike_easy + IA-MIL | `train_v24_musklike_easy_mil.yaml` | **학습 중** (PID 1372761) |
+| `v24_musklike_easy_rare_baseline` (판별) | rare-response(5~15% cell 반응) + no-MIL | `train_v24_musklike_easy_rare_baseline.yaml` | 대기 |
+| `v24_musklike_easy_rare_mil` (판별) | rare-response + IA-MIL | `train_v24_musklike_easy_rare_mil.yaml` | 대기 |
+
+- **OOM**: 3개 병렬 시 GPU 183GB 초과(2개가 이미 ~168GB, 3번째 CUDA OOM) → **순차 실행**.
+  `scripts/queue_phase1_rare.sh`가 주 실험 종료 후 판별 2종을 순차 실행 (커밋 `f3158cd`).
+
+**판별 실험 논리**: musklike_easy는 전 cell 반응(separable, 0.951 포화)이라 IA-MIL 이득이 안 보임.
+rare-response(일부 cell만 반응)에서 "어느 cell이 반응하는가"가 중요 → IA-MIL이 baseline을 이기면
+**cell-identity 메커니즘 검증** (ICI 희귀 반응 세포와 동형).
+
+**성공 기준**: ① 주: 합성 val ≥ 0.94 무회귀 + NaN 없음, ② 판별: IA-MIL이 baseline보다 유의 우위,
+③ (예비) Musk 0.80 근처 유지. 통과 시 Phase 2(166→512 읽기 브리지 + IA-MIL) 진행.
