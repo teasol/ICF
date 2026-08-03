@@ -36,6 +36,8 @@
 - [`history/architecture_v23_candidates.md`](history/architecture_v23_candidates.md): v23/v24 bag-collapse 후보 설계 및 T5-A/B/C 제안. **2026-08-01 v24 확정 결정과 T5-A 미해결 사유가 문서 상단에 기록됨**
 - [`history/medium_b200_baseline.md`](history/medium_b200_baseline.md): B200 medium baseline
 - [`history/synthetic_data_and_tasks.md`](history/synthetic_data_and_tasks.md): synthetic generator와 task 정의
+- [`history/archive.md`](history/archive.md): **running archive** — `current_status.md`에서 해결·폐기되어 이관된 섹션 (v22 결정, 7-31~8-02 세션 핸드오프, v25/v26/v27/v29, §22 musk-like easy 가설, §23 raw-stat 음성, §24 IA-MIL 음성 등)
+- [`history/architecture_v26_proposal_ec_moe_rejected.md`](history/architecture_v26_proposal_ec_moe_rejected.md) / [`architecture_v27_proposal_ac_icar_rejected.md`](history/architecture_v27_proposal_ac_icar_rejected.md) / [`architecture_v29_proposal_sp_sat_rejected.md`](history/architecture_v29_proposal_sp_sat_rejected.md): 미구현 폐기된 설계안 (2026-08-02)
 
 ---
 
@@ -44,6 +46,8 @@
 - **Living 문서 유지**: `docs/` 최상위 루트에는 오직 5개의 Living 문서만 유지합니다.
 - **Git 커밋 동기화**: 세션 핸드오프 시 작업을 남김없이 커밋하고 커밋 내역/diff를 `agent_handoff.md` 및 `current_status.md`에 반영합니다.
 - **아카이빙 규칙**: 특정 버전 딥다이브 보고서나 계획 문서는 완료 시 즉시 `docs/history/`로 이관하여 `docs/` 루트를 단순하고 가독성 높게 유지합니다.
-- **Config 루트 관리**: `configs/` 루트에는 확정된 v24 entry point(`train_v24_medium_bag_proj_residual.yaml`)와, ICI 파이프라인이 아직 참조하는 v22 entry point(`train_v22_medium`, `train_v22_hard_realworld`, `train_v22_ici_finetune`, `train_v22_ici_scratch` 등)를 유지합니다. 폐기된 v23/v24 candidate(`train_v23_medium_bag_mean`, `train_v24_medium_bag_proj`, `train_v24_medium_bag_proj_bottleneck`)는 `configs/archive/v23_v24_candidates/`로, 구버전(v18~v21)은 `configs/archive/`로 관리합니다. ICI의 fold/seed는 config가 아니라 `--cv`/`--seed`로 주입하므로 fold별 config를 만들지 않습니다.
+- **Config 루트 관리**: `configs/` 루트에는 확정된 v24 entry point(`train_v24_medium_bag_proj_residual.yaml`)와,
+  ICI 파이프라인이 아직 참조하는 v22 entry point(`train_v22_medium`, `train_v22_hard_realworld`, `train_v22_ici_finetune`, `train_v22_ici_scratch` 등),
+  Musk 0.95 지렛대 1 기준(`train_v24_musklike_easy.yaml`)을 유지합니다. 폐기된 v23/v24 candidate(`train_v23_medium_bag_mean`, `train_v24_medium_bag_proj`, `train_v24_medium_bag_proj_bottleneck`)는 `configs/archive/v23_v24_candidates/`로, 구버전(v18~v21)은 `configs/archive/`로, IA-MIL 3종은 `configs/archive/ia_mil/`로, 닫힌 musklike 지렛대(rawstats/mean_token)는 `configs/archive/musklike_easy_levers/`로 관리합니다. ICI의 fold/seed는 config가 아니라 `--cv`/`--seed`로 주입하므로 fold별 config를 만들지 않습니다.
 - **단일 출처화**: 동일한 수치나 진행 상태를 중복해 기록하지 않으며, 상태는 `current_status.md`에만 기록합니다.
 - **자율 연속 실행과 추적성**: `current_status.md`에 다음 Action과 판정 기준이 명확하면 재확인 없이 실행합니다. 각 논리 단위의 결과·명령·로그/산출물 경로·판단·후속 Action을 SSOT에 기록하고 Git 커밋하여 다른 작업공간이 즉시 이어받을 수 있게 합니다.
