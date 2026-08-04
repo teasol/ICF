@@ -206,6 +206,77 @@ def report_decompose(
             print(f"    {target:.3f} -> {projected:.3f}")
 
 
+def report_paired(
+    ids: list[str],
+    sizes: np.ndarray,
+    prediction_dir: Path,
+    baseline_name: str,
+    candidate_name: str,
+    samples: int,
+    bound: int,
+) -> None:
+    """Paired bag-level bootstrap of AUROC difference.
+
+    `scripts/compare_predictions.py` cannot be used here: it expects the synthetic
+    `validation_aggregate` payload, whereas Musk predictions are per-bag. Pairing
+    matters because both models score the SAME 102 bags -- comparing two independent
+    CIs (which overlap heavily at n=102) understates the evidence, while a paired
+    resample cancels the shared bag-difficulty variance.
+    """
+    size_of = dict(zip(ids, sizes))
+    loaded = {}
+    for name in (baseline_name, candidate_name):
+        payload = torch.load(prediction_dir / name, map_location="cpu", weights_only=False)
+        order = {bag: index for index, bag in enumerate(payload["bag_id"])}
+        loaded[name] = (payload, order)
+
+    # Align on bag id; both files cover the same 102 bags but not necessarily in order.
+    base_payload, base_order = loaded[baseline_name]
+    cand_payload, cand_order = loaded[candidate_name]
+    shared = [bag for bag in base_payload["bag_id"] if bag in cand_order]
+    labels = np.asarray(
+        [int(base_payload["label"][base_order[bag]]) for bag in shared]
+    )
+    base = np.asarray(
+        [float(base_payload["probability"][base_order[bag]]) for bag in shared]
+    )
+    cand = np.asarray(
+        [float(cand_payload["probability"][cand_order[bag]]) for bag in shared]
+    )
+    n = np.asarray([size_of[bag] for bag in shared])
+
+    print(f"== paired bootstrap: {candidate_name} vs {baseline_name} ==")
+    print(f"  {len(shared)} shared bags, {samples} paired resamples\n")
+    print(f"  {'stratum':>14s} {'bags':>5s} {'baseline':>9s} {'candidate':>10s} "
+          f"{'delta':>8s} {'95% CI of delta':>20s} {'P(cand>base)':>13s}")
+    strata = (
+        ("ALL", np.ones(len(shared), dtype=bool)),
+        (f"n<={bound}", n <= bound),
+        (f"n>{bound}", n > bound),
+    )
+    generator = np.random.default_rng(0)
+    for label, mask in strata:
+        y, b, c = labels[mask], base[mask], cand[mask]
+        if y.size < 6 or len(np.unique(y)) < 2:
+            print(f"  {label:>14s} {int(mask.sum()):5d} {'n/a':>9s}")
+            continue
+        positive = np.where(y == 1)[0]
+        negative = np.where(y == 0)[0]
+        deltas = np.empty(samples)
+        for index in range(samples):
+            pick = np.concatenate([
+                generator.choice(positive, positive.size, True),
+                generator.choice(negative, negative.size, True),
+            ])
+            deltas[index] = auroc(y[pick], c[pick]) - auroc(y[pick], b[pick])
+        low, high = np.percentile(deltas, [2.5, 97.5])
+        print(
+            f"  {label:>14s} {int(mask.sum()):5d} {auroc(y, b):9.3f} {auroc(y, c):10.3f} "
+            f"{auroc(y, c) - auroc(y, b):+8.3f} {f'[{low:+.3f}, {high:+.3f}]':>20s} "
+            f"{float(np.mean(deltas > 0)):13.3f}"
+        )
+
+
 def bag_statistics(bag: np.ndarray, mode: str, mean: np.ndarray, std: np.ndarray) -> np.ndarray:
     def unit(matrix: np.ndarray) -> np.ndarray:
         return matrix / np.maximum(np.linalg.norm(matrix, axis=1, keepdims=True), 1e-6)
@@ -340,10 +411,15 @@ def main() -> None:
     )
     parser.add_argument(
         "--report",
-        choices=("all", "cardinality", "stratified", "decompose", "ceiling"),
+        choices=("all", "cardinality", "stratified", "decompose", "ceiling", "paired"),
         default="all",
     )
     parser.add_argument("--reference", default="musk_v24_musklike_easy.pt")
+    parser.add_argument(
+        "--candidate",
+        default=None,
+        help="Prediction file to compare against --reference in the 'paired' report.",
+    )
     parser.add_argument("--small-bound", type=int, default=4)
     parser.add_argument("--bootstrap", type=int, default=2000)
     parser.add_argument("--penalties", type=float, nargs="+", default=[1.0, 10.0, 100.0, 1000.0])
@@ -373,6 +449,14 @@ def main() -> None:
     if args.report in ("all", "decompose"):
         report_decompose(ids, sizes, args.predictions, args.reference, args.small_bound)
         print()
+    if args.report == "paired":
+        if not args.candidate:
+            parser.error("--report paired requires --candidate")
+        report_paired(
+            ids, sizes, args.predictions, args.reference, args.candidate,
+            args.bootstrap, args.small_bound,
+        )
+        return
     if args.report in ("all", "ceiling"):
         report_ceiling(
             bags,
