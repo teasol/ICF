@@ -170,11 +170,11 @@ class SyntheticManifoldGenerator:
             response_state_effect_scale,
             positive=False,
         )
-        if len(response_task_probabilities) not in (3, 4, 5):
+        if len(response_task_probabilities) not in (3, 4, 5, 6):
             raise ValueError(
                 "response_task_probabilities must contain weights for "
                 "composition-only, state-only, covariance-only, interaction, "
-                "and combined tasks. Legacy three/four-value weights are also "
+                "combined, and any_positive_sparse tasks. Legacy weights are also "
                 "accepted."
             )
         if len(response_task_probabilities) == 3:
@@ -187,6 +187,7 @@ class SyntheticManifoldGenerator:
                 0.0,
                 0.0,
                 combined_weight,
+                0.0,
             )
         elif len(response_task_probabilities) == 4:
             composition_weight, state_weight, covariance_weight, combined_weight = (
@@ -198,7 +199,25 @@ class SyntheticManifoldGenerator:
                 covariance_weight,
                 0.0,
                 combined_weight,
+                0.0,
             )
+        elif len(response_task_probabilities) == 5:
+            (
+                composition_weight,
+                state_weight,
+                covariance_weight,
+                interaction_weight,
+                combined_weight,
+            ) = response_task_probabilities
+            response_task_probabilities = (
+                composition_weight,
+                state_weight,
+                covariance_weight,
+                interaction_weight,
+                combined_weight,
+                0.0,
+            )
+
         if any(weight < 0 for weight in response_task_probabilities):
             raise ValueError("response_task_probabilities cannot be negative.")
         response_task_weight_sum = float(sum(response_task_probabilities))

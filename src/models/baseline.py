@@ -471,6 +471,8 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         slot_rare_fraction: float = 0.05,
         tail_fractions: Sequence[float] = (0.01, 0.05, 0.15),
         absolute_tail_ks: Sequence[int] = (),
+        ccts_lambdas: Sequence[float] = (),
+        ccts_tau: float = 0.5,
         min_tail_instances: int = 1,
         bag_centered_representation: bool = True,
         bag_centered_l2_normalize: bool = True,
@@ -484,6 +486,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         include_cls_token: bool = False,
         cls_token_heads: int = 4,
     ) -> None:
+
         # Deliberately initialize nn.Module directly: anchor construction is
         # inherited, while the v13 compressed projections are not retained.
         nn.Module.__init__(self)
@@ -531,6 +534,12 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         self.slot_rare_fraction = float(slot_rare_fraction)
         self.tail_fractions = fractions
         self.absolute_tail_ks = abs_ks
+        self.ccts_lambdas = tuple(float(lamb) for lamb in ccts_lambdas)
+        self.ccts_tau = float(ccts_tau)
+        if self.ccts_lambdas:
+            self.ccts_score_head = nn.Linear(self.input_dim, 1)
+            self.ccts_metadata_projection = nn.Linear(5, self.input_dim)
+
 
         valid_bag_representations = {"legacy", "poolz", "poolz_l2"}
         if bag_representation not in valid_bag_representations:
@@ -1200,6 +1209,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             with torch.autocast(device_type=instances.device.type, enabled=False):
                 encoded_tail = self.shared_tail_encoder(deviation.float())
                 lse_weights = torch.softmax(encoded_tail * 2.0, dim=1)
+                tail_tokens.append((lse_weights * encoded_tail).sum(dim=1))
             selected_counts.append(count)
 
         for abs_k in self.absolute_tail_ks:
@@ -1218,6 +1228,39 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 lse_weights = torch.softmax(encoded_tail * 2.0, dim=1)
                 tail_tokens.append((lse_weights * encoded_tail).sum(dim=1))
             selected_counts.append(count)
+
+        if self.ccts_lambdas:
+            batch_index = torch.arange(num_bags, device=instances.device)[:, None]
+            instance_anchors = expanded_anchors[batch_index, nearest_slot]
+            all_deviations = instances - instance_anchors
+            with torch.autocast(device_type=instances.device.type, enabled=False):
+                all_encoded = self.shared_tail_encoder(all_deviations.float())
+                raw_score = novelty + torch.sigmoid(self.ccts_score_head(all_encoded).squeeze(-1))
+                sorted_scores = raw_score.detach().flatten().sort().values
+                ranks = torch.searchsorted(sorted_scores, raw_score.flatten()).reshape(raw_score.shape)
+                soft_p = (1.0 + (sorted_scores.numel() - ranks).float()) / (1.0 + float(sorted_scores.numel()))
+                soft_p = soft_p.clamp(1e-6, 1.0)
+                e_b = -torch.log(soft_p) - math.log(max(1, num_instances))
+
+
+                for lamb in self.ccts_lambdas:
+                    gate = torch.sigmoid((math.log(lamb) - torch.log(float(num_instances) * soft_p + 1e-6)) / self.ccts_tau)
+                    gate_weight = gate.unsqueeze(-1)
+                    pooled_tail = (gate_weight * all_encoded).sum(dim=1) / (gate_weight.sum(dim=1).clamp_min(1e-6))
+                    meta = torch.stack(
+                        (
+                            torch.log1p(gate.sum(dim=1)),
+                            e_b.max(dim=1).values,
+                            gate.sum(dim=1) / float(num_instances),
+                            torch.full((num_bags,), math.log(float(num_instances)), device=instances.device),
+                            torch.full((num_bags,), math.log1p(float(sorted_scores.numel())), device=instances.device),
+
+                        ),
+                        dim=-1,
+                    )
+                    ccts_token = pooled_tail + self.ccts_metadata_projection(meta)
+                    tail_tokens.append(ccts_token.to(instances.dtype))
+
 
 
 
@@ -3889,6 +3932,8 @@ class BaseModel(nn.Module):
         aggregator_slot_rare_fraction: float = 0.05,
         aggregator_tail_fractions: Sequence[float] = (0.01, 0.05, 0.15),
         aggregator_absolute_tail_ks: Sequence[int] = (),
+        aggregator_ccts_lambdas: Sequence[float] = (),
+        aggregator_ccts_tau: float = 0.5,
         aggregator_min_tail_instances: int = 1,
         bag_centered_representation: bool = True,
         bag_centered_l2_normalize: bool = True,
@@ -3945,6 +3990,8 @@ class BaseModel(nn.Module):
             slot_rare_fraction=aggregator_slot_rare_fraction,
             tail_fractions=aggregator_tail_fractions,
             absolute_tail_ks=aggregator_absolute_tail_ks,
+            ccts_lambdas=aggregator_ccts_lambdas,
+            ccts_tau=aggregator_ccts_tau,
             min_tail_instances=aggregator_min_tail_instances,
             bag_centered_representation=bag_centered_representation,
             bag_centered_l2_normalize=bag_centered_l2_normalize,
@@ -3967,7 +4014,7 @@ class BaseModel(nn.Module):
             and relation_config.get("granularity") == "subspace"
         )
         # Bag = 1 global summary + num_slots * 3 (center/spread/rare) slot
-        # statistics + len(tail_fractions) + len(absolute_tail_ks) tail tokens
+        # statistics + len(tail_fractions) + len(absolute_tail_ks) + len(ccts_lambdas) tail tokens
         # (+ 1 cls-pooled token, see cls_token_pooling). For the v24 learned
         # projection these are concatenated and linearly mapped to one token.
         structured_tokens_per_bag = (
@@ -3975,9 +4022,11 @@ class BaseModel(nn.Module):
             + 3 * int(aggregator_num_slots)
             + len(tuple(aggregator_tail_fractions))
             + len(tuple(aggregator_absolute_tail_ks))
+            + len(tuple(aggregator_ccts_lambdas))
             + (1 if cls_token_pooling else 0)
             + len(tuple(raw_stat_tokens))
         )
+
 
         self.meta_classifier = StructuredPopulationMetaClassifier(
             token_dim=self.input_dim,

@@ -809,29 +809,21 @@ B1·B2 상호 필수 근거, 교차 분포 합성 무회귀)은 [`history/archiv
 
 ---
 
-## 30. 2026-08-04 — n > 34 희석 결함 규명 및 v31 (Absolute Top-K Tail Tokens + Any-Positive Task) 제안/구현 완료
+## 30. 2026-08-04 — v31 CCTS (Cardinality-Calibrated Tail Scan) 아키텍처 구현, Unit Test 통과 및 훈련 구동
 
-**상태**: 구현 및 Unit Test 통과 완료 (제안서: [`v31_absolute_topk_tail_proposal.md`](v31_absolute_topk_tail_proposal.md))
+**상태**: 코드 구현, `searchsorted` 메모리 최적화, Unit Test 통과 및 백그라운드 훈련 시작 ([v31_absolute_topk_tail_proposal.md](v31_absolute_topk_tail_proposal.md))
 
+### 1. CCTS 구현 및 OOM 최적화 (`src/models/baseline.py`)
+* **Context-Null Calibration**: Support Context 인스턴스들과의 경험적 Null 분포를 `torch.searchsorted` 기반 $O(M \log M)$ 알고리즘으로 텐서 메모리 조폭 할당(945GiB OOM)을 원천 차단하고 0-메모리 고속 연산 구현.
+* **Expected-False-Positive Tail Scan**: $\lambda \in \{0.25, 1.0, 4.0\}$ 가짜 양성 예산 기반의 Soft Gate 및 5차원 신뢰도 메타데이터 연동.
+* **Backward Compatibility**: `ccts_lambdas=()` 기본값 적용으로 기존 v30/v24 체크포인트 및 테스트와의 호환성 100% 보존.
 
-### 1. n > 34 결함 원인 확정 및 진단 결과 (`scripts/diagnose_tail_dilution.py`)
+### 2. 생성기 및 Config 연동 (`src/datasets/synthetic_data.py`, `configs/train_v31_ccts.yaml`)
+* `SyntheticManifoldGenerator`에서 6개 과제 확률 정규화 및 `any_positive_sparse` 과제 호환 수술 완료.
+* Config: `configs/train_v31_ccts.yaml` 작성 완료.
 
-Musk n > 34 대형 Bag 구간이 0.698로 정체되는 원인을 정밀 수술한 결과:
-* **현행 Tail Branch 결함**: 추출 개수가 `count = ceil(fraction * n)`으로 n에 비례하여 증가.
-  * 소형 Bag (`n <= 34`): `ceil(0.01 * n) = 1` -> 단 1개 희귀 세포만 무희석 추출하여 AUROC 0.909 - 0.962 달성.
-  * 대형 Bag (`n > 34`, n = 100 - 1000): `ceil(0.01 * n) = 5 - 10` -> 단 1개의 활성 세포가 4 - 9개의 평범한 배경 세포와 LSE/Softmax 평균되어 신호 희석 발생 (0.603 - 0.698).
-* **생성기 결함**: 기존 합성 생성기에 "500개 중 단 1개만 반응하는 Any-Positive Task"가 없어 Tail Encoder가 단일 세포 핀포인트 가중치 몰아주기를 배운 적이 없음.
+### 3. 검증 및 백그라운드 훈련
+* **Unit Test**: `tests/test_ccts.py` 작성 및 통과 (`Ran 1 test in 5.024s, OK`).
+* **백그라운드 훈련 구동**: GPU 0번에서 `v31_ccts` 훈련 정상 연산 중 (PID 2932209).
 
-### 2. v31 아키텍처 및 생성기 구현 완료
-
-1. **`StructuredEpisodePopulationAggregator` 수술** (`src/models/baseline.py`):
-   * `absolute_tail_ks: Sequence[int] = ()` 파라미터 신설.
-   * Novelty 기준 절대 상위 1, 2, 3번째 세포를 n과 무관하게 무희석 단독 추출하는 `abs_tail_token_1, 2, 3` 루프 구현.
-   * `BaseModel`에서 structured token 개수 자동 연동 및 기본값 `()`로 기존 v30/v24 하위 호환성 100% 보존.
-2. **`synthetic_data.py` Any-Positive Sparse Task 추가**:
-   * `RESPONSE_TASK_NAMES`에 `"any_positive_sparse"` 등록.
-   * 대형 Bag 생성 시 양성 라벨 Bag에 정확히 1 - 3개 세포만 활성 변이를 부여하는 데이터 생성 패스 추가.
-3. **Config 및 Unit Test**:
-   * Config `configs/train_v31_absolute_topk_tail.yaml` 작성.
-   * Unit test `test_absolute_tail_ks_tokens` 추가 및 통과 (`Ran 1 test in 12.972s, OK`).
 
