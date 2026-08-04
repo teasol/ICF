@@ -811,7 +811,8 @@ B1·B2 상호 필수 근거, 교차 분포 합성 무회귀)은 [`history/archiv
 
 ## 30. 2026-08-04 — n > 34 희석 결함 규명 및 v31 (Absolute Top-K Tail Tokens + Any-Positive Task) 제안/구현 완료
 
-**상태**: 구현 및 Unit Test 통과 완료 (제안서: [`history/v31_absolute_topk_tail_proposal.md`](history/v31_absolute_topk_tail_proposal.md))
+**상태**: 구현 및 Unit Test 통과 완료 (제안서: [`v31_absolute_topk_tail_proposal.md`](v31_absolute_topk_tail_proposal.md))
+
 
 ### 1. n > 34 결함 원인 확정 및 진단 결과 (`scripts/diagnose_tail_dilution.py`)
 
