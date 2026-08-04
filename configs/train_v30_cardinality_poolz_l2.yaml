@@ -1,0 +1,51 @@
+base_config: train_v24_musklike_easy.yaml
+
+# v30 S2 = B2 (cardinality-faithful sampling) + B1 `poolz_l2`.
+#
+# S1 verdict (SS28): uncentering alone is NEGATIVE on Musk -- poolz 0.776 and
+# poolz_l2 0.762 both fall below the v24 baseline 0.803, so neither passed its gate.
+# But the stratified split shows uncentering doing exactly what was predicted at the
+# small end and paying for it at the large end:
+#
+#   run        Musk all   n<=4    5-10    11-34   n>34   corr(prob, log n)
+#   v24         0.803     0.475   0.825   0.988   0.667   +0.012
+#   poolz       0.776     0.442   0.833   0.927   0.540   +0.327
+#   poolz_l2    0.762     0.517   0.767   0.976   0.460   +0.100
+#
+# poolz_l2 has the best n<=4 of all six checkpoints (0.517) and the smaller size bias,
+# yet it collapses on n>34. The model was trained with ONE cell count per episode and
+# always 500..1000, so it has never had to be invariant to bag size -- it cannot serve
+# the small and large regimes at once. That is what B2 addresses: draw the cell count
+# log-uniformly over [1, 1024] so training spans the regime real data occupies.
+#
+# Log-uniform (not uniform) because uniform over [1,1024] puts ~99% of its mass above
+# n=12 and the model would still never meet a small bag:
+#   uniform:      median 510, frac(n<=12) 0.01
+#   log-uniform:  median  34, frac(n<=12) 0.36
+#   Musk actual:  median  12, frac(n<=12) 0.50
+#
+# Feasibility: the small-bag guard is `pooled context candidates >= num_slots (12)`,
+# NOT a per-bag limit, so with num_bags 60..100 even n=1 forwards cleanly (verified at
+# bags=20 and bags=60; only a 6-bag episode fails). Within an episode all bags still
+# share one count (the 4D batched path and shape_group_size require it), so this gives
+# per-episode cardinality variation, not Musk's within-episode mixture -- a known gap.
+#
+# Gate: synthetic musklike-easy 1,000-ep AUROC >= 0.94 AND Musk >= 0.85 overall with
+# n<=4 >= 0.60 and n>34 not below 0.60. Stratified reporting is mandatory: an overall
+# number alone cannot distinguish "learned size invariance" from "traded one band for
+# another", which is exactly how S1 failed.
+data_overrides:
+  dataset_kwargs:
+    num_cells: [1, 1024]
+    num_cells_log_uniform: true
+
+model_overrides:
+  bag_representation: poolz_l2
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v30_cardinality_poolz_l2
+
+trainer:
+  max_epochs: 50

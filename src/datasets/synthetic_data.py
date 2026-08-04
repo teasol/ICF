@@ -60,6 +60,7 @@ class SyntheticManifoldGenerator:
         self,
         num_bags: int | tuple[int, int] = 50,
         num_cells: int | tuple[int, int] = 1000,
+        num_cells_log_uniform: bool = False,
         latent_dim: int = 8,
         output_dim: int = 512,
         mlp_hidden_dim: int = 128,
@@ -244,6 +245,7 @@ class SyntheticManifoldGenerator:
 
         self.num_bags = tuple(num_bags)
         self.num_cells = tuple(num_cells)
+        self.num_cells_log_uniform = bool(num_cells_log_uniform)
         self.latent_dim = latent_dim
         self.output_dim = output_dim
         self.mlp_hidden_dim = mlp_hidden_dim
@@ -610,12 +612,21 @@ class SyntheticManifoldGenerator:
         generator: torch.Generator | None = None,
         device: torch.device | str = "cpu",
     ) -> int:
-        """Sample one episode-wide cell count from the configured range."""
-        return self._sample_integer(
-            self.num_cells,
-            generator,
-            torch.device(device),
-        )
+        """Sample one episode-wide cell count from the configured range.
+
+        With `num_cells_log_uniform` the draw is uniform in log-space, which is what
+        v30 B2 needs: real bags are heavy-tailed (Musk2 spans 1..1044 with a median
+        of 12), so a plain uniform draw over [1, 1024] would put half its mass above
+        512 and the model would still almost never meet a small bag.
+        """
+        device = torch.device(device)
+        low, high = self.num_cells
+        if not self.num_cells_log_uniform or low == high:
+            return self._sample_integer(self.num_cells, generator, device)
+        fraction = torch.rand((), device=device, generator=generator)
+        span = math.log(float(high)) - math.log(float(low))
+        value = math.exp(math.log(float(low)) + float(fraction) * span)
+        return int(min(high, max(low, round(value))))
 
     def sample_num_bags(
         self,
