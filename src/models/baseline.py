@@ -1376,6 +1376,58 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 return representation, auxiliary
             return result
 
+        ccts_per_bag_tokens: list[list[torch.Tensor]] = [[] for _ in range(len(bags))]
+        if self.ccts_lambdas:
+            all_raw_scores: list[torch.Tensor] = []
+            all_encoded_list: list[torch.Tensor] = []
+            for bag in bags:
+                normalized = F.normalize(bag.float(), dim=-1)
+                similarity = normalized @ anchors.float().T
+                nearest_similarity, nearest_slot = similarity.max(dim=-1)
+                novelty = 1.0 - nearest_similarity
+                instance_anchors = anchors[nearest_slot]
+                all_deviations = bag - instance_anchors
+                with torch.autocast(device_type=bag.device.type, enabled=False):
+                    all_encoded = self.shared_tail_encoder(all_deviations.float())
+                    raw_score = novelty + torch.sigmoid(self.ccts_score_head(all_encoded).squeeze(-1))
+                all_raw_scores.append(raw_score)
+                all_encoded_list.append(all_encoded)
+
+            context_mask_bool = context_mask.to(torch.bool)
+            context_scores = [
+                score for score, is_ctx in zip(all_raw_scores, context_mask_bool) if is_ctx
+            ]
+            if context_scores:
+                all_context_scores = torch.cat(context_scores, dim=0)
+            else:
+                all_context_scores = torch.cat(all_raw_scores, dim=0)
+
+            sorted_scores = all_context_scores.detach().sort().values
+
+            for b_idx, (bag, raw_score, all_encoded) in enumerate(zip(bags, all_raw_scores, all_encoded_list)):
+                n_inst = bag.shape[0]
+                ranks = torch.searchsorted(sorted_scores, raw_score)
+                soft_p = (1.0 + (sorted_scores.numel() - ranks).float()) / (1.0 + float(sorted_scores.numel()))
+                soft_p = soft_p.clamp(1e-6, 1.0)
+                e_b = -torch.log(soft_p) - math.log(max(1, n_inst))
+
+                for lamb in self.ccts_lambdas:
+                    gate = torch.sigmoid((math.log(lamb) - torch.log(float(n_inst) * soft_p + 1e-6)) / self.ccts_tau)
+                    gate_weight = gate.unsqueeze(-1)
+                    pooled_tail = (gate_weight * all_encoded).sum(dim=0) / (gate_weight.sum(dim=0).clamp_min(1e-6))
+                    meta = torch.stack(
+                        (
+                            torch.log1p(gate.sum()),
+                            e_b.max(),
+                            gate.sum() / float(n_inst),
+                            torch.tensor(math.log(float(n_inst)), device=bag.device),
+                            torch.tensor(math.log1p(float(sorted_scores.numel())), device=bag.device),
+                        ),
+                        dim=-1,
+                    )
+                    ccts_token = pooled_tail + self.ccts_metadata_projection(meta)
+                    ccts_per_bag_tokens[b_idx].append(ccts_token.to(bag.dtype))
+
         slot_tokens: list[torch.Tensor] = []
         tail_tokens: list[torch.Tensor] = []
         slot_covariance_sketches: list[torch.Tensor] = []
@@ -1385,7 +1437,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         slot_means: list[torch.Tensor] = []
         selected_counts: list[list[int]] = []
         cls_tokens: list[torch.Tensor] = []
-        for bag, centered_delta in zip(bags, centered_deltas):
+        for b_idx, (bag, centered_delta) in enumerate(zip(bags, centered_deltas)):
             cls_tokens.append(
                 self.cls_token_pooling(bag.unsqueeze(0)).squeeze(0)
                 if self.include_cls_token
@@ -1482,11 +1534,28 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                         self.shared_tail_encoder(deviation.float()).mean(dim=0)
                     )
                 bag_selected_counts.append(count)
+
+            for abs_k in self.absolute_tail_ks:
+                count = min(bag.shape[0], max(1, abs_k))
+                index = novelty.topk(count).indices
+                deviation = bag[index] - anchors[nearest_slot[index]]
+                with torch.autocast(device_type=bag.device.type, enabled=False):
+                    encoded_tail = self.shared_tail_encoder(deviation.float())
+                    if encoded_tail.ndim == 1:
+                        encoded_tail = encoded_tail.unsqueeze(0)
+                    lse_weights = torch.softmax(encoded_tail * 2.0, dim=0)
+                    bag_tail_tokens.append((lse_weights * encoded_tail).sum(dim=0))
+                bag_selected_counts.append(count)
+
+            if self.ccts_lambdas:
+                bag_tail_tokens.extend(ccts_per_bag_tokens[b_idx])
+
             tail_tokens.append(torch.stack(bag_tail_tokens))
             proportions.append(proportion)
             dispersions.append(dispersion)
             slot_means.append(slot_mean)
             selected_counts.append(bag_selected_counts)
+
 
         representation = {
             "global_summary": torch.stack(global_summaries),
