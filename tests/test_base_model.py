@@ -1529,3 +1529,140 @@ class BaseModelTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PoolStandardizedBagRepresentationTest(unittest.TestCase):
+    """v30 B1: context-pool standardization replacing per-bag centering."""
+
+    def _model(self, representation: str) -> BaseModel:
+        torch.manual_seed(1234)
+        return BaseModel(
+            input_dim=8,
+            meta_hidden_dim=16,
+            meta_num_heads=4,
+            meta_num_set_layers=1,
+            meta_relation_hidden_dim=16,
+            num_classes=2,
+            bag_representation=representation,
+        ).eval()
+
+    def _episode(self, episodes: int = 2, bags: int = 5, cells: int = 7, dim: int = 8):
+        torch.manual_seed(7)
+        # Deliberately off-centre and wide so a pooled z-score is not a no-op.
+        x = torch.randn(episodes, bags, cells, dim) * 3.0 + 1.5
+        y = torch.tensor([[0, 1, 0, 1, 0]] * episodes)[:, :bags]
+        mask_index = torch.zeros(episodes, 1, dtype=torch.long)
+        mask_index[1, 0] = 1
+        return x, y, mask_index
+
+    def test_rejects_unknown_representation(self) -> None:
+        with self.assertRaises(ValueError):
+            StructuredEpisodePopulationAggregator(input_dim=8, bag_representation="nope")
+
+    def test_rejects_incompatible_legacy_flags(self) -> None:
+        with self.assertRaises(ValueError):
+            StructuredEpisodePopulationAggregator(
+                input_dim=8,
+                bag_representation="poolz",
+                bag_centered_representation=False,
+                global_summary="raw_mean",
+                use_raw_mean_branch=True,
+            )
+
+    def test_default_is_legacy(self) -> None:
+        aggregator = StructuredEpisodePopulationAggregator(input_dim=8)
+        self.assertEqual(aggregator.bag_representation, "legacy")
+
+    def test_bag_view_requires_pool_statistics(self) -> None:
+        aggregator = StructuredEpisodePopulationAggregator(
+            input_dim=8, bag_representation="poolz"
+        )
+        with self.assertRaises(ValueError):
+            aggregator._bag_view(torch.randn(4, 8))
+
+    def test_poolz_preserves_magnitude_and_poolz_l2_does_not(self) -> None:
+        x, _, _ = self._episode()
+        bags = list(x[0].unbind(0))
+        context = torch.ones(len(bags), dtype=torch.bool)
+        context[0] = False
+
+        plain = self._model("poolz").aggregator
+        unit = self._model("poolz_l2").aggregator
+        pool_mean, pool_std = plain._context_pool_stats(bags, context)
+
+        view_plain = plain._bag_view(bags[2], pool_mean, pool_std)[0]
+        view_unit = unit._bag_view(bags[2], pool_mean, pool_std)[0]
+        view_legacy = self._model("legacy").aggregator._bag_view(bags[2])[0]
+
+        self.assertFalse(torch.allclose(view_plain, view_legacy))
+        self.assertFalse(torch.allclose(view_plain, view_unit))
+        torch.testing.assert_close(
+            view_unit.norm(dim=-1), torch.ones(bags[2].shape[0]), atol=1e-4, rtol=0
+        )
+        # A pooled z-score keeps per-cell scale, so norms must not collapse to 1.
+        self.assertGreater(float(view_plain.norm(dim=-1).mean()), 1.5)
+
+    def test_pool_statistics_ignore_query_bags(self) -> None:
+        x, _, _ = self._episode()
+        bags = list(x[0].unbind(0))
+        context = torch.ones(len(bags), dtype=torch.bool)
+        context[0] = False
+        aggregator = self._model("poolz").aggregator
+
+        baseline = aggregator._context_pool_stats(bags, context)
+        perturbed = [bag.clone() for bag in bags]
+        perturbed[0] = perturbed[0] * 100.0 + 50.0  # query bag only
+        after = aggregator._context_pool_stats(perturbed, context)
+
+        torch.testing.assert_close(baseline[0], after[0])
+        torch.testing.assert_close(baseline[1], after[1])
+
+    def test_batched_and_list_pool_statistics_agree(self) -> None:
+        x, _, _ = self._episode()
+        aggregator = self._model("poolz").aggregator
+        bags = list(x[0].unbind(0))
+        context = torch.ones(len(bags), dtype=torch.bool)
+        context[0] = False
+
+        list_mean, list_std = aggregator._context_pool_stats(bags, context)
+        batched_mean, batched_std = aggregator._context_pool_stats_batched(
+            x[:1], context.unsqueeze(0)
+        )
+        torch.testing.assert_close(batched_mean[0], list_mean, atol=1e-5, rtol=0)
+        torch.testing.assert_close(batched_std[0], list_std, atol=1e-5, rtol=0)
+
+    def test_batched_matches_list_forward(self) -> None:
+        x, y, mask_index = self._episode()
+        for representation in ("legacy", "poolz", "poolz_l2"):
+            model = self._model(representation)
+            with torch.no_grad():
+                batched = model.forward_episode_batch(x[:1], y[:1], mask_index[:1])
+                listed = model(x[0], y[0], mask_index[0])
+            batched = (batched[0] if isinstance(batched, tuple) else batched).flatten()
+            listed = (listed[0] if isinstance(listed, tuple) else listed).flatten()
+            torch.testing.assert_close(batched, listed, atol=1e-4, rtol=0)
+
+    def test_forward_and_backward_are_finite(self) -> None:
+        x, y, mask_index = self._episode()
+        for representation in ("poolz", "poolz_l2"):
+            model = self._model(representation).train()
+            logits = model.forward_episode_batch(x, y, mask_index)
+            logits = logits[0] if isinstance(logits, tuple) else logits
+            self.assertTrue(torch.isfinite(logits).all())
+            logits.float().square().mean().backward()
+            gradients = [p.grad for p in model.parameters() if p.grad is not None]
+            self.assertTrue(gradients)
+            self.assertTrue(all(torch.isfinite(g).all() for g in gradients))
+
+    def test_single_instance_bag_is_not_annihilated(self) -> None:
+        """Legacy centering maps an n=1 bag to zeros; pool-z must not."""
+        aggregator = self._model("poolz").aggregator
+        bag = torch.randn(1, 8) * 2.0 + 1.0
+        pool_mean = torch.zeros(8)
+        pool_std = torch.ones(8)
+
+        legacy = self._model("legacy").aggregator._bag_view(bag)[0]
+        pooled = aggregator._bag_view(bag, pool_mean, pool_std)[0]
+
+        torch.testing.assert_close(legacy, torch.zeros_like(legacy))
+        self.assertGreater(float(pooled.abs().max()), 0.0)

@@ -473,6 +473,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         min_tail_instances: int = 1,
         bag_centered_representation: bool = True,
         bag_centered_l2_normalize: bool = True,
+        bag_representation: str = "legacy",
         global_summary: str = "centered_spread",
         use_raw_mean_branch: bool = False,
         raw_stat_tokens: Sequence[str] = (),
@@ -525,21 +526,46 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         self.density_temperature = float(density_temperature)
         self.slot_rare_fraction = float(slot_rare_fraction)
         self.tail_fractions = fractions
-        if bag_centered_representation:
-            if global_summary != "centered_spread" or use_raw_mean_branch:
-                raise ValueError(
-                    "Centered v19 mode requires a centered spread summary "
-                    "and use_raw_mean_branch=False."
-                )
-        elif global_summary != "raw_mean" or not use_raw_mean_branch:
+        valid_bag_representations = {"legacy", "poolz", "poolz_l2"}
+        if bag_representation not in valid_bag_representations:
             raise ValueError(
-                "Raw-mean diagnostic mode requires global_summary=raw_mean "
-                "and use_raw_mean_branch=True."
+                f"bag_representation must be one of {sorted(valid_bag_representations)}, "
+                f"got {bag_representation!r}."
             )
+        if bag_representation == "legacy":
+            # Historical flag pair keeps deciding the view (default path).
+            if bag_centered_representation:
+                if global_summary != "centered_spread" or use_raw_mean_branch:
+                    raise ValueError(
+                        "Centered v19 mode requires a centered spread summary "
+                        "and use_raw_mean_branch=False."
+                    )
+            elif global_summary != "raw_mean" or not use_raw_mean_branch:
+                raise ValueError(
+                    "Raw-mean diagnostic mode requires global_summary=raw_mean "
+                    "and use_raw_mean_branch=True."
+                )
+        else:
+            # v30 B1: replace per-bag centering with context-pool standardization.
+            # The summary stays the per-bag centered spread and `centered_delta`
+            # is still returned per bag, so the covariance/spread branches are
+            # untouched -- only `classification_instances` changes.
+            if not bag_centered_representation or use_raw_mean_branch:
+                raise ValueError(
+                    f"bag_representation={bag_representation!r} requires "
+                    "bag_centered_representation=True and use_raw_mean_branch=False "
+                    "(it replaces the centering step, not the summary/covariance path)."
+                )
+            if global_summary != "centered_spread":
+                raise ValueError(
+                    f"bag_representation={bag_representation!r} requires "
+                    "global_summary='centered_spread'."
+                )
         self.min_tail_instances = int(min_tail_instances)
         self.slot_statistic_count = 3
         self.bag_centered_representation = bool(bag_centered_representation)
         self.bag_centered_l2_normalize = bool(bag_centered_l2_normalize)
+        self.bag_representation = str(bag_representation)
         self.global_summary = str(global_summary)
         self.use_raw_mean_branch = bool(use_raw_mean_branch)
         valid_raw_stats = {"mean", "variance", "skewness", "kurtosis"}
@@ -615,15 +641,88 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             nn.Linear(input_dim, input_dim),
         )
 
+    def _context_pool_stats(
+        self, bags: Sequence[torch.Tensor], context_mask: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Per-feature mean/std over every cell of every CONTEXT bag.
+
+        Cell-count weighted (bags differ in size by up to 1000x on real data, so
+        averaging per-bag means would misweight them). Context-only, matching the
+        leak-free convention already used by `_ridge_logits` and
+        `_normalize_covariance_relation`.
+        """
+        selected = [
+            bag.reshape(-1, bag.shape[-1]).float()
+            for bag, keep in zip(bags, context_mask.flatten().tolist())
+            if keep
+        ]
+        if not selected:
+            raise ValueError("context_mask must identify at least one context bag.")
+        pool = torch.cat(selected, dim=0)
+        mean = pool.mean(dim=0)
+        # unbiased=False so this matches `_context_pool_stats_batched` exactly.
+        # With Bessel's correction the training (batched) and evaluation (list)
+        # paths would disagree by a factor sqrt(cells/(cells-1)), i.e. a silent
+        # ~0.25% scale mismatch between train and real-data inference.
+        std = pool.std(dim=0, unbiased=False).clamp_min(1e-6)
+        return mean, std
+
+    @staticmethod
+    def _context_pool_stats_batched(
+        x: torch.Tensor, is_context: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Batched twin of `_context_pool_stats`.
+
+        `x` is [episodes, bags, instances, dim] and `is_context` is
+        [episodes, bags]; returns per-episode mean/std shaped [episodes, dim].
+        """
+        episodes, num_bags, num_instances, dim = x.shape
+        values = x.float()
+        mask = (
+            is_context[..., None, None]
+            .expand(episodes, num_bags, num_instances, 1)
+            .to(values.dtype)
+        )
+        cells = mask.sum(dim=(1, 2)).clamp_min(1.0)
+        mean = (values * mask).sum(dim=(1, 2)) / cells
+        variance = (
+            ((values - mean[:, None, None, :]).square() * mask).sum(dim=(1, 2)) / cells
+        )
+        std = variance.clamp_min(1e-12).sqrt().clamp_min(1e-6)
+        return mean, std
+
     def _bag_view(
-        self, bag: torch.Tensor
+        self,
+        bag: torch.Tensor,
+        pool_mean: torch.Tensor | None = None,
+        pool_std: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Return classification instances, summary, and centered deltas."""
+        """Return classification instances, summary, and centered deltas.
+
+        `pool_mean`/`pool_std` are required only when `bag_representation` is a
+        pool-standardized mode; they must broadcast against `bag`'s feature axis.
+        """
         bag_mean = bag.mean(dim=-2, keepdim=True)
         centered_delta = bag - bag_mean
         global_spread = torch.sqrt(
             centered_delta.float().square().mean(dim=-2) + 1e-6
         )
+        if self.bag_representation in ("poolz", "poolz_l2"):
+            if pool_mean is None or pool_std is None:
+                raise ValueError(
+                    f"bag_representation={self.bag_representation!r} needs context-pool "
+                    "statistics; call _bag_view via forward_episode_batch, "
+                    "StructuredEpisodePopulationAggregator.forward, or BaseModel.forward "
+                    "(or pass pool_mean/pool_std explicitly)."
+                )
+            standardized = (bag.float() - pool_mean) / pool_std
+            if self.bag_representation == "poolz_l2":
+                standardized = F.normalize(standardized, dim=-1, eps=1e-6)
+            return (
+                standardized.to(bag.dtype),
+                global_spread.to(bag.dtype),
+                centered_delta,
+            )
         if self.bag_centered_representation:
             if self.bag_centered_l2_normalize:
                 classification_instances = F.normalize(
@@ -1160,18 +1259,24 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         | tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]
     ):
         raw_bags = self._normalize_bags(instances)
-        prepared = [self._bag_view(bag) for bag in raw_bags]
+        # context_mask is validated BEFORE _bag_view because pool-standardized
+        # representations need context-only statistics to build the view.
+        context_mask = torch.as_tensor(
+            context_mask,
+            device=raw_bags[0].device,
+            dtype=torch.bool,
+        ).flatten()
+        if context_mask.numel() != len(raw_bags) or not torch.any(context_mask):
+            raise ValueError("context_mask must identify at least one context bag.")
+        if self.bag_representation in ("poolz", "poolz_l2"):
+            pool_mean, pool_std = self._context_pool_stats(raw_bags, context_mask)
+        else:
+            pool_mean = pool_std = None
+        prepared = [self._bag_view(bag, pool_mean, pool_std) for bag in raw_bags]
         bags = [item[0] for item in prepared]
         global_summaries = [item[1] for item in prepared]
         centered_deltas = [item[2] for item in prepared]
         covariance_sketches = [self._covariance_sketch(delta) for delta in centered_deltas]
-        context_mask = torch.as_tensor(
-            context_mask,
-            device=bags[0].device,
-            dtype=torch.bool,
-        ).flatten()
-        if context_mask.numel() != len(bags) or not torch.any(context_mask):
-            raise ValueError("context_mask must identify at least one context bag.")
         anchors = self._context_anchors(bags, context_mask)
         if self.raw_stat_tokens:
             if isinstance(instances, torch.Tensor):
@@ -3763,6 +3868,7 @@ class BaseModel(nn.Module):
         aggregator_min_tail_instances: int = 1,
         bag_centered_representation: bool = True,
         bag_centered_l2_normalize: bool = True,
+        bag_representation: str = "legacy",
         global_summary: str = "centered_spread",
         use_raw_mean_branch: bool = False,
         raw_stat_tokens: Sequence[str] = (),
@@ -3817,6 +3923,7 @@ class BaseModel(nn.Module):
             min_tail_instances=aggregator_min_tail_instances,
             bag_centered_representation=bag_centered_representation,
             bag_centered_l2_normalize=bag_centered_l2_normalize,
+            bag_representation=bag_representation,
             global_summary=global_summary,
             use_raw_mean_branch=use_raw_mean_branch,
             raw_stat_tokens=raw_stat_tokens,
@@ -3940,7 +4047,26 @@ class BaseModel(nn.Module):
         is_context = torch.ones(episodes, num_bags, dtype=torch.bool, device=x.device)
         is_context.scatter_(1, mask_index.long(), False)
         flat_x = x.reshape(episodes * num_bags, num_instances, input_dim)
-        classification_flat, global_summary, centered_delta = self.aggregator._bag_view(flat_x)
+        if self.aggregator.bag_representation in ("poolz", "poolz_l2"):
+            # Per-episode context-pool stats, broadcast back over that episode's bags.
+            episode_mean, episode_std = self.aggregator._context_pool_stats_batched(
+                x, is_context
+            )
+            pool_mean = (
+                episode_mean[:, None, :]
+                .expand(episodes, num_bags, input_dim)
+                .reshape(episodes * num_bags, 1, input_dim)
+            )
+            pool_std = (
+                episode_std[:, None, :]
+                .expand(episodes, num_bags, input_dim)
+                .reshape(episodes * num_bags, 1, input_dim)
+            )
+        else:
+            pool_mean = pool_std = None
+        classification_flat, global_summary, centered_delta = self.aggregator._bag_view(
+            flat_x, pool_mean, pool_std
+        )
         covariance_sketch = self.aggregator._covariance_sketch(centered_delta)
         if self.aggregator.raw_stat_tokens:
             raw_stats = self.aggregator._raw_stat_tokens(flat_x)
@@ -4050,16 +4176,27 @@ class BaseModel(nn.Module):
             mask_index, num_bags=num_bags, device=y.device
         )
         normalized_bags = self.aggregator._normalize_bags(x)
+        # is_context is built BEFORE the view so pool-standardized representations
+        # can use the same context-only statistics the aggregator will use below;
+        # otherwise this duplicate _bag_view would feed the rare-evidence/MIL
+        # branches differently-normalized cells than the slot branch.
+        is_context = torch.ones(num_bags, dtype=torch.bool, device=y.device)
+        is_context[query_index] = False
+        if self.aggregator.bag_representation in ("poolz", "poolz_l2"):
+            pool_mean, pool_std = self.aggregator._context_pool_stats(
+                normalized_bags, is_context
+            )
+        else:
+            pool_mean = pool_std = None
         classification_bags = [
-            self.aggregator._bag_view(bag)[0] for bag in normalized_bags
+            self.aggregator._bag_view(bag, pool_mean, pool_std)[0]
+            for bag in normalized_bags
         ]
         query_instances = [
             classification_bags[index] for index in query_index.detach().cpu().tolist()
         ]
         if isinstance(x, torch.Tensor):
             query_instances = torch.stack(query_instances)
-        is_context = torch.ones(num_bags, dtype=torch.bool, device=y.device)
-        is_context[query_index] = False
         if return_auxiliary:
             representation, aggregator_auxiliary = self.aggregator(
                 x,

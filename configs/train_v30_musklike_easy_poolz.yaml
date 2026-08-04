@@ -1,0 +1,39 @@
+base_config: train_v24_musklike_easy.yaml
+
+# v30 B1 (S1) — context-pool standardization replacing per-bag centering.
+#
+# Diagnosis (docs/history/musk_transfer_diagnosis_v30_proposal.md, current_status.md SS26):
+# per-bag centering projects a d-dimensional bag onto a rank-(n-1) subspace, which is
+# nearly free at the synthetic n=500..1000 but destructive on real Musk bags (median 12
+# conformers, 29/102 with n<=4, 2 with n=1 -> the view is literally the zero vector).
+#
+# Measured LOO ridge ceilings on bag [mean, var], matched protocol
+# (scripts/diagnose_musk_cardinality.py --design-norm scalar and
+#  scripts/diagnose_normalization_ceiling.py):
+#   representation   synth n=500-1000   synth n=2-16   Musk all   Musk n<=4
+#   current          0.8959             0.6470         0.759      0.500
+#   poolz  (this)    0.8766             0.7363         0.874      0.900
+#   poolz_l2         0.7966             0.6754         0.912      0.967
+# poolz costs only -0.019 on the large-bag synthetic regime while gaining +0.115 on
+# Musk, so it is the balanced first step; poolz_l2 wins Musk outright but pays -0.099
+# on synthetic because the generator L2-normalizes cells at creation
+# (configs/data/medium.yaml normalize_output: true), i.e. that loss is an artifact.
+#
+# Only `classification_instances` changes: `global_summary` stays the per-bag centered
+# spread and `centered_delta` is still returned per bag, so the covariance-sketch and
+# spread branches are byte-identical to v24.
+#
+# Success gate (pre-registered):
+#   * synthetic musklike-easy 1,000-episode AUROC >= 0.94 (no regression vs 0.9510)
+#   * Musk zero-shot AUROC >= 0.89 overall, reported stratified by bag cardinality
+#     (n<=4 / 5-10 / 11-34 / n>34); current best is 0.822 with n<=4 at 0.475.
+model_overrides:
+  bag_representation: poolz
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v30_musklike_easy_poolz
+
+trainer:
+  max_epochs: 50
