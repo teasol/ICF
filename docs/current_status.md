@@ -1,27 +1,16 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-04` (**§29 v30 확정 — B1 `poolz_l2` + B2 cardinality-faithful 승격 — 최신**)
-**Status**: **v30이 확정 baseline (2026-08-04 사용자 승격 결정)** — v30 = v24(residual+bottleneck bag proj) + **B1 `poolz_l2` 표현** + **B2 cardinality-faithful log-uniform 샘플링**. 승격 근거(§28 S2): 사전 등록 게이트 6항목 전부 통과 — 합성 무회귀 0.9483(v24 0.9510), **Musk zero-shot 0.8539**(종전 최고 0.822 경신), n≤4 0.475→0.800, n>34 0.667→0.698, paired 소형 Δ+0.325 CI 0 제외(P=0.997) / 대형 Δ+0.001 무해(P=0.504). **B1·B2는 상호 필수** — B1 단독(S1) 음성(구간 교환), B2 단독(legacy)은 n=1 bag 0벡터 → NaN으로 **학습 자체가 불가**. **v30은 config+living 문서 수준으로 승격** — `bag_representation` 코드 기본값은 `legacy` 유지(v24/ICI 재현성 보존; 기본값 플립은 기존 `_bag_view` 테스트와 미고정 config를 깨뜨림). 새 확정 config: `configs/train_v30_medium_bag_proj_residual.yaml`(아직 미학습 — v30 medium 참조 수치 확보가 다음 Action). Musk 경로: `configs/train_v30_cardinality_poolz_l2.yaml`(S2 실측 승리). 부산물: **선형 ridge 천장은 예측 지표로 폐기**(부호가 양쪽 반대였음). **다음 최약 구간은 n>34(0.698)** — 0.95까지 남은 +0.096의 대부분. **§26에서 Musk 로드맵을 재설정**했습니다 —
-`musk095_architecture_proposal.md`의 **P1/P2는 기각, P3는 연기**. 진짜 병목은 "입력이 bag 평균을
-버린다"가 아니라 **per-bag centering이 작은 bag(Musk median 12, n≤4가 28%)을 rank 결핍으로
-소멸시키는 것**입니다 — 소형 bag에서 현 표현 **0.500** vs pool-z **0.900~0.967**, 그리고 학습된 4개
-체크포인트 전부 소형 bag에서 **무작위 이하**(0.325~0.500).
-**v30 확정 (2026-08-04)**: B1 `poolz_l2` 표현 + B2 cardinality-faithful 샘플링을 확정 baseline으로
-승격. Musk zero-shot **0.854** (musklike-easy + v30; 종전 최고 0.822 경신). 합성 무회귀 0.9483.
-(§26에서 선형 천장으로 예상한 `poolz` 단독 0.874→실현 0.776은 **천장 프로브가 예측 지표가 아님**을
-확인시킨 음성 — §28 결과 (1). `poolz_l2`(0.912)는 B2와 함께할 때만 유효하다는 것이 §28의 결론.)
-지렛대 2(§23)·3(§24 IA-MIL)은 음성이나 **§24 게이트는 무효**로 판정(생성기에 any-positive 과제 부재
-+ IA-MIL 크기 편향 +0.327).
+**Last updated**: `2026-08-05` (**§31 v31 CCTS 후보 실험 완료 — v30 확정 baseline 유지**)
+**Status**: **v30이 확정 baseline (2026-08-04 사용자 승격 결정 유지)** — v30 = v24(residual+bottleneck bag proj) + **B1 `poolz_l2` 표현** + **B2 cardinality-faithful log-uniform 샘플링**. **v31 CCTS 후보 실험 완료 (미채택)** — Musk Overall `0.8376` (v30의 `0.8539` 미달), `n <= 4` `0.8333`, `5..10` `0.8667`, `11..34` `0.9273`, `n > 34` `0.6032` (정체). **정식 baseline으로 채택하지 않으며 v30 S2 유지**.
+* **v31 CCTS 메커니즘 진단**: p-value 예산($n \cdot \hat{p}_i \le \lambda$)이 대형 bag($n=1000$)에서 추출 개수 $k$를 10~15개로 비례 증가시켜 1개 활성 세포 신호를 1/15로 희석시킴. 166차원 zero-padding으로 인한 346개(67.5%) 휴면 가중치 수술 필요.
+* **다음 Action**: Absolute Top-K Tail (`absolute_tail_ks: [1, 4, 8, 16]`) + Learned Read-Bridge ($W_{\text{bridge}} \in \mathbb{R}^{512 \times 166}$).
 
-> **사용자 결정 (2026-08-04, 확정 — 재논의 불필요)**:
-> 1. **ICI는 손대지 않습니다.** §26의 cell-축 zero-padding 미마스킹 결함은 **기록만 유지**하고
->    수정하지 않으며, 향후 ICI 잠금 해제 시 **반드시 먼저 처리할 항목**으로 남깁니다.
-> 2. **Musk 목표는 0.95 유지.** §26 초판의 "0.90 하향" 권고는 **철회**됐습니다 — 선형 ridge 천장은
->    모델의 상한이 아니며(모델이 자기 입력의 선형 천장을 +0.055~0.072 일관 초과), 0.95에 필요한
->    선형 기반 ≈0.89는 `poolz_l2`(0.912) 아래입니다.
-> 3. **v30 승격 (2026-08-04, 최종 확정)**: §28 S2(B2 + B1 `poolz_l2`)가 게이트 전 항목을 통과함에
->    따라 **v30 = v24 + B1 + B2를 확정 baseline으로 승격**. v24는 이전 baseline으로 보존.
->    승격 세부·근거: §29.
+> **사용자 결정 (2026-08-05, 확정)**:
+> 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
+> 2. **ICI는 손대지 않습니다.** (잠금 유지)
+> 3. **Musk 목표는 0.95 유지.**
+
+**Read first if you are picking this up**: **§31 (v31 CCTS 후보 평가 및 대형 bag 정체 진단 — 최신)**, **§30 (v31 CCTS 구현)**, **§29 (v30 확정 baseline)**, **§28 판정 과정 ([`history/archive.md`](history/archive.md) §28)**.
 
 **열린 과제**: ① **v30 medium 기준 재학습** — 새 확정 config(`configs/train_v30_medium_bag_proj_residual.yaml`)로
 v30 참조 수치 확보(S2 실측은 musklike-easy 기준), ② **n>34 최약 구간(0.698)** — B2b(에피소드 내
