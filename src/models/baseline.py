@@ -470,6 +470,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         density_temperature: float = 0.15,
         slot_rare_fraction: float = 0.05,
         tail_fractions: Sequence[float] = (0.01, 0.05, 0.15),
+        absolute_tail_ks: Sequence[int] = (),
         min_tail_instances: int = 1,
         bag_centered_representation: bool = True,
         bag_centered_l2_normalize: bool = True,
@@ -515,6 +516,9 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         fractions = tuple(float(fraction) for fraction in tail_fractions)
         if not fractions or any(not 0 < fraction <= 1 for fraction in fractions):
             raise ValueError("tail_fractions must contain values in (0, 1].")
+        abs_ks = tuple(int(k) for k in absolute_tail_ks)
+        if any(k < 1 for k in abs_ks):
+            raise ValueError("absolute_tail_ks must contain positive integers.")
         if min_tail_instances < 1:
             raise ValueError("min_tail_instances must be positive.")
         self.input_dim = int(input_dim)
@@ -526,6 +530,8 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         self.density_temperature = float(density_temperature)
         self.slot_rare_fraction = float(slot_rare_fraction)
         self.tail_fractions = fractions
+        self.absolute_tail_ks = abs_ks
+
         valid_bag_representations = {"legacy", "poolz", "poolz_l2"}
         if bag_representation not in valid_bag_representations:
             raise ValueError(
@@ -1194,8 +1200,25 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             with torch.autocast(device_type=instances.device.type, enabled=False):
                 encoded_tail = self.shared_tail_encoder(deviation.float())
                 lse_weights = torch.softmax(encoded_tail * 2.0, dim=1)
+            selected_counts.append(count)
+
+        for abs_k in self.absolute_tail_ks:
+            count = min(num_instances, max(1, abs_k))
+            index = novelty.topk(count, dim=1).indices
+            selected_instances = instances.gather(
+                1, index.unsqueeze(-1).expand(-1, -1, instances.shape[-1])
+            )
+            selected_slots = nearest_slot.gather(1, index)
+            selected_anchors = expanded_anchors.gather(
+                1, selected_slots.unsqueeze(-1).expand(-1, -1, anchors.shape[-1])
+            )
+            deviation = selected_instances - selected_anchors
+            with torch.autocast(device_type=instances.device.type, enabled=False):
+                encoded_tail = self.shared_tail_encoder(deviation.float())
+                lse_weights = torch.softmax(encoded_tail * 2.0, dim=1)
                 tail_tokens.append((lse_weights * encoded_tail).sum(dim=1))
             selected_counts.append(count)
+
 
 
 
@@ -3865,6 +3888,7 @@ class BaseModel(nn.Module):
         aggregator_density_temperature: float = 0.15,
         aggregator_slot_rare_fraction: float = 0.05,
         aggregator_tail_fractions: Sequence[float] = (0.01, 0.05, 0.15),
+        aggregator_absolute_tail_ks: Sequence[int] = (),
         aggregator_min_tail_instances: int = 1,
         bag_centered_representation: bool = True,
         bag_centered_l2_normalize: bool = True,
@@ -3920,6 +3944,7 @@ class BaseModel(nn.Module):
             density_temperature=aggregator_density_temperature,
             slot_rare_fraction=aggregator_slot_rare_fraction,
             tail_fractions=aggregator_tail_fractions,
+            absolute_tail_ks=aggregator_absolute_tail_ks,
             min_tail_instances=aggregator_min_tail_instances,
             bag_centered_representation=bag_centered_representation,
             bag_centered_l2_normalize=bag_centered_l2_normalize,
@@ -3942,16 +3967,18 @@ class BaseModel(nn.Module):
             and relation_config.get("granularity") == "subspace"
         )
         # Bag = 1 global summary + num_slots * 3 (center/spread/rare) slot
-        # statistics + len(tail_fractions) tail tokens (+ 1 cls-pooled token,
-        # see cls_token_pooling). For the v24 learned projection these are
-        # concatenated and linearly mapped to one token.
+        # statistics + len(tail_fractions) + len(absolute_tail_ks) tail tokens
+        # (+ 1 cls-pooled token, see cls_token_pooling). For the v24 learned
+        # projection these are concatenated and linearly mapped to one token.
         structured_tokens_per_bag = (
             1
             + 3 * int(aggregator_num_slots)
             + len(tuple(aggregator_tail_fractions))
+            + len(tuple(aggregator_absolute_tail_ks))
             + (1 if cls_token_pooling else 0)
             + len(tuple(raw_stat_tokens))
         )
+
         self.meta_classifier = StructuredPopulationMetaClassifier(
             token_dim=self.input_dim,
             hidden_dim=meta_hidden_dim,

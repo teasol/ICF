@@ -18,7 +18,9 @@ RESPONSE_TASK_NAMES = (
     "covariance",
     "interaction",
     "combined",
+    "any_positive_sparse",
 )
+
 
 
 @dataclass(frozen=True)
@@ -457,7 +459,25 @@ class SyntheticManifoldGenerator:
         effect_mask = None
         effect_cell_fraction = None
         effect_component_index = None
-        if use_continuous_response:
+        if response_task == "any_positive_sparse":
+            effect_mask = torch.zeros(
+                (num_bags, num_cells, 1), dtype=torch.bool, device=device
+            )
+            effect_component_index = 0
+            for i in range(num_bags):
+                if y[i] == 1:
+                    m = int(
+                        torch.randint(
+                            1, 4, (1,), device=device, generator=generator
+                        ).item()
+                    )
+                    m = min(m, num_cells)
+                    perm = torch.randperm(
+                        num_cells, device=device, generator=generator
+                    )[:m]
+                    effect_mask[i, perm, 0] = True
+            effect_cell_fraction = effect_mask.squeeze(-1).float().mean(dim=1)
+        elif use_continuous_response:
             effect_component_index = (
                 responsive_component_index
                 if responsive_component_index is not None
@@ -496,7 +516,7 @@ class SyntheticManifoldGenerator:
                 * covariance_direction.view(1, 1, -1)
             )
 
-        if response_task in ("state", "interaction", "combined"):
+        if response_task in ("state", "interaction", "combined", "any_positive_sparse"):
             effect_scale = self._sample_uniform(
                 self.response_state_effect_scale, generator, device
             )
@@ -511,6 +531,7 @@ class SyntheticManifoldGenerator:
                 * effect_direction.view(1, 1, self.latent_dim)
             )
             z = z + effect_mask * response_shift
+
 
         # Same-label donors share episode-level prototypes, but each donor has
         # independent nuisance and component-specific biological variation.

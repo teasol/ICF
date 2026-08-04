@@ -1666,3 +1666,25 @@ class PoolStandardizedBagRepresentationTest(unittest.TestCase):
 
         torch.testing.assert_close(legacy, torch.zeros_like(legacy))
         self.assertGreater(float(pooled.abs().max()), 0.0)
+
+    def test_absolute_tail_ks_tokens(self) -> None:
+        """Verify absolute_tail_ks parameter extends structured token count and runs end-to-end."""
+        model = BaseModel(
+            input_dim=8,
+            meta_hidden_dim=16,
+            meta_num_heads=4,
+            meta_num_set_layers=1,
+            meta_relation_hidden_dim=16,
+            aggregator_absolute_tail_ks=(1, 2, 3),
+            num_classes=2,
+        ).eval()
+        self.assertEqual(model.aggregator.absolute_tail_ks, (1, 2, 3))
+
+        x, y, mask_index = self._episode()
+        with torch.no_grad():
+            logits = model.forward_episode_batch(x, y, mask_index)
+            logits = logits[0] if isinstance(logits, tuple) else logits
+        self.assertTrue(torch.isfinite(logits).all())
+        self.assertEqual(logits.shape, (2, 1, 2))
+
+
