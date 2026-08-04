@@ -1,0 +1,23 @@
+base_config: train_v24_musklike_easy.yaml
+
+# EVAL-ONLY config: v24 musklike-easy DATA (num_cells 500..1000) with the v24 (legacy)
+# `poolz_l2` MODEL, so a B2-trained checkpoint can be measured on the ORIGINAL
+# large-bag distribution.
+#
+# Why this exists: the S2 configs override num_cells to log-uniform [1,1024], and
+# evaluate_synthetic.py builds its val dataset from the config it is given. Running
+# the S2 checkpoint against its own training config therefore reports accuracy on the
+# NEW (harder, fewer-cells) distribution -- which is NOT the "no synthetic regression"
+# check, since 0.9510 was measured at n=500..1000. This config holds the model fixed
+# and puts the data back, making the comparison apples-to-apples.
+#
+# CAUTION: `bag_representation` adds NO parameters, so loading a poolz_l2 checkpoint
+# under a legacy config raises no error and silently evaluates the wrong view. The
+# model override below is what keeps this honest.
+model_overrides:
+  bag_representation: legacy
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: eval_v30_cardinality_legacy_on_largebags
