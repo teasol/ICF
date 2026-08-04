@@ -4,17 +4,17 @@ base_config: train_v30_cardinality_poolz_l2.yaml
 # v31 CANDIDATE BASELINE (2026-08-04)
 # =============================================================================
 # v31 = v30 (residual bottleneck bag proj + poolz_l2 + log-uniform cardinality)
-#       + Absolute Top-K Tail Tokens (`aggregator_absolute_tail_ks: [1, 2, 3]`)
+#       + Exponential Multi-Scale Top-K Tail Tokens (`aggregator_absolute_tail_ks: [1, 4, 8, 16]`)
 #       + B4 Any-Positive Sparse Meta-Training (`any_positive_sparse` task).
 #
 # Target: Resolve n > 34 large-bag performance degradation (0.698 -> >= 0.850)
-# by extracting absolute (un-diluted) top-1/2/3 rare instance tokens and
-# meta-learning single-conformer active detection.
+# by extracting exponentially spaced multi-scale tail tokens (1, 4, 8, 16)
+# to cover both single-cell needles and 15% sub-population clusters.
 # =============================================================================
 
 model_overrides:
   bag_representation: poolz_l2
-  aggregator_absolute_tail_ks: [1, 2, 3]
+  aggregator_absolute_tail_ks: [1, 4, 8, 16]
 
 data_overrides:
   dataset_kwargs:
