@@ -331,6 +331,14 @@ def main() -> None:
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA)
     parser.add_argument("--predictions", type=Path, default=Path("predictions"))
     parser.add_argument(
+        "--names",
+        nargs="*",
+        default=None,
+        help="Prediction filenames for the stratified report. Defaults to every "
+        "musk_*.pt in --predictions (so new runs are picked up automatically), "
+        "falling back to the known v24-era set if the glob finds nothing.",
+    )
+    parser.add_argument(
         "--report",
         choices=("all", "cardinality", "stratified", "decompose", "ceiling"),
         default="all",
@@ -355,7 +363,12 @@ def main() -> None:
         report_cardinality(sizes, labels, args.bootstrap)
         print()
     if args.report in ("all", "stratified"):
-        report_stratified(ids, sizes, args.predictions, DEFAULT_PREDICTIONS, args.bootstrap)
+        if args.names:
+            names = tuple(args.names)
+        else:
+            discovered = tuple(sorted(p.name for p in args.predictions.glob("musk_*.pt")))
+            names = discovered or DEFAULT_PREDICTIONS
+        report_stratified(ids, sizes, args.predictions, names, args.bootstrap)
         print()
     if args.report in ("all", "decompose"):
         report_decompose(ids, sizes, args.predictions, args.reference, args.small_bound)
