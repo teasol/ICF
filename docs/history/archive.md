@@ -1040,3 +1040,293 @@ rare-response(일부 cell만 반응)에서 "어느 cell이 반응하는가"가 �
 
 ---
 
+
+> **[아카이브 2026-08-04]** `current_status.md`에서 이관. 이 절의 T3-3 / 후보 동결 / T4 context-size curve는 모두 완료됐고, Action Plan 자체는 §21~§26(Musk 실데이터 전이)으로 대체됐습니다. 다만 **T4 Medium→Hard attribution의 잔여 항목**(raw-cell 대 40-token audit, token budget sweep, training scaling)은 수행되지 않은 **미결 질문**으로 남아 있습니다 — `current_status.md` §6 스텁 참고.
+
+## 6. 다음 작업 세션 Action Plan — 구조적 변경 및 실험 목록
+
+> [!IMPORTANT]
+> 모든 판단은 **합성 val**에서 하고 ICI는 손대지 않습니다 (§5). 후보마다
+> `scripts/evaluate_synthetic.py` → `scripts/compare_predictions.py`로 기준선
+> (`predictions/synthetic_v22_baseline_1000ep.pt`, AUROC 0.7078 [0.696, 0.719])과
+> paired cluster bootstrap 비교할 것.
+
+### ✅ T3-3 v22 Hard 기준선 완료 (2026-07-31)
+
+- Run: `v22_hard_baseline`, 50 epoch / 25,600 optimizer steps, 정상 종료
+- Best checkpoint: `checkpoints/20260731_035538/v22_hard_baseline/epoch=044-val_ce_loss=0.6839.ckpt`
+- Best `val_ce_loss`: **0.6839** (epoch 44), v21 Phase 2 참고값 0.6845와 사실상 동일
+- 1,000-episode 평가: **AUROC 0.5483 [0.538, 0.558]**, Log Loss 0.6920, 15,373 query
+- 예측: `predictions/synthetic_v22_hard_baseline_1000ep.pt`
+- 로그: `logs/20260731_035538/v22_hard_baseline.out`
+
+| task | AUROC | episodes |
+|---|---:|---:|
+| combined | 0.6095 | 213 |
+| composition | 0.5614 | 204 |
+| interaction | 0.5298 | 200 |
+| state | 0.5167 | 177 |
+| covariance | 0.5103 | 206 |
+
+> [!IMPORTANT]
+> Hard regime에서는 전체도 0.55에 불과하고 state/covariance는 거의 무작위입니다. Medium에서 종료한 Tier 1/2 방향을 다시 열 관측 근거가 생긴 것은 아닙니다. v21의 `val_ce_loss`를 재현했으므로 v22 구현 이상보다는 문제 난이도 자체의 한계로 읽는 것이 타당합니다.
+
+### ✅ 최종 후보 동결 여부 결정 — **완료 (2026-08-01)**
+
+사전에 계획한 Tier 1~3 합성 작업이 모두 끝났고, 이어서 진행한 v23/v24 bag-collapse family도 4종 모두 학습을 완주했습니다. 원래 계획은 이 4종을 1,000-episode paired 비교로 검증한 뒤 동결하는 것이었으나, **사용자가 이 비교를 건너뛰고 v24-B1(residual + bottleneck)을 직접 v24로 확정했습니다** (§3 "최종 결정" 참고). v22 Medium baseline은 폐기되었고 최종 후보는 v24입니다. **ICI는 여전히 잠금 상태** — v24용 ICI config가 없고, 이번 결정이 §7 평가 프로토콜을 통과한 것이 아니므로 ICI 해제는 별도로 다시 확인이 필요합니다.
+
+### ➡ 다음 우선순위: T4 Medium→Hard 성능 붕괴 attribution
+
+Hard는 Medium과 비교해 9개 축이 동시에 바뀝니다: class separation `0.5~1.4→0.2~0.8`, rare fraction `2~8%→0.5~3%`, rare probability `0.15→0.25`, donor shift `0.35→0.70`, component shift `0.12→0.25`, noise `0.01→0.05`, latent dim `32→64`, cells `500~1000→500~1500`, 그리고 batch/accumulation·covariance rank가 달라집니다. 현재 결과만으로는 어느 변화가 AUROC `0.7078→0.5483` 붕괴를 만들었는지 알 수 없습니다.
+
+**세 가지 표본·압축 병목 가설 (2026-07-31)**
+
+1. **Bag 내부 압축 병목 — 가능성 높음.** “40 instances”가 아니라 1 global + 12 slots×(center/spread/rare) + 3 tails의 **40개 512-d token**이며, 별도 slot metadata/covariance 경로도 있으므로 단순 1000→40 비율만으로 과압축이라 단정할 수는 없습니다. 하지만 Hard 반응세포는 0.5~3%뿐이고, 기존 sparse/slot 선택이 무작위·fragmented였으므로 label-relevant 소집단이 요약 과정에서 사라질 가능성은 높습니다. 판별은 같은 context에서 raw-cell observable distribution descriptor와 40-token descriptor를 직접 비교하고, 이후 12/24/48 slot·tail budget scaling으로 합니다.
+2. **Episode 내부 context bag 부족 — 가능성 높음.** 50~100 bags에서 최대 20%를 query로 빼면 context는 대략 40~80 bags, 클래스당 약 20~40개입니다. 매 episode마다 manifold와 response direction이 새로 뽑히므로 이 수십 개 label로 512-d 이상의 episode-specific 관계를 다시 추정해야 합니다. 또한 context token은 class당 8 memory token으로 다시 압축되지만 global/ridge 분기는 원 bag 통계를 직접 쓰므로 두 경로를 분리해 봐야 합니다. 판별은 같은 query를 고정한 paired context-size curve(10/20/40/80/160)로 합니다.
+3. **전체 training episode/step 부족 — 가능성 중간 이하, 아직 배제 불가.** Training은 seed 고정 dataset 재사용이 아니라 온라인 non-repeating stream입니다. Medium은 약 81,920 episodes/10,240 optimizer steps, Hard는 약 204,800 episodes/25,600 steps로 episode 절대량은 이미 큽니다. Hard CE도 epoch 30의 0.6845에서 epoch 44의 0.6839로만 개선되어 거의 plateau입니다. 따라서 우선순위는 낮지만, checkpoint별 1,000-episode curve와 1×/2×/4× update scaling으로 최종 확인합니다. Episode 수와 optimizer update 수는 별도로 통제합니다.
+
+**판별 순서**: context-size curve(가장 저렴) → raw-cell 대 40-token information audit → token budget sweep → 마지막으로 training scaling. Context를 늘려도 평평하면 bag 표현 병목, raw-cell descriptor만 높으면 압축 병목, 둘 다 충분한데 checkpoint 성능만 낮으면 meta-training/optimizer 병목으로 판정합니다.
+
+**Context-size curve 완료 기록 (2026-07-31 10:21~10:42 KST)**
+- 고정: Hard best checkpoint, 동일 episode, 클래스별 query 10개(총 20), nested balanced context
+- Context: 총 10/20/40/80/160 bags. 10~80은 학습 범위, 160은 의도적 OOD 상한
+- 완료: 1,000 episode 중 991 사용, 9 skip; context 크기당 query 19,820개
+
+| 총 context bags | AUROC (episode-cluster 95% CI) | Log loss |
+|---:|---:|---:|
+| 10 | 0.5084 [0.500, 0.516] | 0.7170 |
+| 20 | 0.5193 [0.511, 0.528] | 0.7047 |
+| 40 | 0.5312 [0.523, 0.539] | 0.6967 |
+| 80 | 0.5505 [0.542, 0.559] | 0.6900 |
+| 160 | 0.5737 [0.565, 0.583] | 0.6835 |
+
+- **판정**: context 10→80에서 `+0.0421`, 80→160에서 추가 `+0.0232`, 전체 10→160에서 `+0.0653`으로 단조 증가한다. 따라서 episode 내부 labeled bag 부족은 실제 주요 병목이다.
+- 200회 paired episode bootstrap 교차검증에서 `P(40 > 80)=0.00`, `P(80 > 160)=0.00`이었다. 즉 두 핵심 증가는 동일 episode/query 기준으로도 방향이 일관됐다.
+- 80의 0.5505가 기존 Hard 기준선 0.5483과 정합하므로 통상 Hard 평가의 context 규모를 재현한다.
+- 160은 학습 분포 밖 상한인데도 개선이 계속되지만 AUROC는 0.5737에 그친다. 따라서 context 부족만으로 Hard 붕괴 전체를 설명할 수 없고, bag 내부 정보 손실/압축 병목을 다음으로 분리한다.
+- 실행 PID(종료): `2499444`; 로그: `logs/20260731_context_curve/context_curve.out`
+- Summary: `logs/v22_hard_context_curve_1000ep.csv`; predictions: `predictions/v22_hard_context_curve/context_{10,20,40,80,160}.pt`
+- Smoke: 2 episodes 전체 경로 성공; unit tests 3개 통과 (balanced/disjoint/nested 계약); 전체 unittest 114개 통과 (675.411초)
+
+**Large-context 학습 용량 점검 (B200 183,359 MiB)**
+- 현재 Hard 학습: `episode_batch_size=4`, `accumulate_grad_batches=2`, GPU 1장, BF16 mixed. 따라서 forward/backward당 4 episodes, optimizer update당 effective 8 episodes.
+- Episode는 50~100 bags, training query는 5~12 bags이므로 실제 학습 context 범위는 38~95 bags.
+- 현재 v22 6.57M 모델, batch 4, 1,500 cells/bag의 보수적 FP32 forward/backward 벤치:
+
+| 총 bags/episode | Peak allocated VRAM | Step time |
+|---:|---:|---:|
+| 100 | 47,043.9 MiB | 0.135 s |
+| 172 | 80,849.2 MiB | 0.213 s |
+| 220 | 103,384.9 MiB | 0.273 s |
+
+- 벤치는 bags 절반을 query로 둬 실제 training query 5~12보다 meta 경로가 더 무거운 보수적 조건이다. 따라서 `context 160 + query 최대 12 = 총 172 bags`는 현재 batch 4를 유지해도 충분한 여유가 있다.
+- 총 220 bags도 단일 model step은 통과했으므로 context 약 200까지는 유력하지만, CUDA online generation/prefetch를 포함한 end-to-end smoke 전에는 정식 상한으로 확정하지 않는다.
+- 실제 ICI context는 fold당 약 69명이므로 large-context-only 학습은 사용하지 않습니다. 작은 context를 포함한 mixed 학습을 하고 표준 40/80 평가 성능이 개선될 때만 학습 효과로 인정합니다.
+
+**Batch 2 / context 300 추가 점검**
+
+| Episode batch | 총 bags/episode | Peak allocated VRAM | Step time |
+|---:|---:|---:|---:|
+| 2 | 312 | 73,338.0 MiB | 0.196 s |
+| 2 | 360 | 84,605.2 MiB | 0.223 s |
+
+- `context 300 + query 최대 12 = 총 312 bags`는 B200에서 큰 메모리 여유로 통과했다. 이 벤치 역시 FP32이며 bags 절반을 query로 둔 보수적 model-step 조건이다.
+- `episode_batch_size=2`로 내리면 `accumulate_grad_batches=4`로 올려 기존 effective batch 8과 epoch당 optimizer step 수를 유지한다. accumulation 2를 그대로 두면 effective batch가 4로 바뀌고 optimizer step이 2배가 되어 context 효과와 최적화 효과가 섞인다.
+- 실제 ICI context가 약 69이므로 context 300 고정 학습은 피한다. 기존 38~95 구간을 충분히 포함하는 mixed/bucket sampling으로 최대 300까지 노출하고, 40/80 성능 개선을 1차 성공 기준으로 둔다.
+
+**Mixed-context sampler 구현 (2026-07-31)**
+- Config: `configs/train_v22_hard_context300.yaml`
+- 각 training shape group에서 중심을 `[40, 80, 120, 160, 180, 240, 300]` 중 균등 선택하고 정수 jitter `[-5, +5]`를 적용한다.
+- Dataset은 선택된 context에 query 5~12개를 더해 총 bag 수를 생성한다. `ModelInterface`는 실제 query 수를 필터링하여 query 제거 후 남는 context가 반드시 선택 가능한 중심의 `±5` 안에 들도록 보장한다.
+- 최대 조합은 context 305 + query 12 = 총 317 bags이며, 이 범위를 train dataset에만 적용한다. Validation/test의 기존 50~100 bags 분포는 유지한다.
+- Batch 2, accumulation 4로 effective 8 episodes/update와 epoch당 optimizer step 수를 기존 Hard 기준선과 동일하게 유지한다.
+- 테스트: 관련 dataset/model 27개 통과, batched forward 포함 31개 통과(169.244초).
+- 최초 training smoke에서 whole-batch CUDA prefetch가 다음 대형 episode 생성을 현재 forward와 겹치며 순간 allocator OOM 경고를 냈다. Prefetch를 끈 뒤에도 batch 내부 두 CUDA stream의 episode 생성이 겹칠 때 같은 경고가 재현됐다. 두 run은 중단했다.
+- 최종 안전 설정은 `cuda_prefetch: false`, `parallel_cuda_generation: false`다. 두 episode tensor는 순차 생성한 뒤 stack하여 batch 2 forward/backward를 수행하므로 학습 통계와 effective batch는 바뀌지 않는다.
+- Prefetch-off 최대 경계 smoke: `(batch=2, bags=317, cells=1500, dim=512)`, query 12, 실제 context 305. Online generation부터 forward/backward까지 peak 74,546.6 MiB로 통과했다.
+- 외부 W&B 인증에 의존하지 않도록 파생 config는 local CSV logger를 사용한다.
+- Fine-tuning: Hard best epoch 44 checkpoint에서 epoch 45~49를 이어 학습 완료.
+- 로그: `logs/20260731_context300_ft/v22_hard_context300_ft_serial.out`
+- Checkpoints: `checkpoints/20260731_context300_ft/v22_hard_context300_ft_serial/`
+
+| Fine-tuning epoch | val CE | val AUROC (104 episodes, 참고용) |
+|---:|---:|---:|
+| 45 | 0.6867 | 0.5542 |
+| 46 | 0.6889 | 0.5588 |
+| **47** | **0.6853** | 0.5623 |
+| 48 | 0.6864 | 0.5586 |
+| 49 | 0.6890 | 0.5626 |
+
+- 기존 Hard best CE `0.6839`를 넘지 못했으므로 CE 기준 개선 신호는 없다. 다만 104-episode AUROC는 불확실하므로 epoch 47 checkpoint를 동일 1,000-episode context curve로 최종 비교한다.
+- Fine-tuned checkpoint 평가 완료: context 40/80/160/300, fixed query, pool 400 bags, 1,000 episodes.
+
+| Context | AUROC (episode-cluster 95% CI) | Log loss |
+|---:|---:|---:|
+| 40 | 0.5331 [0.525, 0.542] | 0.6992 |
+| 80 | 0.5553 [0.546, 0.565] | 0.6901 |
+| 160 | 0.5842 [0.575, 0.593] | 0.6798 |
+| 300 | 0.5977 [0.588, 0.607] | 0.6762 |
+
+- 로그: `logs/20260731_context300_eval/context_curve.out`
+- 산출물: `logs/v22_hard_context300_ft_curve_1000ep.csv`, `predictions/v22_hard_context300_ft_curve/context_{40,80,160,300}.pt`
+- 동일 pool 400·동일 episode의 원본 Hard checkpoint 대조 평가 완료:
+
+| Context | 원본 AUROC | Fine-tuned AUROC | Δ |
+|---:|---:|---:|---:|
+| 40 | 0.5284 | 0.5331 | +0.0047 |
+| 80 | 0.5483 | 0.5553 | +0.0070 |
+| 160 | 0.5734 | 0.5842 | +0.0108 |
+| 300 | 0.5839 | 0.5977 | +0.0138 |
+
+- Fine-tuning 이득은 context가 클수록 증가하지만 사전 구조 후보 기준 overall `+0.03`에는 전 구간 미달합니다. 실제 ICI 범위 40/80의 이득도 `+0.005~0.007`로 작다.
+- 대조 로그: `logs/20260731_context300_baseline_eval/context_curve.out`; summary: `logs/v22_hard_baseline_pool400_curve_1000ep.csv`
+
+**Medium context-to-oracle 실험**
+- 공식 checkpoint: `checkpoints/20260729_160643/v22_medium_fixed/epoch=013-val_ce_loss=0.5946.ckpt`; 기존 AUROC `0.7078 [0.696, 0.719]`.
+- Config: `configs/train_v22_medium_context300.yaml`; Hard와 같은 context 중심 `[40,80,120,160,180,240,300]±5`, batch 2/accumulation 4, 순차 CUDA generation.
+- Medium 원본 checkpoint pool-400 context curve 완료:
+
+| Context | AUROC (episode-cluster 95% CI) | Log loss |
+|---:|---:|---:|
+| 40 | 0.6757 [0.665, 0.686] | 0.6456 |
+| 80 | 0.7204 [0.709, 0.730] | 0.6100 |
+| 160 | 0.7654 [0.755, 0.775] | 0.5817 |
+| 300 | 0.7989 [0.790, 0.807] | 0.5639 |
+
+- 재학습 전 모델도 context 40→300에서 `+0.1232` 상승해 context 활용 능력이 분명하다. 다만 300에서도 overall 0.80이며, state task의 비현실적 oracle-mask 0.9013과는 직접 같은 지표가 아니므로 혼동하지 않습니다.
+- Baseline 평가 로그: `logs/20260731_medium_context_baseline_eval/context_curve.out`; summary: `logs/v22_medium_baseline_pool400_curve_1000ep.csv`.
+- Mixed-context fine-tuning 완료:
+
+| Epoch | val CE | val AUROC (104 episodes, 참고용) |
+|---:|---:|---:|
+| **14** | **0.5953** | 0.7340 |
+| 15 | 0.5970 | 0.7371 |
+| 16 | 0.5961 | 0.7387 |
+| 17 | 0.5955 | 0.7378 |
+| 18 | 0.5978 | 0.7344 |
+| 19 | 0.5953 | 0.7340 |
+
+- Best epoch 14도 원본 best CE `0.5946`을 넘지 못했다. CE 기준 개선 신호는 없다.
+- Fine-tuning 로그: `logs/20260731_medium_context300_ft/train.out`; checkpoints: `checkpoints/20260731_medium_context300_ft/v22_medium_context300_ft/`.
+- 사용자 요청에 따라 20 epochs에서 결론 내리지 않고 `max_epochs=100`으로 확장했다. Epoch 19 `last.ckpt`의 model/optimizer/scheduler/global-step을 모두 복원해 epoch 20부터 이어간다.
+- 중간 best epoch 14의 context curve(PID `2542931`)와 대기 중이던 state upper-bound(PID `2543210`)는 최종 100-epoch 후보로 대체되므로 중단했다.
+- 100-epoch run PID: `2544289`; 로그: `logs/20260731_medium_context300_100e/train.out`.
+- Checkpoints: `checkpoints/20260731_medium_context300_100e/v22_medium_context300_100e/`.
+- 현재 속도 약 3.4분/epoch 기준 epoch 99까지 예상 약 4.5시간. 완료 후 best CE checkpoint를 동일 pool-400 curve 및 state observable/oracle 진단으로 평가한다.
+- 진행 확인: epoch 31의 42%, 경과 40분 43초, GPU 약 102.7 GiB, OOM/Traceback 없음. Epoch 20~30 val CE는 `0.5955~0.5999`; mixed-context 전체 best는 여전히 epoch 14의 `0.5953`이며 공식 원본 best `0.5946`을 넘지 못했다.
+- 사용자 판단에 따라 epoch 31 validation 완료 후 run을 중단했다. Epoch 31 CE `0.5947`, AUROC `0.7351`로 공식 CE `0.5946`과 사실상 동률이다. Train total/CE의 epoch 20~30 평균도 하락하지 않아 추가 epoch보다 architecture 개선으로 전환한다.
+- 상세 architecture 근거와 v23 후보: [`architecture_v23_candidates.md`](architecture_v23_candidates.md).
+- **다음 우선순위 T5-A**: 기존 40-token aggregator는 고정하고 token type/slot/tail identity를 부여한 뒤, bag 내부에서 structured embedding을 만들고 각 labelled bag을 fixed 8-token class memory 없이 direct ridge/cross-attention에 전달합니다. 이 실험으로 episode-level context 압축과 bag-level 정보 손실을 먼저 분리합니다.
+- State oracle-mask `0.9013`/latent `1.0`은 정답 반응세포 또는 latent score를 사용하므로 달성 목표가 아니라 비현실적 참고 상한입니다. 실제 성공 기준은 관측 입력만으로 context 40/80 및 overall AUROC가 개선되는지다.
+
+**T4-0. 재학습 없는 접근성 감사 [먼저]**
+- Hard best checkpoint로 state `model_input`/`observable`/`oracle` 상한 재측정
+  - 완료: 현재 모델 0.5175 [0.496, 0.538], model-input 최대 0.5336 [0.510, 0.556](+0.016, 기준 +0.05 미달), oracle-mask 0.6953
+  - 산출물: `logs/v22_hard_state_upper_bound_1000ep.csv`; 로그 `logs/20260731_hard_accessibility/state_upper_bound.out`
+- Hard config에서 covariance all-cell/oracle-mask 상한 재측정
+  - 완료: all-cell 최대 0.5044 [0.483, 0.525], 현재 모델 0.5103과 동률; oracle-mask covariance 최대 0.6074 [0.564, 0.652]
+  - 산출물: `logs/v22_hard_covariance_upper_bound_1000ep.csv`; 로그 `logs/20260731_hard_accessibility/covariance_upper_bound.out`
+- effect scale 0.4/0.7 matched 평가로 Hard task 상대 약점이 생성기 scale 아티팩트인지 확인
+  - 완료: scale 0.4 overall 0.5086 [0.500, 0.518], scale 0.7 overall 0.5282 [0.519, 0.538]; 모든 단일 task 0.498~0.531, combined만 scale 0.7에서 0.5645
+  - 산출물: `predictions/synthetic_v22_hard_scale{0.4,0.7}_1000ep.pt`; 로그 `logs/20260731_hard_accessibility/matched_effect.out`
+
+**T4-1. 누적 bridge ablation [T4-0 후]**
+1. **Signal scarcity**: class separation + rare fraction/probability
+2. **Nuisance**: donor shift + component shift + observation noise
+3. **Geometry/scale**: latent dim + cell/bag 범위
+4. **Optimization/model setting**: batch/accumulation + covariance rank
+
+Medium에서 시작해 위 그룹을 하나씩 Hard 값으로 바꾸고, 동일 optimizer-step 예산과 1,000-episode paired evaluation을 사용합니다. 처음 성능이 급락하는 그룹 안에서만 one-factor ablation을 합니다. 모든 조합을 탐색하지 않습니다.
+
+**판정 기준**
+- overall AUROC 차이 **+0.03 이상** 또는 target task **+0.05 이상**
+- episode cluster CI + paired bootstrap 필수
+- 관측 가능한 헤드룸이 없는 상태에서 새 architecture head 추가 금지
+- ICI는 Medium+Hard 후보 확정 전까지 실행 금지
+
+### ~~Tier 2 — state 분기~~ — 🛑 **종료 (2026-07-31)**
+
+상세 결과는 §3의 T2-1/T2-2 표를 참고합니다. `model_input`, `observable`, `oracle_mask`, `oracle_latent`를 처음부터 분리했고, 현재 모델이 관측 가능 probe와 동률이라는 사전 종료 조건이 충족됐습니다. 따라서 T2-3 이득 곡선과 state 아키텍처 변경은 진행하지 않습니다.
+
+### Tier 3 — 방법론 (성능이 아니라 판단 신뢰도)
+
+**T3-1. ✅ 완료 (2026-07-30) — 진짜 약점은 `state`.**
+effect scale을 통일해 비교하니 covariance는 composition과 동률이고 **state가 전 구간 최하위**. 기본 config의 covariance 최하위는 생성기 아티팩트였습니다. 상세는 §3.
+재현: `python scripts/evaluate_synthetic.py --checkpoint <best>.ckpt --config configs/train_v22_medium.yaml --val-episodes 400 --effect-scale 0.7`
+
+<details><summary>원래 T3-1 계획 (완료)</summary>
+현재 task별 AUROC는 생성기 effect scale(composition 1.40 / state 0.72 / covariance 0.55)에 오염되어 **아키텍처의 상대적 강약을 직접 비교할 수 없습니다.** 모든 task의 effect scale을 동일하게 맞춘 진단용 데이터 config를 만들면 "어느 메커니즘에 실제로 약한가"를 처음으로 공정하게 볼 수 있습니다. 학습된 모델을 그 데이터로 평가만 하면 되므로 재학습 불필요.
+</details>
+
+**T3-2. ✅ 완료 (2026-07-30) — 권고: val episode 1,000개.**
+CI 폭 104→0.074 / 400→0.035 / 1,000→0.021. task별은 1,000에서 0.045. **task별 +0.05 미만을 노리는 실험은 1,000개로도 부족하므로 2,000개 이상 필요**합니다. 상세는 §3. 이 과정에서 공식 기준선도 1,000 episode 기준으로 갱신했습니다(0.7078).
+
+<details><summary>원래 T3-2 계획 (완료)</summary>
+현재 104 episodes → CI 폭 0.060. Tier 1/2에서 기대하는 개선폭이 그보다 작다면 검출이 안 됩니다. `val_dataset_kwargs.episodes_per_epoch`를 늘려 CI를 좁히세요 (episode 수가 실질 표본 크기, §5).
+</details>
+
+**T3-3. ✅ 완료 (2026-07-31) — v22 Hard 기준선.**
+Best `val_ce_loss 0.6839`; 1,000-episode AUROC `0.5483 [0.538, 0.558]`. state 0.5167 / covariance 0.5103으로 거의 무작위이며, v21 Phase 2 CE 0.6845를 재현했습니다. 상세는 위 T3-3 완료 표 참고.
+
+### ~~Tier 1 — 반응세포 식별 (Sparse Evidence)~~ — 🛑 **종료 (2026-07-29)**
+
+**결론: 진행하지 않습니다.** 사전 판정 기준에 따라 T1-C 2단계에서 종료했습니다 (bag 라벨 purity 0.128 ≤ 0.15). 전체 근거 사슬은 §3의 T1-0 → T1-A → T1-B → T1-C 참고.
+
+| 단계 | 질문 | 결과 |
+|---|---|---|
+| T1-0 | covariance 상한이 실재하는가 | 오라클 세포 0.893 / **실제 관측 가능 0.570** — 모델 0.612는 이미 그 위 |
+| T1-A | 세포 선택이 반응세포를 찾는가 | 기하 3종 + 학습 1종 **전부 AUROC ~0.50** |
+| T1-B | 슬롯 단위로는 되는가 | fragmentation entropy 0.963 — 12슬롯에 흩어짐. 단 세포 라벨 held-out은 0.697 |
+| T1-C 1 | 부분 개선도 값이 있는가 | **있음** — 곡선 선형, 순도 0.40에서 분기 +0.107 |
+| T1-C 2 | bag 라벨만으로 되는가 | **안 됨** — purity 0.128 (무작위 0.110) → **종료** |
+
+<details><summary>종료된 Tier 1 상세 계획</summary>
+
+
+T1-0/T1-1 진단으로 원래 가설이 무너지고 병목이 바뀌었습니다 (§3 참고). 요약:
+- 모델 0.6122는 **진짜 관측 가능한 상한 0.5704를 이미 초과**합니다.
+- 0.8931은 **반응세포 오라클 마스크**를 받은 경우이며 모델은 그 마스크를 못 받습니다.
+- 반응세포는 전체의 **11.7%**뿐. **그 세포들을 찾아내는 것이 유일한 실질 레버**입니다.
+
+**T1-A. ✅ 완료 (2026-07-29) — 세포 선택이 무작위와 구분되지 않음.**
+기하학적 기준 3종(`outlier_distance` 0.5091 / `studentized` 0.5098 / `novelty` 0.4984)과 **학습된 기준**(`class_memory` 0.4971) 전부 AUROC ~0.5. precision = base rate, recall = 유지 비율. 4개 task 모두 동일. 상세는 §3.
+**결론: k값 튜닝은 무의미합니다.** 랭킹에 신호가 없습니다.
+재현: `python scripts/diagnose_cell_selection.py --config configs/train_v22_medium.yaml --val-episodes 400 --checkpoint <best>.ckpt`
+
+**T1-B. ✅ 완료 (2026-07-29) — 슬롯 정렬 실패, 그러나 특징에는 신호 있음.**
+슬롯 capture 0.155(무작위 0.083)·fragmentation entropy 0.963 → 반응 component는 12개 슬롯에 흩어짐. 반면 held-out LDA는 0.6969 → **특징에는 신호가 있고 메커니즘이 없는 것**. 상세는 §3.
+재현: `python scripts/diagnose_oracle_slot_alignment.py --config configs/train_v22_medium.yaml` / `python scripts/diagnose_cell_selection.py --probe --checkpoint <best>.ckpt`
+
+<details><summary>원래 T1-B 계획 (완료)</summary>
+T1-A가 실패 원인을 짚어줬습니다: 반응세포는 `effect_mask = (component_index == effect_component_index)`, 즉 **latent mixture component 하나**이고, covariance task에서는 **위치가 아니라 분산이 바뀝니다.** 중심에서 먼 세포를 찾는 현재 기준으로는 구조적으로 못 찾습니다.
+→ 개별 세포가 아니라 **component 단위**로 접근해야 합니다. aggregator는 이미 12개 slot에 세포를 배정하므로:
+1. **반응 component가 특정 슬롯과 정렬되는지 측정** — 기존 도구 `scripts/diagnose_oracle_slot_alignment.py`가 이 용도입니다.
+2. 정렬된다면 → 슬롯별 공분산(`slot_covariance_sketch`, 이미 계산 중)으로 0.89에 얼마나 근접하는지 측정.
+3. 정렬되지 않는다면 → 슬롯 배정 자체(anchor 선정, `assignment_temperature`)가 문제.
+</details>
+
+**T1-C 1단계. ✅ 완료 (2026-07-29) — 이득 곡선 선형, Tier 1 유지.**
+순도 0.11→1.00에서 covariance AUROC 0.517→0.888로 **선형 증가, 문턱 없음**. 현실적(held-out LDA, 순도 0.40) 기대치는 분기 **0.557 → 0.664 (+0.107)**. 상세는 §3.
+재현: `python scripts/diagnose_selection_gain_curve.py --config configs/train_v22_medium.yaml --val-episodes 400`
+
+**T1-C 2단계. [다음] bag 라벨만으로 판별 방향을 학습할 수 있는지 검증.**
+남은 핵심 미지수는 하나입니다: **세포 라벨 없이, bag 라벨(R/NR)만으로 순도 0.4 수준의 선택을 학습할 수 있는가?** 이것이 되면 +0.107이 현실이고, 안 되면 Tier 1은 여기서 끝입니다.
+- 값싼 선행 검증: episode 여러 개에 걸쳐 **bag 라벨로 학습한 선형 판별 방향**(R bag 세포 vs NR bag 세포)이 반응세포를 얼마나 골라내는지 측정. 세포 라벨을 안 쓰므로 **실제 학습 가능한 상한**이 됩니다. `diagnose_cell_selection.py`에 score를 하나 추가하는 수준의 작업입니다.
+- 이 값이 순도 0.3~0.4를 내면 → 구조 변경(attention 기반 세포 가중) 착수 근거 확보.
+- 0.15 이하면 → **Tier 1 종료**, Tier 2/3으로 이동.
+
+> [!WARNING]
+> **T3-2(val episode 증량)가 Tier 1 검증의 선행 조건입니다.** covariance는 전체의 20%라 성공해도 전체 AUROC로는 +0.014 수준이고 현재 CI 폭(0.060)에 묻힙니다. §3의 검출 가능성 경고 참고.
+
+</details>
+
+### 하지 말 것
+
+- **ICI 실행 금지** — 합성에서 후보가 확정되기 전까지. §5 참고, 지금 돌리면 테스트 세트를 조기 소진합니다.
+- **오라클 기반 상한을 목표치로 삼기 금지** — descriptor가 `responsive_instance_mask`나 latent 파라미터를 쓰는지 항상 먼저 확인하세요. 모델이 못 받는 정보로 만든 상한은 목표가 아닙니다 (§3 정정 사례).
+- **effect scale 정규화 없이 task별 AUROC로 우열 판단 금지** (§3 T3-1). 기본 config의 task별 표는 생성기 난이도에 오염되어 있습니다.
+- **상한 측정 없이 아키텍처부터 뜯기 금지** — Tier 1 전체가 학습 한 번 없이 진단만으로 닫혔습니다. 관측 가능한 상한 → 모델 위치 → 이득 곡선 순서를 지키세요.
+- **104 episode 결과로 판정 금지** — `--val-episodes 1000` 사용 (§3 T3-2).
+
+---
+
