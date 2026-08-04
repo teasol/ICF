@@ -1,7 +1,7 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-04` (**§26 Musk 전이 재진단 + §27 문서 압축 — 최신**)
-**Status**: **v24가 확정 baseline (변경 없음, 코드 미변경)**. **§26에서 Musk 로드맵을 재설정**했습니다 —
+**Last updated**: `2026-08-04` (**§28 v30 S1 학습 실행 중 — 최신**; §26 재진단 / §27 문서 압축)
+**Status**: **v24가 확정 baseline (변경 없음)** — v30 B1 플래그는 구현됐으나 **기본 OFF**이며 승격 전입니다. **§28: `poolz`/`poolz_l2` 학습 + 자동 평가 큐가 백그라운드 실행 중** (오케스트레이터 PID 2183035, `logs/queue_v30_poolz.log`). **§26에서 Musk 로드맵을 재설정**했습니다 —
 `musk095_architecture_proposal.md`의 **P1/P2는 기각, P3는 연기**. 진짜 병목은 "입력이 bag 평균을
 버린다"가 아니라 **per-bag centering이 작은 bag(Musk median 12, n≤4가 28%)을 rank 결핍으로
 소멸시키는 것**입니다 — 소형 bag에서 현 표현 **0.500** vs pool-z **0.900~0.967**, 그리고 학습된 4개
@@ -25,7 +25,7 @@
 no-L2 음성(0.5925), v25 폐기.
 **Read first if you are picking this up**: **§26 (Musk 재진단·v30 제안 — 최신)** 및
 [`history/musk_transfer_diagnosis_v30_proposal.md`](history/musk_transfer_diagnosis_v30_proposal.md),
-그다음 §27 (문서 압축·재현성 복구 기록), §25 (IA-MIL 폐기·정리), §3 (실험 현황·최종 결정),
+그다음 **§28 (실행 중인 v30 S1 — PID·로그·게이트)**, §27 (문서 압축·재현성 복구 기록), §25 (IA-MIL 폐기·정리), §3 (실험 현황·최종 결정),
 §5 (실험 전략), §7 (평가 프로토콜).
 해결·폐기된 세션/실험 기록(**§6**, §11~§24, §22 musk-like easy 가설 / §23 raw-stat 음성 /
 §24 IA-MIL 음성 포함)은 [`history/archive.md`](history/archive.md) 참고.
@@ -742,3 +742,61 @@ S5 인스턴스 수준 채널(§22의 독립 신호원, 0.95 마진 확보). **�
 ③ P1 보류 여부. B1 구현 시 착수점은 `_bag_view`(`baseline.py:618`)에 `bag_representation` 플래그
 (기본 OFF)를 추가하고 pool 통계를 3개 호출 지점에서 주입하는 것 — 상세는
 [`history/musk_transfer_diagnosis_v30_proposal.md`](history/musk_transfer_diagnosis_v30_proposal.md) §3.1.
+
+---
+
+## 28. 2026-08-04 — v30 S1 실행 중: B1 `poolz` / `poolz_l2` 학습 + 자동 평가 큐
+
+**상태**: **백그라운드 실행 중** (구현·테스트 완료, 커밋 `b3808cb`). 아키텍처 플래그는 기본 OFF이므로
+**v24 확정 baseline은 그대로**이며, 승격 판정은 아래 게이트 통과 후 별도로 받습니다.
+
+**구현** (`bag_representation`: `"legacy"`(기본) | `"poolz"` | `"poolz_l2"`):
+per-bag centering을 **context-pool 대각 표준화**로 대체합니다 — `z = (x − μ_ctx)/σ_ctx`,
+`poolz_l2`는 여기에 per-cell L2. `classification_instances`만 바뀌고 `global_summary`(per-bag
+centered spread)와 `centered_delta`는 그대로라 **공분산/spread 분기는 v24와 동일**합니다.
+pool 통계는 **context bag의 모든 세포**에서 cell-count 가중(실 bag 크기 1~1044 → per-bag 평균의
+평균은 오가중), query 누출 없음. 주입 지점 3곳: `forward_episode_batch`(에피소드별),
+`aggregator.forward`(`context_mask` 검증을 `_bag_view` 앞으로 이동), `BaseModel.forward`
+(`is_context`를 중복 `_bag_view` 앞으로 이동 — 안 하면 rare-evidence/MIL 분기가 slot 분기와 다르게
+정규화된 세포를 받음).
+
+**검증**: unittest **164/164 통과**(136.6s, 신규 10건 — 기본값 legacy 유지, 잘못된 플래그 조합 거부,
+pool 통계 없으면 raise, poolz는 magnitude 보존/poolz_l2는 단위 노름, pool 통계가 query bag 무시,
+batched==list pool 통계 및 forward 일치(≤1e-4), forward/backward 유한, **n=1 bag이 legacy에서는
+0벡터지만 poolz에서는 아님**). 1-epoch 실 스모크(poolz) `val_loss 0.436`(v24 musklike-easy 스모크
+0.485), NaN·크래시 없음.
+또한 `_context_pool_stats`를 `unbiased=False`로 batched twin과 정확히 일치시켰습니다 — Bessel 보정을
+쓰면 학습(batched)과 실데이터 추론(list)이 **~0.25% 조용히 어긋납니다.**
+
+**실행 중인 큐** (`scripts/queue_v30_poolz.sh`, 단일 B200이라 순차):
+train 50 epoch → 1,000-ep 합성 eval → Musk zero-shot eval → cardinality 층화 리포트, 2개 run 연속.
+
+| 항목 | 값 |
+|---|---|
+| Run 1 | `v30_musklike_easy_poolz` — **진행 중** (10:02:34 시작) |
+| Run 1 PID / 로그 | `2174854` / `logs/20260804_100234/v30_musklike_easy_poolz.out` |
+| Run 1 체크포인트 | `checkpoints/20260804_100234/v30_musklike_easy_poolz/` |
+| Run 2 | `v30_musklike_easy_poolz_l2` — Run 1 종료 후 자동 시작 |
+| 오케스트레이터 PID / 로그 | `2183035` / `logs/queue_v30_poolz.log` |
+| 진행 상황 | epoch 1에서 `val_loss 0.409`, GPU 114GB/77%, ~105s/epoch → 50 epoch ≈ 90분/run |
+| 예측 산출물 | `predictions/synthetic_v30_musklike_easy_poolz{,_l2}_1000ep.pt`, `predictions/musk_v30_musklike_easy_poolz{,_l2}.pt` |
+
+**사전 등록 게이트** (config 주석에도 명시):
+- `poolz`: 합성 musklike-easy 1,000-ep AUROC **≥0.94**(현 0.9510 무회귀) **AND** Musk 전체 **≥0.89**
+- `poolz_l2`: 합성 **≥0.94** **AND** Musk 전체 **≥0.92**
+- **층화 보고 필수**(n≤4 / 5–10 / 11–34 / n>34). 현 최고는 Musk 0.822이고 n≤4가 0.475이므로,
+  소형 구간 개선이 없으면 전체 수치만으로는 무엇이 개선됐는지 판정 불가.
+- 근거 천장(§26): `poolz` Musk 0.874 / n≤4 0.900, `poolz_l2` 0.912 / 0.967. 모델은 자기 입력의
+  선형 천장을 +0.055~0.072 초과해 왔으므로 실현 기대치는 각각 **≈0.93 / ≈0.97**입니다.
+
+**큐 스크립트 버그 수정 (실행 중 발견)**: 아카이브에서 계승한 `pgrep -f "scripts/train.py"`는
+**그 문자열을 명령줄에 포함한 모든 프로세스**(예: 큐 상태를 확인하는 `pgrep -af scripts/train.py`
+쉘)를 매칭해, 큐가 학습이 살아있다고 오판하고 `wait_gpu_free`에서 영구 대기했습니다.
+`/proc/<pid>/comm`으로 **실제 python/torchrun 프로세스만** 필터링하도록 수정했습니다. 또한 launcher가
+학습을 detach하므로 오케스트레이터를 재시작해도 중복 실행되지 않게 `ICF_ATTACH_FIRST=1`
+(진행 중인 첫 run을 입양해 완료 대기 후 평가) 모드를 추가했습니다.
+
+**다음 Action**: 큐 완료 후 ① 게이트 판정(합성 무회귀 + Musk 전체·층화), ② 통과 시 v30 승격 여부와
+`poolz` vs `poolz_l2` 선택을 사용자 확인, ③ 미달 시 S2(B2 cardinality-faithful 샘플링)로 진행 —
+B2는 아키텍처 무변경이며 소형 bag을 학습 분포에 넣어 B1의 천장을 실제로 실현시키는 단계입니다.
+진행 확인: `timeout 5s tail -5 logs/queue_v30_poolz.log`.

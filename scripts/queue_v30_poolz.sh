@@ -31,9 +31,29 @@ declare -A RUN_CONFIGS=(
 )
 DEFAULT_ORDER=(v30_musklike_easy_poolz v30_musklike_easy_poolz_l2)
 
+# Real training processes only.
+#
+# FIX (2026-08-04): the inherited `pgrep -f "scripts/train.py"` matches ANY process
+# whose command line contains that string -- including an interactive shell running
+# `pgrep -af scripts/train.py` to check on the queue. That made the queue believe a
+# training was live and block forever in wait_gpu_free. Filtering on /proc/<pid>/comm
+# keeps only actual python/torchrun processes, so shells cannot be mistaken for runs.
+training_pids() {
+  local pid comm
+  for pid in $(pgrep -f "scripts/train\.py" 2>/dev/null || true); do
+    [[ "$pid" == "$$" ]] && continue
+    comm="$(cat "/proc/$pid/comm" 2>/dev/null || true)"
+    case "$comm" in
+      python*|torchrun*|pt_main_thread*) echo "$pid" ;;
+    esac
+  done
+}
+
+training_running() { [[ -n "$(training_pids)" ]]; }
+
 wait_gpu_free() {
   log "waiting for GPU to be free..."
-  while pgrep -f "scripts/train.py" > /dev/null 2>&1; do sleep 60; done
+  while training_running; do sleep 60; done
   log "GPU free."
 }
 
@@ -41,17 +61,17 @@ wait_gpu_free() {
 # and (2) finished. Step (1) is what prevents the spawn race described above.
 wait_launched_training_done() {
   local name="$1" waited=0
-  log "waiting for $name to spawn train.py..."
-  while ! pgrep -f "scripts/train.py" > /dev/null 2>&1; do
+  log "waiting for $name to spawn its trainer..."
+  while ! training_running; do
     sleep 5; waited=$((waited + 5))
     if (( waited >= TRAIN_SPAWN_TIMEOUT )); then
-      log "WARN: $name showed no train.py within ${TRAIN_SPAWN_TIMEOUT}s (check its launch log)"
+      log "WARN: $name spawned no trainer within ${TRAIN_SPAWN_TIMEOUT}s (check its launch log)"
       wait_gpu_free
       return 0
     fi
   done
-  log "$name training started; waiting for completion..."
-  while pgrep -f "scripts/train.py" > /dev/null 2>&1; do sleep 60; done
+  log "$name training started (pids: $(training_pids | tr '\n' ' ')); waiting for completion..."
+  while training_running; do sleep 60; done
   log "$name training finished."
 }
 
@@ -92,15 +112,8 @@ evaluate() {
     >> "$QUEUE_LOG" 2>&1 || log "$name: stratified report FAILED"
 }
 
-run_one() {
+finish_one() {
   local name="$1" cfg="${RUN_CONFIGS[$1]}"
-  wait_gpu_free
-  log "launching $name ($cfg)"
-  CUDA_DEVICES=0 NPROC_PER_NODE=1 TORCHRUN_BIN="$TORCHRUN_BIN" NETRC="$NETRC" \
-    scripts/launch_interactive_training.sh "$name" "$cfg" \
-    || { log "launch FAILED for $name"; return 1; }
-  wait_launched_training_done "$name"
-
   local ckpt
   if ! ckpt="$(best_checkpoint "$name")" || [[ -z "$ckpt" ]]; then
     log "$name: no checkpoint found -> skipping eval (training likely died; check logs/)"
@@ -110,12 +123,42 @@ run_one() {
   evaluate "$name" "$cfg" "$ckpt"
 }
 
+run_one() {
+  local name="$1" cfg="${RUN_CONFIGS[$1]}"
+  wait_gpu_free
+  log "launching $name ($cfg)"
+  CUDA_DEVICES=0 NPROC_PER_NODE=1 TORCHRUN_BIN="$TORCHRUN_BIN" NETRC="$NETRC" \
+    scripts/launch_interactive_training.sh "$name" "$cfg" \
+    || { log "launch FAILED for $name"; return 1; }
+  wait_launched_training_done "$name"
+  finish_one "$name"
+}
+
+# Adopt a training that is ALREADY in flight (launcher detaches, so an orchestrator
+# restart must not relaunch it): wait for it to finish, then evaluate.
+attach_one() {
+  local name="$1"
+  log "attaching to in-flight $name (pids: $(training_pids | tr '\n' ' ')); waiting for completion..."
+  while training_running; do sleep 60; done
+  log "$name training finished."
+  finish_one "$name"
+}
+
 if [[ $# -gt 0 ]]; then RUNS=("$@"); else RUNS=("${DEFAULT_ORDER[@]}"); fi
-log "started; queue = ${RUNS[*]}"
+# ICF_ATTACH_FIRST=1 means the first queued run is already training; adopt it
+# instead of launching a duplicate.
+ATTACH_FIRST="${ICF_ATTACH_FIRST:-0}"
+log "started; queue = ${RUNS[*]} (attach_first=${ATTACH_FIRST})"
+first=1
 for run in "${RUNS[@]}"; do
   if [[ -z "${RUN_CONFIGS[$run]:-}" ]]; then
     log "ERROR: unknown run '$run' (valid: ${!RUN_CONFIGS[*]})"; exit 1
   fi
-  run_one "$run" || log "$run: pipeline reported a failure; continuing with the next run"
+  if [[ "$first" == 1 && "$ATTACH_FIRST" == 1 ]]; then
+    attach_one "$run" || log "$run: pipeline reported a failure; continuing with the next run"
+  else
+    run_one "$run" || log "$run: pipeline reported a failure; continuing with the next run"
+  fi
+  first=0
 done
 log "ALL DONE"
