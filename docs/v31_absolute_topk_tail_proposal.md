@@ -1,135 +1,291 @@
-# Absolute Top-K Tail Token & Any-Positive Meta-Learning Proposal (v31 Candidate)
-## 대형 Bag (n > 34) 희석 결함 극복을 위한 지수 스케일(1, 4, 8, 16) 아키텍처 수술 및 메타 학습 제안서
+# v31 Proposal: Cardinality-Calibrated Tail Scan (CCTS)
+## 고정 Top-K가 아니라, bag 크기에 따른 우연한 극값을 보정하는 희소 신호 검출기
 
-**작성일**: 2026-08-04  
-**상태**: 제안 및 검토 단계 (v31 후보)  
-**수정 대상 모듈**: [src/models/baseline.py](file:///NHNHOME/kimds/ICF/src/models/baseline.py) (`StructuredEpisodePopulationAggregator`), [src/datasets/synthetic_data.py](file:///NHNHOME/kimds/ICF/src/datasets/synthetic_data.py)  
+**작성일**: 2026-08-04
 
----
+**상태**: 설계 제안 — 미구현, 미검증
 
-## 0. Executive Summary & 핵심 결론
+**기준선**: v30 S2 (`poolz_l2` + bag cardinality log-uniform training)
 
-Musk zero-shot 평가에서 **n > 34 대형 Bag 구간이 AUROC 0.698로 정체**되는 원인을 정밀 수술한 결과, **희귀 인스턴스(Rare Instance)를 감지해야 할 Tail Branch가 대형 Bag에서 구조적으로 신호를 희석시키는 결함**을 입증하였습니다.
-
-본 제안서에서는 기존 1, 2, 3 선형 추출 방식의 중복성(Redundancy) 문제를 비판적으로 검토하고, **지수 스케일 rank 샘플링 `absolute_tail_ks: (1, 4, 8, 16)`** 방식을 도입합니다. 이는 **단일 세포 바늘(1개)부터 15% 서브 인구 집단(16개)까지 멀티 스케일 해상도로 탐색**하여, 6가지 대안(Retrieval, rawstats, IA-MIL, P1/P2 제안, Slot 확장, 단순 fraction 조정)의 한계를 극복하는 유일한 해결책임을 증명합니다.
+**예상 수정 범위**: [`src/models/baseline.py`](../src/models/baseline.py), [`src/datasets/synthetic_data.py`](../src/datasets/synthetic_data.py), 신규 진단/평가 스크립트와 테스트
 
 ---
 
-## 1. 정밀 심층 비판: 왜 (1, 2, 3)이 아닌 (1, 4, 8, 16) 지수 스케일이어야 하는가?
+## 0. 제안 요약
 
-### 1.1 (1, 2, 3) 선형 샘플링의 구조적 한계 (Redundancy & Narrow Window)
-* **정보 중복성 (Information Redundancy)**: Rank 1, 2, 3은 인접한 세포들로, 1번 세포가 노이즈이면 2, 3번 세포도 동일한 노이즈 영역일 확률이 극도로 높습니다.
-* **좁은 윈도우 한계 (Narrow Window Limit)**: 1, 2, 3은 오직 단일 세포 수준(3개 이하)만 커버합니다. 만약 Musk 대형 Bag에서 활성 신호가 10 - 15개 세포 집단으로 분산되어 있다면, 1, 2, 3 추출은 전체 활성 집단의 일부분만 포획하여 신호를 놓칩니다.
+v31의 핵심 질문은 “Top-K의 K를 1, 4, 8, 16 중 무엇으로 정할 것인가?”가 아니다. 더 근본적인 문제는 **bag이 커질수록 무관한 배경 인스턴스 중에서도 큰 novelty가 우연히 나타난다**는 것이다. 고정 Top-K는 선택 개수만 고정할 뿐 이 극값 편향을 보정하지 못한다.
 
-### 1.2 (1, 4, 8, 16) 지수 스케일 샘플링의 필연성 (Multi-Scale Coverage)
-[scripts/diagnose_tail_dilution.py](file:///NHNHOME/kimds/ICF/scripts/diagnose_tail_dilution.py) 프로브 실측 결과:
-* `top_1` (k=1): 0.611
-* `top_3` (k=3): 0.627
-* `frac_0.15` (k=15): **0.690**
+따라서 v31은 기존 global/fractional tail에 absolute Top-K를 덧붙이는 대신 다음 세 요소를 하나의 검증 가능한 가설로 제안한다.
 
-지수 스케일 `(1, 4, 8, 16)`은 다음과 같은 멀티 스케일 해상도를 동시에 확보합니다:
-* **$k = 1$**: 단일 세포 희소 바늘 (0.1% 바늘 세포 핀포인트)
-* **$k = 4$**: 미세 인구 서브 클러스터 (Micro-cluster)
-* **$k = 8$**: 소형 인구 서브 클러스터 (Small sub-population)
-* **$k = 16$**: 중형 인구 서브 클러스터 (15% 수준의 서브 인구 집단 커버)
+1. **Context-calibrated instance evidence**: 각 인스턴스의 novelty를 support/context의 경험적 null 분포에 대조해 tail probability로 변환한다.
+2. **Expected-false-positive tail scan**: 고정 K 대신 `n * p_i`를 기준으로 여러 희소도 스케일을 스캔한다. 같은 토큰은 bag 크기가 달라도 null에서 비슷한 수준의 우연한 검출을 보도록 설계한다.
+3. **Counterfactual sparse meta-training**: 양성 bag에만 outlier를 넣는 쉬운 생성 과제를 피하고, 두 클래스 모두 nuisance outlier를 가지되 일부만 label-causal하도록 만든다. 인스턴스 수 역시 bag별로 다르게 샘플링한다.
 
-이로써 **단일 세포 MIL 과제부터 15% 집단 반응 과제까지 로그 스케일(Logarithmic Scale)로 완벽히 커버**할 수 있습니다.
+이 설계의 목표는 Musk 점수 하나를 설명하는 사후 서사가 아니라 다음 가설을 반증 가능하게 시험하는 것이다.
+
+> 대형 bag 성능 저하의 일부가 uncalibrated extreme-value evidence에서 발생한다면, context-null로 보정된 tail scan은 background cardinality를 바꿔도 예측을 더 안정적으로 유지하면서 sparse-response 판별력을 높일 것이다.
+
+현재 증거만으로 이 가설이 참이라고 단정하지 않는다.
 
 ---
 
-## 2. 왜 다른 6가지 대안들은 배제되어야만 하는가? (Exclusion of Alternative Directions)
+## 1. 현재 관측으로 말할 수 있는 것과 없는 것
 
-이전 개발 히스토리에서 시도되었거나 검토된 6가지 대체 방향에 대해 정량적/수학적 배제 논거를 정립합니다.
+### 1.1 확인된 관측
 
-### 2.1 [대안 1 배제] Retrieval (검색 계층) 재도입
-* **과거 결과**: v21/v22에서 retrieval 계층을 완전히 제거함 ([docs/agent_handoff.md](file:///NHNHOME/kimds/ICF/docs/agent_handoff.md) §4).
-* **배제 이유**: Retrieval은 유사한 Context Bag을 찾아오는 메커니즘입니다. 그러나 Musk MIL 문제는 유사한 Context Bag의 부재가 아니라, **단일 쿼리 Bag 내부에서 0.1% 활성 세포가 99.9% 배경 세포에 묻히는 문제(Intra-bag dilution)**입니다. Retrieval은 Bag 내부 세포 희석을 해결하지 못하며, 과거 합성 AUROC만 낮추어 기각되었습니다.
+- v30 S2의 Musk overall AUROC는 0.8539이고 `n > 34` band는 0.698이다.
+- [`scripts/diagnose_tail_dilution.py`](../scripts/diagnose_tail_dilution.py)의 별도 ridge probe에서 `n > 34` AUROC는 `top_1=0.611`, `top_3=0.627`, `frac_0.15=0.690`이었다.
+- Musk `n > 34` band는 25 bags뿐이며 class 구성은 positive 7 / negative 18이다. 이 band의 AUROC는 표본 변동성이 크다.
 
-### 2.2 [대안 2 배제] `rawstats` / Raw Bag-Stat Tokens (mean, skew, kurt, §23 음성)
-* **과거 결과**: §23 실험 결과 음성 판정 (Musk AUROC 0.7835로 회귀).
-* **배제 이유**: Raw bag 통계 토큰은 합성 세포 정규화(`normalize_output: true`) 상태에서 스케일 신호가 없어 §23에서 Musk AUROC 0.7835로 회귀했습니다. 또한 1차-4차 적률 통계는 세포의 전체 집단 분포를 요약할 뿐, **0.1%의 단 1개 극단 세포(Rare instance)를 핀포인트 추출하는 것이 구조적으로 불가능**합니다.
+### 1.2 아직 확인되지 않은 것
 
-### 2.3 [대안 3 배제] Instance-Attention MIL (IA-MIL, §24/§25 음성)
-* **과거 결과**: §24/§25 실험 결과 음성 판정 (Musk AUROC 0.8030 -> 0.5545 큰 폭 회귀, 크기 편향 `pearson(prob, log n) = +0.327`).
-* **배제 이유**: 제약 없는 인스턴스 어텐션은 Bag 크기 `n`이 커질수록 배경 세포들의 어텐션 누적 합이 증가하여 심각한 Bag 크기 편향을 유발했습니다. 명확한 K개 선택(Top-K Selection) 없는 어텐션 풀링은 대형 Bag에서 노이즈만 누적시킵니다.
-
-### 2.4 [대안 4 배제] P1 (166->512 읽기 브리지) 및 P2 (raw bag-mean 채널) (§26 기각)
-* **과거 결과**: §26 진단에서 기각 ([docs/history/musk_transfer_diagnosis_v30_proposal.md](file:///NHNHOME/kimds/ICF/docs/history/musk_transfer_diagnosis_v30_proposal.md)).
-* **배제 이유**: P2는 "per-cell L2가 신호를 죽인다"는 잘못된 전제에 기반했으나, §26 실측 결과 `L2-only (0.911) > raw (0.880)`으로 L2는 이로웠습니다. P1의 zero-padding OOD 전제 역시 선형 프로브가 zero-padding에 불변임이 입증되어 기각되었습니다. 수술 대상은 채널 추가나 정렬이 아니라 **Tail 추출 메커니즘 자체**입니다.
-
-### 2.5 [대안 5 배제] Population Slot 개수 확장 (`num_slots: 12 -> 64`)
-* **배제 이유**: 슬롯을 64개로 늘리면 연산량이 $O(K_{\text{slots}}^2)$로 폭증하고 소형 Bag (`n <= 34`)에서 심각한 과적합이 발생하며, 0.1% 희귀 세포가 특정 슬롯에 고르게 들어간다는 보장이 없어 근본 해결책이 되지 못합니다.
-
-### 2.6 [대안 6 배제] 단순 `tail_fractions` 계수 축소 (예: 0.01 -> 0.001)
-* **배제 이유**: `fraction`을 0.001로 줄이면 $n = 1000$에서 `count = 1`이 되지만, 소형 Bag ($n = 10$)에서는 `0.001 * 10 = 0.01`이 되어 `min_tail_instances = 1`에 걸려 항상 1개만 추출됩니다. 즉, 비율 기반 방식은 **밀집 반응 과제(75% 세포 반응)와 희소 반응 과제(0.1% 세포 반응)를 동시에 수용할 수 없는 유연성 한계**를 가집니다.
+- 위 probe는 실제 `shared_tail_encoder`, context anchors, meta-classifier를 재현하지 않으므로 tail branch의 인과적 결함을 입증하지 않는다.
+- `frac_0.15`가 관측상 `top_1`과 `top_3`보다 좋으므로, 이 결과는 absolute Top-K의 우월성을 지지하지 않는다.
+- Musk의 양성 신호가 실제로 1개 또는 0.1% 인스턴스에 존재한다는 instance-level annotation은 없다.
+- 이미 Musk 결과를 반복 관찰해 설계를 선택했으므로 Musk는 더 이상 완전히 untouched한 confirmatory zero-shot test로 부를 수 없다. v31에서는 Musk를 transfer development benchmark로 명시하고, 최종 확인용 외부 MIL 데이터셋을 별도로 잠가야 한다.
 
 ---
 
-## 3. 왜 이 방향(v31: Absolute Top-K + B4 Any-Positive)이어야만 하는가? (Logical Necessity)
+## 2. 왜 고정 Absolute Top-K가 충분하지 않은가
 
-### 3.1 아키텍처적 필연성: Bag 크기 n에 완전히 불변인 K 추출 계약 (Cardinality Invariance)
-* Absolute Top-K Tail Token (`absolute_tail_ks: (1, 4, 8, 16)`)은 `n`이 10이든 1000이든 상관없이 **항상 상위 1, 4, 8, 16번째 세포를 무희석 상태로 멀티 스케일 추출**합니다.
-* 이는 $n > 34$ 대형 Bag에서 배경 세포가 LSE/Softmax 풀링에 포함되어 신호를 희석시키는 현상을 **수학적으로 원천 차단**합니다.
+### 2.1 고정 K는 cardinality-invariant하지 않다
 
-### 3.2 밀집(Dense) 과제와 희소(Sparse) 과제의 비파괴적 독립 결합 (Decoupled Dual-Track)
-* 기존 Fractional Tail Token `(0.01, 0.05, 0.15)`은 75% 세포가 반응하는 밀집 과제(합성 데이터)를 담당합니다.
-* 신규 Absolute Top-K Token `(1, 4, 8, 16)`은 0.1% - 15% 세포가 반응하는 희소 과제(Musk 대형 Bag)를 담당합니다.
-* 두 트랙이 병렬 토큰으로 결합되므로, **기존 합성 고성능(0.9483)을 전혀 훼손하지 않으면서 Musk 대형 Bag 성능을 독립적으로 끌어올릴 수 있는 유일한 구조**입니다.
+`k=16`은 `n=16`에서는 bag의 100%, `n=100`에서는 16%, `n=1000`에서는 1.6%다. 선택 개수는 제한되지만 의미하는 prevalence가 계속 변한다. 또한 `k > n`이면 여러 스케일이 동일한 전체 bag으로 붕괴한다.
 
-### 3.3 메타 학습 필연성 (B4 Any-Positive Task)
-* 아무리 아키텍처에 Top-K 토큰 채널을 만들어도, 훈련 데이터에 "500개 중 1개만 반응하는 과제"가 없으면 Tail Encoder 신경망은 희소 세포에 가중치를 몰아주는 법을 배울 수 없습니다.
-* 생성기에 `any_positive_sparse` 과제를 주입하여 메타 학습시킴으로써, `shared_tail_encoder`가 0.1% 희귀 세포에 Softmax 가중치 1.0을 완벽히 몰아주도록 만듭니다.
+### 2.2 큰 bag에서는 null maximum도 커진다
 
----
+배경 novelty score를 확률변수 `S`라 하고 threshold가 `t`일 때, 독립 근사 아래 순수 배경 bag에서도
 
-## 4. 아키텍처 및 생성기 세부 변경 명세 (Technical Specifications)
+\[
+P(\max_i S_i > t \mid n)=1-F_0(t)^n
+\]
 
-### 4.1 `StructuredEpisodePopulationAggregator` 수술 ([src/models/baseline.py](file:///NHNHOME/kimds/ICF/src/models/baseline.py))
+이다. `n`이 커질수록 label과 무관하게 큰 score가 관찰될 가능성이 증가한다. Top-1이나 Top-16은 이 다중 비교 효과를 제거하지 않는다.
 
-```python
-# __init__ 파라미터 추가
-absolute_tail_ks: Sequence[int] = ()  # 기본값 빈 튜플 (v30/v24 하위 호환성 100% 보존)
+### 2.3 novelty와 label-causal evidence는 다르다
 
-# _forward_dense 내 연산 패스 추가
-for abs_k in self.absolute_tail_ks:
-    count = min(num_instances, max(1, abs_k))
-    index = novelty.topk(count, dim=1).indices
-    selected_instances = instances.gather(1, index.unsqueeze(-1).expand(-1, -1, instances.shape[-1]))
-    selected_slots = nearest_slot.gather(1, index)
-    selected_anchors = expanded_anchors.gather(1, selected_slots.unsqueeze(-1).expand(-1, -1, anchors.shape[-1]))
-    deviation = selected_instances - selected_anchors
-    with torch.autocast(device_type=instances.device.type, enabled=False):
-        encoded_tail = self.shared_tail_encoder(deviation.float())
-        lse_weights = torch.softmax(encoded_tail * 2.0, dim=1)
-        tail_tokens.append((lse_weights * encoded_tail).sum(dim=1))
-```
+현재 tail 선택은 nearest anchor와의 cosine novelty로 결정된다. 희귀한 nuisance, 측정 오류, 또는 정상적인 작은 population도 높은 novelty를 가질 수 있다. “가장 이상한 인스턴스”가 “분류에 필요한 인스턴스”라는 보장은 없다.
 
-### 4.2 `synthetic_data.py` Any-Positive Sparse Task 추가 ([src/datasets/synthetic_data.py](file:///NHNHOME/kimds/ICF/src/datasets/synthetic_data.py))
-* `RESPONSE_TASK_NAMES`에 `"any_positive_sparse"` 추가.
-* 양성 라벨 Bag에 1개 내지 3개의 세포만 활성 변이(Shift)를 부여하는 에피소드 생성 로직 연동.
+### 2.4 고정 후보 `(1, 4, 8, 16)`에는 데이터 기반 근거가 없다
 
-### 4.3 Config 명세 ([configs/train_v31_absolute_topk_tail.yaml](file:///NHNHOME/kimds/ICF/configs/train_v31_absolute_topk_tail.yaml))
-* `bag_representation: poolz_l2`
-* `aggregator_absolute_tail_ks: [1, 4, 8, 16]`
-* `num_cells: [1, 1024]` + `num_cells_log_uniform: true`
-* `response_task_probabilities: [0.18, 0.18, 0.18, 0.18, 0.18, 0.10]` (`any_positive_sparse` 포함)
+현재 probe는 `k=4,8,16`을 직접 비교하지 않았고 `(1,4,8,16)`은 일정 비율의 지수 수열도 아니다. 이를 아키텍처 상수로 확정하면 Musk에 대한 사후 튜닝과 작은 표본의 우연을 구조에 고정할 위험이 있다.
 
 ---
 
-## 5. 사전 등록 평가 게이트 (Pre-registered Gates)
+## 3. 제안 아키텍처: Context-Calibrated Tail Scan
 
-| 게이트 항목 | 현재 기준 (v30 S2) | v31 목표 기준 | 비고 |
-| :--- | :---: | :---: | :--- |
-| **1. 합성 무회귀** | 0.9483 | **>= 0.9450** | 기존 대형 bag 무회귀 검증 |
-| **2. Musk `n > 34` Target Band** | 0.6980 | **>= 0.8500** | **+0.1500 이상 대폭 개선** |
-| **3. Musk `n <= 4` Small Band** | 0.8000 | **>= 0.8000** | 소형 bag 성능 유지 |
-| **4. Musk Overall AUROC** | 0.8539 | **>= 0.9000** | **0.95 목표 진입 교두보** |
+### 3.1 인스턴스 표현과 scalar evidence
+
+bag `b`의 인스턴스 `x_i`를 현재 방식대로 nearest context anchor `a_{j(i)}`에 정렬하고 deviation을 만든다.
+
+\[
+d_i=x_i-a_{j(i)}, \qquad h_i=E_\theta(d_i)
+\]
+
+별도의 작은 head가 scalar tail score를 출력한다.
+
+\[
+s_i=g_\phi(h_i,\;1-\cos(x_i,a_{j(i)}),\;m_{j(i)})
+\]
+
+여기서 `m_j`는 slot proportion/dispersion/reliability metadata다. `h_i`는 방향과 상태 정보를 보존하고, `s_i`는 어떤 인스턴스를 tail evidence로 볼지 결정한다.
+
+### 3.2 context-null calibration
+
+각 query instance의 score를 **query bag을 제외한 context instances**의 같은 slot score 분포와 비교한다. Context 표본이 작은 slot은 global context distribution으로 shrinkage한다.
+
+\[
+\hat p_i=
+\frac{1+\sum_{r\in C_{j(i)}}\mathbf 1[s_r\ge s_i]}
+{1+|C_{j(i)}|}
+\]
+
+학습 시에는 indicator를 temperature-controlled sigmoid로 바꾼 soft empirical CDF를 사용하고, 평가 시에는 hard rank 버전도 함께 보고 calibration 차이를 점검한다. 이는 엄밀한 독립 p-value를 보장하려는 장치가 아니라, **support episode 내부의 관측된 null tail scale로 score를 표준화하는 장치**다.
+
+### 3.3 expected-false-positive scan tokens
+
+각 인스턴스에 대해 multiplicity-corrected evidence를 정의한다.
+
+\[
+e_i=-\log(\max(\hat p_i,\epsilon))-\log n
+\]
+
+그리고 고정 K 대신 expected false-positive budget `lambda`에 따른 soft gate를 사용한다.
+
+\[
+w_i^{(\lambda)}=
+\sigma\left(\frac{\log\lambda-\log(n\hat p_i)}{\tau}\right),
+\qquad
+t_\lambda=
+\frac{\sum_i w_i^{(\lambda)}h_i}
+{\sum_i w_i^{(\lambda)}+\epsilon}
+\]
+
+초기 후보는 `lambda in {0.25, 1, 4}`로 제한한다. 이는 “상위 몇 개를 무조건 선택”하는 스케일이 아니라, null에서 허용할 우연한 exceedance 수준을 뜻한다. 각 token에는 다음 reliability metadata를 projection해 더한다.
+
+- `log1p(sum(w))`: 유효 tail mass
+- `max(e_i)`: 가장 강한 보정 evidence
+- `sum(w)/n`: 선택 비율
+- `log(n)`: 남아 있는 cardinality dependence를 classifier가 명시적으로 조정할 정보
+- context null sample count: calibration 신뢰도
+
+### 3.4 sparse/dense 역할 분리
+
+- 기존 global summary와 slot center/spread/rare tokens는 composition 및 dense response를 담당한다.
+- CCTS tokens는 sparse, context-unexpected evidence를 담당한다.
+- 기존 fractional global-tail tokens와 새 CCTS를 무조건 병렬로 누적하지 않는다. 먼저 `fractional-only`, `CCTS-only`, `hybrid`를 ablation하고 token 수 증가 자체의 효과를 통제한다.
+
+토큰 수를 늘린 모델에는 동일 parameter/FLOP budget의 dummy-token 또는 wider-baseline control을 둔다. 개선이 단순 용량 증가 때문인지 분리하기 위해서다.
 
 ---
 
-## 6. 검증 및 테스트 현황
+## 4. 메타 학습 재설계: Counterfactual Sparse Mixture Curriculum
 
-1. **Unit Test 검증 완료**:
-   * [tests/test_base_model.py](file:///NHNHOME/kimds/ICF/tests/test_base_model.py) 내 `test_absolute_tail_ks_tokens` 테스트 통과 (`Ran 1 test in 12.972s, OK`).
-2. **코드 커밋 완료**:
-   * Commit `6d63c13` (`docs: enrich v31 proposal with logical necessity and exclusion of 6 alternative directions`)
+기존 `any_positive_sparse`처럼 양성 bag에만 1–3개 shifted instance를 넣으면 모델이 “outlier 존재 여부”라는 쉬운 shortcut을 학습할 수 있다. 또한 `n=1..3`에서는 이 과제가 전혀 sparse하지 않다. v31 생성기는 다음 계약을 따라야 한다.
+
+### 4.1 bag별 cardinality
+
+- episode마다 하나의 `n`을 공유하지 않고 각 bag의 `n_b`를 독립적으로 log-uniform 샘플링한다.
+- 한 episode 안에 small/medium/large bag이 함께 존재해야 한다.
+- padded tensor + instance mask 또는 기존 ragged path 중 하나를 공식 학습 경로로 정하고 dense/ragged 동치 테스트를 둔다.
+
+### 4.2 prevalence curriculum
+
+반응 개수 `r_b`는 고정 1–3이 아니라 두 regime에서 샘플링한다.
+
+- sparse: `r_b in {1,2,4}`에서 `r_b <= n_b` 적용
+- proportional: `pi_b ~ LogUniform(0.005, 0.30)`, `r_b=ceil(pi_b n_b)`
+
+`n_b < 16`에서는 sparse-task 비중을 낮추거나 별도 small-bag task로 표시해 “1개 = 100%”를 rare example로 세지 않는다.
+
+### 4.3 hard-negative nuisance matching
+
+- 두 클래스 모두 동일한 개수와 비슷한 크기의 nuisance outlier를 가진다.
+- label-causal shift만 episode-specific response direction 및 population membership과 일치한다.
+- random isolated outlier, batch-like global shift, 정상 rare component를 음성 hard negative로 포함한다.
+- 반응 인스턴스는 무작위 위치뿐 아니라 coherent component 내부에서도 샘플링해 “독립된 극단점”과 “희귀 subpopulation”을 모두 다룬다.
+
+### 4.4 counterfactual pairs와 보조 손실
+
+같은 background bag으로 다음 쌍을 생성한다.
+
+- response를 주입한 bag / 주입하지 않은 bag
+- background instance만 추가·삭제한 두 bag
+- 동일 causal instances를 유지하고 background만 복제한 두 bag
+
+학습 손실은 다음과 같이 분리한다.
+
+\[
+L=L_{episode}
++\alpha L_{localize}
++\beta L_{cardinality-consistency}
++\gamma L_{null-calibration}
+\]
+
+- `L_episode`: 기존 episode classification loss
+- `L_localize`: synthetic에서만 instance mask를 이용한 causal-evidence ranking loss
+- `L_cardinality-consistency`: background 증감 전후 prediction/token consistency
+- `L_null-calibration`: no-effect instance의 calibrated tail score가 특정 bag size에서 체계적으로 커지지 않도록 하는 loss
+
+보조 loss는 실제 데이터 평가에는 label이나 instance mask를 요구하지 않는다.
+
+---
+
+## 5. 구현 순서와 안전 계약
+
+### Phase 0 — 현재 회귀 복구
+
+새 실험 전에 아래를 먼저 고친다.
+
+1. Dense fractional-tail path가 token을 append하도록 복구한다.
+2. Absolute-tail 실험 코드는 유지하려면 ragged path에도 동일 semantics로 구현한다.
+3. `structured_tokens_per_bag`와 실제 token 수를 forward 초기에 명시적으로 검증한다.
+4. `absolute_tail_ks=()`에서 v30 checkpoint/config forward가 그대로 동작함을 회귀 테스트한다.
+
+이 단계는 CCTS의 성능 주장과 분리된 correctness prerequisite다.
+
+### Phase 1 — 진단 가능한 CCTS 모듈
+
+신규 모듈은 최소한 다음 auxiliary 값을 반환해야 한다.
+
+- raw score `s_i`
+- calibrated `p_i`
+- scale별 effective tail mass
+- injected causal instance recall@weight-mass (synthetic only)
+- null bag에서 `max(e_i)`와 `log(n)`의 관계
+
+### Phase 2 — 생성기와 ragged training
+
+bag별 cardinality, counterfactual pairs, nuisance-matched sparse task를 추가한다. 기존 response tasks의 확률을 임의로 줄이지 않고 총 episode 수 또는 sampling schedule을 조정해 기존 task의 절대 학습량을 보존한다.
+
+### Phase 3 — 모델/데이터 요인 분리 실험
+
+| ID | Architecture | Sparse generator | Consistency/localization |
+|---|---|---|---|
+| A | corrected v30 | 기존 | 없음 |
+| B | absolute Top-K control | 기존 | 없음 |
+| C | CCTS | 기존 | 없음 |
+| D | corrected v30 | 신규 | 없음 |
+| E | CCTS | 신규 | 없음 |
+| F | CCTS | 신규 | 있음 |
+
+`A→C`는 architecture 효과, `A→D`는 data 효과, `C/D→E`는 interaction, `E→F`는 auxiliary objective 효과를 측정한다.
+
+---
+
+## 6. 사전등록 평가 계획
+
+### 6.1 실행 규칙
+
+- 최소 5개 training seed를 사용한다.
+- 모든 후보는 동일 episode 수, optimizer budget, checkpoint-selection rule을 사용한다.
+- Musk 결과를 보고 `lambda`, temperature, loss weight를 바꾸지 않는다. 이 값은 synthetic validation과 null-calibration suite에서만 선택한다.
+- 평균만 보고하지 않고 seed별 결과와 paired bootstrap 95% CI를 함께 보고한다.
+
+### 6.2 필수 지표
+
+| 영역 | 지표 | 목적 |
+|---|---|---|
+| Correctness | dense/ragged token 및 logit 동치 | 두 실행 경로의 의미 일치 |
+| Synthetic dense | AUROC | 기존 composition/dense 성능 보존 |
+| Synthetic sparse | AUROC, AUPRC, causal instance recall | 희소 판별과 localization 확인 |
+| Cardinality counterfactual | background 증감 전후 `abs(delta probability)` | 크기 불변성 직접 측정 |
+| Null calibration | label별 `corr(max evidence, log n)` | 극값 크기 편향 확인 |
+| Musk | overall 및 사전 정의 4개 band AUROC | transfer 성능 |
+| Reliability | band 표본 수, class 수, bootstrap CI | 작은 band의 불확실성 공개 |
+
+### 6.3 승격 조건
+
+v31 승격은 단일 Musk 목표치가 아니라 아래를 모두 만족할 때만 허용한다.
+
+1. corrected v30 대비 synthetic dense AUROC 차이의 95% CI 하한이 `-0.005` 이상.
+2. synthetic sparse AUROC 또는 AUPRC가 seed median 기준 `+0.03` 이상 개선되고 causal-instance recall도 함께 개선.
+3. cardinality counterfactual의 median `abs(delta probability)`가 v30 대비 30% 이상 감소.
+4. Musk overall AUROC가 `-0.01`보다 크게 회귀하지 않음.
+5. Musk `n > 34` AUROC가 median 기준 `+0.05` 이상 개선. 단, positive 7 / negative 18의 작은 표본이므로 CI가 0을 포함하면 “유망하지만 미확정”으로 판정.
+6. 개선이 5개 seed 중 최소 4개에서 같은 방향.
+
+Musk overall `>=0.90`이나 large-band `>=0.85`는 연구 목표로 기록할 수 있지만, 근거 없이 승격 gate로 확정하지 않는다.
+
+---
+
+## 7. 실패 판정과 후속 의사결정
+
+| 관측 | 해석 | 결정 |
+|---|---|---|
+| Null calibration은 개선되나 sparse AUROC 불변 | 극값 편향은 줄였지만 score가 causal하지 않음 | evidence head/localization 재검토 |
+| Synthetic sparse만 개선, Musk 불변 | 생성 과제와 Musk mechanism 불일치 | Musk를 rare-instance 문제로 단정하지 않음 |
+| Large band 개선, small band 회귀 | calibration shrinkage 또는 small-context reliability 문제 | slot/global null fallback 조정 |
+| 모든 모델이 generator 변경만으로 개선 | architecture보다 meta-distribution이 핵심 | 단순한 D안 우선 승격 |
+| Absolute Top-K가 CCTS와 동률 또는 우세 | 복잡성 정당화 실패 | 더 단순한 Top-K control 선택 |
+| Seed/CI 불안정 | 표본 또는 최적화 불확실성 | 확정 승격 금지, 외부 데이터 확인 |
+
+---
+
+## 8. 최종 제안
+
+v31은 “Absolute Top-K + Any-Positive”로 확정하지 않는다. 정식 후보는 **Cardinality-Calibrated Tail Scan + nuisance-matched counterfactual sparse curriculum**으로 둔다.
+
+이 방향의 장점은 특정 `k`가 Musk에 맞을 것이라는 추측에 의존하지 않고, 대형 bag에서 반드시 발생하는 multiple-comparison/extreme-value 문제를 직접 모델링한다는 점이다. 동시에 architecture, generator, auxiliary loss를 분리 평가하므로 실패하더라도 무엇이 틀렸는지 알 수 있다.
+
+구현에 앞서 Phase 0 회귀 복구와 테스트 보강이 필수이며, 그 전까지 상태는 **proposal only**다.
