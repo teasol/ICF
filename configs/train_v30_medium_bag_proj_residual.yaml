@@ -1,0 +1,57 @@
+base_config: train_v24_medium_bag_proj_residual.yaml
+
+# =============================================================================
+# v30 CONFIRMED BASELINE (2026-08-04, user promotion decision)
+# =============================================================================
+# v30 = v24 (residual + bottleneck bag projection) + B1 (`poolz_l2` context-pool
+# standardized representation) + B2 (cardinality-faithful log-uniform sampling).
+#
+# Evidence (docs/current_status.md SS28):
+#   * S2 `v30_cardinality_poolz_l2` passed all 6 pre-registered gates:
+#       - synthetic no-regression 0.9483 (vs v24 0.9510, d-0.003) on ORIGINAL
+#         large-bag data (cross-distribution eval, model fixed)
+#       - Musk zero-shot 0.8539 [0.774,0.925] (previous best 0.822)
+#       - n<=4 0.475 -> 0.800; n>34 0.667 -> 0.698 (no band trade)
+#       - paired bootstrap: small bags d+0.325 CI [+0.092,+0.567] (P=0.997),
+#         large bags d+0.001 (P=0.504, harmless)
+#   * B1 and B2 are MUTUALLY REQUIRED:
+#       - B1 alone (S1) = band trade (small +0.04 / large -0.21), negative.
+#       - B2 alone (legacy view) is UNTRAINABLE: legacy maps n=1 -> zero vector,
+#         log-uniform sampling produces such episodes -> NaN gradients, caught
+#         by the project guard (src/modules/model_interface.py:76).
+#
+# This is the MEDIUM (confirmed-baseline distribution) entry point carrying the
+# v30 settings. NOTE: it has NOT itself been trained yet -- the validated S2
+# numbers above come from the musklike-easy path
+# (configs/train_v30_cardinality_poolz_l2.yaml). Retraining this medium baseline
+# under v30 to establish the new medium reference is the immediate next action.
+#
+# Code defaults are intentionally left at legacy / log-uniform=False:
+#   * flipping `bag_representation` default to poolz_l2 would break the existing
+#     `_bag_view` direct-call tests (poolz mode raises without pool stats) and
+#     silently change v24/ICI configs that do not pin the flag.
+#   * bumping `architecture_version` to 30 would make the guard refuse the
+#     already-trained v30 checkpoints (stored as v24), breaking re-evaluation.
+# v30 is therefore promoted at the CONFIG + living-docs level, exactly like v24.
+# poolz_l2 is pinned here explicitly; v24 stays reproducible via its own config.
+# =============================================================================
+
+model_overrides:
+  bag_representation: poolz_l2
+
+data_overrides:
+  dataset_kwargs:
+    # B2: cardinality-faithful sampling. Log-uniform (not uniform) because
+    # uniform over [1,1024] puts ~99% of mass above n=12 (median 510, frac n<=12
+    # 0.01) and the model would still almost never meet a small bag. Log-uniform
+    # gives median 34, frac n<=12 0.36 (Musk actual: 12 / 0.50).
+    num_cells: [1, 1024]
+    num_cells_log_uniform: true
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v30_medium_bag_proj_residual
+
+trainer:
+  max_epochs: 50

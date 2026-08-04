@@ -1,9 +1,17 @@
 # Current experiments
 
-**Last updated**: `2026-08-01 14:10:00 KST`
-**Architecture Version**: **v24 확정** (residual + bottleneck bag projection, `configs/train_v24_medium_bag_proj_residual.yaml`). **v25(T5-A, typed bag-preserving branch)는 `codex/v25-typed-bag` 브랜치에서 학습 진행 중** — `configs/train_v25_medium_typed_bag.yaml`, 상세는 [`current_status.md`](current_status.md) §3.
+**Last updated**: `2026-08-04 14:45:00 KST`
+**Architecture Version**: **v30 확정 (2026-08-04)** — v24 + B1 `poolz_l2` 표현 + B2 cardinality-faithful 샘플링, config `configs/train_v30_medium_bag_proj_residual.yaml` (아직 미학습 — 참조 수치 확보가 다음 Action). **v24는 이전 확정 baseline으로 보존** (residual + bottleneck bag projection, `configs/train_v24_medium_bag_proj_residual.yaml`).
 
-이 문서는 v22 시절에 확립된 실험 프로토콜(§0~§1, Stage 3 ICI 절차)과 실행 명령어를 설명합니다. **2026-08-01, 사용자 결정으로 v23-A0/v24-A0/v24-B0/v24-B1 4종의 1,000-episode paired 비교 평가는 폐기되고 v24-B1이 그대로 v24로 확정되었습니다** — 상세: [`current_status.md`](current_status.md) §3 "최종 결정". 아래 두 섹션(v23-A0, v24-A0/B0)은 폐기된 candidate의 기록이며 더 이상 active가 아닙니다. v21 retrieval 시대의 실험 기록은 [`history/v21_retrieval_experiments.md`](history/v21_retrieval_experiments.md)로 이관되었습니다.
+이 문서는 v22 시절에 확립된 실험 프로토콜(§0~§1, Stage 3 ICI 절차)과 실행 명령어를 설명합니다. **2026-08-01, 사용자 결정으로 v23-A0/v24-A0/v24-B0/v24-B1 4종의 1,000-episode paired 비교 평가는 폐기되고 v24-B1이 그대로 v24로 확정되었습니다** — 상세: [`current_status.md`](current_status.md) §3 "최종 결정". **2026-08-04, 사용자 결정으로 v30(v24 + B1 `poolz_l2` + B2)이 새 확정 baseline으로 승격되었습니다** — §28·§29. 아래 두 섹션(v23-A0, v24-A0/B0)은 폐기된 candidate의 기록이며 더 이상 active가 아닙니다. v21 retrieval 시대의 실험 기록은 [`history/v21_retrieval_experiments.md`](history/v21_retrieval_experiments.md)로 이관되었습니다.
+
+## ✅ 확정됨 (2026-08-04): v30 = v24 + B1(`poolz_l2`) + B2(cardinality-faithful)
+
+- Config: `configs/train_v30_medium_bag_proj_residual.yaml` (= v24 medium + `bag_representation: poolz_l2` + `num_cells [1,1024]`, `num_cells_log_uniform: true`). **아직 미학습 — 50 epoch 재학습으로 v30 medium 참조 수치 확보가 다음 Action.**
+- Musk 경로: `configs/train_v30_cardinality_poolz_l2.yaml` (musklike-easy). **S2 실측**: Musk zero-shot **0.8539** [0.774,0.925], n≤4 0.475→0.800, n>34 0.667→0.698, 합성 무회귀 0.9483 (원래 대형 bag 분포, v24 0.9510). paired bootstrap: 소형 Δ+0.325 CI 0 제외(P=0.997), 대형 Δ+0.001(P=0.504). 게이트 6항목 전부 통과.
+- **B1·B2는 상호 필수**: B2 단독(legacy)은 n=1 bag이 0벡터 → NaN 그라디언트로 학습 불가(프로젝트 가드 발동, `model_interface.py:76`); B1 단독(S1)은 구간 교환으로 음성. 상세: [`current_status.md`](current_status.md) §28.
+- 코드 기본값은 `legacy` 유지(기본값 플립·`architecture_version` 범프는 기존 테스트/v30 체크포인트 재평가를 깨뜨림). v30은 명시 플래그로 선택.
+- 평가 도구: `scripts/diagnose_musk_cardinality.py --report paired --reference X --candidate Y` (bag-paired bootstrap), `configs/eval_v30_cardinality_*_on_largebags.yaml` (교차 분포 합성 무회귀 측정).
 
 ## 폐기됨 (2026-08-01): v23-A0 exact bag-mean ablation
 

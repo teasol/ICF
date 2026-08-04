@@ -1,9 +1,14 @@
 # Current architecture
 
-**Last updated**: `2026-08-01 13:20:00 KST`  
-**Code baseline**: Architecture Version `24` (`architecture_version = 24`) — **v24-B1 (residual + bottleneck bag projection) 확정 (2026-08-01)**
+**Last updated**: `2026-08-04`  
+**Code baseline**: Architecture Version `30` 확정 (2026-08-04) — v24 + B1 `poolz_l2` 표현 + B2 cardinality-faithful 샘플링
 
-이 문서는 현재 production config(`configs/train_v24_medium_bag_proj_residual.yaml`)가 사용하는 Architecture v24 모델 구조와 수학적 계약을 설명합니다. v24는 v22(retrieval 없는 base, §2~§4는 v24에서도 그대로 유지)에 **bag 내부 40-token 구조화 요약을 1개 학습된 projection token으로 압축**하는 §3.5를 추가한 버전입니다. `project_structured_tokens=false`로 두면 코드는 그대로 v22 동작으로 되돌아갑니다 (§3.5 참고). 최신 개발 상태는 [`current_status.md`](current_status.md) §3 "최종 결정", 실험 프로토콜은 [`current_experiments.md`](current_experiments.md)를 참고합니다.
+이 문서는 현재 확정 config(`configs/train_v30_medium_bag_proj_residual.yaml` — 아직 미학습)와 그 기반이 된
+v24(`configs/train_v24_medium_bag_proj_residual.yaml`)가 사용하는 모델 구조와 수학적 계약을 설명합니다.
+v30은 v24 아키텍처에 **①의 입력 표현을 context-pool 대각 표준화(`poolz_l2`)로 교체**하는 B1과
+**학습 분포의 bag 크기를 log-uniform[1,1024]로 만드는** B2를 더한 버전입니다(§2 ①·② 및 §2.1).
+v24는 이전 확정 baseline으로 보존되며, `bag_representation` 코드 기본값은 `legacy`(v24 동작)입니다 —
+v30은 명시 플래그로 선택합니다. 최신 개발 상태는 [`current_status.md`](current_status.md) §29·§28.
 
 > [!IMPORTANT]
 > **v24는 label 기반 class-memory 압축을 바꾸지 않았습니다.** `_class_memories`는 여전히 context bag을 `context_labels`로 나눠 class당 8개 memory token으로 pooling합니다 (§4, `src/models/baseline.py:2446`). v24가 바꾼 것은 그 이전 단계, 즉 **bag 하나를 몇 개의 토큰으로 요약하는지**(§3.5)뿐입니다.
@@ -61,6 +66,32 @@ $S_i$는 **`global_summary` 토큰**으로 aggregator에 전달되며(나눗셈�
 > 사영합니다. $N_i$가 작으면 파괴적입니다 — $N_i = 1$이면 $\delta = 0$이므로 bag 전체가 0벡터가
 > 됩니다. 실데이터(Musk median 12 instances)에서 이것이 주 병목으로 측정되었습니다:
 > `current_status.md` §26 및 [`history/musk_transfer_diagnosis_v30_proposal.md`](history/musk_transfer_diagnosis_v30_proposal.md).
+
+### ①-2 (v30 B1) Context-Pool Standardized Representation (`poolz` / `poolz_l2`)
+
+**v30 확정 (2026-08-04)** — per-bag centering(①)을 **context-pool 대각 표준화**로 대체합니다
+(`bag_representation`: `"legacy"`(기본=v24) | `"poolz"` | `"poolz_l2"`):
+
+$$\mu_{ctx} = \frac{\sum_{i \in ctx} \sum_{j} x_{i,j}}{\sum_{i \in ctx} N_i}, \qquad
+\sigma_{ctx} = \sqrt{\frac{\sum_{i \in ctx, j} (x_{i,j} - \mu_{ctx})^2}{\sum_{i \in ctx} N_i}}$$
+
+$$\text{poolz:}\; \tilde{x}_{i,j} = \frac{x_{i,j} - \mu_{ctx}}{\sigma_{ctx}}, \qquad
+\text{poolz\_l2:}\; \tilde{x}_{i,j} = \frac{(x_{i,j} - \mu_{ctx})/\sigma_{ctx}}{\|(x_{i,j} - \mu_{ctx})/\sigma_{ctx}\|_2}$$
+
+- pool 통계는 **context bag의 모든 세포**에서 cell-count 가중으로 계산(실 bag 크기 1~1044 최대 1000배 차이
+  → per-bag 평균의 평균은 오가중). **query 누출 없음** (`_context_pool_stats`, `baseline.py`).
+- **`classification_instances`만 바뀝니다.** `global_summary`(per-bag centered spread)와 `centered_delta`는
+  여전히 per-bag으로 반환되므로 **공분산 스케치/spread 분기는 v24와 동일**합니다.
+- `poolz_l2`는 확정 선택: per-cell L2로 magnitude를 유계화해 bag 크기 편향을 줄입니다(corr(prob,log n)
+  +0.327→+0.100→+0.059). `poolz`(L2 없음)는 magnitude를 보존하지만 크기 교란이 커 음성(§28 결과 (1)).
+
+### ② (v30 B2) Cardinality-faithful 에피소드 샘플링
+
+B2는 아키텍처가 아니라 **데이터 분포** 변경입니다: `num_cells: [1,1024]` + `num_cells_log_uniform: true`로
+bag 크기를 log-uniform하게 뽑습니다(median 34, frac n≤12 0.36 — Musk 실제 12/0.50에 근사).
+**B1·B2는 상호 필수**: B2만 적용하면(legacy 뷰) n=1 bag이 0벡터가 되어 NaN 그라디언트로 학습 불가,
+B1만 적용하면(S1) 구간 교환으로 음성. 모델이 크기 불변성을 학습하려면 학습 분포에 크기 변동이 필요합니다.
+제약: 4D batched 경로와 `shape_group_size` 때문에 **에피소드 간** 변동만 가능(에피소드 내 혼합은 B2b).
 
 ### ② Top-k Sparse Evidence Tokenization (Sub-1% 희귀세포 핀포인트 추출)
 97%+ 비반응 배경세포에 의해 0.5%~3% 희귀 세포 신호가 희석되는 현상을 방지함:

@@ -1,7 +1,7 @@
 # Documentation map
 
-**Last updated**: `2026-08-01 13:20:00 KST`
-**Architecture Version**: `24` (`architecture_version = 24`) — v24 확정 (residual + bottleneck bag projection)
+**Last updated**: `2026-08-04 14:45:00 KST`
+**Architecture Version**: `30` 확정 baseline (2026-08-04) — v24 + B1 `poolz_l2` 표현 + B2 cardinality-faithful 샘플링. v24(이전 확정)는 `configs/train_v24_medium_bag_proj_residual.yaml`로 보존.
 
 문서는 **새 대화 세션으로 접속하는 Agent가 최우선으로 읽는 Living 문서 5개(`docs/` 루트)**와 **과거 기록/딥다이브 분석서(`docs/history/`)**로 이원화하여 관리합니다.
 
@@ -48,7 +48,8 @@
 - **Living 문서 유지**: `docs/` 최상위 루트에는 오직 5개의 Living 문서만 유지합니다.
 - **Git 커밋 동기화**: 세션 핸드오프 시 작업을 남김없이 커밋하고 커밋 내역/diff를 `agent_handoff.md` 및 `current_status.md`에 반영합니다.
 - **아카이빙 규칙**: 특정 버전 딥다이브 보고서나 계획 문서는 완료 시 즉시 `docs/history/`로 이관하여 `docs/` 루트를 단순하고 가독성 높게 유지합니다.
-- **Config 루트 관리**: `configs/` 루트에는 확정된 v24 entry point(`train_v24_medium_bag_proj_residual.yaml`)와,
+- **Config 루트 관리**: `configs/` 루트에는 확정된 v30 entry point(`train_v30_medium_bag_proj_residual.yaml`),
+  v30 Musk 경로(`train_v30_cardinality_poolz_l2.yaml`), 이전 확정 v24(`train_v24_medium_bag_proj_residual.yaml`),
   ICI 파이프라인이 아직 참조하는 v22 entry point(`train_v22_medium`, `train_v22_hard_realworld`, `train_v22_ici_finetune`, `train_v22_ici_scratch` 등),
   Musk 0.95 지렛대 1 기준(`train_v24_musklike_easy.yaml`)을 유지합니다. 폐기된 v23/v24 candidate(`train_v23_medium_bag_mean`, `train_v24_medium_bag_proj`, `train_v24_medium_bag_proj_bottleneck`)는 `configs/archive/v23_v24_candidates/`로, 구버전(v18~v21)은 `configs/archive/`로, IA-MIL 3종은 `configs/archive/ia_mil/`로, 닫힌 musklike 지렛대(rawstats/mean_token)는 `configs/archive/musklike_easy_levers/`로 관리합니다. ICI의 fold/seed는 config가 아니라 `--cv`/`--seed`로 주입하므로 fold별 config를 만들지 않습니다.
 - **단일 출처화**: 동일한 수치나 진행 상태를 중복해 기록하지 않으며, 상태는 `current_status.md`에만 기록합니다.
