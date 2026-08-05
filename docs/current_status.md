@@ -1014,14 +1014,33 @@ v30은 계속 확정 baseline이다.
   AUROC ≥ 0.70, sparse +0.03) 실패** — donor-resolved evidence 경로는 이 분포에서 보완 판별 신호를
   만들지 못함(CCER-v2의 0.999 상관 결과와 정합). Stage B(router) 진행 근거 없음.
 
-### 4. Stage-0 probe (P0–P3, 실행 중)
+### 4. Stage-0 probe (P0–P3) — **모든 게이트 실패: CCER 계열 실증적 폐기**
 
-- `scripts/probe_v32_headroom.py`, 500-episode 6-task 혼합, CCER-v2 epoch-18 vs v30 paired.
-- 결과는 본 절에 갱신 예정.
+- `scripts/probe_v32_headroom.py`, 100-episode 6-task 혼합, CCER-v2 epoch-18 vs v30 paired
+  (공유 서버 고부하로 1,000→500→100 ep로 축소; delta 부호/0은 ep 수에 무관하게 결정적).
+  결과: `logs/probe_v32_headroom_20260805.csv` + `/tmp/probe_v32_100.log`.
 
-### 5. 열린 과제 (v32b)
+| Probe | 결과 | 게이트(≥ +0.005) |
+|---|---|---|
+| P0 분기/백본 분해 | CCER-v2 full 0.87679 ≈ branch-zeroed 0.87681 ≈ v30 0.87654 (branch 기여 ~0, n>34 0.9277 동일) | 분기 무기여 |
+| P1 standalone | **branch standalone AUROC 0.5106 (무작위)**, corr(v30)=0.0096(무상관), effective contribution SD 0.021, route별 0.51 전부 | branch = 잡음 |
+| P2 fusion headroom | combiner delta **-0.00034** | **FAIL** |
+| P3 donor-agreement headroom | donor 피처 combiner delta **+0.00000** (개별 8피처 전부 +0.00000) | **FAIL** |
 
-- **전체 unittest 178개 통과** (1534.9s, 2026-08-05) — DR-CCER 포함 회귀 없음.
-- **probe 결과**: 500-episode 실행 중 — P2/P3 headroom이 `< 0.005`면 donor-resolved 계열 폐기,
-  데이터 측(task mix / 소형 bag 노출)로 전환.
-- Phase 1(v30 on 6-task mix retrain)은 donor-resolved 폐기 시 데이터측 경로로 진행.
+- **해석**: CCER-v2의 standalone branch는 무작위(0.51)에 v30과 무상관(corr 0.0096)이며, full 예측이 v30과
+  0.999 상관이던 것은 branch가 v30에 **소량 잡음 섭동(0.021 SD)**을 더했기 때문이다(§37의 "작은 보정"
+  해석보다 더 강한 반증). donor-resolved pooling(donor agreement/상위사분위/중앙값)도 v30 margin에
+  **0.00000** 추가 — v32 §4.1 전제가 0회 재학습 probe로 직접 반증됨.
+- **결론**: v32b §2 Stage-0 게이트 FAIL → **CCER 계열(현 CCER-v2 표현 + donor-resolved 변형) 폐기**,
+  Stage B(router)/C(seed)/D(Musk) 진행 근거 없음. 데이터 측 경로(task mix / 소형 bag 노출 / Phase 1
+  v30-on-6-task-mix)로 전환.
+
+### 5. 종합 판정 (2026-08-05)
+
+- **v30 baseline 유지** (변경 없음). CCER-v2·DR-CCER 모두 미채택, 재현 코드만 보존.
+- **전체 unittest 178개 통과** (1534.9s) — DR-CCER 6개 포함 회귀 없음.
+- **Stage A 학습**(`20260805_182126`) 완주: donor-resolved expert standalone CE 0.693(무작위) 정체
+  → Stage A 게이트 실패. **Stage-0 probe(P0–P3)**도 전 게이트 실패(P2 -0.00034, P3 +0.00000).
+- **다음 Action**: ① CCER 계열 폐기 기록(`history/archive.md`), ② Phase 1 "v30 on 6-task mix"
+  재학습으로 데이터 효과 측정(any_positive_sparse가 v30에 무엇을 더하는지), ③ 소형 bag(n≤4, 0.80)과
+  n>34(0.70)가 0.95 목표의 실질 병목 — 데이터/분포 쪽 레버 우선, ④ ICI 잠금 유지.

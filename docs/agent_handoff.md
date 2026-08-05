@@ -29,10 +29,13 @@ reliability-gated mixture를 제안한다. 구현 전 P0–P2 checkpoint 진단�
 **Active — v32b DR-CCER (2026-08-05)**: v32 원안의 비판적 재검토 개선안
 ([`architecture_v32b_dr_ccer_proposal.md`](architecture_v32b_dr_ccer_proposal.md))을 작성하고,
 P0–P3 probe(`scripts/probe_v32_headroom.py`) + DR-CCER 아키텍처(`architecture_version=32`,
-donor-resolved expert + reliability-gated convex mixture)를 구현했다. **Stage A 학습이 활성
-run**이다: `20260805_182126` (v30 best warm-start, dr_ccer expert만 167K trainable, 10 epochs,
-6-task mix incl. `any_positive_sparse` 0.20). 상세는 [`current_status.md`](current_status.md)
-§38이다. **probe 결과와 전체 unittest 결과는 §38에 갱신 중** — 새 세션은 §38부터 읽을 것.
+donor-resolved expert + reliability-gated convex mixture)를 구현했다. **결과: CCER 계열 실증적
+폐기** — ① Stage A 학습(`20260805_182126`, 10 epochs)에서 donor-resolved expert standalone CE가
+0.693(무작위) 정체, ② Stage-0 probe에서 P2 fusion headroom **-0.00034**, P3 donor-agreement
+headroom **+0.00000** (둘 다 게이트 +0.005 미달), CCER-v2 standalone branch AUROC 0.51(무작위,
+v30과 corr 0.0096). 따라서 v32 미채택, 재현 코드만 보존, v30 baseline 유지. 상세는
+[`current_status.md`](current_status.md) §38이다. **다음 방향**: 데이터 측 — Phase 1 "v30 on
+6-task mix"(any_positive_sparse 포함) 재학습, 소형 bag(n≤4)·n>34 분포 레버. 새 세션은 §38부터 읽을 것.
 
 **Persistent invariants**: ICI는 사용자 지시로 잠금 상태다. 잠금 해제 시
 `src/datasets/base_data.py`의 cell-axis zero-padding이 bag mean/global spread를 오염하는 문제를
