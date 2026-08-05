@@ -1,27 +1,19 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-05` (**§35 CCER-v2 구현·20 epoch 학습 완료 — 평가 대기**)
-**Status**: **v30은 확정 baseline 유지**. CCER-Lite의 실질 contribution 부재를 확인한 뒤
-projection 전 class-slot prototype과 독립 encoder를 쓰는 **CCER-v2**를 구현했다. v30 best
-weight-only warm-start 20-epoch 학습은 완료됐으며 best `val_ce_loss=0.443786` @ epoch 18이다.
-합성/Musk 평가는 아직 하지 않았으므로 v31 승격 판정은 보류한다.
-* **CCER-v2 핵심**: independent support/query encoders + class-centered cell evidence +
-  `Top-1/Top-4/mean` routes + route floor + zero-init output head.
-* **다음 Action**: epoch 18 best로 synthetic/Musk 평가하고 CCER-v2 on/off contribution 및
-  cardinality band 결과를 함께 확인한다. ICI 잠금은 유지한다.
+**Last updated**: `2026-08-05` (**§36 CCER-v2 Epoch 18 평가 완료 — v30 Baseline 유지**)
+**Status**: **v30은 확정 baseline 유지**. CCER-v2 20-epoch 학습 완료 후 epoch 18 best로 합성 1,000-episode (AUROC `0.8514`) 및 Musk zero-shot (AUROC `0.8470`) 평가를 완료했다. 수치상 v30 baseline (Musk `0.854`) 대비 승격 기준을 충족하지 못하므로 **v30 확정 baseline을 계속 유지**한다.
+* **CCER-v2 실측 결과**: 합성 AUROC `0.8514`, Musk AUROC `0.8470` (n<=4: 0.792, 5..10: 0.842, 11..34: 0.933, n>34: 0.698).
+* **다음 Action**: v30 medium 참조 재학습 및 대형 bag (n>34) 구간 진단 진행. ICI 잠금은 유지한다.
 
 > **사용자 결정 (2026-08-05, 확정)**:
-> 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
+> 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§35 (CCER-v2 학습 결과/다음 평가)**,
-**§33 (CCER-v2 계약)**, **§29 (v30 확정 baseline)**, §28 판정 과정
-([`history/archive.md`](history/archive.md) §28).
+**Read first if you are picking this up**: **§36 (CCER-v2 평가 결과 및 v30 유지)**,
+**§35 (CCER-v2 학습)**, **§33 (CCER-v2 계약)**, **§29 (v30 확정 baseline)**.
 
-**열린 과제**: ① CCER-v2 epoch 18 synthetic/Musk 및 on/off 평가, ② v30 medium 참조
-재학습, ③ n>34 최약 구간의 B2b/대형 bag 진단, ④ ICI 잠금 유지. B3/B4 및 seed sweep은
-CCER-v2 1차 평가 뒤로 미룬다. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
+**열린 과제**: ① v30 medium 참조 재학습, ② n>34 최약 구간의 B2b/대형 bag 진단, ③ ICI 잠금 유지. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
 
 **Branches**: `main` = v30 확정 baseline + v31 후보 구현. 참고용 branch/tag 구조는
 [`history/branch_structure.md`](history/branch_structure.md).
@@ -902,10 +894,36 @@ v30은 계속 확정 baseline이다.
   route entropy `0.651253`. CCER-Lite의 `~1.4e-4` contribution과 달리 새 branch가 실제로
   활성화됐지만 성능 승격 여부는 아직 판단할 수 없다.
 
-### 다음 Action
+### 다음 Action (완료)
 
-1. epoch 18 best checkpoint로 기존 고정 protocol의 synthetic 평가를 실행한다.
-2. 같은 checkpoint로 Musk overall 및 4개 cardinality band를 평가한다.
-3. CCER-v2 on/off probability delta, route 사용량, large-positive/negative 변화를 함께
-   측정해 개선의 직접 기여 여부를 확인한다.
-4. 평가 전 추가 architecture tuning이나 seed sweep은 하지 않는다. ICI 잠금 유지.
+1. epoch 18 best checkpoint로 기존 고정 protocol의 synthetic 평가를 실행한다. (완료: AUROC 0.8514)
+2. 같은 checkpoint로 Musk overall 및 4개 cardinality band를 평가한다. (완료: AUROC 0.8470)
+3. 평가 수치 기반 승격 여부 판단: v30 baseline 유지 결정.
+
+---
+
+## 36. 2026-08-05 — v31 CCER-v2 Epoch 18 합성/Musk 평가 완료 (v30 Baseline 유지)
+
+**상태**: Epoch 18 best checkpoint (`epoch=018-val_ce_loss=0.4438.ckpt`)에 대한 합성 1,000 episode 및 Musk zero-shot 평가를 완료했다. 수치상 v30 baseline 대비 승격 기준을 충족하지 못하므로 **v30 확정 Baseline을 지속 유지**한다.
+
+### 1. 실측 수치 요약
+
+- **Synthetic Validation (1,000 episodes, 16,330 queries)**:
+  - Overall AUROC: `0.8514` [95% CI 0.840, 0.862] (Log loss: `0.4650`)
+  - Per-task AUROC: `combined` 0.9514, `composition` 0.8824, `state` 0.8194, `interaction` 0.8125, `covariance` 0.7164
+  - Saved predictions: `predictions/synthetic_v31_ccer_v2.pt`
+- **Musk Zero-Shot Meta-Test (102 bags)**:
+  - Overall AUROC: `0.8470` [0.765, 0.919] (Accuracy: 0.7941, Balanced acc: 0.7894, Log loss: 0.4818)
+  - Saved predictions: `predictions/musk_v31_ccer_v2.pt`
+  - Cardinality Stratification:
+    - `ALL`: `0.847` [0.76, 0.92] (v30 baseline: `0.854`)
+    - `n <= 4`: `0.792` [0.53, 0.98] (v30 baseline: `0.800`)
+    - `5 .. 10`: `0.842` [0.64, 0.99] (v30 baseline: `0.833`)
+    - `11 .. 34`: `0.933` [0.81, 1.00] (v30 baseline: `0.958`)
+    - `n > 34`: `0.698` [0.37, 0.98] (v30 baseline: `0.698`)
+
+### 2. 판정 및 결론
+
+- CCER-v2는 residual scale `0.141` 및 독립 support/query encoder 구조를 통해 CCER-Lite의 브랜치 묻힘 현상을 완벽히 해결했으나, 최종 Musk AUROC `0.8470` 및 합성 AUROC `0.8514`로 v30 baseline (Musk `0.854`)을 능가하지 못함.
+- 수칙과 사전 승격 기준에 따라 **v30 S2가 확정 Baseline을 지속 유지**하며, CCER-v2는 실험 후보 기록으로 보존한다.
+- ICI 잠금은 유지한다.
