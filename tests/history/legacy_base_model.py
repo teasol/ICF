@@ -1687,4 +1687,3 @@ class PoolStandardizedBagRepresentationTest(unittest.TestCase):
         self.assertTrue(torch.isfinite(logits).all())
         self.assertEqual(logits.shape, (2, 1, 2))
 
-

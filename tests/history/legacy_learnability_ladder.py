@@ -141,7 +141,7 @@ class NuisanceResolvedConfigTest(unittest.TestCase):
     }
 
     def test_d_stages_differ_only_in_selected_nuisance(self):
-        root = Path(__file__).resolve().parents[1]
+        root = Path(__file__).resolve().parents[2]
         configs = {
             stage: merge_train_config(
                 (root / "configs" / "archive" / "v18_v19" / f"train_learnability_{stage}.yaml")

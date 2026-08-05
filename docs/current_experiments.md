@@ -348,7 +348,7 @@ ICI 실데이터: 87명 환자, donor당 1,000 세포 샘플링, 512-dim scConce
 ## 5. 검증 스위트
 
 ```bash
-timeout 1500s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
+timeout 300s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
 ```
 
 - `tests/test_base_model.py` — aggregator/meta-classifier 계약, `architecture_version == 22`

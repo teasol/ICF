@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-05` (**§39 v32b 결과 평가 및 v33 MR-BagPFN proposal 작성**)
+**Last updated**: `2026-08-05` (**§40 기본 test suite compact화 완료**)
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. v32b P0–P3와 DR-CCER Stage A가 모두 실패했다(P1 standalone `0.5105`, P2 `-0.00034`, P3 `+0.00000`, expert CE `0.6931`). 다음 후보는 구현 전 데이터 요인과 frozen-feature headroom을 검증하는 v33 MR-BagPFN이다.
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **다음 Action**: v33 Phase 0 arm B(v30 six-task B2)와 C(v30 legacy B2b)를 먼저 구현·평가한다. ICI 잠금은 유지한다.
@@ -10,7 +10,7 @@
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
+**Read first if you are picking this up**: **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
 **§36 (CCER-v2 평가)**, **§29 (v30 확정 baseline)**.
 
 **열린 과제**: ① v30 six-task 효과 분리, ② B2b within-episode cardinality 효과 분리, ③ frozen-v30 multi-resolution headroom, ④ v30 medium 참조 재학습, ⑤ ICI 잠금 유지. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
@@ -71,7 +71,7 @@
 > 2. 새로 접속한 Agent는 **`docs/` 최상위 루트의 Living md 파일 5개(`agent_handoff.md`, `current_status.md`, `current_architecture.md`, `current_experiments.md`, `README.md`)와 현행 `architecture_*_proposal.md` 1개를 최우선으로 정독**하여 전체 개발 맥락과 프로젝트 규칙을 파악합니다.
 > 3. 터미널 조회가 필요한 명령어는 NVML/쉘 hang 방지를 위해 **반드시 `timeout 3s ps aux | grep python`과 같이 타임아웃**을 적용합니다.
 > 4. 코드 변경 시 unittest 통과 필수:
->    `timeout 1500s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"`
+>    `timeout 300s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"`
 
 ---
 
@@ -1063,3 +1063,23 @@ v30은 계속 확정 baseline이다.
   → paired AUROC `+0.01` headroom 확인 시에만 zero-init consensus residual 구현.
 - **바로 다음 단계**: Phase 0 arm B(v30 + six-task + B2)와 arm C(v30 + legacy + B2b).
   새 architecture부터 구현하지 않는다. ICI 잠금 유지.
+
+---
+
+## 40. 2026-08-05 — 기본 unittest suite compact화
+
+**상태**: 완료. 기본 discovery는 19개 핵심 계약만 실행하고, 나머지는 history에서 보존한다.
+
+- 이전 기본 suite: unittest 178개 + discovery에서 누락된 pytest-style ICI 1개, 최근 실측
+  `1534.9s`.
+- 새 기본 suite: `tests/test_core_contracts.py`, `test_scheduler.py`,
+  `test_checkpoint_callback.py`의 **19개**, CPU 실측 **`142.820s`**, 전부 통과.
+- 유지 계약: v30 forward/backward, query-label isolation, label equivariance,
+  cell/context permutation invariance, ragged bags, poolz query isolation, n=1, batched/list,
+  ranking/checkpoint marker, synthetic split/cardinality/sparse task, AUROC/bootstrap/log loss,
+  ICI all-cell mean, scheduler, last-checkpoint 저장.
+- 폐기 architecture와 연구용 상세 회귀 **175개 method / 12개 파일**은
+  `tests/history/legacy_*.py`로 이동했고 파일명 패턴상 기본 `test_*.py`에서 실행되지 않는다.
+- archive 정책: [`../tests/history/README.md`](../tests/history/README.md). 보존 코드 경로를
+  직접 수정할 때만 해당 legacy module을 명시 실행한다.
+- 표준 명령: `timeout 300s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"`.

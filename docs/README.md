@@ -45,6 +45,7 @@
 - [`history/v31_absolute_topk_tail_proposal.md`](history/v31_absolute_topk_tail_proposal.md): 이전 v31 Absolute Top-K Tail proposal — 기록용 archive.
 - [`history/musk095_architecture_proposal.md`](history/musk095_architecture_proposal.md): Musk 0.95 아키텍처 개선 **1차** 제안 (2026-08-04) — P0 앙상블 / P1 166→512 읽기 브리지 / P2 bag-mean 보존 채널 / P3 단순 인스턴스 풀링. **P1/P2 기각, P3 연기 — 기록용 보존**, 대체 문서는 위 `musk_transfer_diagnosis_v30_proposal.md`
 - [`history/architecture_v26_proposal_ec_moe_rejected.md`](history/architecture_v26_proposal_ec_moe_rejected.md) / [`architecture_v27_proposal_ac_icar_rejected.md`](history/architecture_v27_proposal_ac_icar_rejected.md) / [`architecture_v29_proposal_sp_sat_rejected.md`](history/architecture_v29_proposal_sp_sat_rejected.md): 미구현 폐기된 설계안 (2026-08-02)
+- [`../tests/history/README.md`](../tests/history/README.md): 기본 19-test compact suite에서 제외된 폐기 architecture/연구 진단 테스트 archive 정책
 
 ---
 

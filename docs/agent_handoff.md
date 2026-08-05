@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-05` — v32b 평가 종료, CCER 계열 폐기 및 v33 proposal 반영.
+**Last updated**: `2026-08-05` — compact 기본 test suite와 legacy test archive 반영.
 
 **Confirmed baseline**: v30 = v24 residual+bottleneck bag projection + B1
 `bag_representation: poolz_l2` + B2 log-uniform cardinality `[1,1024]`. Musk zero-shot
@@ -107,9 +107,11 @@ multi-resolution combiner가 paired AUROC `+0.01` headroom을 보여야 한다. 
 5. **테스트 검증 필수**:
    - 코드를 변경한 뒤에는 아래 unittest 수트를 통과해야 완결로 인정한다:
      ```bash
-     timeout 1500s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
+     timeout 300s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
      ```
-   - 전체 스위트는 약 12분(현재 123 tests) 걸립니다. 타임아웃 없이 돌리면 §3-2 원칙에 어긋나고 hang 시 세션이 멈춥니다.
+   - 기본 스위트는 현재 **19 tests, 약 143초**다. 폐기 architecture/연구 진단 175개는
+     `tests/history/legacy_*.py`로 이관되어 기본 discovery에서 실행되지 않는다. archive suite는
+     수정 대상이 해당 보존 경로일 때만 개별 실행한다.
 
 ---
 
