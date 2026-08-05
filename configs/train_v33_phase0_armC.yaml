@@ -16,6 +16,10 @@ base_config: train_v30_cardinality_poolz_l2.yaml
 #
 # Gates (Phase 0): legacy overall regression <= 0.01 (paired CI including zero)
 # vs committed v30, and B2b must cut full-vs-subsample margin drift >= 20% vs B2.
+#
+# Precision: bf16-mixed to match v30 baseline and Arm B exactly (factor
+# separation requires identical precision). The ragged B2b path was already
+# validated under bf16-mixed in the Phase 0 smoke run.
 data_overrides:
   episode_batch_size: 1
   dataset_kwargs:
@@ -30,4 +34,4 @@ logger:
 
 trainer:
   max_epochs: 50
-  precision: 32-true
+  precision: bf16-mixed
