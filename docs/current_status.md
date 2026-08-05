@@ -1,16 +1,16 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-05` (**§40 기본 test suite compact화 완료**)
-**Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. v32b P0–P3와 DR-CCER Stage A가 모두 실패했다(P1 standalone `0.5105`, P2 `-0.00034`, P3 `+0.00000`, expert CE `0.6931`). 다음 후보는 구현 전 데이터 요인과 frozen-feature headroom을 검증하는 v33 MR-BagPFN이다.
+**Last updated**: `2026-08-05` (**§41 arm C 중단, arm B 단독 학습 지속**)
+**Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. v33 Phase 0 arm C는 계산량 비대칭으로 중단했고, arm B(v30 six-task + B2)는 50 epoch 완료까지 계속 실행 중이다.
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
-* **다음 Action**: v33 Phase 0 arm B(v30 six-task B2)와 C(v30 legacy B2b)를 먼저 구현·평가한다. ICI 잠금은 유지한다.
+* **다음 Action**: v33 Phase 0 arm B(v30 six-task B2)를 끝까지 학습·평가한다. arm C는 재개하지 않으며 ICI 잠금은 유지한다.
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
+**Read first if you are picking this up**: **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
 **§36 (CCER-v2 평가)**, **§29 (v30 확정 baseline)**.
 
 **열린 과제**: ① v30 six-task 효과 분리, ② B2b within-episode cardinality 효과 분리, ③ frozen-v30 multi-resolution headroom, ④ v30 medium 참조 재학습, ⑤ ICI 잠금 유지. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
@@ -1118,6 +1118,16 @@ probe 통과 전까지 구현하지 않는다. ICI 잠금 유지.
     `checkpoints/20260805_214751/v33_phase0_armC/` (50 ep, batch 1, ~24min/ep)
 - **arm C 비대칭 주의**: batch 1이라 epoch당 optimizer step이 v30 대비 8x.
   회귀 gate에 대해 보수적(더 많이 학습해도 회귀 시 = 강한 부정 신호).
+- **운영 결정 — arm C 중단, arm B 단독 지속** (사용자 확정):
+  - arm C는 `4096 steps/epoch × 50 = 204,800` optimizer step으로, arm B의
+    `512 × 50 = 25,600`보다 8배 많아 예상 약 20시간이 걸렸다. 이는 의도한 공정한
+    데이터 컨트롤이 아니므로 launcher PID `4183921`과 torchrun PID `4183927`에
+    `SIGTERM`을 보내 중단했다. 생성된 checkpoint는 없으며 **재개하지 않는다**.
+  - arm B launcher PID `4183604`, torchrun PID `4183610`, worker PID `4183752`는
+    종료 대상에서 제외했고 계속 실행 중이다. epoch 3 완료 후 epoch 4 진입을 확인했으며
+    현재 보존 checkpoint는 `epoch=001`, `epoch=002`, `epoch=003`, `last.ckpt`다.
+  - Phase 0 판정은 우선 arm B 완료 결과로 진행한다. B2b 효과를 다시 분리해야 한다면
+    동일 optimizer-step budget을 갖춘 새 실험 설계를 먼저 제안한다.
 - **Phase 0 gate**: sparse task AUROC ≥ 0.75 (arm B), legacy overall 회귀
   ≤ 0.01 (paired CI가 0 포함), B2b가 full-vs-subsample margin drift ≥20% 감소
   (probe로 측정).
