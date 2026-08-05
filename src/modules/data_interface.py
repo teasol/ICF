@@ -50,6 +50,11 @@ def collate_synthetic_training_episode(samples: list[Any]):
         raise ValueError("A synthetic training batch cannot be empty.")
     if len(samples) == 1:
         return samples[0]
+    if not isinstance(samples[0][0], torch.Tensor):
+        raise ValueError(
+            "Ragged (per-bag cardinality, B2b) episodes are not stackable; "
+            "configure episode_batch_size=1."
+        )
     x = torch.stack([sample[0] for sample in samples])
     y = torch.stack([sample[1] for sample in samples])
     field_count = len(samples[0])
@@ -113,15 +118,16 @@ def collate_synthetic_evaluation_episode(samples: list[Any]):
     """
     episode = collate_synthetic_training_episode(samples)
     x, y = episode[:2]
+    num_bags = len(x) if not isinstance(x, torch.Tensor) else x.shape[0]
     observed_classes = torch.unique(y, sorted=True)
     protected = []
     for class_index in observed_classes:
         class_members = torch.nonzero(y == class_index, as_tuple=False).flatten()
         protected.append(class_members[0])
-    can_query = torch.ones(x.shape[0], dtype=torch.bool)
+    can_query = torch.ones(num_bags, dtype=torch.bool)
     can_query[torch.stack(protected)] = False
     candidates = torch.nonzero(can_query, as_tuple=False).flatten()
-    requested_queries = max(1, min(20, (x.shape[0] + 4) // 5))
+    requested_queries = max(1, min(20, (num_bags + 4) // 5))
     num_queries = min(requested_queries, candidates.numel())
     if num_queries == 0:
         raise ValueError(

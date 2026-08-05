@@ -1,0 +1,24 @@
+base_config: train_v30_cardinality_poolz_l2.yaml
+
+# v33 Phase 0 arm B = v30 + six-task mix + B2 (per-episode cardinality).
+#
+# Factor separation (proposal v33 §3): arm B vs arm A (committed v30 five-task
+# result) isolates the any_positive_sparse (0.20) task's contribution. The v30
+# architecture is UNCHANGED -- no DR-CCER, no new residual branch.
+#
+# six-task mix = composition, state, covariance, interaction, combined,
+# any_positive_sparse. B2 stays episode-wide (per-episode n ~ LogUniform[1,1024]).
+#
+# Gate (Phase 0): the sparse task must reach AUROC >= 0.75 to be useful; legacy
+# overall must not regress > 0.01 (paired CI including zero) vs committed v30.
+data_overrides:
+  dataset_kwargs:
+    response_task_probabilities: [0.32, 0.24, 0.04, 0.04, 0.16, 0.20]
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v33_phase0_armB_6task
+
+trainer:
+  max_epochs: 50

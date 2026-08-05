@@ -25,9 +25,14 @@ RESPONSE_TASK_NAMES = (
 
 @dataclass(frozen=True)
 class SyntheticEpisode:
-    """One binary classification episode made of bags of manifold samples."""
+    """One binary classification episode made of bags of manifold samples.
 
-    x: torch.Tensor
+    ``x`` is a dense ``[num_bags, num_cells, feature_dim]`` tensor for the
+    standard per-episode cardinality mode, or a ragged list of per-bag
+    ``[n_b, feature_dim]`` tensors when per-bag cardinality (B2b) is enabled.
+    """
+
+    x: torch.Tensor | list[torch.Tensor]
     y: torch.Tensor
     response_score: torch.Tensor | None = None
     response_task: str | None = None
@@ -63,6 +68,7 @@ class SyntheticManifoldGenerator:
         num_bags: int | tuple[int, int] = 50,
         num_cells: int | tuple[int, int] = 1000,
         num_cells_log_uniform: bool = False,
+        per_bag_cardinality: bool = False,
         latent_dim: int = 8,
         output_dim: int = 512,
         mlp_hidden_dim: int = 128,
@@ -267,6 +273,7 @@ class SyntheticManifoldGenerator:
         self.num_bags = tuple(num_bags)
         self.num_cells = tuple(num_cells)
         self.num_cells_log_uniform = bool(num_cells_log_uniform)
+        self.per_bag_cardinality = bool(per_bag_cardinality)
         self.latent_dim = latent_dim
         self.output_dim = output_dim
         self.mlp_hidden_dim = mlp_hidden_dim
@@ -308,8 +315,19 @@ class SyntheticManifoldGenerator:
         effect_scale_multiplier: float = 1.0,
         num_bags: int | None = None,
         num_cells: int | None = None,
+        num_cells_per_bag: Sequence[int] | None = None,
     ) -> SyntheticEpisode:
-        """Sample one episode and randomly permute its bag order."""
+        """Sample one episode and randomly permute its bag order.
+
+        With ``per_bag_cardinality`` enabled (B2b), every bag draws its own
+        cell count from the configured ``num_cells`` range. The returned
+        ``SyntheticEpisode.x`` is then a ragged list of per-bag tensors. Dense
+        cells are exchangeable within a bag, so a uniform subsample of the
+        episode-wide draw is distributed exactly like an independent per-bag
+        draw for every non-sparse response task; the sparse task's shifted
+        cells are re-marked per bag after subsampling so positive bags always
+        retain their effect cells.
+        """
         if effect_scale_multiplier < 0:
             raise ValueError("effect_scale_multiplier must be non-negative.")
         device = torch.device(device)
@@ -319,12 +337,41 @@ class SyntheticManifoldGenerator:
             raise ValueError(
                 f"num_bags must be within the configured range {self.num_bags}."
             )
-        if num_cells is None:
+        if self.per_bag_cardinality:
+            if num_cells_per_bag is None:
+                num_cells_per_bag = [
+                    self.sample_num_cells(generator, device)
+                    for _ in range(num_bags)
+                ]
+            elif len(num_cells_per_bag) != num_bags:
+                raise ValueError(
+                    "num_cells_per_bag must provide exactly one cardinality "
+                    "per bag."
+                )
+            for per_bag_count in num_cells_per_bag:
+                if not self.num_cells[0] <= per_bag_count <= self.num_cells[1]:
+                    raise ValueError(
+                        "Every per-bag cardinality must lie within the "
+                        f"configured range {self.num_cells}."
+                    )
+            # Dense generation runs at the episode maximum; every bag is then
+            # subsampled to its own count so a single pass supports all sizes.
+            num_cells = int(max(num_cells_per_bag))
+        elif num_cells is None:
             num_cells = self.sample_num_cells(generator, device)
         elif not self.num_cells[0] <= num_cells <= self.num_cells[1]:
             raise ValueError(
                 f"num_cells must be within the configured range {self.num_cells}."
             )
+        # Draw every bag's subsample indices up front (B2b) so the sparse
+        # effect can be marked inside each bag's retained cells before the
+        # manifold map -- the shift must be applied in latent space.
+        per_bag_subsets: list[torch.Tensor] | None = None
+        if self.per_bag_cardinality:
+            per_bag_subsets = [
+                torch.randperm(num_cells, device=device, generator=generator)[:n_i]
+                for n_i in num_cells_per_bag
+            ]
         y = self._sample_labels(num_bags, generator, device)
         response_score = self._sample_response_score(y, generator, device)
         use_shared_component = bool(
@@ -483,19 +530,35 @@ class SyntheticManifoldGenerator:
                 (num_bags, num_cells, 1), dtype=torch.bool, device=device
             )
             effect_component_index = 0
-            for i in range(num_bags):
-                if y[i] == 1:
-                    m = int(
-                        torch.randint(
-                            1, 4, (1,), device=device, generator=generator
-                        ).item()
-                    )
-                    m = min(m, num_cells)
-                    perm = torch.randperm(
-                        num_cells, device=device, generator=generator
-                    )[:m]
-                    effect_mask[i, perm, 0] = True
-            effect_cell_fraction = effect_mask.squeeze(-1).float().mean(dim=1)
+            if self.per_bag_cardinality:
+                # Mark m shifted cells among each positive bag's retained
+                # subsample so they survive B2b subsampling.
+                for i in range(num_bags):
+                    if y[i] == 1:
+                        n_i = num_cells_per_bag[i]
+                        m = min(
+                            int(
+                                torch.randint(
+                                    1, 4, (1,), device=device, generator=generator
+                                ).item()
+                            ),
+                            n_i,
+                        )
+                        effect_mask[i, per_bag_subsets[i][:m], 0] = True
+            else:
+                for i in range(num_bags):
+                    if y[i] == 1:
+                        m = int(
+                            torch.randint(
+                                1, 4, (1,), device=device, generator=generator
+                            ).item()
+                        )
+                        m = min(m, num_cells)
+                        perm = torch.randperm(
+                            num_cells, device=device, generator=generator
+                        )[:m]
+                        effect_mask[i, perm, 0] = True
+                effect_cell_fraction = effect_mask.squeeze(-1).float().mean(dim=1)
         elif use_continuous_response:
             effect_component_index = (
                 responsive_component_index
@@ -588,9 +651,10 @@ class SyntheticManifoldGenerator:
         # Diagnostic-only features use the generator's true responsive
         # population membership. They are never returned by the training
         # Dataset, but let us verify that abundance/state/dispersion remain
-        # identifiable after the random manifold mapping.
+        # identifiable after the random manifold mapping. Per-bag cardinality
+        # recomputes them after subsampling below.
         oracle_population_features = None
-        if effect_mask is not None:
+        if effect_mask is not None and not self.per_bag_cardinality:
             population_weight = effect_mask.to(x.dtype)
             population_count = population_weight.sum(dim=1).clamp_min(1.0)
             population_fraction = population_count / num_cells
@@ -604,11 +668,61 @@ class SyntheticManifoldGenerator:
                 (fraction_logit, population_mean, population_variance), dim=-1
             )
 
+        if self.per_bag_cardinality:
+            # B2b: subsample every bag to its own cardinality so one episode
+            # spans the full bag-size regime. Dense cells are exchangeable
+            # within a bag, so this is distributionally identical to drawing
+            # n_i cells directly for every task. Effect cells were marked
+            # inside each bag's retained subset (latent space) up front, so
+            # the manifold-mapped shift survives subsampling.
+            ragged_x: list[torch.Tensor] = []
+            ragged_masks: list[torch.Tensor] | None = (
+                [] if effect_mask is not None else None
+            )
+            for bag_index in range(num_bags):
+                subset = per_bag_subsets[bag_index]
+                ragged_x.append(x[bag_index][subset].clone())
+                if ragged_masks is not None:
+                    ragged_masks.append(
+                        effect_mask[bag_index][subset].squeeze(-1)
+                    )
+            x = ragged_x
+            if ragged_masks is not None:
+                effect_mask = ragged_masks
+                effect_cell_fraction = torch.stack(
+                    [mask.float().mean() for mask in ragged_masks]
+                )
+            if effect_mask is not None:
+                oracle_population_features = self._bag_population_features(
+                    x, effect_mask, device=device
+                )
+
         permutation = torch.randperm(
             num_bags, device=device, generator=generator
         )
+        permutation_indices = permutation.tolist()
+        if self.per_bag_cardinality:
+            bag_x = [x[index] for index in permutation_indices]
+            bag_effect_mask = (
+                [effect_mask[index] for index in permutation_indices]
+                if effect_mask is not None
+                else None
+            )
+            bag_responsive_mask = (
+                [mask.detach() for mask in bag_effect_mask]
+                if bag_effect_mask is not None
+                else None
+            )
+        else:
+            bag_x = x[permutation]
+            bag_effect_mask = effect_mask
+            bag_responsive_mask = (
+                effect_mask[permutation].squeeze(-1).detach()
+                if effect_mask is not None
+                else None
+            )
         return SyntheticEpisode(
-            x=x[permutation],
+            x=bag_x,
             y=y[permutation],
             response_score=response_score[permutation],
             response_task=response_task,
@@ -640,11 +754,7 @@ class SyntheticManifoldGenerator:
                 if oracle_population_features is not None
                 else None
             ),
-            responsive_instance_mask=(
-                effect_mask[permutation].squeeze(-1).detach()
-                if effect_mask is not None
-                else None
-            ),
+            responsive_instance_mask=bag_responsive_mask,
         )
 
     def sample_num_cells(
@@ -667,6 +777,43 @@ class SyntheticManifoldGenerator:
         span = math.log(float(high)) - math.log(float(low))
         value = math.exp(math.log(float(low)) + float(fraction) * span)
         return int(min(high, max(low, round(value))))
+
+    def sample_num_cells_per_bag(
+        self,
+        num_bags: int,
+        generator: torch.Generator | None = None,
+        device: torch.device | str = "cpu",
+    ) -> list[int]:
+        """Sample one independent cell count per bag (B2b)."""
+        return [
+            self.sample_num_cells(generator, device) for _ in range(num_bags)
+        ]
+
+    @staticmethod
+    def _bag_population_features(
+        ragged_x: Sequence[torch.Tensor],
+        ragged_masks: Sequence[torch.Tensor],
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Recompute diagnostic-only responsive-population features per bag."""
+        per_bag: list[torch.Tensor] = []
+        for bag, mask in zip(ragged_x, ragged_masks):
+            n_i = bag.shape[0]
+            weight = mask.to(bag.dtype)
+            population_count = weight.sum().clamp_min(1.0)
+            population_fraction = population_count / n_i
+            population_mean = (bag * weight.unsqueeze(-1)).sum(dim=0) / population_count
+            centered = (bag - population_mean.unsqueeze(0)) * weight.unsqueeze(-1)
+            population_variance = centered.square().sum(dim=0) / population_count
+            fraction_logit = torch.logit(
+                population_fraction.clamp(1.0 / n_i, 1.0 - 1.0 / n_i)
+            ).reshape(1)
+            per_bag.append(
+                torch.cat(
+                    (fraction_logit, population_mean, population_variance)
+                )
+            )
+        return torch.stack(per_bag)
 
     def sample_num_bags(
         self,

@@ -1083,3 +1083,43 @@ v30은 계속 확정 baseline이다.
 - archive 정책: [`../tests/history/README.md`](../tests/history/README.md). 보존 코드 경로를
   직접 수정할 때만 해당 legacy module을 명시 실행한다.
 - 표준 명령: `timeout 300s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"`.
+
+
+---
+
+## 41. 2026-08-05 — v33 Phase 0 구현: arm B(C) 데이터 컨트롤 + 학습 런치
+
+**상태**: v33 proposal §9에 따라 **arm B(v30 + six-task + B2)와 arm C(v30 +
+legacy + B2b)** 구현·런칭 완료. 새 architecture(residual consensus)는 Phase 1
+probe 통과 전까지 구현하지 않는다. ICI 잠금 유지.
+
+- **B2b (per-bag cardinality) 구현**:
+  - `SyntheticManifoldGenerator(per_bag_cardinality=True)` — 에피소드 내에서 각
+    bag이 `n_b ~ LogUniform[1,1024]`을 독립 추첨. dense generation은
+    `max(n_b)`에서 수행 후 per-bag subset으로 subsample(ragged list 반환).
+  - dense cell은 bag 내 교환 가능하므로 subsample은 i.i.d. `n_i` 추첨과
+    분포상 동일. sparse task(arm D 예비)는 각 양성 bag의 유지 subset 내에서
+    m개의 shifted cell을 latent 공간에 marking해 subsample 후에도 보존.
+  - oracle abundance/population features는 subsample 후 per-bag 재계산.
+  - `SyntheticEpisode.x` 타입을 `Tensor | list[Tensor]`로 확장.
+  - collator: ragged 배치 >1 거부(에피소드 간 stack 불가), eval collator는
+    `len(x)`로 bag 수 처리. `training_step`에 ragged(Sequence) 단일 에피소드
+    분기 추가. `episode_batch_size=1` 필수.
+- **config**: `configs/train_v33_phase0_armB.yaml`(six-task
+  `[0.32,0.24,0.04,0.04,0.16,0.20]`), `configs/train_v33_phase0_armC.yaml`
+  (`per_bag_cardinality: true`, batch=1, shape_group_size=1).
+- **테스트**: `tests/test_b2b.py` 신규 10개 추가. 전체 기본 suite
+  **29 tests / 185.785s 전부 통과**.
+- **GPU 스모크**: arm B/C 각 1 epoch + 16 train batch 정상(exit=0).
+- **학습 런치** (detached, GPU 0):
+  - arm B: `logs/20260805_214745/v33_phase0_armB.out`, ckpt
+    `checkpoints/20260805_214745/v33_phase0_armB/` (50 ep, batch 8, ~2.9min/ep)
+  - arm C: `logs/20260805_214751/v33_phase0_armC.out`, ckpt
+    `checkpoints/20260805_214751/v33_phase0_armC/` (50 ep, batch 1, ~24min/ep)
+- **arm C 비대칭 주의**: batch 1이라 epoch당 optimizer step이 v30 대비 8x.
+  회귀 gate에 대해 보수적(더 많이 학습해도 회귀 시 = 강한 부정 신호).
+- **Phase 0 gate**: sparse task AUROC ≥ 0.75 (arm B), legacy overall 회귀
+  ≤ 0.01 (paired CI가 0 포함), B2b가 full-vs-subsample margin drift ≥20% 감소
+  (probe로 측정).
+- **바로 다음**: Phase 0 결과 선택 → frozen-v30 multi-resolution probe
+  (Phase 1) → paired AUROC `+0.01` 통과 시에만 v33 residual 구현.

@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-05` — compact 기본 test suite와 legacy test archive 반영.
+**Last updated**: `2026-08-05` — v33 Phase 0 arm B/C 구현·런칭, B2b ragged 데이터 파이프라인 신규.
 
 **Confirmed baseline**: v30 = v24 residual+bottleneck bag projection + B1
 `bag_representation: poolz_l2` + B2 log-uniform cardinality `[1,1024]`. Musk zero-shot
@@ -37,12 +37,23 @@ v30과 corr 0.0096). 따라서 v32 미채택, 재현 코드만 보존, v30 basel
 [`current_status.md`](current_status.md) §38이다. **다음 방향**: 데이터 측 — Phase 1 "v30 on
 6-task mix"(any_positive_sparse 포함) 재학습, 소형 bag(n≤4)·n>34 분포 레버. 새 세션은 §38부터 읽을 것.
 
-**Proposed next investigation — v33 MR-BagPFN**: CCER와 다른 새 cell evidence를 만들지 않고,
-검증된 v30 bag representation을 동일 bag의 full/partition/subsample view에서 공유해 sampling
-resolution 정보를 보존한다. 단, 구현 전 v30 six-task mix와 B2b를 분리 평가하고 frozen-v30
-multi-resolution combiner가 paired AUROC `+0.01` headroom을 보여야 한다. 상세는
+**Active — v33 Phase 0 (2026-08-05)**: v33 MR-BagPFN proposal의 §9 지침대로 **arm B(v30 +
+six-task + B2)와 arm C(v30 + legacy + B2b) 데이터 컨트롤을 먼저 구현·런칭**했다. B2b는
+`SyntheticManifoldGenerator(per_bag_cardinality=True)`로 에피소드 내 per-bag
+`n_b ~ LogUniform[1,1024]`을 추첨해 ragged list-of-bags를 반환하는 새 데이터 경로다
+(collator/training_step ragged 분기, `episode_batch_size=1` 필요). config:
+`configs/train_v33_phase0_armB.yaml`·`armC.yaml`. 신규 테스트 `tests/test_b2b.py` 10개 포함
+기본 suite **29 tests / 185.8s 통과**. 학습: arm B `logs/20260805_214745/`, arm C
+`logs/20260805_214751/` (둘 다 GPU 0 detached, 50 ep). **Phase 1 frozen-v30 multi-resolution
+probe는 Phase 0 결과 선택 후에만 구현한다.** 상세는
+[`current_status.md`](current_status.md) §41·§39다.
+
+**Proposed next investigation — v33 MR-BagPFN (아키텍처)**: CCER와 다른 새 cell evidence를
+만들지 않고, 검증된 v30 bag representation을 동일 bag의 full/partition/subsample view에서
+공유해 sampling resolution 정보를 보존한다. 단, Phase 0(arm B/C) 결과와 frozen-v30
+multi-resolution combiner의 paired AUROC `+0.01` headroom 확인 후에만 구현한다. 상세는
 [`architecture_v33_multiresolution_bag_proposal.md`](architecture_v33_multiresolution_bag_proposal.md)와
-[`current_status.md`](current_status.md) §39다. 아직 구현·학습은 시작하지 않았다.
+[`current_status.md`](current_status.md) §39다.
 
 **Persistent invariants**: ICI는 사용자 지시로 잠금 상태다. 잠금 해제 시
 `src/datasets/base_data.py`의 cell-axis zero-padding이 bag mean/global spread를 오염하는 문제를

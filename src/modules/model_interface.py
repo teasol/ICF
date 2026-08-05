@@ -94,7 +94,15 @@ class ModelInterface(L.LightningModule):
     def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
         x, y = batch[:2]
         losses, episode_terms, query_counts = [], [], []
-        if x.ndim == 3:
+        if not isinstance(x, torch.Tensor):
+            # Ragged single episode: per-bag cardinality (B2b) produces a list
+            # of per-bag tensors, which requires episode_batch_size=1.
+            mask_index = self._sample_training_queries(y)
+            episode_loss, terms = self._episode_losses(x, y, mask_index)
+            losses.append(episode_loss)
+            episode_terms.append(terms)
+            query_counts.append(mask_index.numel())
+        elif x.ndim == 3:
             mask_index = self._sample_training_queries(y)
             episode_loss, terms = self._episode_losses(x, y, mask_index)
             losses.append(episode_loss)

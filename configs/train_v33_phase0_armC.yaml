@@ -1,0 +1,31 @@
+base_config: train_v30_cardinality_poolz_l2.yaml
+
+# v33 Phase 0 arm C = v30 + legacy five-task mix + B2b (per-bag cardinality).
+#
+# Factor separation (proposal v33 §3): arm C vs arm A (committed v30) isolates
+# the per-bag mixed-n regime. Under B2b every bag draws its own cell count
+# n_b ~ LogUniform[1,1024] within the episode, so one episode spans the full
+# bag-size regime exactly as real data do. The v30 architecture is UNCHANGED.
+#
+# Ragged (list-of-bags) episodes are not stackable, so episode_batch_size must
+# be 1 and shape_group_size is disabled. This means arm C takes 8x the
+# optimizer steps per epoch vs v30 (4096 episodes/epoch at batch 1) -- a
+# CONSERVATIVE choice for the regression gate: if arm C still regresses despite
+# 8x more training, B2b is a strong negative; if it holds or improves, that is
+# a positive signal to confirm with the step-matched Phase-1 probe.
+#
+# Gates (Phase 0): legacy overall regression <= 0.01 (paired CI including zero)
+# vs committed v30, and B2b must cut full-vs-subsample margin drift >= 20% vs B2.
+data_overrides:
+  episode_batch_size: 1
+  dataset_kwargs:
+    per_bag_cardinality: true
+    shape_group_size: 1
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v33_phase0_armC_b2b
+
+trainer:
+  max_epochs: 50
