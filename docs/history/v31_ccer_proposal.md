@@ -7,7 +7,7 @@
 
 **기준선**: v30 S2 (`poolz_l2` + bag cardinality log-uniform training)
 
-**예상 수정 범위**: [`src/models/baseline.py`](../src/models/baseline.py), [`src/datasets/synthetic_data.py`](../src/datasets/synthetic_data.py), 신규 진단/평가 스크립트와 테스트
+**예상 수정 범위**: [`src/models/baseline.py`](../../src/models/baseline.py), [`src/datasets/synthetic_data.py`](../../src/datasets/synthetic_data.py), 신규 진단/평가 스크립트와 테스트
 
 ---
 
@@ -34,7 +34,7 @@ v31의 핵심 질문은 “Top-K의 K를 1, 4, 8, 16 중 무엇으로 정할 것
 ### 1.1 확인된 관측
 
 - v30 S2의 Musk overall AUROC는 0.8539이고 `n > 34` band는 0.698이다.
-- [`scripts/diagnose_tail_dilution.py`](../scripts/diagnose_tail_dilution.py)의 별도 ridge probe에서 `n > 34` AUROC는 `top_1=0.611`, `top_3=0.627`, `frac_0.15=0.690`이었다.
+- [`scripts/diagnose_tail_dilution.py`](../../scripts/diagnose_tail_dilution.py)의 별도 ridge probe에서 `n > 34` AUROC는 `top_1=0.611`, `top_3=0.627`, `frac_0.15=0.690`이었다.
 - Musk `n > 34` band는 25 bags뿐이며 class 구성은 positive 7 / negative 18이다. 이 band의 AUROC는 표본 변동성이 크다.
 
 ### 1.2 아직 확인되지 않은 것
@@ -317,7 +317,7 @@ CCTS 실험은 Musk overall 0.8376, `n > 34` 0.6032로 v30을 넘지 못했다. 
 
 ### 9.3 실행 및 다음 ablation
 
-1차 run은 [`configs/train_v31_ccer_lite.yaml`](../configs/train_v31_ccer_lite.yaml), seed 42, 50 epochs다. 이 run은 구현 smoke와 방향성 확인용이며 단일 seed 승격 판정에 사용하지 않는다. 완료 후 corrected CCTS, CCER-Lite, effective-cardinality 보정, full support-conditioned router, 입력 read-bridge를 각각 분리해 비교한다. Read-bridge는 zero-padding이 실패 원인이라는 선결론 없이 독립 요인으로만 평가한다.
+1차 run은 [`configs/train_v31_ccer_lite.yaml`](../../configs/train_v31_ccer_lite.yaml), seed 42, 50 epochs다. 이 run은 구현 smoke와 방향성 확인용이며 단일 seed 승격 판정에 사용하지 않는다. 완료 후 corrected CCTS, CCER-Lite, effective-cardinality 보정, full support-conditioned router, 입력 read-bridge를 각각 분리해 비교한다. Read-bridge는 zero-padding이 실패 원인이라는 선결론 없이 독립 요인으로만 평가한다.
 
 ---
 

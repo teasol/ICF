@@ -934,7 +934,7 @@ v30은 계속 확정 baseline이다.
 
 **상태**: 제안서 작성만 완료. 구현·학습은 시작하지 않았고 v30 baseline은 변경 없다.
 
-- 문서: [`history/architecture_v32_dr_ccer_proposal.md`](history/architecture_v32_dr_ccer_proposal.md)
+- 문서: [`architecture_v32_dr_ccer_proposal.md`](architecture_v32_dr_ccer_proposal.md)
 - paired 점추정 재분석: synthetic v30→CCER-v2 `+0.00025`, prediction correlation
   `0.99928`, class flip `1.21%`; Musk `-0.00692`, correlation `0.99311`, class flip
   `1.96%`; Musk `n>34`는 `0.69841→0.69841`로 변화 없음.

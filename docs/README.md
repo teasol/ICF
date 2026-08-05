@@ -38,7 +38,9 @@
 - [`history/synthetic_data_and_tasks.md`](history/synthetic_data_and_tasks.md): synthetic generator와 task 정의
 - [`history/archive.md`](history/archive.md): **running archive** — `current_status.md`에서 해결·폐기되어 이관된 섹션 (v22 결정, 7-31~8-02 세션 핸드오프, v25/v26/v27/v29, §22 musk-like easy 가설, §23 raw-stat 음성, §24 IA-MIL 음성, **§6 Action Plan/T3-3/T4 curve** 등)
 - [`history/musk_transfer_diagnosis_v30_proposal.md`](history/musk_transfer_diagnosis_v30_proposal.md): **⭐ 현행 Musk 로드맵 — 전이 실패 재진단 + v30(CFMT) 제안 (2026-08-04)**. `musk095_*`의 P1/P2를 측정으로 기각하고 대안 제시: B1 `poolz` 표현 → B2 cardinality-faithful 샘플링 → B3 shrinkage → B4 생성기 확장. 목표 Musk 0.95 유지. 재현: `scripts/diagnose_musk_cardinality.py`
-- [`history/architecture_v32_dr_ccer_proposal.md`](history/architecture_v32_dr_ccer_proposal.md): **CCER-v2 결과 기반 차기 architecture 제안 (2026-08-05)** — donor-resolved support evidence, 독립 expert 사전학습, reliability-gated mixture, B2b mixed-cardinality 학습. 구현 전 P0–P2 진단 게이트부터 수행.
+- [`architecture_v32_dr_ccer_proposal.md`](architecture_v32_dr_ccer_proposal.md): **⭐ 현행 architecture proposal (2026-08-05)** — CCER-v2 결과 기반 donor-resolved support evidence, 독립 expert 사전학습, reliability-gated mixture, B2b mixed-cardinality 학습. 구현 전 P0–P2 진단 게이트부터 수행.
+- [`history/v31_ccer_proposal.md`](history/v31_ccer_proposal.md): 이전 v31 CCER proposal — CCER-v2 평가 종료로 대체되어 기록용 archive.
+- [`history/v31_absolute_topk_tail_proposal.md`](history/v31_absolute_topk_tail_proposal.md): 이전 v31 Absolute Top-K Tail proposal — 기록용 archive.
 - [`history/musk095_architecture_proposal.md`](history/musk095_architecture_proposal.md): Musk 0.95 아키텍처 개선 **1차** 제안 (2026-08-04) — P0 앙상블 / P1 166→512 읽기 브리지 / P2 bag-mean 보존 채널 / P3 단순 인스턴스 풀링. **P1/P2 기각, P3 연기 — 기록용 보존**, 대체 문서는 위 `musk_transfer_diagnosis_v30_proposal.md`
 - [`history/architecture_v26_proposal_ec_moe_rejected.md`](history/architecture_v26_proposal_ec_moe_rejected.md) / [`architecture_v27_proposal_ac_icar_rejected.md`](history/architecture_v27_proposal_ac_icar_rejected.md) / [`architecture_v29_proposal_sp_sat_rejected.md`](history/architecture_v29_proposal_sp_sat_rejected.md): 미구현 폐기된 설계안 (2026-08-02)
 

@@ -23,7 +23,7 @@ Seed 42 20-epoch 학습 best는 epoch 18 `val_ce_loss=0.443786`이었으나 synt
 `0.99928`, Musk 상관 `0.99311`이고 Musk `n>34`가 `0.69841`로 완전히 동일했다. 따라서
 단순 slot/Top-K 확대 대신 donor-resolved support evidence와 independently supervised expert,
 reliability-gated mixture를 제안한다. 구현 전 P0–P2 checkpoint 진단이 필수다. 상세는
-[`history/architecture_v32_dr_ccer_proposal.md`](history/architecture_v32_dr_ccer_proposal.md)와
+[`architecture_v32_dr_ccer_proposal.md`](architecture_v32_dr_ccer_proposal.md)와
 [`current_status.md`](current_status.md) §37이다. 아직 구현·학습 승인 또는 활성 run은 없다.
 
 **Persistent invariants**: ICI는 사용자 지시로 잠금 상태다. 잠금 해제 시

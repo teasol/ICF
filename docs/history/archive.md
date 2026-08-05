@@ -10,7 +10,7 @@ section keeps its original heading so cross-references still resolve.
 
 ## 30. 2026-08-04 — v31 CCTS (Cardinality-Calibrated Tail Scan) 아키텍처 구현, Unit Test 통과 및 훈련 구동
 
-**상태**: 코드 구현, `searchsorted` 메모리 최적화, Unit Test 통과 및 백그라운드 훈련 시작 ([v31_absolute_topk_tail_proposal.md](../v31_absolute_topk_tail_proposal.md))
+**상태**: 코드 구현, `searchsorted` 메모리 최적화, Unit Test 통과 및 백그라운드 훈련 시작 ([v31_absolute_topk_tail_proposal.md](v31_absolute_topk_tail_proposal.md))
 
 ### 1. CCTS 구현 및 OOM 최적화 (`src/models/baseline.py`)
 * **Context-Null Calibration**: Support Context 인스턴스들과의 경험적 Null 분포를 `torch.searchsorted` 기반 $O(M \log M)$ 알고리즘으로 텐서 메모리 조폭 할당(945GiB OOM)을 원천 차단하고 0-메모리 고속 연산 구현.
