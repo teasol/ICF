@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-05` — CCER-v2 architecture와 weight-only warm-start 계약 반영.
+**Last updated**: `2026-08-05` — CCER-v2 평가 종료 및 v30 baseline 유지 반영.
 
 **Confirmed baseline**: v30 = v24 residual+bottleneck bag projection + B1
 `bag_representation: poolz_l2` + B2 log-uniform cardinality `[1,1024]`. Musk zero-shot
@@ -8,14 +8,16 @@
 §29·§28이다. 코드 기본 `bag_representation`은 checkpoint/config의 조용한 의미 변경을 막기
 위해 계속 `legacy`다.
 
-**Active candidate — architecture v31 CCER-v2**: projection 전 aligned slot-center로
+**Rejected candidate — architecture v31 CCER-v2**: projection 전 aligned slot-center로
 support class prototype을 만들고, 기존 rare branch와 독립인 support/query encoder에서
 class-centered cell evidence를 계산한다. `Top-1`, `Top-4`, `mean` route는 총 `0.30`의
 floor를 가지며 별도 null gate는 없다. 최종 output head는 zero-init이므로 v30 weight-only
 초기화 직후 logits가 정확히 동일하다. 신규 module은 base LR, 공통 v30 backbone은 `0.05x`
 LR을 사용한다. Config는 `configs/train_v31_ccer_v2.yaml`, architecture marker는 `31`이다.
-Seed 42 20-epoch 학습 best는 epoch 18 `val_ce_loss=0.443786`; 아직 synthetic/Musk 미평가라
-baseline 승격은 금지한다. 실시간 상태와 artifact는 [`current_status.md`](current_status.md) §35.
+Seed 42 20-epoch 학습 best는 epoch 18 `val_ce_loss=0.443786`이었으나 synthetic AUROC
+`0.8514`, Musk `0.8470`으로 v30 Musk `0.8539`를 넘지 못했고 대형 bag은 `0.698`로
+동일했다. 따라서 미채택이며 재현용 코드만 보존한다. 상세는
+[`current_status.md`](current_status.md) §35·§36이다. 현재 활성 v31 학습은 없다.
 
 **Persistent invariants**: ICI는 사용자 지시로 잠금 상태다. 잠금 해제 시
 `src/datasets/base_data.py`의 cell-axis zero-padding이 bag mean/global spread를 오염하는 문제를
