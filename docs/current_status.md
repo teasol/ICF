@@ -1,19 +1,19 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-05` (**§36 CCER-v2 Epoch 18 평가 완료 — v30 Baseline 유지**)
+**Last updated**: `2026-08-05` (**§37 CCER-v2 결과 기반 v32 DR-CCER proposal 작성**)
 **Status**: **v30은 확정 baseline 유지**. CCER-v2 20-epoch 학습 완료 후 epoch 18 best로 합성 1,000-episode (AUROC `0.8514`) 및 Musk zero-shot (AUROC `0.8470`) 평가를 완료했다. 수치상 v30 baseline (Musk `0.854`) 대비 승격 기준을 충족하지 못하므로 **v30 확정 baseline을 계속 유지**한다.
 * **CCER-v2 실측 결과**: 합성 AUROC `0.8514`, Musk AUROC `0.8470` (n<=4: 0.792, 5..10: 0.842, 11..34: 0.933, n>34: 0.698).
-* **다음 Action**: v30 medium 참조 재학습 및 대형 bag (n>34) 구간 진단 진행. ICI 잠금은 유지한다.
+* **다음 Action**: v32 구현 전 CCER-v2 P0–P2 진단(분기/백본 기여 분리, standalone evidence, fusion headroom)을 먼저 수행한다. ICI 잠금은 유지한다.
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§36 (CCER-v2 평가 결과 및 v30 유지)**,
+**Read first if you are picking this up**: **§37 (v32 DR-CCER proposal)**, **§36 (CCER-v2 평가 결과 및 v30 유지)**,
 **§35 (CCER-v2 학습)**, **§33 (CCER-v2 계약)**, **§29 (v30 확정 baseline)**.
 
-**열린 과제**: ① v30 medium 참조 재학습, ② n>34 최약 구간의 B2b/대형 bag 진단, ③ ICI 잠금 유지. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
+**열린 과제**: ① CCER-v2 P0–P2 진단, ② v30 medium 참조 재학습, ③ n>34 최약 구간의 B2b/대형 bag 진단, ④ ICI 잠금 유지. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
 
 **Branches**: `main` = v30 확정 baseline + 미채택 v31 CCER-v2 재현 코드. 참고용 branch/tag 구조는
 [`history/branch_structure.md`](history/branch_structure.md).
@@ -927,3 +927,24 @@ v30은 계속 확정 baseline이다.
 - CCER-v2는 residual scale `0.141` 및 독립 support/query encoder 구조를 통해 CCER-Lite의 브랜치 묻힘 현상을 완벽히 해결했으나, 최종 Musk AUROC `0.8470` 및 합성 AUROC `0.8514`로 v30 baseline (Musk `0.854`)을 능가하지 못함.
 - 수칙과 사전 승격 기준에 따라 **v30 S2가 확정 Baseline을 지속 유지**하며, CCER-v2는 실험 후보 기록으로 보존한다.
 - ICI 잠금은 유지한다.
+
+---
+
+## 37. 2026-08-05 — CCER-v2 결과 기반 v32 DR-CCER proposal 작성
+
+**상태**: 제안서 작성만 완료. 구현·학습은 시작하지 않았고 v30 baseline은 변경 없다.
+
+- 문서: [`history/architecture_v32_dr_ccer_proposal.md`](history/architecture_v32_dr_ccer_proposal.md)
+- paired 점추정 재분석: synthetic v30→CCER-v2 `+0.00025`, prediction correlation
+  `0.99928`, class flip `1.21%`; Musk `-0.00692`, correlation `0.99311`, class flip
+  `1.96%`; Musk `n>34`는 `0.69841→0.69841`로 변화 없음.
+- epoch 18의 `val_ccer_v2_logit_std=0.05184`, residual scale `0.14136`이므로 실효
+  contribution은 약 `0.00733` logit SD다. branch 활성화와 유용한 보완 정보 학습은
+  구분해야 한다.
+- 제안 방향: donor-resolved support bank + null-contrasted multi-scale query scan +
+  standalone evidence expert + reliability-gated convex mixture + B2b within-episode
+  cardinality mixing.
+- **바로 다음 단계**: full v32 구현 전에 P0(분기/백본 delta 분리), P1(standalone
+  evidence 진단), P2(episode-grouped fusion upper bound)만 구현·실행한다.
+- 최신 git의 rare slot 4→8 실험은 동일 커밋을 즉시 revert하여 현재 활성 config/run이
+  없다. proposal은 해당 단순 capacity 확대를 후속 방향으로 권고하지 않는다.

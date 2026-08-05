@@ -19,6 +19,13 @@ Seed 42 20-epoch 학습 best는 epoch 18 `val_ce_loss=0.443786`이었으나 synt
 동일했다. 따라서 미채택이며 재현용 코드만 보존한다. 상세는
 [`current_status.md`](current_status.md) §35·§36이다. 현재 활성 v31 학습은 없다.
 
+**Proposed next investigation — v32 DR-CCER**: CCER-v2 예측은 v30과 synthetic 상관
+`0.99928`, Musk 상관 `0.99311`이고 Musk `n>34`가 `0.69841`로 완전히 동일했다. 따라서
+단순 slot/Top-K 확대 대신 donor-resolved support evidence와 independently supervised expert,
+reliability-gated mixture를 제안한다. 구현 전 P0–P2 checkpoint 진단이 필수다. 상세는
+[`history/architecture_v32_dr_ccer_proposal.md`](history/architecture_v32_dr_ccer_proposal.md)와
+[`current_status.md`](current_status.md) §37이다. 아직 구현·학습 승인 또는 활성 run은 없다.
+
 **Persistent invariants**: ICI는 사용자 지시로 잠금 상태다. 잠금 해제 시
 `src/datasets/base_data.py`의 cell-axis zero-padding이 bag mean/global spread를 오염하는 문제를
 먼저 처리한다. 이전 v24/v25/v26/IA-MIL 결정과 config 복구 기록은 §25~§29 및
