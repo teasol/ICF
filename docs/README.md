@@ -1,21 +1,22 @@
 # Documentation map
 
-**Last updated**: `2026-08-04 14:45:00 KST`
+**Last updated**: `2026-08-05`
 **Architecture Version**: `30` 확정 baseline (2026-08-04) — v24 + B1 `poolz_l2` 표현 + B2 cardinality-faithful 샘플링. v24(이전 확정)는 `configs/train_v24_medium_bag_proj_residual.yaml`로 보존.
 
-문서는 **새 대화 세션으로 접속하는 Agent가 최우선으로 읽는 Living 문서 5개(`docs/` 루트)**와 **과거 기록/딥다이브 분석서(`docs/history/`)**로 이원화하여 관리합니다.
+문서는 **새 대화 세션으로 접속하는 Agent가 최우선으로 읽는 Living 문서 5개와 현행 proposal 1개(`docs/` 루트)**, **과거 기록/딥다이브 분석서(`docs/history/`)**로 이원화하여 관리합니다.
 
 ---
 
 ## 1. 새 세션 접속 Agent가 최우선으로 정독하는 Living 문서 (Docs Root)
 
-사용자가 매번 새 채팅 세션으로 접속할 때, 새로 시작한 Agent는 아래 `docs/` 최상위 루트의 Living md 파일 5개를 우선 정독하고 **Git commit log/diff**를 조회하여 작업 맥락을 동기화합니다:
+사용자가 매번 새 채팅 세션으로 접속할 때, 새로 시작한 Agent는 아래 `docs/` 최상위 루트의 Living md 파일 5개와 현재 `architecture_*_proposal.md` 1개를 우선 정독하고 **Git commit log/diff**를 조회하여 작업 맥락을 동기화합니다:
 
 1. [`agent_handoff.md`](agent_handoff.md): 새 세션 Agent 초기화 수칙, Git 기반 워크플로우, 실행 환경, 타임아웃, 테스트 검증, Docs/Config 정리 규칙
 2. [`current_status.md`](current_status.md): 개발 현황, 최신 실증 수치, v22 retrieval 제거 결정과 근거, 실험 전략(합성=결정 / ICI=최종 테스트), 평가 프로토콜, Next Action Plan (SSOT)
 3. [`current_architecture.md`](current_architecture.md): Architecture v22 모델 구조 (4대 수학 기술, retrieval 없는 context 구성), Logit Fusion 수식
 4. [`current_experiments.md`](current_experiments.md): 실험 전략과 검정력, 평가 프로토콜, Stage 1~3 실행 명령어 및 실증 수치
 5. [`README.md`](README.md): 문서 맵 및 갱신/아카이빙 가이드라인
+6. [`architecture_v33_multiresolution_bag_proposal.md`](architecture_v33_multiresolution_bag_proposal.md): 현재 활성 개선 proposal. 완료·폐기되면 `history/`로 이관하고 후속 proposal 하나만 루트에 유지
 
 ---
 
@@ -38,7 +39,8 @@
 - [`history/synthetic_data_and_tasks.md`](history/synthetic_data_and_tasks.md): synthetic generator와 task 정의
 - [`history/archive.md`](history/archive.md): **running archive** — `current_status.md`에서 해결·폐기되어 이관된 섹션 (v22 결정, 7-31~8-02 세션 핸드오프, v25/v26/v27/v29, §22 musk-like easy 가설, §23 raw-stat 음성, §24 IA-MIL 음성, **§6 Action Plan/T3-3/T4 curve** 등)
 - [`history/musk_transfer_diagnosis_v30_proposal.md`](history/musk_transfer_diagnosis_v30_proposal.md): **⭐ 현행 Musk 로드맵 — 전이 실패 재진단 + v30(CFMT) 제안 (2026-08-04)**. `musk095_*`의 P1/P2를 측정으로 기각하고 대안 제시: B1 `poolz` 표현 → B2 cardinality-faithful 샘플링 → B3 shrinkage → B4 생성기 확장. 목표 Musk 0.95 유지. 재현: `scripts/diagnose_musk_cardinality.py`
-- [`architecture_v32_dr_ccer_proposal.md`](architecture_v32_dr_ccer_proposal.md): **⭐ 현행 architecture proposal (2026-08-05)** — CCER-v2 결과 기반 donor-resolved support evidence, 독립 expert 사전학습, reliability-gated mixture, B2b mixed-cardinality 학습. 구현 전 P0–P2 진단 게이트부터 수행.
+- [`architecture_v33_multiresolution_bag_proposal.md`](architecture_v33_multiresolution_bag_proposal.md): **⭐ 현행 architecture proposal (2026-08-05)** — CCER 계열 폐기 결과를 반영한 distribution-first MR-BagPFN. v30 six-task/B2b 요인 분리와 frozen-v30 multi-resolution headroom을 통과할 때만 architecture를 구현한다.
+- [`history/architecture_v32_dr_ccer_proposal.md`](history/architecture_v32_dr_ccer_proposal.md) / [`history/architecture_v32b_dr_ccer_proposal.md`](history/architecture_v32b_dr_ccer_proposal.md): 완료·폐기된 DR-CCER 원안/개선안 — P0–P3와 Stage A 전부 실패하여 CCER 계열 종료, 기록용 archive.
 - [`history/v31_ccer_proposal.md`](history/v31_ccer_proposal.md): 이전 v31 CCER proposal — CCER-v2 평가 종료로 대체되어 기록용 archive.
 - [`history/v31_absolute_topk_tail_proposal.md`](history/v31_absolute_topk_tail_proposal.md): 이전 v31 Absolute Top-K Tail proposal — 기록용 archive.
 - [`history/musk095_architecture_proposal.md`](history/musk095_architecture_proposal.md): Musk 0.95 아키텍처 개선 **1차** 제안 (2026-08-04) — P0 앙상블 / P1 166→512 읽기 브리지 / P2 bag-mean 보존 채널 / P3 단순 인스턴스 풀링. **P1/P2 기각, P3 연기 — 기록용 보존**, 대체 문서는 위 `musk_transfer_diagnosis_v30_proposal.md`
@@ -48,7 +50,7 @@
 
 ## 3. 갱신 및 관리 수칙 (Maintenance Rules)
 
-- **Living 문서 유지**: `docs/` 최상위 루트에는 오직 5개의 Living 문서만 유지합니다.
+- **Living 문서 유지**: `docs/` 최상위 루트에는 5개의 Living 문서와 현행 proposal 1개만 유지합니다.
 - **Git 커밋 동기화**: 세션 핸드오프 시 작업을 남김없이 커밋하고 커밋 내역/diff를 `agent_handoff.md` 및 `current_status.md`에 반영합니다.
 - **아카이빙 규칙**: 특정 버전 딥다이브 보고서나 계획 문서는 완료 시 즉시 `docs/history/`로 이관하여 `docs/` 루트를 단순하고 가독성 높게 유지합니다.
 - **Config 루트 관리**: `configs/` 루트에는 확정된 v30 entry point(`train_v30_medium_bag_proj_residual.yaml`),

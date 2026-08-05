@@ -1,25 +1,25 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-05` (**§37 CCER-v2 결과 기반 v32 DR-CCER proposal 작성**)
-**Status**: **v30은 확정 baseline 유지**. CCER-v2 20-epoch 학습 완료 후 epoch 18 best로 합성 1,000-episode (AUROC `0.8514`) 및 Musk zero-shot (AUROC `0.8470`) 평가를 완료했다. 수치상 v30 baseline (Musk `0.854`) 대비 승격 기준을 충족하지 못하므로 **v30 확정 baseline을 계속 유지**한다.
-* **CCER-v2 실측 결과**: 합성 AUROC `0.8514`, Musk AUROC `0.8470` (n<=4: 0.792, 5..10: 0.842, 11..34: 0.933, n>34: 0.698).
-* **다음 Action**: v32 구현 전 CCER-v2 P0–P2 진단(분기/백본 기여 분리, standalone evidence, fusion headroom)을 먼저 수행한다. ICI 잠금은 유지한다.
+**Last updated**: `2026-08-05` (**§39 v32b 결과 평가 및 v33 MR-BagPFN proposal 작성**)
+**Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. v32b P0–P3와 DR-CCER Stage A가 모두 실패했다(P1 standalone `0.5105`, P2 `-0.00034`, P3 `+0.00000`, expert CE `0.6931`). 다음 후보는 구현 전 데이터 요인과 frozen-feature headroom을 검증하는 v33 MR-BagPFN이다.
+* **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
+* **다음 Action**: v33 Phase 0 arm B(v30 six-task B2)와 C(v30 legacy B2b)를 먼저 구현·평가한다. ICI 잠금은 유지한다.
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§37 (v32 DR-CCER proposal)**, **§36 (CCER-v2 평가 결과 및 v30 유지)**,
-**§35 (CCER-v2 학습)**, **§33 (CCER-v2 계약)**, **§29 (v30 확정 baseline)**.
+**Read first if you are picking this up**: **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
+**§36 (CCER-v2 평가)**, **§29 (v30 확정 baseline)**.
 
-**열린 과제**: ① CCER-v2 P0–P2 진단, ② v30 medium 참조 재학습, ③ n>34 최약 구간의 B2b/대형 bag 진단, ④ ICI 잠금 유지. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
+**열린 과제**: ① v30 six-task 효과 분리, ② B2b within-episode cardinality 효과 분리, ③ frozen-v30 multi-resolution headroom, ④ v30 medium 참조 재학습, ⑤ ICI 잠금 유지. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
 
 **Branches**: `main` = v30 확정 baseline + 미채택 v31 CCER-v2 재현 코드. 참고용 branch/tag 구조는
 [`history/branch_structure.md`](history/branch_structure.md).
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
-**Architecture Versions**: `30` 확정 baseline, `31` CCER-v2 미채택 후보(재현용 보존). v31 config는
-`configs/train_v31_ccer_v2.yaml`; 코드 기본 `bag_representation`은 `legacy` 유지.
+**Architecture Versions**: `30` 확정 baseline; `31` CCER-v2와 `32` DR-CCER 미채택(재현용 보존);
+`33` MR-BagPFN은 proposal-only. 코드 기본 `bag_representation`은 `legacy` 유지.
 **Purpose**: 연구실 / 집 / 노트북 간 상태를 동기화하는 SSOT living document.
 
 ---
@@ -68,7 +68,7 @@
 > [!IMPORTANT]
 > **새 대화 세션 시작 시 Agent 초기화 원칙**:
 > 1. 사용자는 매번 **새 대화 세션(New Chat Session)**으로 접속합니다.
-> 2. 새로 접속한 Agent는 **`docs/` 최상위 루트의 Living md 파일 5개(`agent_handoff.md`, `current_status.md`, `current_architecture.md`, `current_experiments.md`, `README.md`)만 최우선으로 정독**하여 전체 개발 맥락과 프로젝트 규칙을 파악합니다.
+> 2. 새로 접속한 Agent는 **`docs/` 최상위 루트의 Living md 파일 5개(`agent_handoff.md`, `current_status.md`, `current_architecture.md`, `current_experiments.md`, `README.md`)와 현행 `architecture_*_proposal.md` 1개를 최우선으로 정독**하여 전체 개발 맥락과 프로젝트 규칙을 파악합니다.
 > 3. 터미널 조회가 필요한 명령어는 NVML/쉘 hang 방지를 위해 **반드시 `timeout 3s ps aux | grep python`과 같이 타임아웃**을 적용합니다.
 > 4. 코드 변경 시 unittest 통과 필수:
 >    `timeout 1500s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"`
@@ -934,7 +934,7 @@ v30은 계속 확정 baseline이다.
 
 **상태**: 제안서 작성만 완료. 구현·학습은 시작하지 않았고 v30 baseline은 변경 없다.
 
-- 문서: [`architecture_v32_dr_ccer_proposal.md`](architecture_v32_dr_ccer_proposal.md)
+- 문서: [`history/architecture_v32_dr_ccer_proposal.md`](history/architecture_v32_dr_ccer_proposal.md)
 - paired 점추정 재분석: synthetic v30→CCER-v2 `+0.00025`, prediction correlation
   `0.99928`, class flip `1.21%`; Musk `-0.00692`, correlation `0.99311`, class flip
   `1.96%`; Musk `n>34`는 `0.69841→0.69841`로 변화 없음.
@@ -954,7 +954,7 @@ v30은 계속 확정 baseline이다.
 ## 38. 2026-08-05 — v32b DR-CCER: 비판적 검토 반영 개선안 + 구현 + Stage A 학습 시작
 
 **상태**: v30 baseline 유지. v32 원안을 비판적으로 재검토한 **v32b 개선안**
-([`architecture_v32b_dr_ccer_proposal.md`](architecture_v32b_dr_ccer_proposal.md))을 작성하고,
+([`history/architecture_v32b_dr_ccer_proposal.md`](history/architecture_v32b_dr_ccer_proposal.md))을 작성하고,
 이를 바탕으로 **P0–P3 probe 스크립트 + DR-CCER 아키텍처 + Stage A 학습**을 구현·실행 중.
 
 ### 1. 비판적 검토 요약 (v32 원안 → v32b)
@@ -1044,3 +1044,22 @@ v30은 계속 확정 baseline이다.
 - **다음 Action**: ① CCER 계열 폐기 기록(`history/archive.md`), ② Phase 1 "v30 on 6-task mix"
   재학습으로 데이터 효과 측정(any_positive_sparse가 v30에 무엇을 더하는지), ③ 소형 bag(n≤4, 0.80)과
   n>34(0.70)가 0.95 목표의 실질 병목 — 데이터/분포 쪽 레버 우선, ④ ICI 잠금 유지.
+
+---
+
+## 39. 2026-08-05 — v32b 완료 결과 평가 + v33 MR-BagPFN proposal
+
+**상태**: 결과 평가와 proposal 작성만 완료. v33 구현·학습은 시작하지 않았고 v30 baseline은 유지한다.
+
+- 현행 proposal: [`architecture_v33_multiresolution_bag_proposal.md`](architecture_v33_multiresolution_bag_proposal.md)
+- v32/v32b proposal은 구현·평가 종료에 따라 `history/`로 이관했다.
+- **평가**: P1 standalone `0.51055`, P2 fusion `-0.00034`, P3 donor fusion `+0.00000`,
+  Stage-A expert CE `0.6931` 정체가 같은 결론을 지지한다. CCER/DR-CCER 표현에는 v30의 오류를
+  교정할 ranking information이 없다. 100-episode probe의 검정력 한계는 존재하지만, 독립 Stage-A
+  학습까지 무작위로 붕괴했으므로 추가 CCER 학습의 근거가 되지 않는다.
+- **폐기 범위**: class-conditioned cell↔support similarity, donor 통계, slot/Top-K/residual 확대.
+  기존 v30 rare/population branch, six-task 학습, B2b, multi-resolution v30 view는 아직 반증되지 않았다.
+- **v33 방향**: (A/B/C/D) v30 task-mix×B2/B2b 요인 분리 → frozen-v30 multi-resolution probe
+  → paired AUROC `+0.01` headroom 확인 시에만 zero-init consensus residual 구현.
+- **바로 다음 단계**: Phase 0 arm B(v30 + six-task + B2)와 arm C(v30 + legacy + B2b).
+  새 architecture부터 구현하지 않는다. ICI 잠금 유지.

@@ -1,5 +1,14 @@
 # Archived sections from current_status.md
 
+## 2026-08-05 — v32/v32b DR-CCER proposal 종료
+
+- 원안과 개선안은 각각 [`architecture_v32_dr_ccer_proposal.md`](architecture_v32_dr_ccer_proposal.md),
+  [`architecture_v32b_dr_ccer_proposal.md`](architecture_v32b_dr_ccer_proposal.md)로 이관했다.
+- Stage-0 P0–P3와 Stage-A 10-epoch 결과가 모두 음성(P1 standalone `0.51055`, P2
+  `-0.00034`, P3 `+0.00000`, expert CE `0.6931`)이어서 CCER 계열을 폐기했다.
+- v30 baseline은 유지하며 후속 활성안은
+  [`../architecture_v33_multiresolution_bag_proposal.md`](../architecture_v33_multiresolution_bag_proposal.md)다.
+
 This is the running archive for fully-resolved / superseded sections that were
 moved out of `docs/current_status.md` to keep the living doc compact. Each
 section keeps its original heading so cross-references still resolve.
