@@ -948,3 +948,80 @@ v30은 계속 확정 baseline이다.
   evidence 진단), P2(episode-grouped fusion upper bound)만 구현·실행한다.
 - 최신 git의 rare slot 4→8 실험은 동일 커밋을 즉시 revert하여 현재 활성 config/run이
   없다. proposal은 해당 단순 capacity 확대를 후속 방향으로 권고하지 않는다.
+
+---
+
+## 38. 2026-08-05 — v32b DR-CCER: 비판적 검토 반영 개선안 + 구현 + Stage A 학습 시작
+
+**상태**: v30 baseline 유지. v32 원안을 비판적으로 재검토한 **v32b 개선안**
+([`architecture_v32b_dr_ccer_proposal.md`](architecture_v32b_dr_ccer_proposal.md))을 작성하고,
+이를 바탕으로 **P0–P3 probe 스크립트 + DR-CCER 아키텍처 + Stage A 학습**을 구현·실행 중.
+
+### 1. 비판적 검토 요약 (v32 원안 → v32b)
+
+| v32 원안 문제 | v32b 수정 |
+|---|---|
+| probe가 donor-resolved 전제(§4.1)를 검증하지 못함 | **P3(donor-agreement headroom) 추가** — 기존 checkpoint의 per-donor evidence로 zero-training 검증 |
+| n>34 메커니즘 미설명 | P0/P1에 n>34·11–34 band 분해 포함 |
+| generator+아키텍처 번들링 (요인 비분리) | B2b를 Stage A에서 분리(Phase 1b로 지연), "v30 on new task mix" baseline을 별도 Phase 1로 |
+| 게이트 통계 무효(legacy ±0.01, n>34 단일 수치) | legacy ±0.03, n>34 CI 기반, Stage A에 sparse 전용 + v30 잔차 비상관 조건 |
+| mixture logit scale 비대칭 | expert logit을 v30 margin 척도로 표준화(공역혼합) + gate 초기 g≈0.018로 v30 보존 |
+| 0.95 목표와 소형 bag 정렬 부재 | 모든 stage에 4-band stratified 보고 의무화 |
+
+### 2. 구현 (Stage-0 probe + DR-CCER 아키텍처)
+
+- **probe**: `scripts/probe_v32_headroom.py` — P0(분기/백본 분해) + P1(standalone evidence,
+  route별 AUROC, v30 오류 조건부 AUROC) + P2(episode-grouped CV logistic fusion headroom) +
+  P3(donor-agreement headroom) + n>34/11–34 band 분해. 6-task 혼합(any_positive_sparse 포함)
+  1,000-episode 고정 스트림에서 CCER-v2 epoch-18/v30 체크포인트를 paired 평가.
+- **모델** (`src/models/baseline.py`, `architecture_version=32`):
+  - donor-resolved support bank: per-donor class prototype(전 사영 aligned slot-center),
+    top-k donor mean(반복 증거), donor agreement, dispersion, max(upper envelope)의 per-class
+    대비 마진.
+  - null-contrasted multi-scale scan: absolute(top-1/4/16) + fractional(1%/5%) + dense + 
+    bottom-tail + agreement 라우트, donor dispersion으로 표준화, 중복 k 마스킹(floor는 unmasked에만).
+  - standalone evidence expert: 2-class logit, zero-init head, CE + 0.1·ranking + 0.05·donor-
+    consistency 손실.
+  - reliability-gated convex mixture: `final = (1−g)·v30 + g·expert` (expert margin을 v30
+    척도로 표준화), gate 초기 g≈0.018 → v30 예측 보존.
+- **model_interface** (`src/modules/model_interface.py`): dr_ccer expert 손실/진단,
+  `dr_ccer_stage`(A/B) freeze → optimizer는 trainable param만, backbone 0.05x와 독립.
+- **config**: `configs/train_v32_dr_ccer.yaml` — v30 best weight-only warm-start,
+  6-task mix(`any_positive_sparse` 0.20, legacy 재정규화), `dr_ccer_stage: A`, 10 epochs.
+- **test**: `tests/test_dr_ccer.py` 6개 — v30 ranking 보존, dense/list 동치, donor 순열 불변,
+  라벨 동변성(마진 부호 반전), 중복 라우트 마스킹, expert 학습·gate 유계.
+
+### 3. Stage A 학습 (완료 2026-08-05, 결과: expert standalone 미학습 → 게이트 실패)
+
+- **Run**: `20260805_182126`, PID `4053492`, config `configs/train_v32_dr_ccer.yaml`
+  (v30 best에서 weight-only init, dr_ccer expert만 167K trainable / v30 9.5M frozen).
+- **Log**: `logs/20260805_182126/v32_dr_ccer.out` / checkpoint `checkpoints/20260805_182126/v32_dr_ccer/`
+  (best `epoch=008-val_ce_loss=0.4307.ckpt`).
+- **초기 검증**: v30 warm-start 성공, sanity check 통과, 10 epochs 무결점 완주(오류/NaN 없음).
+- **결과 (에폭별 val 메트릭)**:
+
+| epoch | val_ce_loss | val_expert_ce | val_expert_logit_std | val_gate | val_routed_std |
+|---|---:|---:|---:|---:|---:|
+| 0 | 0.4310 | 0.69315 | 9.43* | 0.01799 | 0.0087 |
+| 4 | 0.4316 | 0.69330 | 0.00284 | 0.01799 | 0.0177 |
+| 8 | 0.4307 | 0.69311 | 0.00360 | 0.01799 | 0.0084 |
+| 9 | 0.4311 | 0.69323 | 0.00606 | 0.01799 | 0.0085 |
+
+  *epoch 0의 logit_std 9.43은 초기 1회 spike(수치 검증), 이후 정상.
+- **핵심 해석**: expert의 **standalone CE가 전 에폭 0.693(2-class 무작위)에 정체** → donor-resolved
+  expert가 v30 고정 조건에서 **standalone 판별을 학습하지 못함** (expert logit std 0.006 수준).
+  gate는 Stage A에서 의도대로 초기값(0.018)에 고정. 따라서 **v32b Stage A 게이트(standalone expert
+  AUROC ≥ 0.70, sparse +0.03) 실패** — donor-resolved evidence 경로는 이 분포에서 보완 판별 신호를
+  만들지 못함(CCER-v2의 0.999 상관 결과와 정합). Stage B(router) 진행 근거 없음.
+
+### 4. Stage-0 probe (P0–P3, 실행 중)
+
+- `scripts/probe_v32_headroom.py`, 500-episode 6-task 혼합, CCER-v2 epoch-18 vs v30 paired.
+- 결과는 본 절에 갱신 예정.
+
+### 5. 열린 과제 (v32b)
+
+- **전체 unittest 178개 통과** (1534.9s, 2026-08-05) — DR-CCER 포함 회귀 없음.
+- **probe 결과**: 500-episode 실행 중 — P2/P3 headroom이 `< 0.005`면 donor-resolved 계열 폐기,
+  데이터 측(task mix / 소형 bag 노출)로 전환.
+- Phase 1(v30 on 6-task mix retrain)은 donor-resolved 폐기 시 데이터측 경로로 진행.

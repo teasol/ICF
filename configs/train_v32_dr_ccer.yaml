@@ -1,0 +1,63 @@
+base_config: train_v30_cardinality_poolz_l2.yaml
+
+# =============================================================================
+# v32b DR-CCER — Stage A (donor-resolved evidence expert, v30 frozen)
+# =============================================================================
+# Proposal: docs/architecture_v32b_dr_ccer_proposal.md
+#
+# Stage A trains ONLY the donor-resolved expert (dr_ccer_* modules) with v30
+# frozen (dr_ccer_stage: A also freezes the reliability gate, so the mixture is
+# g ~ 0.018 and the exact v30 prediction is preserved while the expert learns
+# via its own CE + ranking + donor-consistency loss).
+#
+# Distribution: 6-task mix — any_positive_sparse at 0.20, the five legacy
+# weights renormalized to 0.80 of their v30 values (total episode budget kept
+# identical; the v31 rule "preserve legacy absolute amount" is met by keeping
+# the same episodes_per_epoch and only renormalizing).
+#
+# Warm-start: weight-only from the v30 S2 best checkpoint. All v30 keys are
+# shared; only dr_ccer_* and the architecture buffer are newly initialized.
+# =============================================================================
+
+init_checkpoint: checkpoints/20260804_132334/v30_cardinality_poolz_l2/epoch=048-val_ce_loss=0.4442.ckpt
+
+model_overrides:
+  bag_representation: poolz_l2
+  aggregator_ccts_lambdas: []
+  aggregator_absolute_tail_ks: []
+  meta_ccer_temperatures: []
+  meta_ccer_v2_topks: []
+  # --- DR-CCER ---
+  meta_dr_ccer_enabled: true
+  meta_dr_ccer_abs_topks: [1, 4, 16]
+  meta_dr_ccer_frac_topks: [0.01, 0.05]
+  meta_dr_ccer_donor_topk: 3
+  meta_dr_ccer_use_bottom_tail: true
+  meta_dr_ccer_expert_hidden: 128
+  meta_dr_ccer_route_floor: 0.05
+  meta_dr_ccer_max_donors: 32
+  # --- ModelInterface-level hparams (popped before model construction) ---
+  dr_ccer_stage: A
+  dr_ccer_expert_loss_weight: 1.0
+  dr_ccer_gate_usage_penalty: 0.05
+
+data_overrides:
+  dataset_kwargs:
+    # composition, state, covariance, interaction, combined, any_positive_sparse
+    response_task_probabilities: [0.32, 0.24, 0.04, 0.04, 0.16, 0.20]
+
+optimizer:
+  optimizer_src: torch.optim.AdamW
+  optimizer_kwargs:
+    lr: 0.0005
+    betas: [0.9, 0.999]
+    eps: 1.0e-8
+    weight_decay: 0.01
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v32_dr_ccer
+
+trainer:
+  max_epochs: 10

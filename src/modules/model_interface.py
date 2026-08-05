@@ -29,6 +29,9 @@ class ModelInterface(L.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.model = self._build_model(*args, **kwargs)
+        stage = self.hparams.get("dr_ccer_stage")
+        if stage is not None:
+            self.model.apply_dr_ccer_stage(stage)
 
     def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
         """Reject checkpoints from structurally incompatible architectures."""
@@ -584,6 +587,40 @@ class ModelInterface(L.LightningModule):
             terms["ccer_v2_route_entropy"] = -(
                 ccer_v2_weights * ccer_v2_weights.log()
             ).sum(dim=-1).mean()
+        if "dr_ccer_expert_logits" in auxiliary:
+            expert_logits = auxiliary["dr_ccer_expert_logits"].float()
+            expert_ce = F.cross_entropy(expert_logits, targets)
+            expert_ranking = self._pairwise_ranking_loss(expert_logits, targets)
+            routed = auxiliary["dr_ccer_routed"].float()
+            agree = auxiliary["dr_ccer_agree"].float()
+            donor_consistency = ((1.0 - agree) * routed.abs()).mean()
+            expert_loss = (
+                expert_ce + 0.10 * expert_ranking + 0.05 * donor_consistency
+            )
+            expert_weight = float(
+                self.hparams.get("dr_ccer_expert_loss_weight", 1.0)
+            )
+            total = total + expert_weight * expert_loss
+            gate = auxiliary["dr_ccer_gate"].float()
+            gate_penalty = float(
+                self.hparams.get("dr_ccer_gate_usage_penalty", 0.0)
+            )
+            total = total + gate_penalty * gate.mean()
+            terms["dr_ccer_expert_ce"] = expert_ce
+            terms["dr_ccer_expert_ranking"] = expert_ranking
+            terms["dr_ccer_donor_consistency"] = donor_consistency
+            terms["dr_ccer_expert_loss"] = expert_loss
+            terms["dr_ccer_expert_logit_std"] = expert_logits.std(
+                unbiased=False
+            )
+            terms["dr_ccer_gate_mean"] = gate.mean()
+            terms["dr_ccer_routed_std"] = routed.std(unbiased=False)
+            dr_route_weights = auxiliary["dr_ccer_route_weights"].float().clamp_min(
+                1e-12
+            )
+            terms["dr_ccer_route_entropy"] = -(
+                dr_route_weights * dr_route_weights.log()
+            ).sum(dim=-1).mean()
         return total, terms
 
     @staticmethod
@@ -745,6 +782,9 @@ class ModelInterface(L.LightningModule):
             "routing_balance_weight",
             "fixed_training_queries",
             "backbone_lr_scale",
+            "dr_ccer_stage",
+            "dr_ccer_expert_loss_weight",
+            "dr_ccer_gate_usage_penalty",
         ):
             kwargs.pop(key, None)
         module_name, class_name = model_src.rsplit(".", 1)
@@ -754,24 +794,39 @@ class ModelInterface(L.LightningModule):
     def configure_optimizers(self) -> dict[str, Any]:
         optimizer_cls = self._optimizer_class()
         optimizer_kwargs = dict(self.hparams.get("optimizer_kwargs", {}))
-        backbone_lr_scale = float(self.hparams.get("backbone_lr_scale", 1.0))
-        if not 0.0 < backbone_lr_scale <= 1.0:
-            raise ValueError("backbone_lr_scale must be in (0, 1].")
-        ccer_v2_parameters = []
-        backbone_parameters = []
-        for name, parameter in self.named_parameters():
-            if "ccer_v2_" in name:
-                ccer_v2_parameters.append(parameter)
-            else:
-                backbone_parameters.append(parameter)
-        if ccer_v2_parameters and backbone_lr_scale != 1.0:
-            base_lr = float(optimizer_kwargs.get("lr", 1e-3))
+        dr_ccer_stage = self.hparams.get("dr_ccer_stage")
+        if dr_ccer_stage is not None:
+            # Staged DR-CCER training: only the parameters left trainable by
+            # ``apply_dr_ccer_stage`` receive an optimizer (v30 and the frozen
+            # stage are excluded).
             parameters: Any = [
-                {"params": backbone_parameters, "lr": base_lr * backbone_lr_scale},
-                {"params": ccer_v2_parameters, "lr": base_lr},
+                parameter
+                for name, parameter in self.named_parameters()
+                if parameter.requires_grad
             ]
+            if not parameters:
+                raise ValueError(
+                    f"dr_ccer_stage={dr_ccer_stage} froze every parameter."
+                )
         else:
-            parameters = self.parameters()
+            backbone_lr_scale = float(self.hparams.get("backbone_lr_scale", 1.0))
+            if not 0.0 < backbone_lr_scale <= 1.0:
+                raise ValueError("backbone_lr_scale must be in (0, 1].")
+            ccer_v2_parameters = []
+            backbone_parameters = []
+            for name, parameter in self.named_parameters():
+                if "ccer_v2_" in name:
+                    ccer_v2_parameters.append(parameter)
+                else:
+                    backbone_parameters.append(parameter)
+            if ccer_v2_parameters and backbone_lr_scale != 1.0:
+                base_lr = float(optimizer_kwargs.get("lr", 1e-3))
+                parameters = [
+                    {"params": backbone_parameters, "lr": base_lr * backbone_lr_scale},
+                    {"params": ccer_v2_parameters, "lr": base_lr},
+                ]
+            else:
+                parameters = self.parameters()
         optimizer = optimizer_cls(parameters, **optimizer_kwargs)
         scheduler_cls = self._scheduler_class()
         scheduler = scheduler_cls(optimizer, **self.hparams.get("scheduler_kwargs", {}))

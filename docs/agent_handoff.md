@@ -26,6 +26,14 @@ reliability-gated mixture를 제안한다. 구현 전 P0–P2 checkpoint 진단�
 [`architecture_v32_dr_ccer_proposal.md`](architecture_v32_dr_ccer_proposal.md)와
 [`current_status.md`](current_status.md) §37이다. 아직 구현·학습 승인 또는 활성 run은 없다.
 
+**Active — v32b DR-CCER (2026-08-05)**: v32 원안의 비판적 재검토 개선안
+([`architecture_v32b_dr_ccer_proposal.md`](architecture_v32b_dr_ccer_proposal.md))을 작성하고,
+P0–P3 probe(`scripts/probe_v32_headroom.py`) + DR-CCER 아키텍처(`architecture_version=32`,
+donor-resolved expert + reliability-gated convex mixture)를 구현했다. **Stage A 학습이 활성
+run**이다: `20260805_182126` (v30 best warm-start, dr_ccer expert만 167K trainable, 10 epochs,
+6-task mix incl. `any_positive_sparse` 0.20). 상세는 [`current_status.md`](current_status.md)
+§38이다. **probe 결과와 전체 unittest 결과는 §38에 갱신 중** — 새 세션은 §38부터 읽을 것.
+
 **Persistent invariants**: ICI는 사용자 지시로 잠금 상태다. 잠금 해제 시
 `src/datasets/base_data.py`의 cell-axis zero-padding이 bag mean/global spread를 오염하는 문제를
 먼저 처리한다. 이전 v24/v25/v26/IA-MIL 결정과 config 복구 기록은 §25~§29 및
