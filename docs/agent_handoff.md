@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-05` — v33 Phase 0 arm C 중단, arm B 단독 학습 지속.
+**Last updated**: `2026-08-05` — v33 Phase 0 arm B BF16 지속, arm C step-matched 재설계·재시작.
 
 **Confirmed baseline**: v30 = v24 residual+bottleneck bag projection + B1
 `bag_representation: poolz_l2` + B2 log-uniform cardinality `[1,1024]`. Musk zero-shot
@@ -43,12 +43,13 @@ six-task + B2)와 arm C(v30 + legacy + B2b) 데이터 컨트롤을 먼저 구현
 `n_b ~ LogUniform[1,1024]`을 추첨해 ragged list-of-bags를 반환하는 새 데이터 경로다
 (collator/training_step ragged 분기, `episode_batch_size=1` 필요). config:
 `configs/train_v33_phase0_armB.yaml`·`armC.yaml`. 신규 테스트 `tests/test_b2b.py` 10개 포함
-기본 suite는 compact화 후 **19 tests / 약 143초**다. 학습: arm B
-`logs/20260805_214745/`는 GPU 0에서 50 epoch 끝까지 진행한다. arm C
-`logs/20260805_214751/`는 batch 1로 인해 epoch당 optimizer step이 arm B의 8배가 되어
-예상 약 20시간이 걸리는 비대칭이 확인되어 사용자 결정으로 중단했다(checkpoint 없음).
-**arm C는 재개하지 않는다. Phase 1 frozen-v30 multi-resolution probe는 arm B 결과 확인 후에만
-구현한다.** 상세는
+기본 suite는 compact화 후 **19 tests / 약 143초**다. 학습: arm B는
+`logs/20260805_220642/`에서 BF16으로 기존 checkpoint를 복원해 계속 진행한다. 최초 arm C
+`logs/20260805_214751/`는 batch 1에서 4096 updates/epoch가 되어 중단했다. 해결 run은
+`logs/20260805_220843/`: train episode를 512/epoch로 줄여 arm B와 동일한
+**512 optimizer updates/epoch**를 사용하며, ragged B2b와 v30 architecture는 유지한다
+(실측 약 3분/epoch, 전체 약 2.5–3시간). **Phase 1 frozen-v30 multi-resolution probe는
+Phase 0 결과 확인 후에만 구현한다.** 상세는
 [`current_status.md`](current_status.md) §41·§39다.
 
 **Proposed next investigation — v33 MR-BagPFN (아키텍처)**: CCER와 다른 새 cell evidence를

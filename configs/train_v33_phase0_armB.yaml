@@ -22,3 +22,4 @@ logger:
 
 trainer:
   max_epochs: 50
+  precision: bf16-mixed
