@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import lightning as L
+import torch
 import yaml
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
@@ -82,6 +83,11 @@ def parse_train_args() -> argparse.Namespace:
         "--ckpt-path",
         type=Path,
         help="Resume model, optimizer, scheduler, and loop state from a checkpoint.",
+    )
+    parser.add_argument(
+        "--init-checkpoint",
+        type=Path,
+        help="Load model weights only; optimizer, scheduler, and loop state start fresh.",
     )
     return parser.parse_args()
 
@@ -178,6 +184,42 @@ def build_model(config: dict[str, Any]) -> ModelInterface:
     model_kwargs = deep_merge(model_kwargs, optimizer_config)
     model_kwargs = deep_merge(model_kwargs, scheduler_config)
     return ModelInterface(**model_kwargs)
+
+
+def initialize_model_weights(
+    model: ModelInterface, checkpoint_path: str | Path
+) -> tuple[list[str], list[str]]:
+    """Load compatible weights without invoking Lightning resume semantics.
+
+    Architecture-version metadata is intentionally skipped so an additive,
+    zero-output branch can warm-start from its immediate predecessor.
+    """
+    path = Path(checkpoint_path).expanduser().resolve()
+    checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+    state_dict = checkpoint.get("state_dict", checkpoint)
+    if not isinstance(state_dict, dict):
+        raise TypeError(f"Checkpoint has no state dictionary: {path}")
+    compatible_state = {
+        key: value
+        for key, value in state_dict.items()
+        if key != "model._architecture_version"
+    }
+    incompatible = model.load_state_dict(compatible_state, strict=False)
+    missing = list(incompatible.missing_keys)
+    unexpected = list(incompatible.unexpected_keys)
+    allowed_missing = {
+        key
+        for key in missing
+        if key == "model._architecture_version"
+        or key.startswith("model.meta_classifier.ccer_v2_")
+    }
+    disallowed_missing = sorted(set(missing) - allowed_missing)
+    if disallowed_missing or unexpected:
+        raise RuntimeError(
+            "Weight-only initialization found incompatible keys: "
+            f"missing={disallowed_missing}, unexpected={unexpected}"
+        )
+    return missing, unexpected
 
 
 def build_logger(config: dict[str, Any]):

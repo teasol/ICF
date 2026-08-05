@@ -1,0 +1,34 @@
+base_config: train_v30_cardinality_poolz_l2.yaml
+
+# Architecture-first v31: CCER-v2 warm-starts from the exact v30 optimum.
+# It keeps v30's synthetic task distribution unchanged and adds an isolated
+# class-conditional cell-evidence path with Top-1, Top-4, and dense routes.
+init_checkpoint: checkpoints/20260804_132334/v30_cardinality_poolz_l2/epoch=048-val_ce_loss=0.4442.ckpt
+
+model_overrides:
+  bag_representation: poolz_l2
+  aggregator_ccts_lambdas: []
+  aggregator_absolute_tail_ks: []
+  meta_ccer_temperatures: []
+  meta_ccer_v2_topks: [1, 4]
+  meta_ccer_v2_route_floor: 0.30
+  meta_ccer_v2_residual_scale: 0.10
+
+# The new CCER-v2 modules use the base LR. The inherited v30 backbone receives
+# only 5% of it, limiting representation drift during architectural adaptation.
+optimizer:
+  optimizer_src: torch.optim.AdamW
+  optimizer_kwargs:
+    lr: 0.0005
+    betas: [0.9, 0.999]
+    eps: 1.0e-8
+    weight_decay: 0.01
+  backbone_lr_scale: 0.05
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v31_ccer_v2
+
+trainer:
+  max_epochs: 20

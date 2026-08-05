@@ -1,0 +1,26 @@
+base_config: train_v30_cardinality_poolz_l2.yaml
+
+# v31 CCER-Lite: label-conditioned, fully differentiable sparse/dense evidence.
+# CCTS is deliberately disabled.  Existing v30 rare evidence remains as the
+# controlled baseline path; CCER enters through a small residual initialized at 0.10.
+model_overrides:
+  bag_representation: poolz_l2
+  aggregator_ccts_lambdas: []
+  aggregator_absolute_tail_ks: []
+  meta_ccer_temperatures: [0.25, 1.0, 4.0]
+  meta_ccer_residual_scale: 0.10
+  meta_ccer_presence_temperature: 0.5
+
+data_overrides:
+  dataset_kwargs:
+    num_cells: [1, 1024]
+    num_cells_log_uniform: true
+    response_task_probabilities: [0.18, 0.18, 0.18, 0.18, 0.18, 0.10]
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v31_ccer_lite
+
+trainer:
+  max_epochs: 50

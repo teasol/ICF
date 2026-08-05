@@ -8,6 +8,82 @@ section keeps its original heading so cross-references still resolve.
 
 ---
 
+## 30. 2026-08-04 — v31 CCTS (Cardinality-Calibrated Tail Scan) 아키텍처 구현, Unit Test 통과 및 훈련 구동
+
+**상태**: 코드 구현, `searchsorted` 메모리 최적화, Unit Test 통과 및 백그라운드 훈련 시작 ([v31_absolute_topk_tail_proposal.md](../v31_absolute_topk_tail_proposal.md))
+
+### 1. CCTS 구현 및 OOM 최적화 (`src/models/baseline.py`)
+* **Context-Null Calibration**: Support Context 인스턴스들과의 경험적 Null 분포를 `torch.searchsorted` 기반 $O(M \log M)$ 알고리즘으로 텐서 메모리 조폭 할당(945GiB OOM)을 원천 차단하고 0-메모리 고속 연산 구현.
+* **Expected-False-Positive Tail Scan**: $\lambda \in \{0.25, 1.0, 4.0\}$ 가짜 양성 예산 기반의 Soft Gate 및 5차원 신뢰도 메타데이터 연동.
+* **Backward Compatibility**: `ccts_lambdas=()` 기본값 적용으로 기존 v30/v24 체크포인트 및 테스트와의 호환성 100% 보존.
+
+### 2. 생성기 및 Config 연동 (`src/datasets/synthetic_data.py`, `configs/train_v31_ccts.yaml`)
+* `SyntheticManifoldGenerator`에서 6개 과제 확률 정규화 및 `any_positive_sparse` 과제 호환 수술 완료.
+* Config: `configs/train_v31_ccts.yaml` 작성 완료.
+
+### 3. 검증 및 훈련 완료
+* **Unit Test**: `tests/test_ccts.py` 작성 및 통과 (`Ran 1 test in 5.024s, OK`).
+* **훈련 완료**: `v31_ccts` 50 Epoch 완료 (`val_ce_loss` 최저치 `0.4404` 달성).
+
+---
+
+## 31. 2026-08-05 — v31 CCTS 50 Epoch 완주, Musk Zero-shot 평가 및 대형 Bag 정체 정밀 분석
+
+**상태**: 평가 완료 및 정밀 메커니즘 분석 완료 (`predictions/musk_v31_ccts_ep50best.pt`)
+
+### 1. Musk Zero-shot 평가 수치 (`epoch=050-val_ce_loss=0.4404.ckpt`)
+* **Overall AUROC**: **`0.8376`** (95% CI: `[0.756, 0.908]`)
+* **`n <= 4` (소형 Bag)**: **`0.8333`** (v30의 0.8000 경신, 소형 구간 최고치)
+* **`5..10` (중소형 Bag)**: **`0.8667`** (v30의 0.8250 경신, 중소형 구간 최고치)
+* **`11..34` (중대형 Bag)**: **`0.9273`**
+* **`n > 34` (대형 Bag)**: **`0.6032`** (Energy-Scaling 정석 보정 시 **`0.6111`**, Tiling 가중치 눈속임 시 `0.6984`)
+
+### 2. 비판적 정밀 진단 (Forensic Diagnosis)
+* **소형 Bag 성공 원인**: $n \le 10$ 소형 Bag에서는 $n \cdot \hat{p}_i \le \lambda$ 조건이 정확히 1개 세포만을 추출하여 무희석 Top-1 핀포인트 추출기로 동작 (`0.8333` / `0.8667`).
+* **대형 Bag 실패 원인**: $n = 500 - 1000$ 대형 Bag에서는 추출 세포 수 $k$가 $n$에 비례하여 10 - 15개로 증가함으로써 활성 세포 1개 + 배경 세포 14개가 평균되어 신호 희석 재발.
+* **차원 미스매치**: 166차원 원본 디스크립터를 Zero-padding함에 따라 512개 앵커 가중치 중 346개(67.5%)가 0과 곱해져 휴면(Dormant) 상태로 남아 스코어 스케일 왜곡 발생.
+
+### 3. 정석적 해법
+* 세포 개수 $n$과 무관하게 절대 1, 4, 8, 16개 세포만 단독 추출하는 **Absolute Top-K Tail (`absolute_tail_ks: [1, 4, 8, 16]`)** 및 166차원 특성을 512차원으로 직교 매핑하는 **Learned Read-Bridge ($W_{\text{bridge}} \in \mathbb{R}^{512 \times 166}$)** 도입 확정.
+
+> **2026-08-05 재분류**: 위 결론은 CCTS 구현 결함 확인 전의 진단이다. Absolute Top-K와 Read-Bridge는 확정 해법이 아니라 독립 ablation 후보로 되돌린다.
+
+---
+
+## 32. 2026-08-05 — v31 CCER-Lite 구현 및 1차 학습 시작
+
+**상태**: 구현·targeted test 완료, seed 42 학습 진행 중. v30 baseline 변경 없음.
+
+### 구현
+
+- `StructuredPopulationMetaClassifier`에 class-conditioned evidence router 추가.
+- temperature `[0.25, 1.0, 4.0]`의 cardinality-normalized LogMeanExp route.
+- support-class separation 기반 shared router, class-centering, explicit null gate.
+- CCTS/Absolute Top-K는 신규 config에서 비활성화하고 기존 v30 rare branch를 control로 유지.
+- Config: `configs/train_v31_ccer_lite.yaml`.
+
+### 검증
+
+- `tests/test_ccer.py` 3항목 및 기존 `tests/test_ccts.py` 통과: 총 4 tests.
+- `PoolStandardizedBagRepresentationTest` 11 tests 통과.
+- CCER router, support-router, null-threshold, residual 파라미터 gradient 확인.
+- dense/list logit 동치 및 uniform instance duplication invariance 확인.
+- merged config 모델 생성 성공: 9,453,478 trainable parameters.
+
+### 실행
+
+- Run time: `20260805_015000`
+- Config: `configs/train_v31_ccer_lite.yaml`
+- Seed / epochs: `42` / `50`
+- Torchrun PID: `3210190`; worker PID: `3210265`
+- Log: `logs/20260805_015000/v31_ccer_lite.out`
+- Checkpoints: `checkpoints/20260805_015000/v31_ccer_lite/`
+- CUDA sanity validation 통과 후 epoch 0 진행 확인.
+
+이 run은 단일-seed 방향성 확인용이다. 승격은 synthetic/Musk 평가 및 후속 seed 반복 전까지 금지한다.
+
+---
+
 ## 4. v22 결정: retrieval 완전 제거 (2026-07-29)
 
 ### 제거 근거 (3대 가설 검증 결과)

@@ -17,6 +17,7 @@ from src.utils.utils import (
     build_datamodule,
     build_model,
     build_trainer,
+    initialize_model_weights,
     merge_train_config,
     parse_train_args,
 )
@@ -47,6 +48,8 @@ def main() -> None:
         )
     if args.ckpt_path is not None:
         config["ckpt_path"] = str(args.ckpt_path.expanduser().resolve())
+    if args.init_checkpoint is not None:
+        config["init_checkpoint"] = str(args.init_checkpoint.expanduser().resolve())
 
     if args.print_config:
         print(yaml.safe_dump(config, sort_keys=False))
@@ -59,6 +62,18 @@ def main() -> None:
 
     datamodule = build_datamodule(config)
     model = build_model(config)
+    init_checkpoint: str | None = config.get("init_checkpoint")
+    if init_checkpoint is not None:
+        if config.get("ckpt_path") is not None:
+            raise ValueError("Use only one of init_checkpoint and ckpt_path.")
+        missing, _ = initialize_model_weights(model, init_checkpoint)
+        new_tensor_count = sum(
+            key.startswith("model.meta_classifier.ccer_v2_") for key in missing
+        )
+        print(
+            f"Initialized weights from {init_checkpoint}; "
+            f"kept {new_tensor_count} new architecture tensors at initialization."
+        )
     trainer = build_trainer(config)
 
     ckpt_path: str | None = config.get("ckpt_path")

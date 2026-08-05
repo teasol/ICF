@@ -1,37 +1,34 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-05` (**§31 v31 CCTS 후보 실험 완료 — v30 확정 baseline 유지**)
-**Status**: **v30이 확정 baseline (2026-08-04 사용자 승격 결정 유지)** — v30 = v24(residual+bottleneck bag proj) + **B1 `poolz_l2` 표현** + **B2 cardinality-faithful log-uniform 샘플링**. **v31 CCTS 후보 실험 완료 (미채택)** — Musk Overall `0.8376` (v30의 `0.8539` 미달), `n <= 4` `0.8333`, `5..10` `0.8667`, `11..34` `0.9273`, `n > 34` `0.6032` (정체). **정식 baseline으로 채택하지 않으며 v30 S2 유지**.
-* **v31 CCTS 메커니즘 진단**: p-value 예산($n \cdot \hat{p}_i \le \lambda$)이 대형 bag($n=1000$)에서 추출 개수 $k$를 10~15개로 비례 증가시켜 1개 활성 세포 신호를 1/15로 희석시킴. 166차원 zero-padding으로 인한 346개(67.5%) 휴면 가중치 수술 필요.
-* **다음 Action**: Absolute Top-K Tail (`absolute_tail_ks: [1, 4, 8, 16]`) + Learned Read-Bridge ($W_{\text{bridge}} \in \mathbb{R}^{512 \times 166}$).
+**Last updated**: `2026-08-05` (**§35 CCER-v2 구현·20 epoch 학습 완료 — 평가 대기**)
+**Status**: **v30은 확정 baseline 유지**. CCER-Lite의 실질 contribution 부재를 확인한 뒤
+projection 전 class-slot prototype과 독립 encoder를 쓰는 **CCER-v2**를 구현했다. v30 best
+weight-only warm-start 20-epoch 학습은 완료됐으며 best `val_ce_loss=0.443786` @ epoch 18이다.
+합성/Musk 평가는 아직 하지 않았으므로 v31 승격 판정은 보류한다.
+* **CCER-v2 핵심**: independent support/query encoders + class-centered cell evidence +
+  `Top-1/Top-4/mean` routes + route floor + zero-init output head.
+* **다음 Action**: epoch 18 best로 synthetic/Musk 평가하고 CCER-v2 on/off contribution 및
+  cardinality band 결과를 함께 확인한다. ICI 잠금은 유지한다.
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§31 (v31 CCTS 후보 평가 및 대형 bag 정체 진단 — 최신)**, **§30 (v31 CCTS 구현)**, **§29 (v30 확정 baseline)**, **§28 판정 과정 ([`history/archive.md`](history/archive.md) §28)**.
+**Read first if you are picking this up**: **§35 (CCER-v2 학습 결과/다음 평가)**,
+**§33 (CCER-v2 계약)**, **§29 (v30 확정 baseline)**, §28 판정 과정
+([`history/archive.md`](history/archive.md) §28).
 
-**열린 과제**: ① **v30 medium 기준 재학습** — 새 확정 config(`configs/train_v30_medium_bag_proj_residual.yaml`)로
-v30 참조 수치 확보(S2 실측은 musklike-easy 기준), ② **n>34 최약 구간(0.698)** — B2b(에피소드 내
-cardinality 혼합) 또는 대형 bag 실패 진단, ③ ICI 잠금 유지(해제 시 cell-축 zero-padding 결함부터),
-④ B3(2차 통계 shrinkage)·B4(생성기 any-positive)는 n>34 이후. (이전: v26 0.5908 동률 미채택, v25 폐기.)
-**Read first if you are picking this up**: **§29 (v30 확정 — 최신)** 및 **§28 판정 과정
-([`history/archive.md`](history/archive.md) §28 — B1·B2 상호 필수 근거)**, 그다음 **§26 (Musk 재진단·v30 제안)** 및
-[`history/musk_transfer_diagnosis_v30_proposal.md`](history/musk_transfer_diagnosis_v30_proposal.md),
-§27 (문서 압축·재현성 복구 기록), §25 (IA-MIL 폐기·정리), §3 (실험 현황·최종 결정),
-§5 (실험 전략), §7 (평가 프로토콜).
-해결·폐기된 세션/실험 기록(**§6**, §11~§24, §22 musk-like easy 가설 / §23 raw-stat 음성 /
-§24 IA-MIL 음성 포함)은 [`history/archive.md`](history/archive.md) 참고.
-**Branches**: `main` = `v30` 확정 (현재 SSOT; v24는 이전 확정 baseline으로 config·문서에 보존) / 참고용 `v22`·`v24`·`v19`·`codex/v23-bag-mean` / v25는 태그 **`v25-typed-bag-final`**로 보존 (브랜치 삭제) — 구조: [`history/branch_structure.md`](history/branch_structure.md)
+**열린 과제**: ① CCER-v2 epoch 18 synthetic/Musk 및 on/off 평가, ② v30 medium 참조
+재학습, ③ n>34 최약 구간의 B2b/대형 bag 진단, ④ ICI 잠금 유지. B3/B4 및 seed sweep은
+CCER-v2 1차 평가 뒤로 미룬다. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
+
+**Branches**: `main` = v30 확정 baseline + v31 후보 구현. 참고용 branch/tag 구조는
+[`history/branch_structure.md`](history/branch_structure.md).
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
-**Architecture Version**: `30` 확정 baseline (2026-08-04) — v24 + B1 `poolz_l2` 표현 + B2
-cardinality-faithful 샘플링. Config: `configs/train_v30_medium_bag_proj_residual.yaml` (아직 미학습 —
-참조 수치 확보가 다음 Action). `24`는 이전 확정 baseline으로 보존
-(`configs/train_v24_medium_bag_proj_residual.yaml`; 코드 기본 `bag_representation`은 `legacy` 유지).
-`26`(CLS-token pooling) 2026-08-03 val_ce 0.5908 동률 → **미채택**. `25`(T5-A) 폐기. `use_instance_attention_mil`
-(IA-MIL) 2026-08-04 폐기 (§25). `22`/`23` 폐기된 구버전.
-**Purpose**: 연구실 / 집 / 노트북 3개 작업 환경 간 대화 기록 비동기화 문제를 해결하기 위한 Single Source of Truth (SSOT) living document.
+**Architecture Versions**: `30` 확정 baseline, `31` CCER-v2 평가 후보. v31 config는
+`configs/train_v31_ccer_v2.yaml`; 코드 기본 `bag_representation`은 `legacy` 유지.
+**Purpose**: 연구실 / 집 / 노트북 간 상태를 동기화하는 SSOT living document.
 
 ---
 
@@ -798,43 +795,117 @@ B1·B2 상호 필수 근거, 교차 분포 합성 무회귀)은 [`history/archiv
 
 ---
 
-## 30. 2026-08-04 — v31 CCTS (Cardinality-Calibrated Tail Scan) 아키텍처 구현, Unit Test 통과 및 훈련 구동
+## 30. 2026-08-04 — v31 CCTS 구현·학습 (아카이브됨)
 
-**상태**: 코드 구현, `searchsorted` 메모리 최적화, Unit Test 통과 및 백그라운드 훈련 시작 ([v31_absolute_topk_tail_proposal.md](v31_absolute_topk_tail_proposal.md))
-
-### 1. CCTS 구현 및 OOM 최적화 (`src/models/baseline.py`)
-* **Context-Null Calibration**: Support Context 인스턴스들과의 경험적 Null 분포를 `torch.searchsorted` 기반 $O(M \log M)$ 알고리즘으로 텐서 메모리 조폭 할당(945GiB OOM)을 원천 차단하고 0-메모리 고속 연산 구현.
-* **Expected-False-Positive Tail Scan**: $\lambda \in \{0.25, 1.0, 4.0\}$ 가짜 양성 예산 기반의 Soft Gate 및 5차원 신뢰도 메타데이터 연동.
-* **Backward Compatibility**: `ccts_lambdas=()` 기본값 적용으로 기존 v30/v24 체크포인트 및 테스트와의 호환성 100% 보존.
-
-### 2. 생성기 및 Config 연동 (`src/datasets/synthetic_data.py`, `configs/train_v31_ccts.yaml`)
-* `SyntheticManifoldGenerator`에서 6개 과제 확률 정규화 및 `any_positive_sparse` 과제 호환 수술 완료.
-* Config: `configs/train_v31_ccts.yaml` 작성 완료.
-
-### 3. 검증 및 훈련 완료
-* **Unit Test**: `tests/test_ccts.py` 작성 및 통과 (`Ran 1 test in 5.024s, OK`).
-* **훈련 완료**: `v31_ccts` 50 Epoch 완료 (`val_ce_loss` 최저치 `0.4404` 달성).
+CCTS 구현과 50-epoch 학습 기록은 후속 CCER-v2로 완전히 대체되어
+[`history/archive.md`](history/archive.md#30-2026-08-04--v31-ccts-cardinality-calibrated-tail-scan-아키텍처-구현-unit-test-통과-및-훈련-구동)로 이동했다.
 
 ---
 
-## 31. 2026-08-05 — v31 CCTS 50 Epoch 완주, Musk Zero-shot 평가 및 대형 Bag 정체 정밀 분석
+## 31. 2026-08-05 — v31 CCTS Musk 평가·진단 (아카이브됨)
 
-**상태**: 평가 완료 및 정밀 메커니즘 분석 완료 (`predictions/musk_v31_ccts_ep50best.pt`)
+CCTS Musk `0.8376`, 대형 bag `0.6032` 결과와 구현 결함 재분류 기록은
+[`history/archive.md`](history/archive.md#31-2026-08-05--v31-ccts-50-epoch-완주-musk-zero-shot-평가-및-대형-bag-정체-정밀-분석)로 이동했다.
 
-### 1. Musk Zero-shot 평가 수치 (`epoch=050-val_ce_loss=0.4404.ckpt`)
-* **Overall AUROC**: **`0.8376`** (95% CI: `[0.756, 0.908]`)
-* **`n <= 4` (소형 Bag)**: **`0.8333`** (v30의 0.8000 경신, 소형 구간 최고치)
-* **`5..10` (중소형 Bag)**: **`0.8667`** (v30의 0.8250 경신, 중소형 구간 최고치)
-* **`11..34` (중대형 Bag)**: **`0.9273`**
-* **`n > 34` (대형 Bag)**: **`0.6032`** (Energy-Scaling 정석 보정 시 **`0.6111`**, Tiling 가중치 눈속임 시 `0.6984`)
+---
 
-### 2. 비판적 정밀 진단 (Forensic Diagnosis)
-* **소형 Bag 성공 원인**: $n \le 10$ 소형 Bag에서는 $n \cdot \hat{p}_i \le \lambda$ 조건이 정확히 1개 세포만을 추출하여 무희석 Top-1 핀포인트 추출기로 동작 (`0.8333` / `0.8667`).
-* **대형 Bag 실패 원인**: $n = 500 - 1000$ 대형 Bag에서는 추출 세포 수 $k$가 $n$에 비례하여 10 - 15개로 증가함으로써 활성 세포 1개 + 배경 세포 14개가 평균되어 신호 희석 재발.
-* **차원 미스매치**: 166차원 원본 디스크립터를 Zero-padding함에 따라 512개 앵커 가중치 중 346개(67.5%)가 0과 곱해져 휴면(Dormant) 상태로 남아 스코어 스케일 왜곡 발생.
+## 32. 2026-08-05 — v31 CCER-Lite 구현·학습 (아카이브됨)
 
-### 3. 정석적 해법
-* 세포 개수 $n$과 무관하게 절대 1, 4, 8, 16개 세포만 단독 추출하는 **Absolute Top-K Tail (`absolute_tail_ks: [1, 4, 8, 16]`)** 및 166차원 특성을 512차원으로 직교 매핑하는 **Learned Read-Bridge ($W_{\text{bridge}} \in \mathbb{R}^{512 \times 166}$)** 도입 확정.
+CCER-Lite 구현과 학습 기록은 contribution이 `~1.4e-4`로 사실상 비활성임을 확인한 뒤
+[`history/archive.md`](history/archive.md#32-2026-08-05--v31-ccer-lite-구현-및-1차-학습-시작)로 이동했다.
 
+---
 
+## 33. 2026-08-05 — v31 CCER-v2 아키텍처 구현 완료 (학습 미시작)
 
+**상태**: CCER-Lite 실패 분석을 반영한 독립 아키텍처 구현과 회귀 검증 완료. 기존
+CCER-Lite와 해당 체크포인트는 재현성을 위해 그대로 보존했다.
+
+### 변경점
+
+- class prototype은 bag projection 이후 memory가 아니라 **projection 전 aligned
+  slot-center**에서 직접 만든다.
+- query cell encoder와 support prototype encoder를 기존 rare branch와 완전히 분리했다.
+- evidence route는 cardinality와 무관한 `Top-1`, 미세 population용 `Top-4`, dense
+  shift용 `mean` 세 경로다.
+- router는 어떤 route도 제거할 수 없도록 총 `0.30`의 route floor를 갖는다.
+- 별도 null gate를 제거하고 class-centered logits만 사용한다.
+- 새 output head를 0으로 초기화해 v30 checkpoint 주입 직후 전체 logits를 정확히
+  보존한다. 첫 update에는 output head가 열리고 이후 encoder/router로 gradient가
+  전달되는 staged adaptation이다.
+- optimizer는 CCER-v2에 base LR, v30 backbone에 `0.05x` LR을 사용한다.
+- Lightning resume와 분리된 `--init-checkpoint` weight-only 초기화를 추가했다.
+
+### 설정과 검증
+
+- Config: `configs/train_v31_ccer_v2.yaml` (v30 data/task distribution 그대로 상속,
+  20 epochs, v30 best warm-start).
+- 신규/기존 CCER targeted tests: **6 tests, OK**.
+- 실제 v30 best checkpoint load: 신규 tensor 21개와 architecture marker만 missing,
+  unexpected key 0개.
+- 동일 synthetic episode에서 warm-start v30과 v31-v2의 초기 logit 최대 차이:
+  **`0.0`**.
+- route floor, Top-1 background invariance, dense/single-episode path 동치, zero-init
+  gradient staging을 검증했다.
+
+학습은 아직 시작하지 않았다. architecture correctness가 확보된 이 상태를 고정한 뒤
+단일 20-epoch 방향성 run을 실행하면 된다.
+
+---
+
+## 34. 2026-08-05 — v31 CCER-v2 20-epoch 학습 시작
+
+**상태**: 완료. 최종 수치와 artifact 검증은 §35로 통합했다.
+
+- Run time: `20260805_123630`
+- Config: `configs/train_v31_ccer_v2.yaml`
+- Log: `logs/20260805_123630/v31_ccer_v2.out`
+- Checkpoints: `checkpoints/20260805_123630/v31_ccer_v2/`
+- Initialization: v30 best
+  `epoch=048-val_ce_loss=0.4442.ckpt` weight-only load, 신규 tensor 21개 유지.
+- GPU: B200 device 0, single process.
+- 시작 검증: CUDA 연결, sanity validation 2/2 통과, epoch 0 진입 확인.
+
+초기 detached launcher가 worker 생성 전에 종료되어 checkpoint/log를 만들지 않았고, 같은
+run 경로를 foreground persistent session으로 재시작했다. 중복 학습 없이 20 epochs를
+정상 완주했다.
+
+---
+
+## 35. 2026-08-05 — CCER-v2 구현·검증·20 epoch 학습 완료
+
+**상태**: architecture-first 변경과 seed 42 방향성 학습 완료. 합성/Musk 평가는 대기 중이며
+v30은 계속 확정 baseline이다.
+
+### 구현과 안전 조건
+
+- `src/models/baseline.py`: projection 전 class-slot prototype, 독립 support/query encoder,
+  class-centered `Top-1/Top-4/mean` evidence router, 총 route floor `0.30`, zero-init output head.
+- `scripts/train.py` / `src/utils/utils.py`: Lightning resume와 분리된 `--init-checkpoint`
+  weight-only warm-start.
+- `src/modules/model_interface.py`: CCER-v2 base LR + v30 backbone `0.05x` param groups와
+  contribution/route diagnostics logging.
+- 실제 v30 best load에서 신규 CCER-v2 tensor 21개만 missing, unexpected 0개였고 동일
+  episode 초기 logit 최대 차이는 정확히 `0.0`이었다.
+- targeted CCER tests 6개와 ModelInterface tests 14개 통과. `git diff --check`와 변경 Python
+  파일 compile도 통과했다.
+
+### 학습 결과와 artifact 생존 확인
+
+- Run / seed / epochs: `20260805_123630` / `42` / `20`.
+- Log: `logs/20260805_123630/v31_ccer_v2.out`.
+- Checkpoints: `checkpoints/20260805_123630/v31_ccer_v2/`.
+- `last.ckpt`와 epoch 18/19 checkpoint가 `2026-08-05 13:04~13:06`, 각
+  `118,523,863` bytes로 생성됐고 log는 `max_epochs=20 reached`를 기록했다.
+- Best: epoch 18, `val_ce_loss=0.443786`, `val_loss=0.477892`, `val_auroc=0.825494`.
+- Best validation CCER-v2 diagnostics: logit std `0.051835`, residual scale `0.141363`,
+  route entropy `0.651253`. CCER-Lite의 `~1.4e-4` contribution과 달리 새 branch가 실제로
+  활성화됐지만 성능 승격 여부는 아직 판단할 수 없다.
+
+### 다음 Action
+
+1. epoch 18 best checkpoint로 기존 고정 protocol의 synthetic 평가를 실행한다.
+2. 같은 checkpoint로 Musk overall 및 4개 cardinality band를 평가한다.
+3. CCER-v2 on/off probability delta, route 사용량, large-positive/negative 변화를 함께
+   측정해 개선의 직접 기여 여부를 확인한다.
+4. 평가 전 추가 architecture tuning이나 seed sweep은 하지 않는다. ICI 잠금 유지.

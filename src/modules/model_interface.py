@@ -571,6 +571,19 @@ class ModelInterface(L.LightningModule):
         terms["rare_fraction_entropy"] = (
             -(rare_weights * rare_weights.log()).sum(dim=-1).mean()
         )
+        if "ccer_v2_logits" in auxiliary:
+            terms["ccer_v2_logit_std"] = auxiliary["ccer_v2_logits"].float().std(
+                unbiased=False
+            )
+            terms["ccer_v2_residual_scale"] = auxiliary[
+                "ccer_v2_residual_scale"
+            ].float().mean()
+            ccer_v2_weights = auxiliary["ccer_v2_route_weights"].float().clamp_min(
+                1e-12
+            )
+            terms["ccer_v2_route_entropy"] = -(
+                ccer_v2_weights * ccer_v2_weights.log()
+            ).sum(dim=-1).mean()
         return total, terms
 
     @staticmethod
@@ -731,6 +744,7 @@ class ModelInterface(L.LightningModule):
             "routing_sparsity_weight",
             "routing_balance_weight",
             "fixed_training_queries",
+            "backbone_lr_scale",
         ):
             kwargs.pop(key, None)
         module_name, class_name = model_src.rsplit(".", 1)
@@ -739,9 +753,26 @@ class ModelInterface(L.LightningModule):
 
     def configure_optimizers(self) -> dict[str, Any]:
         optimizer_cls = self._optimizer_class()
-        optimizer = optimizer_cls(
-            self.parameters(), **self.hparams.get("optimizer_kwargs", {})
-        )
+        optimizer_kwargs = dict(self.hparams.get("optimizer_kwargs", {}))
+        backbone_lr_scale = float(self.hparams.get("backbone_lr_scale", 1.0))
+        if not 0.0 < backbone_lr_scale <= 1.0:
+            raise ValueError("backbone_lr_scale must be in (0, 1].")
+        ccer_v2_parameters = []
+        backbone_parameters = []
+        for name, parameter in self.named_parameters():
+            if "ccer_v2_" in name:
+                ccer_v2_parameters.append(parameter)
+            else:
+                backbone_parameters.append(parameter)
+        if ccer_v2_parameters and backbone_lr_scale != 1.0:
+            base_lr = float(optimizer_kwargs.get("lr", 1e-3))
+            parameters: Any = [
+                {"params": backbone_parameters, "lr": base_lr * backbone_lr_scale},
+                {"params": ccer_v2_parameters, "lr": base_lr},
+            ]
+        else:
+            parameters = self.parameters()
+        optimizer = optimizer_cls(parameters, **optimizer_kwargs)
         scheduler_cls = self._scheduler_class()
         scheduler = scheduler_cls(optimizer, **self.hparams.get("scheduler_kwargs", {}))
         return {

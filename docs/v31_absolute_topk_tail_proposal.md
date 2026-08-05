@@ -1,9 +1,9 @@
-# v31 Proposal: Cardinality-Calibrated Tail Scan (CCTS)
-## 고정 Top-K가 아니라, bag 크기에 따른 우연한 극값을 보정하는 희소 신호 검출기
+# v31 Proposal: CCTS에서 Class-Conditional Evidence Router(CCER)로
+## Generic novelty가 아니라 support class를 직접 지지하는 희소·밀집 증거 라우팅
 
 **작성일**: 2026-08-04
 
-**상태**: 설계 제안 — 미구현, 미검증
+**상태**: CCER-Lite 구현 및 seed 42 1차 학습 진행 중 — 미평가
 
 **기준선**: v30 S2 (`poolz_l2` + bag cardinality log-uniform training)
 
@@ -289,3 +289,77 @@ v31은 “Absolute Top-K + Any-Positive”로 확정하지 않는다. 정식 후
 이 방향의 장점은 특정 `k`가 Musk에 맞을 것이라는 추측에 의존하지 않고, 대형 bag에서 반드시 발생하는 multiple-comparison/extreme-value 문제를 직접 모델링한다는 점이다. 동시에 architecture, generator, auxiliary loss를 분리 평가하므로 실패하더라도 무엇이 틀렸는지 알 수 있다.
 
 구현에 앞서 Phase 0 회귀 복구와 테스트 보강이 필수이며, 그 전까지 상태는 **proposal only**다.
+
+---
+
+## 9. 2026-08-05 Architecture Upgrade: CCER-Lite
+
+CCTS 실험은 Musk overall 0.8376, `n > 34` 0.6032로 v30을 넘지 못했다. 그러나 구현 감사에서 `detach → sort → searchsorted`가 `ccts_score_head`의 gradient를 완전히 차단하고, dense 학습과 ragged 평가의 null calibration semantics도 다름이 확인되었다. 따라서 이 결과는 학습 가능한 CCTS 전체에 대한 반증이 아니라 현재 구현 후보의 실패로 해석한다.
+
+후속 v31은 aggregator 내부의 label-free anomaly score를 더 복잡하게 만들지 않는다. 기존 class memory와 query instance 사이의 discriminative evidence를 episode-level classifier에서 직접 계산하는 **CCER-Lite**를 1차 후보로 둔다.
+
+### 9.1 구현된 계약
+
+- support label로 만들어진 class memory와 query instance의 class별 evidence를 사용한다.
+- hard Top-K/searchsorted 없이 `temperature in {0.25, 1.0, 4.0}`의 cardinality-normalized LogMeanExp를 사용한다.
+- 모든 class에 공통인 generic anomaly evidence를 class축 centering으로 제거한다.
+- support class separation으로 temperature mixture를 조정하는 label-equivariant router를 사용한다.
+- class-discriminative evidence가 약하면 residual을 0으로 보내는 explicit null gate를 사용한다.
+- 기존 v30 rare branch는 control로 보존하고 CCER residual은 0.10에서 시작한다.
+- CCTS와 Absolute Top-K는 CCER-Lite config에서 비활성화한다.
+
+### 9.2 검증된 안전 조건
+
+- CCER router/null/residual 파라미터에 finite gradient가 도달한다.
+- dense episode path와 list/ragged path logits가 허용 오차 안에서 일치한다.
+- 모든 instance를 동일 횟수 복제해도 LogMeanExp route score가 변하지 않는다.
+- projection-enabled v30 구조에서 forward/backward가 정상 동작한다.
+
+### 9.3 실행 및 다음 ablation
+
+1차 run은 [`configs/train_v31_ccer_lite.yaml`](../configs/train_v31_ccer_lite.yaml), seed 42, 50 epochs다. 이 run은 구현 smoke와 방향성 확인용이며 단일 seed 승격 판정에 사용하지 않는다. 완료 후 corrected CCTS, CCER-Lite, effective-cardinality 보정, full support-conditioned router, 입력 read-bridge를 각각 분리해 비교한다. Read-bridge는 zero-padding이 실패 원인이라는 선결론 없이 독립 요인으로만 평가한다.
+
+---
+
+## 10. 2026-08-05 Architecture Upgrade: CCER-v2
+
+CCER-Lite의 Musk 결과와 on/off 검사는 residual contribution이 약 `1.4e-4`에 불과해
+사실상 v30 그대로였음을 보였다. 원인은 단순한 residual scale 부족이 아니라 (1) 기존
+rare branch와 표현을 공유한 점, (2) projected class memory가 세포 수준 identity를 이미
+압축한 점, (3) dense route 선호와 null gate가 희소 route를 동시에 약화한 점, (4) v30과
+다른 task mixture로 backbone까지 재학습한 점의 결합이다. 따라서 scale tuning 실험을
+반복하지 않고 경로 자체를 교체한다.
+
+### 10.1 확정 아키텍처
+
+1. support class prototype은 projection 전 aligned slot-center에서 계산한다.
+2. support/query encoder는 기존 rare evidence encoder와 parameter를 공유하지 않는다.
+3. query cell과 class-slot prototype의 cosine evidence를 만든 뒤 class축 centering한다.
+4. `Top-1`, `Top-4`, `mean`을 병렬 route로 두고 learned router로 결합한다.
+5. 각 route에는 최소 `0.30 / 3 = 0.10`의 weight를 보장한다.
+6. 별도 null gate는 두지 않는다. 무정보 상황은 class-centered logit 자체가 0에
+   가까워지는 구조로 처리한다.
+7. 최종 1x1 output head는 정확히 0으로 초기화한다. 따라서 v30 warm-start 시 새 branch가
+   기존 예측을 교란하지 않으며, optimizer가 데이터로부터 유효한 방향을 먼저 정한다.
+
+### 10.2 학습 계약
+
+- `configs/train_v31_ccer_v2.yaml`은 v30 config를 직접 상속하며 task probability를
+  재정의하지 않는다.
+- v30 best checkpoint는 resume가 아니라 weight-only initialization으로 읽는다.
+- 새 CCER-v2 parameter는 base LR, 공통 v30 backbone은 `0.05x` LR로 학습한다.
+- 1차 run은 20 epochs로 제한한다. 목적은 광범위한 tuning이 아니라 새 경로가 실제
+  contribution과 대형-bag 개선을 만드는지 판정하는 것이다.
+
+### 10.3 구현 완료 조건
+
+- v30 checkpoint의 공통 key를 모두 읽고 신규 CCER-v2 key 외 missing이 없어야 한다.
+- warm-start 직후 v30/v31 logits의 최대 차이는 0이어야 한다.
+- Top-1 route는 더 낮은 background cell 추가에 불변이어야 한다.
+- 모든 route weight는 설정된 floor 이상이어야 한다.
+- batched와 single-episode forward가 일치해야 한다.
+- zero-init 첫 backward에서 output head에 finite nonzero gradient가 도달하고, head가 열린
+  뒤 독립 encoder에도 gradient가 도달해야 한다.
+
+위 조건은 모두 구현 및 targeted test에서 충족됐다. CCER-Lite는 checkpoint 호환과 실패
+재현을 위해 제거하지 않는다.

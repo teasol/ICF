@@ -1,7 +1,26 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-04` (**§29 v30 확정 반영**: v24 + B1 `poolz_l2` 표현 + B2 cardinality-faithful 샘플링을 **확정 baseline으로 승격** — Musk zero-shot 0.8539, 합성 무회귀 0.9483, 게이트 6항목 통과. v24는 이전 확정 baseline으로 보존. 상세: [`current_status.md`](current_status.md) §29·§28) **§26 Musk 전이 재진단 반영**: `musk095_architecture_proposal.md`의 P1/P2 기각, P3 연기 → 대체 제안 [`history/musk_transfer_diagnosis_v30_proposal.md`](history/musk_transfer_diagnosis_v30_proposal.md), 신규 진단 스크립트 `scripts/diagnose_musk_cardinality.py`. **ICI 블로킹 결함 발견 (수정 보류)** — `src/datasets/base_data.py`가 cell 축을 `target_cells`까지 마스크 없이 zero-padding하여 `_bag_view`의 bag 평균/`global_spread`를 오염시킴. **2026-08-04 사용자 지시로 ICI는 손대지 않으므로 기록만 유지하며, 향후 ICI 잠금 해제 시 반드시 먼저 처리할 항목**임. 또한 아카이빙으로 깨져 있던 config 13건 복구 + 삭제 파일 3건 git 복원으로 **unittest 154/154 통과**(이전 153/154) 및 `base_config` 보유 config 65개 전부 로드 성공. 상세: [`current_status.md`](current_status.md) §26·§27)
-**Architecture Version**: **v30 확정 baseline (2026-08-04)** — v24 + B1(`bag_representation: poolz_l2`, context-pool 대각 표준화 `z = normalize((x−μ_ctx)/σ_ctx)`) + B2(cardinality-faithful log-uniform 샘플링, `num_cells [1,1024]` + `num_cells_log_uniform: true`). 확정 config: `configs/train_v30_medium_bag_proj_residual.yaml` (**아직 미학습** — v30 medium 참조 수치 확보가 다음 Action). Musk 경로: `configs/train_v30_cardinality_poolz_l2.yaml` (S2 실측: Musk 0.8539, 합성 무회귀 0.9483, 게이트 6항목 통과 — §29·§28). **v24는 이전 확정 baseline으로 보존** — residual + bottleneck bag projection (구 v24-B1): `project_structured_tokens: true`, `projection_bottleneck_dim: 64`, `projection_residual_mean: true`. v22(구 기준선)/v23-A0/v24-A0/v24-B0는 폐기. v24 Config: `configs/train_v24_medium_bag_proj_residual.yaml`. **코드 기본 `bag_representation`은 `legacy` 유지** (기본값 플립은 기존 `_bag_view` 테스트·미고정 v24/ICI config를 깨뜨리고, `architecture_version` 범프는 기존 v30 체크포인트 재평가를 막음 — §29). 상세 결정 근거: [`current_status.md`](current_status.md) §3 최종 결정. **v25(T5-A)는 2026-08-02 폐기** (Medium/Easy 평가 모두 승격 기준 미달, config `configs/archive/v25_typed_bag/`, 태그 `v25-typed-bag-final`). **`26`(CLS-token pooling, `cls_token_pooling: true`)은 2026-08-02 구현, 2026-08-03 학습 완료(val_ce 0.5908, v24와 동률) → 미채택, v24 유지.** v26(EC-MoE)/v27(AC-ICAR)/v29(SP-SAT) 설계안은 학습 없는 게이트(E2/E7/A4)로 검토 후 미구현 폐기, `docs/history/` 이관 — [`current_status.md`](current_status.md) §25. **`use_instance_attention_mil`(Phase 1 IA-MIL)은 2026-08-04 폐기** — 합성 무회귀(0.9520)지만 rare 판별 유의 열위(baseline 0.9492 vs mil 0.9224, P=1.00)이고 Musk zero-shot 큰 회귀(0.8030→0.5545). configs `configs/archive/ia_mil/`, scripts `scripts/archive/ia_mil/`, 상세 [`current_status.md`](current_status.md) §25.
+**Last updated**: `2026-08-05` — CCER-v2 architecture와 weight-only warm-start 계약 반영.
+
+**Confirmed baseline**: v30 = v24 residual+bottleneck bag projection + B1
+`bag_representation: poolz_l2` + B2 log-uniform cardinality `[1,1024]`. Musk zero-shot
+`0.8539`, 기존 대형 합성 분포 `0.9483`; 상세는 [`current_status.md`](current_status.md)
+§29·§28이다. 코드 기본 `bag_representation`은 checkpoint/config의 조용한 의미 변경을 막기
+위해 계속 `legacy`다.
+
+**Active candidate — architecture v31 CCER-v2**: projection 전 aligned slot-center로
+support class prototype을 만들고, 기존 rare branch와 독립인 support/query encoder에서
+class-centered cell evidence를 계산한다. `Top-1`, `Top-4`, `mean` route는 총 `0.30`의
+floor를 가지며 별도 null gate는 없다. 최종 output head는 zero-init이므로 v30 weight-only
+초기화 직후 logits가 정확히 동일하다. 신규 module은 base LR, 공통 v30 backbone은 `0.05x`
+LR을 사용한다. Config는 `configs/train_v31_ccer_v2.yaml`, architecture marker는 `31`이다.
+Seed 42 20-epoch 학습 best는 epoch 18 `val_ce_loss=0.443786`; 아직 synthetic/Musk 미평가라
+baseline 승격은 금지한다. 실시간 상태와 artifact는 [`current_status.md`](current_status.md) §35.
+
+**Persistent invariants**: ICI는 사용자 지시로 잠금 상태다. 잠금 해제 시
+`src/datasets/base_data.py`의 cell-axis zero-padding이 bag mean/global spread를 오염하는 문제를
+먼저 처리한다. 이전 v24/v25/v26/IA-MIL 결정과 config 복구 기록은 §25~§29 및
+[`history/archive.md`](history/archive.md)에 보존한다.
 
 이 문서는 BagPFN 저장소를 처음 맡은 coding agent가 안전하게 작업을 시작하기 위한 운영 및 핸드오프 지침입니다. 최신 개발 및 실험 진행 상황은 [`current_status.md`](current_status.md), 현재 모델 명세는 [`current_architecture.md`](current_architecture.md), 현재 실험 프로토콜은 [`current_experiments.md`](current_experiments.md)를 참고합니다.
 
