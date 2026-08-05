@@ -1129,10 +1129,21 @@ probe 통과 전까지 구현하지 않는다. ICI 잠금 유지.
   - arm C는 architecture/ragged B2b를 바꾸지 않고 train episode만 512/epoch로 조정했다.
     따라서 `512 episodes / batch 1 = 512 updates/epoch`로 arm B의
     `4096 / batch 8 = 512 updates/epoch`와 정확히 같다. config는
-    `configs/train_v33_phase0_armC.yaml`이며 FP32를 명시했다.
-  - 새 arm C: `logs/20260805_220843/v33_phase0_armC_stepmatched.out`, launcher PID
-    `42865`, checkpoint `checkpoints/20260805_220843/v33_phase0_armC_stepmatched/`.
-    512 steps/epoch 진입과 초반 약 3분/epoch를 확인했으며 전체 예상은 약 2.5–3시간이다.
+    `configs/train_v33_phase0_armC.yaml`이다.
+  - precision 정렬 재시작 (2026-08-05): 기존 arm C가 FP32(`32-true`)인데 반해
+    v30 baseline과 arm B가 `bf16-mixed`여서 요인 분리 계약에 어긋났다. FP32로 2
+    epoch 진행한 `220843` run은 중단하고, `precision: bf16-mixed`로 정렬해
+    **`logs/20260805_221615/v33_phase0_armC_bf16.out`**(launcher PID `61322`,
+    ckpt `checkpoints/20260805_221615/v33_phase0_armC_bf16/`)에서 재시작했다.
+    ragged B2b는 스모크에서 이미 bf16-mixed로 검증했다. (commit `4a39ab9`)
+- **8× 에피소드 수 비대칭 (해석 주의)**: step은 arm B와 일치(25,600)하지만
+  **총 에피소드 수는 arm C 25,600 vs v30/arm B 204,800으로 8× 차이**가 남는다.
+  v30 val_ce 곡선을 보면 ep 25~49에서도 `0.4533→0.4442`로 완만하게 개선 중(best가
+  마지막 epoch 48)이라 v30 자체도 에피소드 수가 아직 경계(binding)였고, arm C는
+  v30의 약 epoch 6~7 수준(val_ce ~0.457)에 머물 것으로 추정된다. 따라서 arm C 회귀
+  gate가 B2b 효과가 아니라 **과소학습 편향으로 오염될 수 있다**. 판정 시 arm C의
+  val_ce가 epoch 50에도 내려가는 중이면(수렴 전) **top-up(추가 학습)으로 수렴점까지
+  이어간 뒤 비교**한다. 엄밀한 대안은 에피소드-매치(4096/epoch, ~20h)지만 비용이 크다.
 - **Phase 0 gate**: sparse task AUROC ≥ 0.75 (arm B), legacy overall 회귀
   ≤ 0.01 (paired CI가 0 포함), B2b가 full-vs-subsample margin drift ≥20% 감소
   (probe로 측정).
