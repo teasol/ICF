@@ -1,19 +1,20 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-05` (**§36 CCER-v2 Epoch 18 평가 완료 — v30 Baseline 유지**)
-**Status**: **v30은 확정 baseline 유지**. CCER-v2 20-epoch 학습 완료 후 epoch 18 best로 합성 1,000-episode (AUROC `0.8514`) 및 Musk zero-shot (AUROC `0.8470`) 평가를 완료했다. 수치상 v30 baseline (Musk `0.854`) 대비 승격 기준을 충족하지 못하므로 **v30 확정 baseline을 계속 유지**한다.
-* **CCER-v2 실측 결과**: 합성 AUROC `0.8514`, Musk AUROC `0.8470` (n<=4: 0.792, 5..10: 0.842, 11..34: 0.933, n>34: 0.698).
-* **다음 Action**: v30 medium 참조 재학습 및 대형 bag (n>34) 구간 진단 진행. ICI 잠금은 유지한다.
+**Last updated**: `2026-08-05` (**§37 v31 Rare-centric Slot Expansion (Rare 4->8개, 총 16개 슬롯) 학습 구동**)
+**Status**: **v30은 확정 baseline 유지**. CCER-v2 평가 종료 후, 사용자 제안에 따라 배경 밀도 슬롯은 8개로 고정하고 **Rare 세포 전용 슬롯을 4개에서 8개로 2배 확장한 v31 Rare-centric Ablation (`v31_rare8_slots16`)** 50-epoch 학습을 백그라운드 구동했다.
+* **v31 Rare8 핵심**: `aggregator_num_slots: 16`, `aggregator_num_density_slots: 8` (Rare = 8개). Config: `configs/train_v31_rare8_slots16.yaml`.
+* **다음 Action**: `v31_rare8_slots16` 완료 후 best checkpoint로 synthetic 1,000 episode 및 Musk zero-shot 4-cardinality band 평가. ICI 잠금 유지.
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
-> 2. **ICI는 손대지 않습니다.** (잠금 유지)
-> 3. **Musk 목표는 0.95 유지.**
+> 2. **Rare 슬롯 중심 확장 (Rare 4->8개) v31 실험 실행.**
+> 3. **ICI는 손대지 않습니다.** (잠금 유지)
+> 4. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§36 (CCER-v2 평가 결과 및 v30 유지)**,
-**§35 (CCER-v2 학습)**, **§33 (CCER-v2 계약)**, **§29 (v30 확정 baseline)**.
+**Read first if you are picking this up**: **§37 (Rare8 슬롯 확장 학습)**,
+**§36 (CCER-v2 평가 결과 및 v30 유지)**, **§29 (v30 확정 baseline)**.
 
-**열린 과제**: ① v30 medium 참조 재학습, ② n>34 최약 구간의 B2b/대형 bag 진단, ③ ICI 잠금 유지. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
+**열린 과제**: ① `v31_rare8_slots16` 50-epoch 학습 완주 및 synthetic/Musk 평가, ② n>34 최약 구간 진단, ③ ICI 잠금 유지. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
 
 **Branches**: `main` = v30 확정 baseline + v31 후보 구현. 참고용 branch/tag 구조는
 [`history/branch_structure.md`](history/branch_structure.md).
@@ -927,3 +928,22 @@ v30은 계속 확정 baseline이다.
 - CCER-v2는 residual scale `0.141` 및 독립 support/query encoder 구조를 통해 CCER-Lite의 브랜치 묻힘 현상을 완벽히 해결했으나, 최종 Musk AUROC `0.8470` 및 합성 AUROC `0.8514`로 v30 baseline (Musk `0.854`)을 능가하지 못함.
 - 수칙과 사전 승격 기준에 따라 **v30 S2가 확정 Baseline을 지속 유지**하며, CCER-v2는 실험 후보 기록으로 보존한다.
 - ICI 잠금은 유지한다.
+
+---
+
+## 37. 2026-08-05 — v31 Rare-centric Slot Expansion (Rare 4->8개, 총 16개 슬롯) 50-Epoch 학습 구동
+
+**상태**: 사용자 제안에 따라 밀도 슬롯은 8개로 유지하면서 Rare 세포 전용 슬롯을 4개에서 8개로 2배 확장한 `v31_rare8_slots16` (50 epochs) 학습을 구동했다.
+
+### 1. 설정 및 구동 정보
+- **Config**: `configs/train_v31_rare8_slots16.yaml`
+- **핵심 오버라이드**: `aggregator_num_slots: 16`, `aggregator_num_density_slots: 8` (Rare slots = 16 - 8 = 8개)
+- **Run Time / Name**: `20260805_144428` / `v31_rare8_slots16`
+- **PID / GPU**: `3747521` / B200 GPU 0 (`CUDA_VISIBLE_DEVICES=0`)
+- **Log**: `logs/20260805_144428/v31_rare8_slots16.out`
+- **Checkpoints**: `checkpoints/20260805_144428/v31_rare8_slots16/`
+- **시작 상태**: Sanity validation (2/2) 통과 후 Epoch 0 진입 완료 (`10.2M` params).
+
+### 2. 다음 Action
+- 50-epoch 학습 완주 후 best checkpoint로 synthetic 1,000 episode 및 Musk 4-cardinality band 평가 실행.
+- v30 baseline (Musk AUROC 0.854) 대비 승격 여부 검증.

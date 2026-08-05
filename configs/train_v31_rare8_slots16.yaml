@@ -1,0 +1,21 @@
+base_config: train_v30_medium_bag_proj_residual.yaml
+
+# =============================================================================
+# v31 Ablation: Rare-Centric Slot Expansion (Rare 4 -> 8 slots, Total 12 -> 16 slots)
+# =============================================================================
+# Keeps density slots at 8 (background stability), while doubling rare slots from 4 to 8.
+# Target: enhance rare-instance signal capture for single-cell & Musk benchmark.
+# =============================================================================
+
+model_overrides:
+  bag_representation: poolz_l2
+  aggregator_num_slots: 16
+  aggregator_num_density_slots: 8
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v31_rare8_slots16
+
+trainer:
+  max_epochs: 50
