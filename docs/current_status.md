@@ -1,16 +1,16 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-06` (**§47 e125 기준 확정: val_ce 개선이 test로 전이 + 타일 제한 스윕(인스턴스 수 효과 task 의존)**)
-**Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up을 8×A6000 DDP + 에피소드-매치(4096 ep/epoch)로 재개 중(epoch ~88/150, batch2). arm B(6-task+sparse)와 arm C(legacy+B2b) 50ep 학습·평가는 완료 — arm B sparse 0.675, arm C legacy 회귀 +0.037로 모두 gate 미달(과소학습 편향).
+**Last updated**: `2026-08-06` (**§48 arm C top-up 완주(150ep, best e125) + v33 평가: legacy 회귀 gate 미달(+0.041, 과소학습 가설 기각), Musk n>34 개선 유지, PathoBench는 v30 우위** + **§47 e125 기준 확정/타일 스윕**)
+**Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
-* **다음 Action**: arm C top-up 완주(150 epoch) 후 §42 재평가(legacy 회귀 gate) + Musk 재확인(§45 중간 신호) + PathoBench 재평가(§46 캐시 재현 가능) → Phase 0 결과 선택 → frozen-v30 multi-resolution probe(Phase 1). ICI 잠금은 유지한다.
+* **다음 Action**: Phase 0 결과 선택(사용자) — arm C의 Musk n>34(0.698→0.849)·PathoBench lscc 개선을 실질 이득으로 볼지, 크기-재배분 trade-off(소형 희생)를 감수할지 → frozen-v30 multi-resolution probe(Phase 1, paired AUROC +0.01) — 아키텍처 가설은 여전히 미검증(§39). ICI 잠금 유지.
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§46 (PathoBench zero-shot 평가)**, **§45 (arm C top-up 중간 Musk 신호 — 대형 bag 개선)**, **§44 (B2b 패딩 배칭, 병목 프로파일)**, **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
+**Read first if you are picking this up**: **§48 (arm C top-up 완주 + v33 평가: legacy gate 미달, PathoBench v30 우위)**, **§47 (e125 재평가/타일 스윕)**, **§46 (PathoBench zero-shot 평가)**, **§45 (arm C top-up 중간 Musk 신호 — 대형 bag 개선)**, **§44 (B2b 패딩 배칭, 병목 프로파일)**, **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
 **§36 (CCER-v2 평가)**, **§29 (v30 확정 baseline)**.
 
 **열린 과제**: ① v30 six-task 효과 분리, ② B2b within-episode cardinality 효과 분리, ③ frozen-v30 multi-resolution headroom, ④ v30 medium 참조 재학습, ⑤ ICI 잠금 유지. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
@@ -1506,3 +1506,94 @@ val_ce 0.5282→0.5142 개선이 실제 test로 전이되는지 확인. test AUR
   이라 잡음 수준이 다름. 제한 케이스는 trial mean이 무제한 단일값과 비슷하거나 위면
   서브샘플이 무해~유익, 아래면 무해하지 않음. 전반적으로 **bag 크기 정규화의 효과가
   task별로 갈림** — 후속으로 LUAD 대형 bag 분석(어느 bag이 문제인지) 권장.
+
+---
+
+## 48. 2026-08-06 — arm C top-up 완주(150ep, best e125) + v33 Phase 0 평가 확정 + PathoBench v30 비교
+
+**상태**: arm C top-up이 **150 epoch까지 완주**했다(8×A6000 DDP, 에피소드-매치
+4096/epoch, batch2). val_ce 기준 best인 `epoch=125-val_ce_loss=0.5142.ckpt`
+(`checkpoints/20260806_145050/v33_phase0_armC_ddp8_batch2/`)를 채택해 §42 legacy
+회귀 gate 재평가 + §45 Musk 재확인 + PathoBench(v30 vs v33) 비교를 수행했다.
+**결론: legacy 회귀 gate 여전히 미달(+0.041) — 과소학습 편향 가설 기각, B2b 데이터
+자체가 회귀 원인. Musk n>34 개선은 유지되지만 PathoBench에서는 v30이 우위.**
+
+- **완주 정보**: 150 epochs, best epoch 125(val_ce 0.5142). §43의 중간(~88/150)
+  기준을 갱신. 이번 평가는 완주 checkpoint 기준 최종 판정이다.
+
+### 1. 합성 legacy 회귀 gate 재평가 (e125, 1,000 ep, seed 42, v30 legacy B2 val 스트림)
+
+- 실행: `evaluate_synthetic.py --checkpoint e125 --config
+  configs/train_v30_cardinality_poolz_l2.yaml --val-episodes 1000
+  --output predictions/synthetic_v33_phase0_armC_topup_e125_legacy_1000ep.pt`
+- **결과**: overall AUROC **0.8100 [0.798, 0.822]**, log loss 0.5218.
+  per-task: composition 0.8611 / state 0.7526 / covariance 0.6347 / interaction
+  0.7547 / combined 0.9411.
+- **v30 committed 대비**: 0.8100 vs 0.8512 [0.840, 0.862] → **회귀 +0.0412**.
+  CI가 완전히 분리(0.798~0.822 vs 0.840~0.862)되어 통계적으로 확정. gate(회귀 ≤ 0.01)
+  **실패**.
+- **핵심 판독 — 과소학습 편향 가설 기각**: 50ep arm C(0.8139) → 완주 e125(0.8100)로
+  사실상 변동 없음. val_ce는 0.5351→0.5142로 크게 개선됐는데 legacy AUROC는 회복되지
+  않았다. 에피소드-매치(4096/epoch, 150ep)로도 회귀가 사라지지 않으므로 **B2b(per-bag
+  cardinality) 데이터 자체가 v30 legacy B2 val 분포에서 성능 저하를 일으킨다.**
+
+### 2. Musk 재확인 (e125, 102 bags leave-one-out, seed 42)
+
+- 실행: `test_musk.py --data .../Musk/musk.pkl --checkpoint e125 --config
+  configs/train_v33_phase0_armC_ddp8.yaml --output predictions/musk_v33_armC_e125.pt`
+- **Overall**: AUROC **0.8616 [0.779, 0.932]** (v30 0.8539 → +0.008), Acc 0.696,
+  BAcc 0.730 (sens 0.872 / spec 0.587), log loss 0.531.
+
+| 밴드 | v30 baseline | arm C e64 (§45) | arm C e125 (완주) |
+|---|---|---|---|
+| ALL | 0.854 | 0.880 | **0.862** |
+| n≤4 | 0.800 | 0.700 | **0.725** |
+| 5..10 | 0.833 | 0.925 | **0.958** |
+| 11..34 | 0.958 | 0.970 | **0.939** |
+| n>34 | **0.698** | 0.825 | **0.849** |
+| corr(prob, log n) | +0.059 | −0.146 | **−0.176** |
+
+- **paired bootstrap (v30 vs e125, 4000 resample)**: ALL +0.008 [−0.062, +0.077]
+  P=0.593(무의미), n≤4 −0.075 [−0.242, +0.058] P=0.144, n>4 +0.038 [−0.044,
+  +0.123] P=0.812.
+- **판독**: §45 신호(n>34 0.698→0.849)가 완주 checkpoint에서도 유지·개선. 5..10
+  0.958. 소형 trade-off(n≤4 0.800→0.725)도 유지. overall +0.008은 무의미.
+
+### 3. PathoBench v30 vs v33(e125) — all-context, 전체 타일, 1 trial
+
+v30 baseline(`checkpoints/20260804_132334/v30_cardinality_poolz_l2/epoch=048-
+val_ce_loss=0.4442.ckpt`)으로 §47과 동일 프로토콜(all-context, 무제한, 1 trial,
+seed 42) 5-task 평가. 예측 파일 `predictions/pathobench_{task}_v30_allctx_full.pt`.
+
+| task | v30 baseline | e125 (arm C) | Δ (v30−e125) |
+|---|---|---|---|
+| cptac_luad_tp53 | **0.7431** | 0.6366 | **+0.107** |
+| cptac_luad_stk11 | **0.9154** | 0.7949 | **+0.121** |
+| cptac_lscc_arid1a | 0.6214 | **0.7381** | −0.117 |
+| cptac_brca_tp53 | **0.7857** | 0.7143 | **+0.071** |
+| cptac_pda_smad4 | **0.7246** | 0.7101 | +0.015 |
+| 평균 | **0.758** | 0.719 | **+0.039** |
+
+**판독**:
+- **v30이 5개 중 4개 task 우위, 평균 +0.039.** 특히 LUAD 계열(stk11 +0.121,
+  tp53 +0.107)에서 크게 우세.
+- 유일한 e125 승리는 **lscc_arid1a (+0.117)** — 최대 bag(4.4만 타일) task로, B2b의
+  대형 bag 강점(§45 Musk n>34)과 같은 방향.
+- 1 trial이라 task별 수치에 노이즈 있음(§47 타일 스윕의 5-trial 안정성 관찰 참조).
+- 합성 legacy 회귀(+0.041)와 같은 방향 — **arm C(B2b)가 전통 분포·PathoBench 레짐
+  모두에서 v30보다 약함.**
+
+### 4. 종합 판정
+
+- **Phase 0 두 주 효과 모두 gate 미달 확정**: arm B sparse 0.6747 (<0.75), arm C
+  legacy 회귀 +0.0412 (>0.01). 과소학습 편향 가설 기각.
+- arm C의 **Musk n>34 개선(0.698→0.849)** 과 **PathoBench lscc 개선**은 실측·재현되는
+  실질 신호이나(대형 bag 강점), 전반적으로 v30 대비 열위 → **v30 baseline 유지,
+  arm C(v33 Phase 0) 미채택**.
+- **다음**: ① Phase 0 결과 선택(사용자) — n>34/대형 bag 개선을 실질 이득으로 볼지,
+  소형 희생 trade-off를 감수할지. ② frozen-v30 multi-resolution probe(Phase 1,
+  paired AUROC +0.01 headroom) — 아키텍처 가설은 여전히 미검증(§39). ③ ICI 잠금 유지.
+- 예측 파일: `predictions/synthetic_v33_phase0_armC_topup_e125_legacy_1000ep.pt`,
+  `predictions/musk_v33_armC_e125.pt`, `predictions/pathobench_{task}_v30_allctx_full.pt` (5개).
+- 참고: `test_pathobench.py`에 `--context-max-tiles`(context만 절단, query 무제한) 옵션
+  추가 — 컨텍스트 크기 격리 실험용(이번엔 미사용).
