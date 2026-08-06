@@ -1413,3 +1413,31 @@ v30 baseline은 문서값과 **정확히 재현**(0.8539) — 체크포인트/�
 - **재실행**: `python scripts/test_pathobench.py --checkpoint <ckpt> --csv
   /NHNHOME/kimds/Data/PathoBench/csv/<task>.csv`. 전처리는
   `python scripts/prepare_pathobench.py --csv ...` 1회.
+
+### all-context (전체 타일) — 5개 task 확장 (2026-08-06)
+
+**상태**: sample-context가 대부분 랜덤~약상승이어서, 강세(LUAD)·약세(BRCA, PDA)·원래
+벤치마크를 고르게 대표하는 **5개 task**를 `--context-mode all`(모든 train 슬라이드,
+전체 타일)로 재평가.
+
+- **OOM 수정**: 전체 타일 all-context를 패딩 dense 경로(`forward_episode_batch`)로
+  돌리면 `[bags, max_cells, slots, dim]` 차이 텐서가 최대 bag 크기에 맞춰 폭발(69GB)
+  → **ragged per-episode 경로**(`model.forward(x_list, y, mask_index)`, bag별 개별
+  처리)로 전환. 메모리는 bag당으로 안전, 결과는 패딩 경로와 동일(1e-4 검증됨).
+- **결과 (전체 타일, epoch 88, 단일 테스트)**:
+
+  | task | test n | sample AUROC | **all AUROC** | Acc | BAcc |
+  |---|---|---|---|---|---|
+  | cptac_brca_tp53 | 22 | 0.420 | **0.696** | 0.545 | 0.616 |
+  | cptac_luad_tp53 | 59 | 0.612 | **0.625** | 0.576 | 0.557 |
+  | cptac_luad_stk11 | 67 | 0.682 | **0.786** | 0.776 | 0.785 |
+  | cptac_lscc_arid1a | 67 | 0.631 | **0.748** | 0.821 | 0.648 |
+  | cptac_pda_smad4 | 55 | 0.309 | **0.679** | 0.746 | 0.624 |
+
+- **해석**: all-context가 전 task에서 sample 대비 개선. 특히 랜덤 이하였던
+  **PDA smad4(0.309→0.679)**, **BRCA(0.420→0.696)**가 큰 반전. LUAD stk11 0.786,
+  LSCC arid1a 0.748로 강세. LUAD tp53만 소폭(0.625). **컨텍스트 규모(전체 train
+  슬라이드, 전체 타일)가 성능의 핵심 요인**임을 다시 확인.
+- **파일**: `predictions/pathobench_{task}_armC_batch2_e88_allctx_full.pt` 5개,
+  로그 `predictions/allctx_full_5.log`. BRACS coarse 데이터(캐시 2개 + 예측 2개)는
+  multi-class 제외에 따라 삭제 (원본 `features/BRACS/`는 보존).

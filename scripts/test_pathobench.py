@@ -283,38 +283,21 @@ def main() -> None:
                     context_ids.extend(pool[index] for index in permutation)
                 context_bags = [projected[slide] for slide in context_ids]
             query_bag = projected[query_id]
-            # Pad the episode into one dense batch and use the vectorized
-            # batched path (the per-bag list path was CPU-bound, leaving the
-            # GPU idle).
+            # Use the ragged per-episode path (list of bags). Each bag is
+            # processed individually, so full-tile all-context episodes (up to
+            # tens of thousands of cells per slide) fit in memory — padding
+            # every bag to the largest one on the dense batched path OOMs
+            # (the [bags, max_cells, slots, dim] difference tensor explodes).
             episode_bags = [*context_bags, query_bag]
-            n_bags = len(episode_bags)
-            max_cells = max(bag.shape[0] for bag in episode_bags)
-            dim = episode_bags[0].shape[-1]
-            padded_x = episode_bags[0].new_zeros((1, n_bags, max_cells, dim))
-            cell_mask = episode_bags[0].new_zeros(
-                (1, n_bags, max_cells), dtype=torch.bool
-            )
-            for bag_index, bag in enumerate(episode_bags):
-                count = bag.shape[0]
-                cell_mask[0, bag_index, :count] = True
-                padded_x[0, bag_index, :count] = bag
-            bag_mask = torch.ones(1, n_bags, dtype=torch.bool, device=device)
             episode_y = torch.tensor(
-                [[train_y[s] for s in context_ids] + [test_y[query_id]]],
+                [train_y[s] for s in context_ids] + [test_y[query_id]],
                 dtype=torch.long,
                 device=device,
             )
-            mask_index = torch.tensor([[len(context_ids)]], device=device)
-            logits = model.model.forward_episode_batch(
-                padded_x,
-                episode_y,
-                mask_index,
-                return_auxiliary=False,
-                cell_mask=cell_mask,
-                bag_mask=bag_mask,
-            )
+            mask_index = torch.tensor([len(context_ids)], device=device)
+            logits = model.model.forward(episode_bags, episode_y, mask_index)
             probability = float(
-                torch.softmax(logits.float(), dim=-1)[0, 0, 1].item()
+                torch.softmax(logits.float(), dim=-1)[0, 1].item()
             )
             if probability != probability:
                 nan_count += 1
