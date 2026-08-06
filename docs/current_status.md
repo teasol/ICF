@@ -1170,7 +1170,8 @@ gate 통과 실패.
   - arm B legacy: **0.8500 [0.839, 0.861]** vs v30 committed 0.8512 [0.840, 0.862]
     → 회귀 **-0.0012**, paired `P(arm B beats v30)=0.04`(에피소드·태스크 매칭 확인).
   - arm C legacy: **0.8139 [0.802, 0.825]** vs v30 committed 0.8512 [0.840, 0.862]
-    → 회귀 **+0.0373**. (paired CI 결과는 §42 추가 대기)
+    → 회귀 **+0.0373**, paired `P(arm C beats v30)=0.00` (5000 bootstrap) — CI가
+    겹치지 않고 v30이 사실상 100% 우세. 회귀는 통계적으로 확정적.
 - **Gate 판정**:
 
   | Gate | arm B | arm C |
