@@ -1,12 +1,28 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-06` — arm C top-up 8×A6000 DDP 재개 + NCCL P2P hang 수정(`NCCL_P2P_DISABLE=1`).
+**Last updated**: `2026-08-07` — 아키텍처 효율화(MLA-slot) + v34-1536 대규모 컨텍스트 학습 완주 + PathoBench 5-fold CV.
 
 **Confirmed baseline**: v30 = v24 residual+bottleneck bag projection + B1
 `bag_representation: poolz_l2` + B2 log-uniform cardinality `[1,1024]`. Musk zero-shot
 `0.8539`, 기존 대형 합성 분포 `0.9483`; 상세는 [`current_status.md`](current_status.md)
 §29·§28이다. 코드 기본 `bag_representation`은 checkpoint/config의 조용한 의미 변경을 막기
 위해 계속 `legacy`다.
+
+**Active — v34 large-context + 아키텍처 효율화 (2026-08-07)**: PathoBench 규모(3k~30k+ 타일)
+컨텍스트 학습을 위한 MLA 계열 효율화를 커밋·적용했다. ① `src/models/mla.py` standalone
+MLA(`bfaee6a`), ② aggregator **slot MLA 저랭크 affinity** (`aggregator_slot_latent_dim`/
+`slot_query_latent_dim`/`slot_affinity_dim` + `slot_w_dq/dkv/uq/uk`, `e98b3e2` — None이면
+full-dim dot과 byte-identical, 파라미터 0), ③ **slot_std 분산 트릭**(`17a1c36`, [cells,slots,dim]
+텐서 제거, default 경로 byte-identical), ④ **배치 population candidates**
+(`_population_candidates_batched`, `7700e85` — 수치 동일, **훈련 전용**), ⑤ **정규화 통합**
+(`_instances_are_unit`, `778b40b` — 수치 동일). eval은 항상 per-bag 루프(배치 경로의
+[C,max_cells,1536] 패딩 OOM 방지, `000aead`). config: `train_v34_phase0_largectx_512.yaml`
+([1,32768]) / `..._1536.yaml`(1536-d, [1,8192]), 둘 다 scratch + slot MLA. **v34-1536
+(1024ep×50, batch=4, fp32) 완주** — best val_ce 0.4419
+(`checkpoints/20260806_215800/v34_phase0_largectx_1536/epoch=048-...`). PathoBench **5-fold CV**
+(`test_pathobench.py --cv-folds N`, raw 1536-d no-PCA, train+test 전체 슬라이드 stratified,
+영구 `data/pathobench/{task}_cvfold{i}.pt`로 h5 재읽기 방지) 평균 **fold-mean 0.905 / pooled
+0.902**. v30과 CV 직접 비교는 **PCA-per-fold 미지원으로 보류**. 상세 §49.
 
 **Rejected candidate — architecture v31 CCER-v2**: projection 전 aligned slot-center로
 support class prototype을 만들고, 기존 rare branch와 독립인 support/query encoder에서

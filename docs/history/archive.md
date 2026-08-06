@@ -93,6 +93,150 @@ section keeps its original heading so cross-references still resolve.
 
 ---
 
+## 33. 2026-08-05 — v31 CCER-v2 아키텍처 구현 완료 (학습 미시작)
+
+**상태**: CCER-Lite 실패 분석을 반영한 독립 아키텍처 구현과 회귀 검증 완료. 기존
+CCER-Lite와 해당 체크포인트는 재현성을 위해 그대로 보존했다.
+
+### 변경점
+
+- class prototype은 bag projection 이후 memory가 아니라 **projection 전 aligned
+  slot-center**에서 직접 만든다.
+- query cell encoder와 support prototype encoder를 기존 rare branch와 완전히 분리했다.
+- evidence route는 cardinality와 무관한 `Top-1`, 미세 population용 `Top-4`, dense
+  shift용 `mean` 세 경로다.
+- router는 어떤 route도 제거할 수 없도록 총 `0.30`의 route floor를 갖는다.
+- 별도 null gate를 제거하고 class-centered logits만 사용한다.
+- 새 output head를 0으로 초기화해 v30 checkpoint 주입 직후 전체 logits를 정확히
+  보존한다. 첫 update에는 output head가 열리고 이후 encoder/router로 gradient가
+  전달되는 staged adaptation이다.
+- optimizer는 CCER-v2에 base LR, v30 backbone에 `0.05x` LR을 사용한다.
+- Lightning resume와 분리된 `--init-checkpoint` weight-only 초기화를 추가했다.
+
+### 설정과 검증
+
+- Config: `configs/train_v31_ccer_v2.yaml` (v30 data/task distribution 그대로 상속,
+  20 epochs, v30 best warm-start).
+- 신규/기존 CCER targeted tests: **6 tests, OK**.
+- 실제 v30 best checkpoint load: 신규 tensor 21개와 architecture marker만 missing,
+  unexpected key 0개.
+- 동일 synthetic episode에서 warm-start v30과 v31-v2의 초기 logit 최대 차이:
+  **`0.0`**.
+- route floor, Top-1 background invariance, dense/single-episode path 동치, zero-init
+  gradient staging을 검증했다.
+
+학습은 아직 시작하지 않았다. architecture correctness가 확보된 이 상태를 고정한 뒤
+단일 20-epoch 방향성 run을 실행하면 된다.
+
+---
+
+## 34. 2026-08-05 — v31 CCER-v2 20-epoch 학습 시작
+
+**상태**: 완료. 최종 수치와 artifact 검증은 §35로 통합했다.
+
+- Run time: `20260805_123630`
+- Config: `configs/train_v31_ccer_v2.yaml`
+- Log: `logs/20260805_123630/v31_ccer_v2.out`
+- Checkpoints: `checkpoints/20260805_123630/v31_ccer_v2/`
+- Initialization: v30 best
+  `epoch=048-val_ce_loss=0.4442.ckpt` weight-only load, 신규 tensor 21개 유지.
+- GPU: B200 device 0, single process.
+- 시작 검증: CUDA 연결, sanity validation 2/2 통과, epoch 0 진입 확인.
+
+초기 detached launcher가 worker 생성 전에 종료되어 checkpoint/log를 만들지 않았고, 같은
+run 경로를 foreground persistent session으로 재시작했다. 중복 학습 없이 20 epochs를
+정상 완주했다.
+
+---
+
+## 35. 2026-08-05 — CCER-v2 구현·검증·20 epoch 학습 완료
+
+**상태**: architecture-first 변경과 seed 42 방향성 학습 완료. 합성/Musk 평가는 대기 중이며
+v30은 계속 확정 baseline이다.
+
+### 구현과 안전 조건
+
+- `src/models/baseline.py`: projection 전 class-slot prototype, 독립 support/query encoder,
+  class-centered `Top-1/Top-4/mean` evidence router, 총 route floor `0.30`, zero-init output head.
+- `scripts/train.py` / `src/utils/utils.py`: Lightning resume와 분리된 `--init-checkpoint`
+  weight-only warm-start.
+- `src/modules/model_interface.py`: CCER-v2 base LR + v30 backbone `0.05x` param groups와
+  contribution/route diagnostics logging.
+- 실제 v30 best load에서 신규 CCER-v2 tensor 21개만 missing, unexpected 0개였고 동일
+  episode 초기 logit 최대 차이는 정확히 `0.0`이었다.
+- targeted CCER tests 6개와 ModelInterface tests 14개 통과. `git diff --check`와 변경 Python
+  파일 compile도 통과했다.
+
+### 학습 결과와 artifact 생존 확인
+
+- Run / seed / epochs: `20260805_123630` / `42` / `20`.
+- Log: `logs/20260805_123630/v31_ccer_v2.out`.
+- Checkpoints: `checkpoints/20260805_123630/v31_ccer_v2/`.
+- `last.ckpt`와 epoch 18/19 checkpoint가 `2026-08-05 13:04~13:06`, 각
+  `118,523,863` bytes로 생성됐고 log는 `max_epochs=20 reached`를 기록했다.
+- Best: epoch 18, `val_ce_loss=0.443786`, `val_loss=0.477892`, `val_auroc=0.825494`.
+- Best validation CCER-v2 diagnostics: logit std `0.051835`, residual scale `0.141363`,
+  route entropy `0.651253`. CCER-Lite의 `~1.4e-4` contribution과 달리 새 branch가 실제로
+  활성화됐지만 성능 승격 여부는 아직 판단할 수 없다.
+
+### 다음 Action (완료)
+
+1. epoch 18 best checkpoint로 기존 고정 protocol의 synthetic 평가를 실행한다. (완료: AUROC 0.8514)
+2. 같은 checkpoint로 Musk overall 및 4개 cardinality band를 평가한다. (완료: AUROC 0.8470)
+3. 평가 수치 기반 승격 여부 판단: v30 baseline 유지 결정.
+
+---
+
+## 36. 2026-08-05 — v31 CCER-v2 Epoch 18 합성/Musk 평가 완료 (v30 Baseline 유지)
+
+**상태**: Epoch 18 best checkpoint (`epoch=018-val_ce_loss=0.4438.ckpt`)에 대한 합성 1,000 episode 및 Musk zero-shot 평가를 완료했다. 수치상 v30 baseline 대비 승격 기준을 충족하지 못하므로 **v30 확정 Baseline을 지속 유지**한다.
+
+### 1. 실측 수치 요약
+
+- **Synthetic Validation (1,000 episodes, 16,330 queries)**:
+  - Overall AUROC: `0.8514` [95% CI 0.840, 0.862] (Log loss: `0.4650`)
+  - Per-task AUROC: `combined` 0.9514, `composition` 0.8824, `state` 0.8194, `interaction` 0.8125, `covariance` 0.7164
+  - Saved predictions: `predictions/synthetic_v31_ccer_v2.pt`
+- **Musk Zero-Shot Meta-Test (102 bags)**:
+  - Overall AUROC: `0.8470` [0.765, 0.919] (Accuracy: 0.7941, Balanced acc: 0.7894, Log loss: 0.4818)
+  - Saved predictions: `predictions/musk_v31_ccer_v2.pt`
+  - Cardinality Stratification:
+    - `ALL`: `0.847` [0.76, 0.92] (v30 baseline: `0.854`)
+    - `n <= 4`: `0.792` [0.53, 0.98] (v30 baseline: `0.800`)
+    - `5 .. 10`: `0.842` [0.64, 0.99] (v30 baseline: `0.833`)
+    - `11 .. 34`: `0.933` [0.81, 1.00] (v30 baseline: `0.958`)
+    - `n > 34`: `0.698` [0.37, 0.98] (v30 baseline: `0.698`)
+
+### 2. 판정 및 결론
+
+- CCER-v2는 residual scale `0.141` 및 독립 support/query encoder 구조를 통해 CCER-Lite의 브랜치 묻힘 현상을 완벽히 해결했으나, 최종 Musk AUROC `0.8470` 및 합성 AUROC `0.8514`로 v30 baseline (Musk `0.854`)을 능가하지 못함.
+- 수칙과 사전 승격 기준에 따라 **v30 S2가 확정 Baseline을 지속 유지**하며, CCER-v2는 실험 후보 기록으로 보존한다.
+- ICI 잠금은 유지한다.
+
+---
+
+## 37. 2026-08-05 — CCER-v2 결과 기반 v32 DR-CCER proposal 작성
+
+**상태**: 제안서 작성만 완료. 구현·학습은 시작하지 않았고 v30 baseline은 변경 없다.
+
+- 문서: [`history/architecture_v32_dr_ccer_proposal.md`](history/architecture_v32_dr_ccer_proposal.md)
+- paired 점추정 재분석: synthetic v30→CCER-v2 `+0.00025`, prediction correlation
+  `0.99928`, class flip `1.21%`; Musk `-0.00692`, correlation `0.99311`, class flip
+  `1.96%`; Musk `n>34`는 `0.69841→0.69841`로 변화 없음.
+- epoch 18의 `val_ccer_v2_logit_std=0.05184`, residual scale `0.14136`이므로 실효
+  contribution은 약 `0.00733` logit SD다. branch 활성화와 유용한 보완 정보 학습은
+  구분해야 한다.
+- 제안 방향: donor-resolved support bank + null-contrasted multi-scale query scan +
+  standalone evidence expert + reliability-gated convex mixture + B2b within-episode
+  cardinality mixing.
+- **바로 다음 단계**: full v32 구현 전에 P0(분기/백본 delta 분리), P1(standalone
+  evidence 진단), P2(episode-grouped fusion upper bound)만 구현·실행한다.
+- 최신 git의 rare slot 4→8 실험은 동일 커밋을 즉시 revert하여 현재 활성 config/run이
+  없다. proposal은 해당 단순 capacity 확대를 후속 방향으로 권고하지 않는다.
+
+---
+
+
 ## 4. v22 결정: retrieval 완전 제거 (2026-07-29)
 
 ### 제거 근거 (3대 가설 검증 결과)

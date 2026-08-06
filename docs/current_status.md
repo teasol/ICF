@@ -1,19 +1,20 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-06` (**§48 arm C top-up 완주(150ep, best e125) + v33 평가: legacy 회귀 gate 미달(+0.041, 과소학습 가설 기각), Musk n>34 개선 유지, PathoBench는 v30 우위** + **§47 e125 기준 확정/타일 스윕**)
+**Last updated**: `2026-08-07` (**§49 아키텍처 효율화(MLA-slot) + v34-1536 대규모 컨텍스트 학습(1024×50, batch=4) 완주 + PathoBench 5-fold CV(평균 pooled 0.902)** + **§48 arm C 완주/v33 평가** + **§47 e125 기준 확정/타일 스윕**)
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
-* **다음 Action**: Phase 0 결과 선택(사용자) — arm C의 Musk n>34(0.698→0.849)·PathoBench lscc 개선을 실질 이득으로 볼지, 크기-재배분 trade-off(소형 희생)를 감수할지 → frozen-v30 multi-resolution probe(Phase 1, paired AUROC +0.01) — 아키텍처 가설은 여전히 미검증(§39). ICI 잠금 유지.
+* **v34 (신규, §49)**: 아키텍처 효율화(MLA-slot 저랭크 affinity, slot_std 분산 트릭, 배치 population candidates, 정규화 통합)로 대규모 컨텍스트 학습이 가능해졌다. **v34-1536(1024ep×50, batch=4, fp32) 완주** — best val_ce **0.4419**(v30 0.4442보다 소폭 하회). PathoBench **5-fold CV**(train+test 전체 슬라이드, raw 1536-d no-PCA, all-context) 평균 **fold-mean 0.905 / pooled 0.902** (LUAD 계열 0.94~0.98 강세). v30과의 직접 CV 비교는 **PCA-per-fold 미지원으로 보류**.
+* **다음 Action**: ① v34-1536 Musk zero-shot 평가, ② v30 vs v34 공정 비교용 **PCA-per-fold CV** (현재 CV는 raw 1536-d 전용), ③ v34-512 학습, ④ Phase 0 결과 선택(사용자) — arm C의 n>34(0.849)·lscc 개선 채택 여부, ⑤ v30 medium 참조 재학습, ⑥ frozen-v30 multi-resolution probe(§39, 아키텍처 가설 여전히 미검증). ICI 잠금 유지.
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§48 (arm C top-up 완주 + v33 평가: legacy gate 미달, PathoBench v30 우위)**, **§47 (e125 재평가/타일 스윕)**, **§46 (PathoBench zero-shot 평가)**, **§45 (arm C top-up 중간 Musk 신호 — 대형 bag 개선)**, **§44 (B2b 패딩 배칭, 병목 프로파일)**, **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
+**Read first if you are picking this up**: **§49 (아키텍처 효율화 MLA-slot + v34-1536 대규모 컨텍스트 학습 완주 + PathoBench 5-fold CV)**, **§48 (arm C top-up 완주 + v33 평가: legacy gate 미달, PathoBench v30 우위)**, **§47 (e125 재평가/타일 스윕)**, **§46 (PathoBench zero-shot 평가)**, **§45 (arm C top-up 중간 Musk 신호 — 대형 bag 개선)**, **§44 (B2b 패딩 배칭, 병목 프로파일)**, **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
 **§36 (CCER-v2 평가)**, **§29 (v30 확정 baseline)**.
 
-**열린 과제**: ① v30 six-task 효과 분리, ② B2b within-episode cardinality 효과 분리, ③ frozen-v30 multi-resolution headroom, ④ v30 medium 참조 재학습, ⑤ ICI 잠금 유지. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
+**열린 과제**: ① v34-512 학습 + v34-1536 Musk 평가, ② v30 vs v34 CV 공정 비교(PCA-per-fold), ③ v30 six-task 효과 분리, ④ B2b within-episode cardinality 효과 분리, ⑤ frozen-v30 multi-resolution headroom, ⑥ v30 medium 참조 재학습, ⑦ ICI 잠금 유지. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
 
 **Branches**: `main` = v30 확정 baseline + 미채택 v31 CCER-v2 재현 코드. 참고용 branch/tag 구조는
 [`history/branch_structure.md`](history/branch_structure.md).
@@ -808,146 +809,33 @@ CCER-Lite 구현과 학습 기록은 contribution이 `~1.4e-4`로 사실상 비�
 
 ---
 
-## 33. 2026-08-05 — v31 CCER-v2 아키텍처 구현 완료 (학습 미시작)
+## 33. 2026-08-05 — v31 CCER-v2 아키텍처 구현 완료 (학습 미시작) (아카이브됨)
 
-**상태**: CCER-Lite 실패 분석을 반영한 독립 아키텍처 구현과 회귀 검증 완료. 기존
-CCER-Lite와 해당 체크포인트는 재현성을 위해 그대로 보존했다.
-
-### 변경점
-
-- class prototype은 bag projection 이후 memory가 아니라 **projection 전 aligned
-  slot-center**에서 직접 만든다.
-- query cell encoder와 support prototype encoder를 기존 rare branch와 완전히 분리했다.
-- evidence route는 cardinality와 무관한 `Top-1`, 미세 population용 `Top-4`, dense
-  shift용 `mean` 세 경로다.
-- router는 어떤 route도 제거할 수 없도록 총 `0.30`의 route floor를 갖는다.
-- 별도 null gate를 제거하고 class-centered logits만 사용한다.
-- 새 output head를 0으로 초기화해 v30 checkpoint 주입 직후 전체 logits를 정확히
-  보존한다. 첫 update에는 output head가 열리고 이후 encoder/router로 gradient가
-  전달되는 staged adaptation이다.
-- optimizer는 CCER-v2에 base LR, v30 backbone에 `0.05x` LR을 사용한다.
-- Lightning resume와 분리된 `--init-checkpoint` weight-only 초기화를 추가했다.
-
-### 설정과 검증
-
-- Config: `configs/train_v31_ccer_v2.yaml` (v30 data/task distribution 그대로 상속,
-  20 epochs, v30 best warm-start).
-- 신규/기존 CCER targeted tests: **6 tests, OK**.
-- 실제 v30 best checkpoint load: 신규 tensor 21개와 architecture marker만 missing,
-  unexpected key 0개.
-- 동일 synthetic episode에서 warm-start v30과 v31-v2의 초기 logit 최대 차이:
-  **`0.0`**.
-- route floor, Top-1 background invariance, dense/single-episode path 동치, zero-init
-  gradient staging을 검증했다.
-
-학습은 아직 시작하지 않았다. architecture correctness가 확보된 이 상태를 고정한 뒤
-단일 20-epoch 방향성 run을 실행하면 된다.
+CCER-v2 아키텍처 구현·검증 기록. §38에서 CCER 계열 폐기 판정으로 대체. 본문은 [`history/archive.md`](history/archive.md#2026-08-05-v31-ccer-v2-아키텍처-구현-완료-학습-미시작)로 이동했다.
 
 ---
 
-## 34. 2026-08-05 — v31 CCER-v2 20-epoch 학습 시작
+## 34. 2026-08-05 — v31 CCER-v2 20-epoch 학습 시작 (아카이브됨)
 
-**상태**: 완료. 최종 수치와 artifact 검증은 §35로 통합했다.
-
-- Run time: `20260805_123630`
-- Config: `configs/train_v31_ccer_v2.yaml`
-- Log: `logs/20260805_123630/v31_ccer_v2.out`
-- Checkpoints: `checkpoints/20260805_123630/v31_ccer_v2/`
-- Initialization: v30 best
-  `epoch=048-val_ce_loss=0.4442.ckpt` weight-only load, 신규 tensor 21개 유지.
-- GPU: B200 device 0, single process.
-- 시작 검증: CUDA 연결, sanity validation 2/2 통과, epoch 0 진입 확인.
-
-초기 detached launcher가 worker 생성 전에 종료되어 checkpoint/log를 만들지 않았고, 같은
-run 경로를 foreground persistent session으로 재시작했다. 중복 학습 없이 20 epochs를
-정상 완주했다.
+CCER-v2 20-epoch 학습 시작 기록. §38에서 폐기 판정. 본문은 [`history/archive.md`](history/archive.md#2026-08-05-v31-ccer-v2-20-epoch-학습-시작)로 이동했다.
 
 ---
 
-## 35. 2026-08-05 — CCER-v2 구현·검증·20 epoch 학습 완료
+## 35. 2026-08-05 — CCER-v2 구현·검증·20 epoch 학습 완료 (아카이브됨)
 
-**상태**: architecture-first 변경과 seed 42 방향성 학습 완료. 합성/Musk 평가는 대기 중이며
-v30은 계속 확정 baseline이다.
-
-### 구현과 안전 조건
-
-- `src/models/baseline.py`: projection 전 class-slot prototype, 독립 support/query encoder,
-  class-centered `Top-1/Top-4/mean` evidence router, 총 route floor `0.30`, zero-init output head.
-- `scripts/train.py` / `src/utils/utils.py`: Lightning resume와 분리된 `--init-checkpoint`
-  weight-only warm-start.
-- `src/modules/model_interface.py`: CCER-v2 base LR + v30 backbone `0.05x` param groups와
-  contribution/route diagnostics logging.
-- 실제 v30 best load에서 신규 CCER-v2 tensor 21개만 missing, unexpected 0개였고 동일
-  episode 초기 logit 최대 차이는 정확히 `0.0`이었다.
-- targeted CCER tests 6개와 ModelInterface tests 14개 통과. `git diff --check`와 변경 Python
-  파일 compile도 통과했다.
-
-### 학습 결과와 artifact 생존 확인
-
-- Run / seed / epochs: `20260805_123630` / `42` / `20`.
-- Log: `logs/20260805_123630/v31_ccer_v2.out`.
-- Checkpoints: `checkpoints/20260805_123630/v31_ccer_v2/`.
-- `last.ckpt`와 epoch 18/19 checkpoint가 `2026-08-05 13:04~13:06`, 각
-  `118,523,863` bytes로 생성됐고 log는 `max_epochs=20 reached`를 기록했다.
-- Best: epoch 18, `val_ce_loss=0.443786`, `val_loss=0.477892`, `val_auroc=0.825494`.
-- Best validation CCER-v2 diagnostics: logit std `0.051835`, residual scale `0.141363`,
-  route entropy `0.651253`. CCER-Lite의 `~1.4e-4` contribution과 달리 새 branch가 실제로
-  활성화됐지만 성능 승격 여부는 아직 판단할 수 없다.
-
-### 다음 Action (완료)
-
-1. epoch 18 best checkpoint로 기존 고정 protocol의 synthetic 평가를 실행한다. (완료: AUROC 0.8514)
-2. 같은 checkpoint로 Musk overall 및 4개 cardinality band를 평가한다. (완료: AUROC 0.8470)
-3. 평가 수치 기반 승격 여부 판단: v30 baseline 유지 결정.
+CCER-v2 구현·20 epoch 학습 완료 기록. §38에서 폐기 판정. 본문은 [`history/archive.md`](history/archive.md#2026-08-05-ccer-v2-구현검증20-epoch-학습-완료)로 이동했다.
 
 ---
 
-## 36. 2026-08-05 — v31 CCER-v2 Epoch 18 합성/Musk 평가 완료 (v30 Baseline 유지)
+## 36. 2026-08-05 — v31 CCER-v2 Epoch 18 합성/Musk 평가 완료 (v30 Baseline 유지) (아카이브됨)
 
-**상태**: Epoch 18 best checkpoint (`epoch=018-val_ce_loss=0.4438.ckpt`)에 대한 합성 1,000 episode 및 Musk zero-shot 평가를 완료했다. 수치상 v30 baseline 대비 승격 기준을 충족하지 못하므로 **v30 확정 Baseline을 지속 유지**한다.
-
-### 1. 실측 수치 요약
-
-- **Synthetic Validation (1,000 episodes, 16,330 queries)**:
-  - Overall AUROC: `0.8514` [95% CI 0.840, 0.862] (Log loss: `0.4650`)
-  - Per-task AUROC: `combined` 0.9514, `composition` 0.8824, `state` 0.8194, `interaction` 0.8125, `covariance` 0.7164
-  - Saved predictions: `predictions/synthetic_v31_ccer_v2.pt`
-- **Musk Zero-Shot Meta-Test (102 bags)**:
-  - Overall AUROC: `0.8470` [0.765, 0.919] (Accuracy: 0.7941, Balanced acc: 0.7894, Log loss: 0.4818)
-  - Saved predictions: `predictions/musk_v31_ccer_v2.pt`
-  - Cardinality Stratification:
-    - `ALL`: `0.847` [0.76, 0.92] (v30 baseline: `0.854`)
-    - `n <= 4`: `0.792` [0.53, 0.98] (v30 baseline: `0.800`)
-    - `5 .. 10`: `0.842` [0.64, 0.99] (v30 baseline: `0.833`)
-    - `11 .. 34`: `0.933` [0.81, 1.00] (v30 baseline: `0.958`)
-    - `n > 34`: `0.698` [0.37, 0.98] (v30 baseline: `0.698`)
-
-### 2. 판정 및 결론
-
-- CCER-v2는 residual scale `0.141` 및 독립 support/query encoder 구조를 통해 CCER-Lite의 브랜치 묻힘 현상을 완벽히 해결했으나, 최종 Musk AUROC `0.8470` 및 합성 AUROC `0.8514`로 v30 baseline (Musk `0.854`)을 능가하지 못함.
-- 수칙과 사전 승격 기준에 따라 **v30 S2가 확정 Baseline을 지속 유지**하며, CCER-v2는 실험 후보 기록으로 보존한다.
-- ICI 잠금은 유지한다.
+CCER-v2 epoch 18 합성/Musk 평가(v30 미달) 기록. §38에서 폐기 판정. 본문은 [`history/archive.md`](history/archive.md#2026-08-05-v31-ccer-v2-epoch-18-합성musk-평가-완료-v30-baseline-유지)로 이동했다.
 
 ---
 
-## 37. 2026-08-05 — CCER-v2 결과 기반 v32 DR-CCER proposal 작성
+## 37. 2026-08-05 — CCER-v2 결과 기반 v32 DR-CCER proposal 작성 (아카이브됨)
 
-**상태**: 제안서 작성만 완료. 구현·학습은 시작하지 않았고 v30 baseline은 변경 없다.
-
-- 문서: [`history/architecture_v32_dr_ccer_proposal.md`](history/architecture_v32_dr_ccer_proposal.md)
-- paired 점추정 재분석: synthetic v30→CCER-v2 `+0.00025`, prediction correlation
-  `0.99928`, class flip `1.21%`; Musk `-0.00692`, correlation `0.99311`, class flip
-  `1.96%`; Musk `n>34`는 `0.69841→0.69841`로 변화 없음.
-- epoch 18의 `val_ccer_v2_logit_std=0.05184`, residual scale `0.14136`이므로 실효
-  contribution은 약 `0.00733` logit SD다. branch 활성화와 유용한 보완 정보 학습은
-  구분해야 한다.
-- 제안 방향: donor-resolved support bank + null-contrasted multi-scale query scan +
-  standalone evidence expert + reliability-gated convex mixture + B2b within-episode
-  cardinality mixing.
-- **바로 다음 단계**: full v32 구현 전에 P0(분기/백본 delta 분리), P1(standalone
-  evidence 진단), P2(episode-grouped fusion upper bound)만 구현·실행한다.
-- 최신 git의 rare slot 4→8 실험은 동일 커밋을 즉시 revert하여 현재 활성 config/run이
-  없다. proposal은 해당 단순 capacity 확대를 후속 방향으로 권고하지 않는다.
+v32 DR-CCER proposal 작성 기록. §38에서 폐기 판정. 본문은 [`history/archive.md`](history/archive.md#2026-08-05-ccer-v2-결과-기반-v32-dr-ccer-proposal-작성)로 이동했다.
 
 ---
 
@@ -1597,3 +1485,79 @@ seed 42) 5-task 평가. 예측 파일 `predictions/pathobench_{task}_v30_allctx_
   `predictions/musk_v33_armC_e125.pt`, `predictions/pathobench_{task}_v30_allctx_full.pt` (5개).
 - 참고: `test_pathobench.py`에 `--context-max-tiles`(context만 절단, query 무제한) 옵션
   추가 — 컨텍스트 크기 격리 실험용(이번엔 미사용).
+
+---
+
+## 49. 2026-08-07 — 아키텍처 효율화(MLA-slot) + v34-1536 대규모 컨텍스트 학습 완주 + PathoBench 5-fold CV
+
+**상태**: v30 baseline 유지. 대규모 컨텍스트 학습을 가능하게 한 아키텍처 효율화 작업(MLA 계열)을
+커밋·정리하고, **v34-1536(1024ep×50, batch=4) 학습을 완주**했다. PathoBench zero-shot 평가를
+**5-fold CV**(전체 슬라이드, raw 1536-d)로 확장해 v34-1536을 평가했다.
+
+### 1. 아키텍처 효율화 스택 (전부 커밋, 직전 세션 미문서화분 정리)
+
+- `bfaee6a` **MLA 레이어** (`src/models/mla.py`): standalone MultiheadLatentAttention —
+  W_DQ/UQ/DKV/UK/UV/O. 훈련(확장) vs 추론(KV-cache + matrix absorption) 동치 검증(5e-15).
+  d_c=512 → KV cache **64× 압축**.
+- `e98b3e2` **slot MLA 저랭크 affinity**: `slot_latent_dim`(d_c=64)/`slot_query_latent_dim`(128)/
+  `slot_affinity_dim`(512) + `slot_w_dq/dkv/uq/uk`. None이면 full-dim dot과 **byte-identical**, 파라미터 0.
+- `17a1c36` **slot_std 분산 트릭**: Var=E[X²]−E[X]², slot_distance=E_d[x²]−2(x·m)/dim+E_d[m²]
+  → `[cells,slots,dim]` 텐서 제거 (default 경로 byte-identical).
+- `7700e85` **배치 population candidates**: `_population_candidates_batched` — [C,max_cells,k]
+  단일 masked softmax (per-bag 대비 ~2×, 285→147ms @1.93M-cell). 수치 동일 (전 bag ≥32 cells일 때).
+- `778b40b` **정규화 통합**: `_instances_are_unit` — poolz_l2/centered+l2는 `_bag_view`에서 이미 unit
+  → `_forward_dense`/`_population_candidates_batched`의 중복 F.normalize 생략 (mean 157→152ms, peak 47.5→43.8GB).
+- `8571798` **smoke `--profiler`**: `scripts/smoke_train_budget.py` op-level 병목 테이블.
+- 병목 진화: topk/sort → _population_candidates → div/mean/AdamW (~152ms/step @[1,32768]).
+
+### 2. v34 config + 배치=4 판정
+
+- `40950de`/`1f2a23e`: `train_v34_phase0_largectx_512.yaml` ([1,32768], slot MLA) /
+  `..._1536.yaml` (1536-d, [1,8192]) — scratch.
+- 배치=4 스모크(1536): fp32 peak **85.5GB**(B200 178GB 중 48%). bf16 autocast는 **더 나쁨**
+  (peak 110.2GB, mean 669ms vs fp32 412ms — aggregator의 `.float()`/fallthrough가 autocast 이득 상쇄)
+  → **fp32 유지** (v30 baseline과도 일치). 스모크에 `--bf16` A/B 플래그 추가.
+
+### 3. v34-1536 학습 (1024×50, batch=4) — 완주
+
+- Run `20260806_215800`, `train_v34_phase0_largectx_1536.yaml` (1024 ep/epoch × 50 = 51,200 ep,
+  batch 4, fp32, slot MLA). 완주 ~50min (~5.5 it/s).
+- **best epoch=048: val_ce 0.4419 / val_auroc 0.8353** (v30 best 0.4442보다 소폭 하회 — 더 어려운
+  대규모 컨텍스트 분포에서도 수렴). 마지막까지 발산 없음.
+- 체크포인트: `checkpoints/20260806_215800/v34_phase0_largectx_1536/epoch=048-val_ce_loss=0.4419.ckpt`.
+
+### 4. PathoBench 5-fold CV (신규 도구) + 결과
+
+- `test_pathobench.py --cv-folds N`: **train+test 통합 전체 슬라이드에 stratified K-fold**. fold k는
+  나머지 N−1 fold가 all-context. per-fold + pooled AUROC 보고.
+- **영구 fold .pt 파일** (`data/pathobench/{task}_cvfold{i}.pt`, raw 1536-d): 1회 h5에서 생성,
+  이후 실행은 **h5/cache 완전 스킵** (동일 fold 분할, 체크포인트 간 공정 비교).
+- cache dim 버그 수정: 512-d 캐시는 input_dim==512일 때만 사용 (1536-d 모델의 캐시 오사용 방지).
+- eval OOM 수정 (`000aead`): `_context_anchors`의 배치 후보 경로를 **훈련 전용**으로 제한, eval은
+  **per-bag 루프** (수치 동일). 배치 경로가 [C,max_cells,1536] 패딩으로 luad_tp53/stk11/lscc에서
+  48-61GB OOM을 일으켰던 문제 해결.
+
+**결과** (raw 1536-d, all-context, 전체 타일):
+
+| task | slides | fold-mean | pooled |
+|---|---:|---:|---:|
+| brca_tp53 | 112 | 0.8600 | 0.8484 |
+| pda_smad4 | 242 | 0.8297 | 0.8314 |
+| luad_stk11 | 324 | **0.9745** | **0.9774** |
+| luad_tp53 | 324 | 0.9456 | 0.9442 |
+| lscc_arid1a | 304 | 0.9157 | 0.9083 |
+| **평균** | | **0.905** | **0.902** |
+
+- LUAD 계열 강세(stk11 0.977, tp53 0.944), lscc 0.908, brca 0.848, pda 0.831.
+  pda_smad4는 §46에서 랜덤 이하(0.309)였던 task가 5-fold에서 0.83까지 상승.
+- 예측: `predictions/pathobench_{task}_v34_1536_cv5.pt` (5개).
+- §48의 v30(train/test split, PCA 512-d) 평균 0.758과는 프로토콜이 달라 **직접 비교 불가**.
+
+### 5. 열린 과제
+
+- **v34-512 미학습** (512-d config만 준비). 학습 시 같은 fold 파일로 평가 가능.
+- **v30 vs v34 CV 비교 불가 (현재)**: CV는 raw 1536-d 전용 (PCA-per-fold 미지원).
+  공정 비교하려면 fold별 context-only PCA 로직이 필요.
+- **v34-1536 Musk zero-shot 평가 미실행** (musklike-easy).
+- v34-1536 합성 val_auroc ~0.835는 v30 synthetic(~0.95)보다 낮지만 분포가 달라 직접 비교 불가
+  — PathoBench가 실질 판정 기준.
