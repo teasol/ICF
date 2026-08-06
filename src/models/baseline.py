@@ -1071,25 +1071,75 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         candidates = weights.T @ normalized
         return F.normalize(candidates, dim=-1, eps=1e-6).to(bag.dtype)
 
+    def _population_candidates_batched(
+        self,
+        bags: list[torch.Tensor],
+    ) -> torch.Tensor:
+        """Batched ``_population_candidates`` over a list of bags.
+
+        Pads the bags to a common cell count and runs ONE masked softmax over
+        [C, max_cells, k] instead of C separate (cells, k) softmaxes, removing
+        the per-bag kernel-launch overhead (this was the dominant cost in large-
+        context episodes). Per-bag result is EXACT when every bag has at least
+        ``context_samples_per_bag`` cells (the large-context regime); otherwise
+        it falls back to the per-bag loop (candidate_count varies per bag).
+
+        Returns the same [n_candidates, dim] tensor as concatenating
+        ``_population_candidates`` over the bags, in bag-major order.
+        """
+        k = min(self.context_samples_per_bag, min(bag.shape[0] for bag in bags))
+        if k < self.context_samples_per_bag:
+            return torch.cat(
+                [self._population_candidates(bag) for bag in bags], dim=0
+            )
+        max_cells = max(bag.shape[0] for bag in bags)
+        lengths = torch.as_tensor(
+            [bag.shape[0] for bag in bags], device=bags[0].device
+        )
+        padded = torch.stack(
+            [
+                F.pad(bag.float(), (0, 0, 0, max_cells - bag.shape[0]))
+                for bag in bags
+            ]
+        )  # [C, max_cells, dim]
+        cell_mask = (
+            torch.arange(max_cells, device=padded.device)[None, :] < lengths[:, None]
+        )  # [C, max_cells]
+        normalized = F.normalize(padded, dim=-1, eps=1e-6)
+        directions = self._candidate_directions[:k].float()  # [k, dim]
+        scores = torch.einsum("cnd,kd->cnk", normalized, directions)
+        scores = scores.masked_fill(~cell_mask.unsqueeze(-1), float("-inf"))
+        weights = torch.softmax(scores.mul(10.0), dim=1)  # [C, max_cells, k]
+        candidates = torch.einsum("cnk,cnd->ckd", weights, normalized)  # [C, k, dim]
+        candidates = F.normalize(candidates, dim=-1, eps=1e-6).to(bags[0].dtype)
+        return candidates.reshape(-1, candidates.shape[-1])
+
     def _context_anchors(
         self,
         bags: list[torch.Tensor],
         context_mask: torch.Tensor,
         cell_masks: list[torch.Tensor] | None = None,
     ) -> torch.Tensor:
-        candidates = torch.cat(
-            [
-                self._population_candidates(
-                    bag,
-                    None if cell_masks is None else cell_masks[b_index],
-                )
-                for b_index, (bag, is_context) in enumerate(
-                    zip(bags, context_mask.tolist())
-                )
-                if is_context
-            ],
-            dim=0,
-        )
+        context_indices = [
+            b_index
+            for b_index, (_, is_context) in enumerate(
+                zip(bags, context_mask.tolist())
+            )
+            if is_context
+        ]
+        context_bags = [bags[b_index] for b_index in context_indices]
+        if cell_masks is None:
+            candidates = self._population_candidates_batched(context_bags)
+        else:
+            candidates = torch.cat(
+                [
+                    self._population_candidates(
+                        context_bags[i], cell_masks[context_indices[i]]
+                    )
+                    for i in range(len(context_bags))
+                ],
+                dim=0,
+            )
         if candidates.shape[0] < self.num_slots:
             raise ValueError(
                 "Context does not contain enough cells for population slots."

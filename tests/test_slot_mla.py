@@ -116,6 +116,25 @@ class TestSlotMla(unittest.TestCase):
         torch.testing.assert_close(std_trick, std_direct, atol=1e-5, rtol=1e-4)
         torch.testing.assert_close(dist_trick, dist_direct, atol=1e-5, rtol=1e-4)
 
+    def test_population_candidates_batched_matches_loop(self) -> None:
+        # Batched anchor-candidate pooling must equal the per-bag loop (the
+        # batched path when all bags >= context_samples_per_bag cells, and the
+        # fallback path when a bag is smaller).
+        normalize = torch.nn.functional.normalize
+        agg = _make_aggregator(context_samples_per_bag=32)
+        torch.manual_seed(0)
+        bags = [normalize(torch.randn(n, 64)) for n in (40, 50, 33)]
+        batched = agg._population_candidates_batched(bags)
+        loop = torch.cat([agg._population_candidates(b) for b in bags], dim=0)
+        self.assertEqual(tuple(batched.shape), tuple(loop.shape))
+        torch.testing.assert_close(batched, loop, atol=1e-5, rtol=1e-4)
+        # fallback path with a small bag (< context_samples_per_bag cells)
+        bags2 = [normalize(torch.randn(n, 64)) for n in (40, 10, 33)]
+        b2 = agg._population_candidates_batched(bags2)
+        l2 = torch.cat([agg._population_candidates(b) for b in bags2], dim=0)
+        self.assertEqual(tuple(b2.shape), tuple(l2.shape))
+        torch.testing.assert_close(b2, l2)
+
 
 if __name__ == "__main__":
     unittest.main()
