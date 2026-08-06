@@ -23,9 +23,20 @@ base_config: train_v30_cardinality_poolz_l2.yaml
 # Budget placeholder: episodes_per_epoch / max_epochs tuned after the smoke
 # test (large episodes are much heavier than v30's, so total episodes are
 # scaled down from v30's 204,800).
+# MLA-slot: low-rank cell->slot affinity (d_c=64) + exact variance-based
+# slot_std/slot_distance so the [cells, slots, dim] difference tensor is not
+# materialized — this is what makes large contexts trainable in memory.
+# Measured peak VRAM with slot_latent_dim=64: ~24 GiB at [1,16384]; ~2.3x for
+# the [1,32768] worst case (~55 GiB) — fits B200 180 GiB.
+model_overrides:
+  bag_representation: poolz_l2
+  aggregator_slot_latent_dim: 64
+  aggregator_slot_query_latent_dim: 128
+  aggregator_slot_affinity_dim: 512
+
 data_overrides:
   dataset_kwargs:
-    num_cells: [1, 16384]
+    num_cells: [1, 32768]
     episodes_per_epoch: 256
   episode_batch_size: 1
 

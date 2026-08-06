@@ -22,8 +22,14 @@ data_overrides:
     episodes_per_epoch: 256
   episode_batch_size: 1
 
+# MLA-slot: low-rank cell->slot affinity (d_c=64) + exact variance-based
+# slot_std/slot_distance (no [cells, slots, dim] tensor).
 model_overrides:
+  bag_representation: poolz_l2
   input_dim: 1536
+  aggregator_slot_latent_dim: 64
+  aggregator_slot_query_latent_dim: 128
+  aggregator_slot_affinity_dim: 512
 
 logger:
   name: csv
