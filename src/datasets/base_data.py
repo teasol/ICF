@@ -17,6 +17,8 @@ class ICIDataset(Dataset):
         seed=42,
         target_cells=1000,
         all_cell_mean=False,
+        input_dim=None,
+        pad_mode='tile',
     ):
         """
         Args:
@@ -24,6 +26,12 @@ class ICIDataset(Dataset):
             state (str): 상태 (e.g., 'train', 'test').
             root_dir (str): 데이터 파일이 위치한 디렉토리 경로.
             seed (int): 랜덤 시드 값.
+            input_dim (int, optional): 모델 입력 차원. 지정하면 셀 특성을 이
+                차원으로 매핑한다 (기본 ICI는 512-d scConcept).
+            pad_mode (str): input_dim 매핑 방식.
+                'tile' (default) = 특성을 floor(input_dim/feat_dim)회 반복하고
+                나머지만 zero-pad (Musk/PathoBench 타일 브리지와 동일).
+                'zero' = 앞 feat_dim만 채우고 나머지 zero.
         """
         self.cv = cv
         self.state = state
@@ -36,6 +44,8 @@ class ICIDataset(Dataset):
         self.target_col = 'Response' # 타겟 컬럼명 지정
         self.target_cells = target_cells
         self.all_cell_mean = bool(all_cell_mean)
+        self.input_dim = input_dim
+        self.pad_mode = pad_mode
         
         # 1. 파일 경로 구성
         if state == 'external':
@@ -111,5 +121,29 @@ class ICIDataset(Dataset):
              raise ValueError(f"알 수 없는 라벨 값입니다: {label_str} (Donor: {donor_id})")
              
         label = self.label_map[label_str]
+
+        # 3. input_dim 브리지: ICI는 512-d scConcept이므로, 더 큰 모델 입력
+        # 차원으로 타일/zero 패딩한다 (Musk/PathoBench 타일 브리지와 동일).
+        if self.input_dim is not None and bag_features.shape[1] != self.input_dim:
+            feat_dim = bag_features.shape[1]
+            if self.pad_mode == "tile":
+                n_repeat = self.input_dim // feat_dim
+                remainder = self.input_dim % feat_dim
+                blocks = [bag_features] * n_repeat
+                if remainder:
+                    blocks.append(
+                        torch.zeros(
+                            (bag_features.shape[0], remainder),
+                            dtype=bag_features.dtype,
+                        )
+                    )
+                bag_features = torch.cat(blocks, dim=1)
+            else:
+                padded = torch.zeros(
+                    (bag_features.shape[0], self.input_dim),
+                    dtype=bag_features.dtype,
+                )
+                padded[:, :feat_dim] = bag_features
+                bag_features = padded
         
         return bag_features, torch.tensor(label, dtype=torch.long)
