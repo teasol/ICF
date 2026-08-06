@@ -13,13 +13,23 @@ Zero-shot bridges (no retraining):
   * multi-class tasks are binarized (default: class 0 vs the rest) because the
     v30 model is a binary in-context classifier.
 
+All-context (every train slide as context, full tiles) is the default;
+sample-context is deprecated. `--max-tiles` randomly subsamples each bag
+(context and query) to a per-bag cap, and `--trials` repeats inference with
+different seeds to average over that subsampling randomness.
+
 Usage:
     python scripts/test_pathobench.py \
-        --checkpoint checkpoints/20260806_145050/v33_phase0_armC_ddp8_batch2/epoch=088-val_ce_loss=0.5282.ckpt \
+        --checkpoint checkpoints/20260806_145050/v33_phase0_armC_ddp8_batch2/epoch=125-val_ce_loss=0.5142.ckpt \
         --config configs/train_v33_phase0_armC_ddp8_batch2.yaml \
-        --csv /NHNHOME/kimds/Data/PathoBench/csv/bracs_coarse.csv \
+        --csv /NHNHOME/kimds/Data/PathoBench/csv/cptac_luad_tp53.csv \
         --features /NHNHOME/kimds/Data/PathoBench/features \
-        --output predictions/pathobench_bracs_coarse.pt
+        --output predictions/pathobench_cptac_luad_tp53.pt
+
+    # tile-limit sweep (random subsample, repeated): e.g. 2000 tiles, 5 trials
+    python scripts/test_pathobench.py --checkpoint <ckpt> \
+        --csv .../cptac_luad_tp53.csv --max-tiles 2000 --trials 5 \
+        --output predictions/..._mt2000.pt
 """
 
 from __future__ import annotations
@@ -68,9 +78,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--context-mode",
         choices=("sample", "all"),
-        default="sample",
-        help="sample = context-per-class train slides (default); "
-        "all = every train slide is context (all tiles).",
+        default="all",
+        help="all = every train slide is context, full tiles (default; "
+        "sample-context deprecated); sample = context-per-class train slides.",
+    )
+    parser.add_argument(
+        "--max-tiles",
+        type=int,
+        default=None,
+        help="Per-bag tile cap: randomly subsample each bag (context and "
+        "query) to at most this many tiles. None = use all tiles.",
+    )
+    parser.add_argument(
+        "--trials",
+        type=int,
+        default=1,
+        help="Number of independent inference runs (seed base + trial). "
+        ">1 to average over random tile subsampling (tile-limit sweep).",
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="cuda")
@@ -140,6 +164,96 @@ def fit_pca(
     )
 
 
+def evaluate_trial(
+    *,
+    model,
+    projected: dict[str, torch.Tensor],
+    train_ids: list[str],
+    test_ids: list[str],
+    train_y: dict[str, int],
+    test_y: dict[str, int],
+    context_mode: str,
+    context_per_class: int,
+    max_tiles: int | None,
+    seed: int,
+    device: torch.device,
+) -> dict:
+    """Run one all-context (or sample-context) inference pass.
+
+    Uses the ragged per-episode path (list of bags) so each bag is processed
+    individually — full-tile all-context episodes (up to tens of thousands of
+    cells per slide) fit in memory, whereas the padded dense batched path
+    OOMs ([bags, max_cells, slots, dim] explodes). ``max_tiles`` randomly
+    subsamples each bag using the trial's own generator.
+    """
+    generator = torch.Generator().manual_seed(seed)
+
+    def subsample_bag(features: torch.Tensor) -> torch.Tensor:
+        if max_tiles is None or features.shape[0] <= max_tiles:
+            return features
+        perm = torch.randperm(features.shape[0], generator=generator)
+        return features[perm[:max_tiles]]
+
+    probabilities: list[float] = []
+    queried_ids: list[str] = []
+    nan_count = 0
+    with torch.no_grad():
+        for query_index, query_id in enumerate(test_ids):
+            if context_mode == "all":
+                context_ids = list(train_ids)
+                context_bags = [
+                    subsample_bag(projected[s]) for s in context_ids
+                ]
+            else:
+                context_ids = []
+                for class_index in (0, 1):
+                    pool = [s for s in train_ids if train_y[s] == class_index]
+                    if not pool:
+                        raise ValueError(
+                            f"No train slides of class {class_index}."
+                        )
+                    permutation = torch.randperm(len(pool), generator=generator)[
+                        : min(context_per_class, len(pool))
+                    ].tolist()
+                    context_ids.extend(pool[index] for index in permutation)
+                context_bags = [
+                    subsample_bag(projected[s]) for s in context_ids
+                ]
+            query_bag = subsample_bag(projected[query_id])
+            episode_bags = [*context_bags, query_bag]
+            episode_y = torch.tensor(
+                [train_y[s] for s in context_ids] + [test_y[query_id]],
+                dtype=torch.long,
+                device=device,
+            )
+            mask_index = torch.tensor([len(context_ids)], device=device)
+            logits = model.model.forward(episode_bags, episode_y, mask_index)
+            probability = float(
+                torch.softmax(logits.float(), dim=-1)[0, 1].item()
+            )
+            if probability != probability:
+                nan_count += 1
+            probabilities.append(probability)
+            queried_ids.append(query_id)
+            if (query_index + 1) % 20 == 0 or query_index + 1 == len(test_ids):
+                print(
+                    f"  ... {query_index + 1}/{len(test_ids)} episodes",
+                    flush=True,
+                )
+
+    probability = torch.tensor(probabilities)
+    target = torch.tensor([test_y[s] for s in queried_ids], dtype=torch.long)
+    valid = torch.isfinite(probability)
+    return {
+        "probability": probability[valid],
+        "target": target[valid],
+        "queried_ids": [
+            s for s, v in zip(queried_ids, valid.tolist()) if v
+        ],
+        "nan_count": nan_count,
+    }
+
+
 def main() -> None:
     args = parse_args()
     L.seed_everything(args.seed, workers=True)
@@ -166,8 +280,6 @@ def main() -> None:
         test_table = table[table["split"] == "test"]
         print(f"[binarized] {labels.nunique()} classes -> 0 vs rest "
               f"(n_pos {int((table['label'] == 1).sum())})")
-
-    generator = torch.Generator().manual_seed(args.seed)
 
     # Load preprocessed 512-d {task}_train.pt / {task}_test.pt when available
     # (produced by scripts/prepare_pathobench.py); otherwise fall back to
@@ -252,99 +364,120 @@ def main() -> None:
         print(f"Projected {len(projected)} slides to {MODEL_INPUT_DIM}-d on {device}")
     print(f"Model: arch v{model.model.architecture_version}, checkpoint {args.checkpoint.name}")
     if args.context_mode == "all":
-        print(f"Context: ALL {len(train_ids)} train slides (all tiles)")
+        print(f"Context: ALL {len(train_ids)} train slides "
+              f"(max {args.max_tiles} tiles/bag)" if args.max_tiles
+              else f"Context: ALL {len(train_ids)} train slides (all tiles)")
     else:
-        print(f"Context: {args.context_per_class} slides per class (all tiles)")
+        print(f"Context: {args.context_per_class} slides per class "
+              f"(max {args.max_tiles} tiles/bag)" if args.max_tiles
+              else f"Context: {args.context_per_class} slides per class (all tiles)")
+    print(f"Trials: {args.trials} (seeds {args.seed}..{args.seed + args.trials - 1})")
 
-    probabilities: list[float] = []
-    queried_ids: list[str] = []
-    nan_count = 0
+    trial_results: list[dict | None] = []
+    for trial in range(args.trials):
+        trial_seed = args.seed + trial
+        if args.trials > 1:
+            print(f"\n--- trial {trial + 1}/{args.trials} (seed {trial_seed}) ---")
+        result = evaluate_trial(
+            model=model,
+            projected=projected,
+            train_ids=train_ids,
+            test_ids=test_ids,
+            train_y=train_y,
+            test_y=test_y,
+            context_mode=args.context_mode,
+            context_per_class=args.context_per_class,
+            max_tiles=args.max_tiles,
+            seed=trial_seed,
+            device=device,
+        )
+        if result["nan_count"]:
+            print(f"WARNING: {result['nan_count']}/{len(result['queried_ids'])} "
+                  f"predictions were NaN (dropped).")
+        probability = result["probability"]
+        target = result["target"]
+        if len(probability) < 2 or target.unique().numel() < 2:
+            print("Not enough valid predictions / both classes to compute AUROC.")
+            trial_results.append(None)
+            continue
+        predicted = (probability > 0.5).long()
+        accuracy = float((predicted == target).float().mean().item())
+        sensitivity = float((predicted[target == 1] == 1).float().mean().item())
+        specificity = float((predicted[target == 0] == 0).float().mean().item())
+        metrics = {
+            "auroc": auroc(probability, target),
+            "accuracy": accuracy,
+            "balanced_accuracy": 0.5 * (sensitivity + specificity),
+            "log_loss": log_loss(probability, target),
+            "task": args.csv.name,
+        }
+        print(f"  trial {trial + 1}: AUROC {metrics['auroc']:.4f}  "
+              f"Acc {metrics['accuracy']:.4f}  "
+              f"BAcc {metrics['balanced_accuracy']:.4f}  "
+              f"LL {metrics['log_loss']:.4f}")
+        trial_results.append(
+            {
+                "slide_id": result["queried_ids"],
+                "label": target,
+                "probability": probability,
+                "prediction": predicted,
+                "metrics": metrics,
+            }
+        )
 
-    context_summary = f"{args.context_per_class} per class"
-    with torch.no_grad():
-        for query_index, query_id in enumerate(test_ids):
-            if args.context_mode == "all":
-                context_ids = list(train_ids)
-                context_summary = (
-                    f"all {len(context_ids)} train slides (all tiles)"
-                )
-                context_bags = [projected[slide] for slide in context_ids]
-            else:
-                context_ids = []
-                for class_index in (0, 1):
-                    pool = [s for s in train_ids if train_y[s] == class_index]
-                    if not pool:
-                        raise ValueError(
-                            f"No train slides of class {class_index}."
-                        )
-                    permutation = torch.randperm(len(pool), generator=generator)[
-                        : min(args.context_per_class, len(pool))
-                    ].tolist()
-                    context_ids.extend(pool[index] for index in permutation)
-                context_bags = [projected[slide] for slide in context_ids]
-            query_bag = projected[query_id]
-            # Use the ragged per-episode path (list of bags). Each bag is
-            # processed individually, so full-tile all-context episodes (up to
-            # tens of thousands of cells per slide) fit in memory — padding
-            # every bag to the largest one on the dense batched path OOMs
-            # (the [bags, max_cells, slots, dim] difference tensor explodes).
-            episode_bags = [*context_bags, query_bag]
-            episode_y = torch.tensor(
-                [train_y[s] for s in context_ids] + [test_y[query_id]],
-                dtype=torch.long,
-                device=device,
-            )
-            mask_index = torch.tensor([len(context_ids)], device=device)
-            logits = model.model.forward(episode_bags, episode_y, mask_index)
-            probability = float(
-                torch.softmax(logits.float(), dim=-1)[0, 1].item()
-            )
-            if probability != probability:
-                nan_count += 1
-            probabilities.append(probability)
-            queried_ids.append(query_id)
-            if (query_index + 1) % 20 == 0 or query_index + 1 == len(test_ids):
-                print(f"  ... {query_index + 1}/{len(test_ids)} episodes", flush=True)
-
-    probability = torch.tensor(probabilities)
-    target = torch.tensor([test_y[s] for s in queried_ids], dtype=torch.long)
-    if nan_count:
-        print(f"WARNING: {nan_count}/{len(queried_ids)} predictions were NaN (dropped).")
-    valid = torch.isfinite(probability)
-    probability = probability[valid]
-    target = target[valid]
-    queried_ids = [s for s, v in zip(queried_ids, valid.tolist()) if v]
-    if int(valid.sum()) < 2 or target.unique().numel() < 2:
-        print("Not enough valid predictions / both classes to compute AUROC.")
+    valid_results = [r for r in trial_results if r is not None]
+    if not valid_results:
         return
 
-    low, high = float("nan"), float("nan")
-    predicted = (probability > 0.5).long()
-    accuracy = float((predicted == target).float().mean().item())
-    sensitivity = float((predicted[target == 1] == 1).float().mean().item())
-    specificity = float((predicted[target == 0] == 0).float().mean().item())
+    def _mean(values: list[float]) -> float:
+        return sum(values) / len(values)
 
-    print(f"\n=== PathoBench zero-shot — {args.csv.name} — {int(valid.sum())} test slides ===")
-    print(f"AUROC             {auroc(probability, target):.4f}")
-    print(f"Accuracy          {accuracy:.4f}")
-    print(f"Balanced accuracy {(0.5 * (sensitivity + specificity)):.4f} "
-          f"(sens {sensitivity:.3f} / spec {specificity:.3f})")
-    print(f"Log loss          {log_loss(probability, target):.4f}")
+    aurocs = [r["metrics"]["auroc"] for r in valid_results]
+    accs = [r["metrics"]["accuracy"] for r in valid_results]
+    baccs = [r["metrics"]["balanced_accuracy"] for r in valid_results]
+    ll = [r["metrics"]["log_loss"] for r in valid_results]
+
+    print(f"\n=== PathoBench zero-shot — {args.csv.name} — "
+          f"{int(valid_results[0]['label'].numel())} test slides "
+          f"({args.context_mode}-context, max_tiles={args.max_tiles}, "
+          f"trials={len(aurocs)}) ===")
+    if len(aurocs) > 1:
+        print(f"AUROC   mean {_mean(aurocs):.4f}  min {min(aurocs):.4f}  "
+              f"max {max(aurocs):.4f}")
+        print(f"Acc     mean {_mean(accs):.4f}  min {min(accs):.4f}  "
+              f"max {max(accs):.4f}")
+        print(f"BAcc    mean {_mean(baccs):.4f}  min {min(baccs):.4f}  "
+              f"max {max(baccs):.4f}")
+        print(f"LogL    mean {_mean(ll):.4f}")
+    else:
+        print(f"AUROC             {aurocs[0]:.4f}")
+        print(f"Accuracy          {accs[0]:.4f}")
+        print(f"Balanced accuracy {baccs[0]:.4f}")
+        print(f"Log loss          {ll[0]:.4f}")
 
     if args.output is not None:
         args.output = args.output.expanduser().resolve()
         args.output.parent.mkdir(parents=True, exist_ok=True)
+        last = valid_results[-1]
         torch.save(
             {
-                "slide_id": queried_ids,
-                "label": target,
-                "probability": probability,
-                "prediction": predicted,
-                "metrics": {
-                    "auroc": auroc(probability, target),
-                    "accuracy": accuracy,
-                    "balanced_accuracy": 0.5 * (sensitivity + specificity),
-                    "log_loss": log_loss(probability, target),
+                "slide_id": last["slide_id"],
+                "label": last["label"],
+                "probability": last["probability"],
+                "prediction": last["prediction"],
+                "metrics": last["metrics"],
+                "trial_aurocs": aurocs,
+                "trial_accuracies": accs,
+                "trial_balanced_accuracies": baccs,
+                "aggregate": {
+                    "auroc_mean": _mean(aurocs),
+                    "auroc_min": min(aurocs),
+                    "auroc_max": max(aurocs),
+                    "accuracy_mean": _mean(accs),
+                    "balanced_accuracy_mean": _mean(baccs),
+                    "log_loss_mean": _mean(ll),
+                    "max_tiles": args.max_tiles,
+                    "trials": len(aurocs),
                     "task": args.csv.name,
                 },
             },

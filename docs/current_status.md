@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-06` (**§46 PathoBench zero-shot — 전체 타일 PCA/추론, bootstrap 폐기, 17개 이진 task 단일 결과** + **§45 arm C top-up 중간 Musk zero-shot — 대형 bag n>34 0.698→0.825**)
+**Last updated**: `2026-08-06` (**§47 기준 checkpoint e125 재평가 + 타일 수 제한 실험 진행 중** + **§46 PathoBench 전체 타일/17개 이진 task**)
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up을 8×A6000 DDP + 에피소드-매치(4096 ep/epoch)로 재개 중(epoch ~88/150, batch2). arm B(6-task+sparse)와 arm C(legacy+B2b) 50ep 학습·평가는 완료 — arm B sparse 0.675, arm C legacy 회귀 +0.037로 모두 gate 미달(과소학습 편향).
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **다음 Action**: arm C top-up 완주(150 epoch) 후 §42 재평가(legacy 회귀 gate) + Musk 재확인(§45 중간 신호) + PathoBench 재평가(§46 캐시 재현 가능) → Phase 0 결과 선택 → frozen-v30 multi-resolution probe(Phase 1). ICI 잠금은 유지한다.
@@ -1441,3 +1441,31 @@ v30 baseline은 문서값과 **정확히 재현**(0.8539) — 체크포인트/�
 - **파일**: `predictions/pathobench_{task}_armC_batch2_e88_allctx_full.pt` 5개,
   로그 `predictions/allctx_full_5.log`. BRACS coarse 데이터(캐시 2개 + 예측 2개)는
   multi-class 제외에 따라 삭제 (원본 `features/BRACS/`는 보존).
+
+## 47. 2026-08-06 — 새 기준 checkpoint(e125) 재평가 + 타일 수 제한 실험
+
+**상태**: **앞으로 모든 PathoBench 실험은 all-context 기준**(sample-context 폐기).
+150 epoch 런의 best인 **`epoch=125-val_ce_loss=0.5142.ckpt`를 새 기준 checkpoint로
+채택**하고, (1) e125로 5개 pathology all-context 재평가(val_ce 개선이 실제 test로
+이어지는지), (2) bag별 타일 수 제한 실험을 실행 중.
+
+- **스크립트 변경** (`scripts/test_pathobench.py`):
+  - `--context-mode` 기본값 `all`로 변경 (sample은 deprecated, `--context-per-class`는
+    sample 전용으로 유지).
+  - **`--max-tiles`** 추가: bag(컨텍스트·query 모두)별 타일 상한. 지정 시 각 bag을
+    trial별 랜덤 서브샘플.
+  - **`--trials`** 추가: seed base + trial로 독립 추론 반복, trial별 지표 + 집계
+    (mean/min/max) 출력. `evaluate_trial()`로 루프 추출.
+  - 평가는 ragged per-episode 경로(`model.forward(x_list, y, mask_index)`) — bag별
+    처리라 전체 타일 all-context도 메모리 안전 (§46).
+- **Task 1 (진행 중)**: e125로 5개 task(`cptac_luad_tp53`, `cptac_luad_stk11`,
+  `cptac_lscc_arid1a`, `cptac_brca_tp53`, `cptac_pda_smad4`) all-context 무제한.
+  e88(val_ce 0.5282)과 e125(val_ce 0.5142) 비교 — val_ce 0.014 개선이 test AUROC로
+  전이되는지 확인.
+- **Task 2 (진행 중)**: bag별 타일 제한 `{1000, 2000, 5000}` × **5 trial**(랜덤
+  서브샘플, trial별 seed) vs 무제한(1 trial). 인스턴스(타일) 수가 성능에 영향을 주는지
+  확인.
+- **실행**: `predictions/pathobench_{task}_armC_batch2_e125_allctx_full.pt` (무제한),
+  `predictions/pathobench_{task}_armC_batch2_e125_mt{1000,2000,5000}.pt` (제한),
+  로그 `predictions/pathobench_e125_allctx_tilesweep.log`.
+- **결과**: 완료 후 본 섹션에 기록.
