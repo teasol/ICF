@@ -33,7 +33,30 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--steps", type=int, default=16)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--profiler",
+        action="store_true",
+        help="Profile the first --profiler-steps training steps with torch.profiler "
+        "and print the op-level bottleneck table instead of the timing summary.",
+    )
+    parser.add_argument("--profiler-steps", type=int, default=3)
     return parser.parse_args()
+
+
+def run_step(
+    model,
+    optimizer,
+    batch,
+    device,
+) -> torch.Tensor:
+    """One training step (forward + backward + optimizer) on a moved batch."""
+    batch = [b.to(device) if torch.is_tensor(b) else b for b in batch]
+    optimizer.zero_grad(set_to_none=True)
+    loss = model.training_step(batch, 0)
+    loss.backward()
+    optimizer.step()
+    torch.cuda.synchronize()
+    return loss
 
 
 def main() -> None:
@@ -53,6 +76,24 @@ def main() -> None:
 
     model = build_model(config).to(device).train()
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+
+    if args.profiler:
+        from torch.profiler import ProfilerActivity, profile
+
+        iterator = iter(loader)
+        n = min(args.profiler_steps, args.steps)
+        with profile(
+            activities=[ProfilerActivity.CUDA, ProfilerActivity.CPU],
+            record_shapes=True,
+        ) as prof:
+            for step in range(n):
+                batch = next(iterator)
+                run_step(model, optimizer, batch, device)
+        print("\n=== torch.profiler — self CUDA time (top 25) ===")
+        print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=25))
+        print("\n=== self CPU time (top 12) ===")
+        print(prof.key_averages().table(sort_by="self_cpu_time_total", row_limit=12))
+        return
 
     torch.cuda.reset_peak_memory_stats(device)
     step_times: list[float] = []
