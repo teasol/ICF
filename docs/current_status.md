@@ -1,16 +1,16 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-05` (**§41 arm C step-matched 재시작, arm B BF16 지속**)
-**Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. v33 Phase 0 arm B는 BF16으로 지속하고, arm C는 512 updates/epoch로 계산량 비대칭을 제거해 다시 실행 중이다.
+**Last updated**: `2026-08-06` (**§42 Phase 0 arm B/C 학습 완료 + gate 평가: arm B sparse gate·arm C legacy 회귀 gate 모두 미달**)
+**Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. v33 Phase 0 arm B(6-task+sparse)와 arm C(legacy+B2b) 학습·평가 완료. arm B는 sparse task AUROC 0.675로 gate(0.75) 미달, arm C는 legacy overall 회귀 +0.037로 gate(0.01) 미달(과소학습 편향 가능성).
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
-* **다음 Action**: v33 Phase 0 arm B(v30 six-task B2)와 step-matched arm C(v30 legacy B2b)를 끝까지 학습·평가한다. ICI 잠금은 유지한다.
+* **다음 Action**: arm C top-up(수렴점까지 추가 학습) 여부 결정 → Phase 0 결과 선택 → frozen-v30 multi-resolution probe(Phase 1). ICI 잠금은 유지한다.
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
+**Read first if you are picking this up**: **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
 **§36 (CCER-v2 평가)**, **§29 (v30 확정 baseline)**.
 
 **열린 과제**: ① v30 six-task 효과 분리, ② B2b within-episode cardinality 효과 분리, ③ frozen-v30 multi-resolution headroom, ④ v30 medium 참조 재학습, ⑤ ICI 잠금 유지. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
@@ -1149,3 +1149,46 @@ probe 통과 전까지 구현하지 않는다. ICI 잠금 유지.
   (probe로 측정).
 - **바로 다음**: Phase 0 결과 선택 → frozen-v30 multi-resolution probe
   (Phase 1) → paired AUROC `+0.01` 통과 시에만 v33 residual 구현.
+
+## 42. 2026-08-06 — v33 Phase 0 arm B/C 학습 완료 + gate 평가
+
+**상태**: arm B, arm C 모두 50 epochs 학습 완료. 1,000-episode 합성 평가로 Phase 0
+gate 판정을 내렸다. **arm B는 sparse task gate 미달, arm C는 legacy overall 회귀
+gate 미달** → v33 Phase 0의 두 주 효과(B: six-task+sparse, C: legacy+B2b) 모두
+gate 통과 실패.
+
+- **학습 완료**:
+  - arm B(v30+six-task+B2): `checkpoints/20260805_220642/v33_phase0_armB_bf16/`,
+    best `epoch=044 (val_ce_loss 0.4290)`. 50 ep / 204,800 ep / 25,600 steps.
+  - arm C(v30+legacy+B2b): `checkpoints/20260805_221615/v33_phase0_armC_bf16/`,
+    best `epoch=049 (val_ce_loss 0.5351)`. 50 ep / 25,600 ep / 25,600 steps.
+    **best가 마지막 epoch** → 수렴 전 경계 상태(§41 과소학습 예측과 일치).
+- **평가** (1,000 ep, seed 42, 고정 val 스트림 = v30 legacy B2 분포):
+  - arm B six-task: overall AUROC **0.8461 [0.834, 0.857]**, log loss 0.4748.
+    per-task: composition 0.8745 / state 0.8214 / covariance 0.7414 /
+    interaction 0.8465 / combined 0.9515 / **any_positive_sparse 0.6747**.
+  - arm B legacy: **0.8500 [0.839, 0.861]** vs v30 committed 0.8512 [0.840, 0.862]
+    → 회귀 **-0.0012**, paired `P(arm B beats v30)=0.04`(에피소드·태스크 매칭 확인).
+  - arm C legacy: **0.8139 [0.802, 0.825]** vs v30 committed 0.8512 [0.840, 0.862]
+    → 회귀 **+0.0373**. (paired CI 결과는 §42 추가 대기)
+- **Gate 판정**:
+
+  | Gate | arm B | arm C |
+  |---|---|---|
+  | sparse task AUROC ≥ 0.75 | ❌ **0.6747** | — |
+  | legacy overall 회귀 ≤ 0.01 | ✅ -0.0012 | ❌ **+0.0373** |
+
+- **해석**:
+  - arm B: `any_positive_sparse` 태스크가 유용성 기준(0.75)에 미달. six-task 믹스의
+    sparse 추가는 Phase 0에서 기각. legacy 성능은 v30 대비 소폭 열세(-0.0012)로 안전.
+  - arm C: B2b 학습이 v30 legacy B2 val 스트림에서 0.037 회귀 → gate 실패.
+    §41에서 예고한 과소학습 편향(8× 적은 에피소드, best=epoch 49, val_ce 0.5362→0.5351
+    완만 하락)과 일치. protocol대로 **top-up(추가 학습)으로 수렴점까지 이어간 뒤
+    재판정**이 필요할 수 있다.
+  - B2b full-vs-subsample margin drift probe: 아직 미실시
+    (`probe_v32_headroom.py`에는 drift 측정이 없음).
+- **예측 파일**: `predictions/synthetic_v33_phase0_armB_6task_1000ep.pt`,
+  `predictions/synthetic_v33_phase0_armB_legacy_1000ep.pt`,
+  `predictions/synthetic_v33_phase0_armC_legacy_1000ep.pt`.
+- **바로 다음**: ① arm C top-up 여부(사용자 결정), ② (선택) top-up 후 arm C 재평가,
+  ③ Phase 0 결과 선택 → frozen-v30 multi-resolution probe(Phase 1).
