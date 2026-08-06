@@ -9,9 +9,11 @@ context and the held-out molecule is the masked query. This mirrors the model's
 training objective (predict a masked bag from labeled context bags).
 
 Preprocessing / caveats:
-  * Musk conformers are 166-dim; each instance is zero-padded to the model's
-    input dim (config input_dim, e.g. 512 for v30 or 1536 for v34-1536). This
-    is a crude OOD bridge: the
+  * Musk conformers are 166-dim; each instance is mapped to the model's input
+    dim (config input_dim, e.g. 512 for v30 or 1536 for v34-1536). Default is
+    zero-padding (first 166 dims filled, rest zero -- a crude OOD bridge);
+    `--pad-mode tile` repeats the 166-d descriptor floor(input_dim/166) times
+    and zero-pads only the leftover, so most input dims carry real signal.
     synthetic-trained weights carry no semantics for these chemical
     descriptors, so treat this as a distribution-shift baseline, not a tuned
     model. A learned 166->512 projection trained on Musk itself would be a
@@ -60,6 +62,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument(
+        "--pad-mode",
+        choices=("zero", "tile"),
+        default="zero",
+        help="How to map 166-d Musk descriptors into the model input. "
+        "zero = fill the first 166 dims, zero the rest (default, crude bridge). "
+        "tile = repeat the descriptor floor(input_dim/166) times and zero-pad "
+        "only the remainder, so most input dims carry real descriptor signal.",
+    )
+    parser.add_argument(
         "--input-dim",
         type=int,
         default=None,
@@ -90,10 +101,19 @@ def parse_args() -> argparse.Namespace:
 def load_musk(
     path: Path,
     input_dim: int,
+    pad_mode: str = "zero",
 ) -> tuple[list[str], list[torch.Tensor], torch.Tensor]:
-    """Load musk.pkl into (bag_ids, padded_instance_tensors, labels)."""
+    """Load musk.pkl into (bag_ids, padded_instance_tensors, labels).
+
+    ``pad_mode`` maps the 166-d descriptors into ``input_dim``:
+      * ``zero``: fill the first 166 dims, zero the rest.
+      * ``tile``: repeat the descriptor floor(input_dim / 166) times, then
+        zero-pad only the leftover remainder.
+    """
     with path.open("rb") as handle:
         records = pickle.load(handle)
+    n_repeat = input_dim // MUSK_FEATURE_DIM
+    remainder = input_dim % MUSK_FEATURE_DIM
     bag_ids: list[str] = []
     padded: list[torch.Tensor] = []
     labels: list[int] = []
@@ -102,8 +122,16 @@ def load_musk(
         x = torch.as_tensor(record["X"], dtype=torch.float32)  # [n, 166]
         if x.ndim != 2 or x.shape[1] != MUSK_FEATURE_DIM:
             raise ValueError(f"Unexpected Musk instance shape: {tuple(x.shape)}")
-        padded_bag = torch.zeros(x.shape[0], input_dim, dtype=torch.float32)
-        padded_bag[:, :MUSK_FEATURE_DIM] = x
+        if pad_mode == "tile":
+            blocks = [x] * n_repeat
+            if remainder:
+                blocks.append(
+                    torch.zeros(x.shape[0], remainder, dtype=torch.float32)
+                )
+            padded_bag = torch.cat(blocks, dim=1)
+        else:
+            padded_bag = torch.zeros(x.shape[0], input_dim, dtype=torch.float32)
+            padded_bag[:, :MUSK_FEATURE_DIM] = x
         padded.append(padded_bag)
         labels.append(int(record["y"]))
     return bag_ids, padded, torch.tensor(labels, dtype=torch.long)
@@ -122,7 +150,9 @@ def main() -> None:
         if args.input_dim is not None
         else int(config["model"].get("input_dim", 512))
     )
-    bag_ids, bags, labels = load_musk(args.data.expanduser().resolve(), input_dim)
+    bag_ids, bags, labels = load_musk(
+        args.data.expanduser().resolve(), input_dim, args.pad_mode
+    )
     n_bags = len(bags)
     if n_bags < 3:
         raise ValueError("Musk needs at least 3 bags for a leave-one-out episode.")
@@ -130,7 +160,8 @@ def main() -> None:
     print(
         f"Musk: {n_bags} bags ({num_positive} positive / {n_bags - num_positive} "
         f"negative), instances per bag {min(b.shape[0] for b in bags)}.."
-        f"{max(b.shape[0] for b in bags)}, zero-padded 166 -> {input_dim}-d"
+        f"{max(b.shape[0] for b in bags)}, padded 166 -> {input_dim}-d "
+        f"(mode={args.pad_mode})"
     )
 
     # Zero-shot preprocessing overrides (no retraining). These are model __init__
