@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-06` (**§47 기준 checkpoint e125 재평가 + 타일 수 제한 실험 진행 중** + **§46 PathoBench 전체 타일/17개 이진 task**)
+**Last updated**: `2026-08-06` (**§47 e125 기준 확정: val_ce 개선이 test로 전이 + 타일 제한 스윕(인스턴스 수 효과 task 의존)**)
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up을 8×A6000 DDP + 에피소드-매치(4096 ep/epoch)로 재개 중(epoch ~88/150, batch2). arm B(6-task+sparse)와 arm C(legacy+B2b) 50ep 학습·평가는 완료 — arm B sparse 0.675, arm C legacy 회귀 +0.037로 모두 gate 미달(과소학습 편향).
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **다음 Action**: arm C top-up 완주(150 epoch) 후 §42 재평가(legacy 회귀 gate) + Musk 재확인(§45 중간 신호) + PathoBench 재평가(§46 캐시 재현 가능) → Phase 0 결과 선택 → frozen-v30 multi-resolution probe(Phase 1). ICI 잠금은 유지한다.
@@ -1468,4 +1468,41 @@ v30 baseline은 문서값과 **정확히 재현**(0.8539) — 체크포인트/�
 - **실행**: `predictions/pathobench_{task}_armC_batch2_e125_allctx_full.pt` (무제한),
   `predictions/pathobench_{task}_armC_batch2_e125_mt{1000,2000,5000}.pt` (제한),
   로그 `predictions/pathobench_e125_allctx_tilesweep.log`.
-- **결과**: 완료 후 본 섹션에 기록.
+
+### Task 1 결과 — e125(0.5142) vs e88(0.5282), all-context 무제한
+
+val_ce 0.5282→0.5142 개선이 실제 test로 전이되는지 확인. test AUROC:
+
+| task | e88 | e125 | Δ |
+|---|---|---|---|
+| cptac_brca_tp53 | 0.696 | **0.714** | +0.018 |
+| cptac_luad_tp53 | 0.625 | **0.637** | +0.012 |
+| cptac_luad_stk11 | 0.786 | **0.795** | +0.009 |
+| cptac_lscc_arid1a | 0.748 | 0.738 | −0.010 |
+| cptac_pda_smad4 | 0.679 | **0.710** | +0.031 |
+
+**판정**: 5 task 중 4개 개선(평균 +0.012), 1개 소폭 하락. **val_ce 개선이 대체로 test로
+전이됨.** e125를 향후 기준 checkpoint로 확정.
+
+### Task 2 결과 — bag별 타일 수 제한 스윕 (5-trial mean vs 무제한 1-trial)
+
+| task | 무제한(1 trial) | 1000 | 2000 | 5000 |
+|---|---|---|---|---|
+| cptac_luad_tp53 | 0.637 | **0.722** | **0.724** | **0.743** |
+| cptac_luad_stk11 | 0.795 | **0.842** | **0.840** | **0.846** |
+| cptac_lscc_arid1a | 0.738 | 0.694 | 0.670 | 0.696 |
+| cptac_brca_tp53 | 0.714 | 0.652 | 0.655 | 0.671 |
+| cptac_pda_smad4 | 0.710 | 0.592 | 0.616 | 0.703 |
+
+(trial별 분포: 제한 케이스는 5 trial AUROC min/max, 로그 참조)
+
+**해석**:
+- **인스턴스(타일) 수는 성능에 뚜렷한 영향을 주며, 방향은 task 의존적.**
+- **LUAD 계열은 타일 제한이 오히려 개선** (tp53 0.637→0.72~0.74, stk11 0.795→0.84).
+  대형 bag(최대 ~3.5만 타일)이 노이즈/혼란을 유발하는 듯 — 대표 서브샘플이 더 강건.
+- **BRCA/LSCC/PDA는 무제한이 우세** (제한 시 −0.04~−0.12), PDA는 5000에서 무제한과
+  비슷(0.703). BRCA는 test 22장으로 trial 간 분산이 큼.
+- **한계**: 무제한은 1 trial(결정적, 전체 타일) vs 제한은 5-trial mean(랜덤 서브샘플)
+  이라 잡음 수준이 다름. 제한 케이스는 trial mean이 무제한 단일값과 비슷하거나 위면
+  서브샘플이 무해~유익, 아래면 무해하지 않음. 전반적으로 **bag 크기 정규화의 효과가
+  task별로 갈림** — 후속으로 LUAD 대형 bag 분석(어느 bag이 문제인지) 권장.
