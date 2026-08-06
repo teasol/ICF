@@ -90,6 +90,14 @@ def parse_args() -> argparse.Namespace:
         "query) to at most this many tiles. None = use all tiles.",
     )
     parser.add_argument(
+        "--context-max-tiles",
+        type=int,
+        default=None,
+        help="Per-CONTEXT-bag tile cap only; the query bag stays at --max-tiles "
+        "(None = full tiles). Isolates context size from query size. "
+        "Defaults to --max-tiles when unset.",
+    )
+    parser.add_argument(
         "--trials",
         type=int,
         default=1,
@@ -175,6 +183,7 @@ def evaluate_trial(
     context_mode: str,
     context_per_class: int,
     max_tiles: int | None,
+    context_max_tiles: int | None = None,
     seed: int,
     device: torch.device,
 ) -> dict:
@@ -184,15 +193,27 @@ def evaluate_trial(
     individually — full-tile all-context episodes (up to tens of thousands of
     cells per slide) fit in memory, whereas the padded dense batched path
     OOMs ([bags, max_cells, slots, dim] explodes). ``max_tiles`` randomly
-    subsamples each bag using the trial's own generator.
+    subsamples every bag (context and query) using the trial's own generator;
+    ``context_max_tiles``, when set, caps ONLY the context bags while the
+    query bag stays at ``max_tiles`` (None = full tiles).
     """
     generator = torch.Generator().manual_seed(seed)
 
-    def subsample_bag(features: torch.Tensor) -> torch.Tensor:
-        if max_tiles is None or features.shape[0] <= max_tiles:
+    def cap(features: torch.Tensor, limit: int | None) -> torch.Tensor:
+        if limit is None or features.shape[0] <= limit:
             return features
         perm = torch.randperm(features.shape[0], generator=generator)
-        return features[perm[:max_tiles]]
+        return features[perm[:limit]]
+
+    context_limit = (
+        context_max_tiles if context_max_tiles is not None else max_tiles
+    )
+
+    def subsample_bag(features: torch.Tensor) -> torch.Tensor:
+        return cap(features, max_tiles)
+
+    def subsample_context_bag(features: torch.Tensor) -> torch.Tensor:
+        return cap(features, context_limit)
 
     probabilities: list[float] = []
     queried_ids: list[str] = []
@@ -202,7 +223,7 @@ def evaluate_trial(
             if context_mode == "all":
                 context_ids = list(train_ids)
                 context_bags = [
-                    subsample_bag(projected[s]) for s in context_ids
+                    subsample_context_bag(projected[s]) for s in context_ids
                 ]
             else:
                 context_ids = []
@@ -217,7 +238,7 @@ def evaluate_trial(
                     ].tolist()
                     context_ids.extend(pool[index] for index in permutation)
                 context_bags = [
-                    subsample_bag(projected[s]) for s in context_ids
+                    subsample_context_bag(projected[s]) for s in context_ids
                 ]
             query_bag = subsample_bag(projected[query_id])
             episode_bags = [*context_bags, query_bag]
@@ -363,14 +384,21 @@ def main() -> None:
         }
         print(f"Projected {len(projected)} slides to {MODEL_INPUT_DIM}-d on {device}")
     print(f"Model: arch v{model.model.architecture_version}, checkpoint {args.checkpoint.name}")
+    context_cap = (
+        args.context_max_tiles if args.context_max_tiles is not None else args.max_tiles
+    )
     if args.context_mode == "all":
-        print(f"Context: ALL {len(train_ids)} train slides "
-              f"(max {args.max_tiles} tiles/bag)" if args.max_tiles
-              else f"Context: ALL {len(train_ids)} train slides (all tiles)")
+        print(f"Context: ALL {len(train_ids)} train slides"
+              + (f", capped at {context_cap} tiles/context-bag (query unlimited)"
+                 if args.context_max_tiles else
+                 (f", max {args.max_tiles} tiles/bag (context+query)" if args.max_tiles
+                  else ", all tiles")))
     else:
-        print(f"Context: {args.context_per_class} slides per class "
-              f"(max {args.max_tiles} tiles/bag)" if args.max_tiles
-              else f"Context: {args.context_per_class} slides per class (all tiles)")
+        print(f"Context: {args.context_per_class} slides per class"
+              + (f", capped at {context_cap} tiles/context-bag (query unlimited)"
+                 if args.context_max_tiles else
+                 (f", max {args.max_tiles} tiles/bag (context+query)" if args.max_tiles
+                  else ", all tiles")))
     print(f"Trials: {args.trials} (seeds {args.seed}..{args.seed + args.trials - 1})")
 
     trial_results: list[dict | None] = []
@@ -388,6 +416,7 @@ def main() -> None:
             context_mode=args.context_mode,
             context_per_class=args.context_per_class,
             max_tiles=args.max_tiles,
+            context_max_tiles=args.context_max_tiles,
             seed=trial_seed,
             device=device,
         )
