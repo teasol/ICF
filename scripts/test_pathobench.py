@@ -35,6 +35,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import random
 import sys
 from pathlib import Path
 
@@ -113,6 +114,15 @@ def parse_args() -> argparse.Namespace:
         ">1 to average over random tile subsampling (tile-limit sweep).",
     )
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--cv-folds",
+        type=int,
+        default=None,
+        help="Stratified K-fold cross-validation over ALL slides (train+test "
+        "union): each fold's held-out slides are queried with the other folds "
+        "as context (all-context). Reports per-fold and pooled AUROC. Default "
+        "None = use the CSV train/test split as-is.",
+    )
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--output", type=Path, default=None)
     return parser.parse_args()
@@ -178,6 +188,25 @@ def fit_pca(
         mean.float().cpu().unsqueeze(0),
         components.float().cpu().contiguous(),
     )
+
+
+def stratified_folds(
+    slide_ids: list[str],
+    labels: list[int],
+    n_folds: int,
+    seed: int,
+) -> list[list[str]]:
+    """Stratified (per-class round-robin) K-fold split of slide ids."""
+    rng = random.Random(seed)
+    by_label: dict[int, list[str]] = {}
+    for slide_id, label in zip(slide_ids, labels):
+        by_label.setdefault(int(label), []).append(slide_id)
+    folds: list[list[str]] = [[] for _ in range(n_folds)]
+    for members in by_label.values():
+        rng.shuffle(members)
+        for index, slide_id in enumerate(members):
+            folds[index % n_folds].append(slide_id)
+    return folds
 
 
 def evaluate_trial(
@@ -283,7 +312,135 @@ def evaluate_trial(
     }
 
 
+def evaluate_cv(
+    *,
+    model,
+    fold_states: list[dict],
+    args: argparse.Namespace,
+    device: torch.device,
+) -> None:
+    """Run the K-fold CV loop over pre-split fold files and report/save."""
+    y_dict = {
+        sid: int(label)
+        for state in fold_states
+        for sid, label in zip(state["slide_id"], state["label"])
+    }
+    all_ids = [sid for state in fold_states for sid in state["slide_id"]]
+    print(f"CV: {len(fold_states)}-fold over {len(all_ids)} slides "
+          f"({', '.join(str(len(state['slide_id'])) for state in fold_states)} "
+          f"per fold), raw {FEATURE_DIM}-d, {args.context_mode}-context, all tiles")
+    # Move every slide's features to the device once; fold k queries its own
+    # slides with the other folds as context.
+    projected = {
+        sid: bag.to(device)
+        for state in fold_states
+        for sid, bag in zip(state["slide_id"], state["bag"])
+    }
+    fold_records: list[dict | None] = []
+    pooled_prob: list[torch.Tensor] = []
+    pooled_target: list[torch.Tensor] = []
+    for fold_index, fold_state in enumerate(fold_states):
+        fold_ids = fold_state["slide_id"]
+        context_ids = [
+            sid
+            for other_index, other in enumerate(fold_states)
+            if other_index != fold_index
+            for sid in other["slide_id"]
+        ]
+        print(f"\n--- CV fold {fold_index + 1}/{len(fold_states)} "
+              f"({len(fold_ids)} query, {len(context_ids)} context) ---")
+        result = evaluate_trial(
+            model=model,
+            projected=projected,
+            train_ids=context_ids,
+            test_ids=fold_ids,
+            train_y=y_dict,
+            test_y=y_dict,
+            context_mode=args.context_mode,
+            context_per_class=args.context_per_class,
+            max_tiles=args.max_tiles,
+            context_max_tiles=args.context_max_tiles,
+            seed=args.seed + fold_index,
+            device=device,
+        )
+        if result["nan_count"]:
+            print(f"WARNING: {result['nan_count']}/{len(result['queried_ids'])} "
+                  f"predictions were NaN (dropped).")
+        probability = result["probability"]
+        target = result["target"]
+        if len(probability) < 2 or target.unique().numel() < 2:
+            print("Fold has insufficient valid predictions / both classes "
+                  "to compute AUROC.")
+            fold_records.append(None)
+            continue
+        predicted = (probability > 0.5).long()
+        fold_auroc = auroc(probability, target)
+        fold_acc = float((predicted == target).float().mean().item())
+        sensitivity = float((predicted[target == 1] == 1).float().mean().item())
+        specificity = float((predicted[target == 0] == 0).float().mean().item())
+        print(f"  fold {fold_index + 1}: AUROC {fold_auroc:.4f}  "
+              f"Acc {fold_acc:.4f}  "
+              f"BAcc {0.5 * (sensitivity + specificity):.4f}  "
+              f"n_query {len(probability)}")
+        fold_records.append(
+            {
+                "slide_id": result["queried_ids"],
+                "label": target,
+                "probability": probability,
+                "prediction": predicted,
+                "auroc": fold_auroc,
+            }
+        )
+        pooled_prob.append(probability)
+        pooled_target.append(target)
+
+    valid_folds = [r for r in fold_records if r is not None]
+    if not valid_folds:
+        return
+    fold_aurocs = [r["auroc"] for r in valid_folds]
+    fold_auroc_mean = sum(fold_aurocs) / len(fold_aurocs)
+    pooled_prob_t = torch.cat(pooled_prob)
+    pooled_target_t = torch.cat(pooled_target)
+    pooled_auroc = auroc(pooled_prob_t, pooled_target_t)
+    print(f"\n=== PathoBench {len(fold_states)}-fold CV — {args.csv.name} — "
+          f"{len(all_ids)} slides ===")
+    print("per-fold AUROC: " + " ".join(f"{a:.4f}" for a in fold_aurocs))
+    print(f"fold-mean AUROC: {fold_auroc_mean:.4f}  "
+          f"pooled AUROC: {pooled_auroc:.4f}")
+
+    if args.output is not None:
+        args.output = args.output.expanduser().resolve()
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "task": args.csv.name,
+                "cv_folds": len(fold_states),
+                "per_fold": [
+                    {
+                        "slide_id": r["slide_id"],
+                        "label": r["label"],
+                        "probability": r["probability"],
+                        "prediction": r["prediction"],
+                        "auroc": r["auroc"],
+                    }
+                    for r in valid_folds
+                ],
+                "aggregate": {
+                    "fold_aurocs": fold_aurocs,
+                    "fold_auroc_mean": fold_auroc_mean,
+                    "auroc_pooled": pooled_auroc,
+                    "n_slides": len(all_ids),
+                },
+            },
+            args.output,
+        )
+        print(f"\nSaved CV predictions to {args.output}")
+
+
 def main() -> None:
+    def _mean(values: list[float]) -> float:
+        return sum(values) / len(values)
+
     args = parse_args()
     L.seed_everything(args.seed, workers=True)
     torch.set_float32_matmul_precision("high")
@@ -322,17 +479,63 @@ def main() -> None:
     )
     pca_needed = input_dim != FEATURE_DIM
 
+    # CV mode: if the per-fold .pt files already exist, they are the data
+    # source -- skip reading h5/cache entirely so re-evaluations (any
+    # checkpoint) start instantly and reuse the exact same fold split.
+    fold_dir = args.data_dir.expanduser().resolve()
+    cv_fold_paths = (
+        [
+            fold_dir / f"{args.csv.stem}_cvfold{fold_index}.pt"
+            for fold_index in range(args.cv_folds)
+        ]
+        if args.cv_folds is not None and args.cv_folds > 1
+        else []
+    )
+    if cv_fold_paths and all(path.exists() for path in cv_fold_paths):
+        if pca_needed:
+            raise ValueError(
+                "--cv-folds requires raw features (model input_dim == "
+                f"FEATURE_DIM {FEATURE_DIM}); PCA-per-fold CV is not supported."
+            )
+        print(f"Loaded {len(cv_fold_paths)} CV fold files from {fold_dir} "
+              f"(skipping h5/cache)")
+        fold_states = [
+            torch.load(path, map_location="cpu", weights_only=False)
+            for path in cv_fold_paths
+        ]
+        model = build_model(config)
+        checkpoint = torch.load(
+            args.checkpoint.expanduser().resolve(), map_location="cpu"
+        )
+        model.on_load_checkpoint(checkpoint)
+        model.load_state_dict(checkpoint["state_dict"])
+        model.eval()
+        model.to(device)
+        print(f"Model: arch v{model.model.architecture_version}, "
+              f"checkpoint {args.checkpoint.name}")
+        evaluate_cv(model=model, fold_states=fold_states, args=args, device=device)
+        return
+
     # Load preprocessed 512-d {task}_train.pt / {task}_test.pt when available
     # (produced by scripts/prepare_pathobench.py); otherwise fall back to
     # reading h5 + (if pca_needed) fitting a train-only PCA on the GPU.
     data_dir = args.data_dir.expanduser().resolve()
     cached_train = data_dir / f"{args.csv.stem}_train.pt"
     cached_test = data_dir / f"{args.csv.stem}_test.pt"
-    use_cache = (
-        not pca_needed
-        and cached_train.exists()
-        and cached_test.exists()
-    )
+    # The preprocessed cache holds 512-d PCA features; use it only when its
+    # stored dim equals the model input dim. A 1536-d model must read raw
+    # 1536-d h5 directly (no PCA, no 512-d cache) -- otherwise feeding the
+    # 512-d cache to a 1536-d model would silently break.
+    use_cache = cached_train.exists() and cached_test.exists()
+    if use_cache:
+        probe = torch.load(cached_train, map_location="cpu", weights_only=False)
+        cache_dim = int(probe["bag"][0].shape[-1])
+        use_cache = cache_dim == input_dim
+        if not use_cache:
+            print(
+                f"NOTE: preprocessed cache is {cache_dim}-d but model input_dim="
+                f"{input_dim} -> reading raw {FEATURE_DIM}-d h5 instead."
+            )
     projected: dict[str, torch.Tensor] = {}
     if use_cache:
         train_state = torch.load(
@@ -416,6 +619,44 @@ def main() -> None:
             }
             print(f"Moved {len(projected)} slides to {device} as raw {FEATURE_DIM}-d (no PCA)")
     print(f"Model: arch v{model.model.architecture_version}, checkpoint {args.checkpoint.name}")
+
+    if args.cv_folds is not None and args.cv_folds > 1:
+        if pca_needed:
+            raise ValueError(
+                "--cv-folds requires raw features (model input_dim == "
+                f"FEATURE_DIM {FEATURE_DIM}); PCA-per-fold CV is not supported."
+            )
+        # Build the per-fold .pt files once from the loaded raw features;
+        # later runs (any checkpoint) skip h5 entirely and load them.
+        if use_cache:
+            raise ValueError(
+                "CV fold files must be built from raw h5 features, but the "
+                "512-d cache was used. Remove the cache or the fold files."
+            )
+        all_ids = train_ids + test_ids
+        all_labels = [train_y[s] for s in train_ids] + [test_y[s] for s in test_ids]
+        folds = stratified_folds(all_ids, all_labels, args.cv_folds, args.seed)
+        fold_dir = args.data_dir.expanduser().resolve()
+        fold_paths = [
+            fold_dir / f"{args.csv.stem}_cvfold{fold_index}.pt"
+            for fold_index in range(args.cv_folds)
+        ]
+        fold_dir.mkdir(parents=True, exist_ok=True)
+        fold_states = []
+        for fold_index, fold_ids in enumerate(folds):
+            state = {
+                "slide_id": fold_ids,
+                "bag": [bags[s] for s in fold_ids],
+                "label": [int(all_labels[all_ids.index(s)]) for s in fold_ids],
+            }
+            torch.save(state, fold_paths[fold_index])
+            fold_states.append(state)
+        print(f"Created {args.cv_folds} CV fold files in {fold_dir}: "
+              f"{args.csv.stem}_cvfold{{0..{args.cv_folds - 1}}}.pt "
+              f"(raw {FEATURE_DIM}-d)")
+        evaluate_cv(model=model, fold_states=fold_states, args=args, device=device)
+        return
+
     context_cap = (
         args.context_max_tiles if args.context_max_tiles is not None else args.max_tiles
     )
@@ -489,9 +730,6 @@ def main() -> None:
     valid_results = [r for r in trial_results if r is not None]
     if not valid_results:
         return
-
-    def _mean(values: list[float]) -> float:
-        return sum(values) / len(values)
 
     aurocs = [r["metrics"]["auroc"] for r in valid_results]
     accs = [r["metrics"]["accuracy"] for r in valid_results]

@@ -1130,13 +1130,20 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             if is_context
         ]
         context_bags = [bags[b_index] for b_index in context_indices]
-        if cell_masks is None:
+        if cell_masks is None and self.training:
+            # Batched path is a training speedup (single masked softmax over
+            # [C, max_cells, k]); it materializes a [C, max_cells, dim] padded
+            # tensor, which OOMs at eval when context bags are huge (e.g.
+            # PathoBench full-tile slides). Eval always uses the per-bag loop.
             candidates = self._population_candidates_batched(context_bags)
         else:
             candidates = torch.cat(
                 [
                     self._population_candidates(
-                        context_bags[i], cell_masks[context_indices[i]]
+                        context_bags[i],
+                        cell_masks[context_indices[i]]
+                        if cell_masks is not None
+                        else None,
                     )
                     for i in range(len(context_bags))
                 ],
