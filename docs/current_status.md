@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-06` (**§43 arm C top-up 8×A6000 DDP 전환 + NCCL P2P hang 수정 + B200 vs A6000 속도 기록**)
+**Last updated**: `2026-08-06` (**§44 B2b 패딩 배칭 구현 — batch>1로 병렬/VRAM 활용, B200 ~2.8× 처리량**)
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up을 8×A6000 DDP + 에피소드-매치(4096 ep/epoch)로 재개 중(epoch ~53/150). arm B(6-task+sparse)와 arm C(legacy+B2b) 50ep 학습·평가는 완료 — arm B sparse 0.675, arm C legacy 회귀 +0.037로 모두 gate 미달(과소학습 편향).
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **다음 Action**: arm C top-up 완주(150 epoch) 후 §42 재평가 → Phase 0 결과 선택 → frozen-v30 multi-resolution probe(Phase 1). ICI 잠금은 유지한다.
@@ -10,7 +10,7 @@
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
+**Read first if you are picking this up**: **§44 (B2b 패딩 배칭, 병목 프로파일)**, **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
 **§36 (CCER-v2 평가)**, **§29 (v30 확정 baseline)**.
 
 **열린 과제**: ① v30 six-task 효과 분리, ② B2b within-episode cardinality 효과 분리, ③ frozen-v30 multi-resolution headroom, ④ v30 medium 참조 재학습, ⑤ ICI 잠금 유지. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
@@ -1240,3 +1240,42 @@ gate 통과 실패.
   `epoch=NNN` 자동 저장 확인. val_ce: 0.5381(50) → 0.5375(51) → 0.5377(52) → 0.5370(53).
 - **바로 다음**: ① arm C top-up 완주(150 epoch) 후 §42 재평가(legacy overall 회귀 gate),
   ② 통과 시 frozen-v30 multi-resolution probe(Phase 1).
+
+---
+
+## 44. 2026-08-06 — 패딩 배칭 (B2b `episode_batch_size>1`) + 병목 프로파일
+
+**상태**: arm C top-up의 핵심 병목(rank당 batch=1, VRAM ~5%, GPU util 불균일)을
+프로파일로 확정하고 **ragged B2b 에피소드의 패딩 배칭**을 구현·검증했다.
+commit `568c5f8`.
+
+- **프로파일 (B200, arm C ddp8 config)**: step의 ~92%가 모델 forward+backward
+  (~177 ms / ~190 ms). 원인은 집계기의 **bag별 Python 루프**(소형 커널 다수)이며,
+  arm B(dense, batch 8)가 8 에피소드를 ragged 1개와 비슷한 벽시계로 처리하는 것으로
+  확인 — 벡터화 dense 경로는 배칭이 핵심.
+- **구현**: collator가 ragged 배치를 `(x, y, cell_mask, bag_mask)`로 패딩.
+  집계기 전역에 cell mask + per-bag valid count 관통 (슬롯 할당은 softmax 후 0처리로
+  all-`-inf` NaN 회피, tail/rare는 per-bag count + keep 마스킹, covariance 정규화,
+  context-pool/앵커/CLS 폴링). `forward_episode_batch`는 집계기는 완전 배칭, bag-
+  토큰 수준 meta-classifier만 에피소드별 루프(저비용). query rare-evidence에도
+  per-query cell mask.
+- **잠재 train/eval 불일치 수정**: `_forward_dense`의 `tail_fractions`가 softmax
+  가중합을 쓰던 것을 list 경로(평가/Musk 기준)와 동일한 **산술 평균**으로 정렬.
+  dense/패딩/평가가 이제 일치.
+- **B200 실측 (동일 v30 arch, ddp8 데이터)**:
+
+  | episode_batch_size | 처리량 | peak VRAM | 비고 |
+  |---|---|---|---|
+  | 1 (기존) | 5.8 ep/s | 1.1 GiB | rank당 1 에피소드 |
+  | 2 | **~16 ep/s** | ~16 GiB | **A6000 48 GiB 안전** |
+  | 4 | ~12 ep/s | ~32 GiB | A6000 경계 |
+  | 8 | ~14 ep/s | ~68 GiB | A6000 OOM, B200 전용 |
+
+  실 wall-clock은 배치로 Lightning 오버헤드가 분산되어 추가 이득.
+- **config**: `configs/train_v33_phase0_armC_ddp8_batch2.yaml`
+  (`episode_batch_size: 2`, episode-match 4096 ep/epoch → 256 steps/epoch).
+- **검증**: `tests/test_ragged_batching.py` 3개 (패딩 collator + 패딩 배치 == 개별
+  list 경로 logits, 1e-4). `test_b2b.py`의 "ragged 거부" 계약을 "패딩" 계약으로 갱신.
+  **전체 38 tests 통과 (~256s)**.
+- **바로 다음**: ① (선택) A6000 top-up을 batch2 config로 재런칭/적용 — 기존 batch=1
+  런과의 비교 판단은 사용자 결정, ② §42 재평가, ③ Phase 1 probe.
