@@ -135,6 +135,20 @@ class TestSlotMla(unittest.TestCase):
         self.assertEqual(tuple(b2.shape), tuple(l2.shape))
         torch.testing.assert_close(b2, l2)
 
+    def test_instances_are_unit_gate(self) -> None:
+        # poolz_l2 / centered+l2 views already L2-normalize cells, so the dense
+        # path skips the redundant re-normalize; a legacy no-L2 view must not.
+        poolz = _make_aggregator(bag_representation="poolz_l2")
+        self.assertTrue(poolz._instances_are_unit)
+        legacy_no_l2 = _make_aggregator(
+            bag_centered_representation=True, bag_centered_l2_normalize=False
+        )
+        self.assertFalse(legacy_no_l2._instances_are_unit)
+        centered_l2 = _make_aggregator(
+            bag_centered_representation=True, bag_centered_l2_normalize=True
+        )
+        self.assertTrue(centered_l2._instances_are_unit)
+
 
 if __name__ == "__main__":
     unittest.main()

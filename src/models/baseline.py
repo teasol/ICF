@@ -1105,7 +1105,9 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         cell_mask = (
             torch.arange(max_cells, device=padded.device)[None, :] < lengths[:, None]
         )  # [C, max_cells]
-        normalized = F.normalize(padded, dim=-1, eps=1e-6)
+        normalized = (
+            padded if self._instances_are_unit else F.normalize(padded, dim=-1, eps=1e-6)
+        )
         directions = self._candidate_directions[:k].float()  # [k, dim]
         scores = torch.einsum("cnd,kd->cnk", normalized, directions)
         scores = scores.masked_fill(~cell_mask.unsqueeze(-1), float("-inf"))
@@ -1318,6 +1320,17 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 out["stat_kurtosis"] = (fourth / (std**4 + 1e-6)).to(raw.dtype)
         return out
 
+    @property
+    def _instances_are_unit(self) -> bool:
+        """True when ``_bag_view`` already L2-normalizes each cell, so the dense
+        path / candidate pooling can reuse the vectors instead of re-normalizing
+        (a full per-cell pass). poolz_l2 always normalizes; the legacy view
+        normalizes when centered + l2.
+        """
+        return self.bag_representation == "poolz_l2" or (
+            self.bag_centered_representation and self.bag_centered_l2_normalize
+        )
+
     def _slot_similarity(
         self, cells: torch.Tensor, anchors: torch.Tensor
     ) -> torch.Tensor:
@@ -1380,7 +1393,11 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 "ccts_lambdas is not supported on padded (ragged-batched) "
                 "episodes; v30 configs do not enable it."
             )
-        normalized = F.normalize(instances.float(), dim=-1)
+        normalized = (
+            instances.float()
+            if self._instances_are_unit
+            else F.normalize(instances.float(), dim=-1)
+        )
         if anchors.ndim == 2:
             expanded_anchors = anchors.unsqueeze(0).expand(num_bags, -1, -1)
         elif anchors.ndim == 3 and anchors.shape[0] == num_bags:
