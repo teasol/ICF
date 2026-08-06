@@ -20,6 +20,7 @@ from src.utils.utils import (
     initialize_model_weights,
     merge_train_config,
     parse_train_args,
+    validate_vram_budget,
 )
 
 def main() -> None:
@@ -62,6 +63,10 @@ def main() -> None:
 
     datamodule = build_datamodule(config)
     model = build_model(config)
+    # Fail fast (before any training step) if the worst-case episode could
+    # OOM the visible GPU -- important when moving runs to smaller devices
+    # such as an A6000 (48 GiB) instead of the B200 (180 GiB).
+    validate_vram_budget(config, model)
     init_checkpoint: str | None = config.get("init_checkpoint")
     if init_checkpoint is not None:
         if config.get("ckpt_path") is not None:

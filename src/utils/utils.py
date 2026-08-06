@@ -186,6 +186,110 @@ def build_model(config: dict[str, Any]) -> ModelInterface:
     return ModelInterface(**model_kwargs)
 
 
+def estimate_training_vram_bytes(
+    *,
+    num_bags_max: int,
+    max_cells_per_bag: int,
+    input_dim: int,
+    param_count: int,
+    activation_layers: int = 6,
+    backward_factor: float = 3.0,
+    context_overhead_bytes: int = 1 << 30,
+) -> int:
+    """Conservative worst-case resident bytes for a single training step.
+
+    Covers, for the biggest possible episode:
+      * bf16 weights + two fp32 Adam moments + fp32 gradients;
+      * the B2b dense-generation buffer at ``num_bags_max x max_cells``;
+      * the per-cell activation chain (input tensor plus ``activation_layers``
+        layer tensors) scaled by a backward-retention factor;
+      * a fixed CUDA/context overhead.
+
+    This deliberately over-estimates the true footprint -- the set encoder
+    runs over ~100 bag tokens, not over cells -- so it is a *safety* bound:
+    passing it means the real working set is comfortably smaller.
+    """
+    weights_bytes = param_count * 2
+    adam_bytes = param_count * 8
+    gradient_bytes = param_count * 4
+    dense_buffer_bytes = num_bags_max * max_cells_per_bag * input_dim * 4
+    worst_cells = num_bags_max * max_cells_per_bag
+    activation_bytes = (
+        worst_cells
+        * input_dim
+        * 4
+        * (1 + int(activation_layers))
+        * float(backward_factor)
+    )
+    return int(
+        weights_bytes
+        + adam_bytes
+        + gradient_bytes
+        + dense_buffer_bytes
+        + activation_bytes
+        + context_overhead_bytes
+    )
+
+
+def validate_vram_budget(
+    config: dict[str, Any],
+    model: Any,
+    *,
+    verbose: bool = True,
+) -> None:
+    """Fail fast if a worst-case training step could OOM the visible GPU.
+
+    Uses conservative worst-case bounds (max bags, max cells) so the check is
+    robust against a future config that scales up ``num_bags``/``num_cells``.
+    Only active when CUDA is available; CPU runs (tests, smoke) are unaffected.
+    Warning/hard-error thresholds are tunable via ``trainer.vram_warn_fraction``
+    and ``trainer.vram_error_fraction`` (defaults 0.6 / 0.9).
+    """
+    if not torch.cuda.is_available():
+        return
+    device = torch.cuda.current_device()
+    properties = torch.cuda.get_device_properties(device)
+    total = properties.total_memory
+
+    dataset_kwargs = config.get("data", {}).get("dataset_kwargs", {})
+    num_bags = dataset_kwargs.get("num_bags", (60, 100))
+    num_bags_max = (
+        max(num_bags) if isinstance(num_bags, (list, tuple)) else int(num_bags)
+    )
+    num_cells = dataset_kwargs.get("num_cells", (500, 1000))
+    num_cells_max = (
+        max(num_cells) if isinstance(num_cells, (list, tuple)) else int(num_cells)
+    )
+    input_dim = int(config.get("model", {}).get("input_dim", 512))
+    param_count = sum(parameter.numel() for parameter in model.parameters())
+
+    estimate = estimate_training_vram_bytes(
+        num_bags_max=num_bags_max,
+        max_cells_per_bag=num_cells_max,
+        input_dim=input_dim,
+        param_count=param_count,
+    )
+    fraction = estimate / total
+
+    trainer_config = config.get("trainer", {})
+    warn_fraction = float(trainer_config.get("vram_warn_fraction", 0.6))
+    error_fraction = float(trainer_config.get("vram_error_fraction", 0.9))
+    if fraction > error_fraction:
+        raise RuntimeError(
+            f"[vram] worst-case step estimate {estimate / 1e9:.1f} GiB "
+            f"({fraction:.0%}) exceeds the hard limit "
+            f"{error_fraction:.0%} of {properties.name} "
+            f"({total / 1e9:.0f} GiB). Reduce num_bags/num_cells "
+            "(or episode batch) before running."
+        )
+    if verbose:
+        print(
+            f"[vram] worst-case estimate {estimate / 1e9:.2f} GiB "
+            f"({fraction:.1%} of {properties.name} {total / 1e9:.0f} GiB)"
+            + (" -- OK" if fraction < warn_fraction else " -- caution")
+        )
+
+
 def initialize_model_weights(
     model: ModelInterface, checkpoint_path: str | Path
 ) -> tuple[list[str], list[str]]:

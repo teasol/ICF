@@ -32,6 +32,10 @@ class ModelInterface(L.LightningModule):
         stage = self.hparams.get("dr_ccer_stage")
         if stage is not None:
             self.model.apply_dr_ccer_stage(stage)
+        self._vram_peak_fraction = float(
+            self.hparams.get("vram_peak_warn_fraction", 0.85)
+        )
+        self._vram_peak_checked = False
 
     def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
         """Reject checkpoints from structurally incompatible architectures."""
@@ -78,8 +82,43 @@ class ModelInterface(L.LightningModule):
         bad = [name for name, gradient in named if not torch.isfinite(gradient).all()]
         raise RuntimeError(f"Non-finite gradients at {stage}: {bad}")
 
+    def _check_peak_vram(self) -> None:
+        """Warn once if the first optimizer step's peak allocation is high.
+
+        This is a runtime complement to ``validate_vram_budget``: it measures
+        the real peak (model + first forward/backward), catching surprises
+        that a static estimate cannot (e.g. a future architecture change).
+        """
+        if not torch.cuda.is_available() or self._vram_peak_checked:
+            return
+        self._vram_peak_checked = True
+        device = torch.cuda.current_device()
+        total = torch.cuda.get_device_properties(device).total_memory
+        peak = torch.cuda.max_memory_allocated(device)
+        fraction = peak / total
+        self.print(
+            f"[vram] peak allocated after first step: "
+            f"{peak / 1e9:.2f} GiB ({fraction:.1%} of device)."
+        )
+        if fraction >= self._vram_peak_fraction:
+            self.print(
+                f"[vram] WARNING: peak {fraction:.1%} >= "
+                f"{self._vram_peak_fraction:.0%}. This configuration risks "
+                "OOM on a smaller device; reduce num_bags/num_cells or batch."
+            )
+
     def on_train_start(self) -> None:
         self._raise_if_nonfinite_parameters("training start")
+        if torch.cuda.is_available():
+            device = torch.cuda.current_device()
+            properties = torch.cuda.get_device_properties(device)
+            self.print(
+                f"[vram] training on {properties.name} "
+                f"({properties.total_memory / 1e9:.0f} GiB); peak-memory "
+                f"guard armed (warn above {self._vram_peak_fraction:.0%})."
+            )
+            torch.cuda.reset_peak_memory_stats(device)
+            self._vram_peak_checked = False
 
     def on_before_optimizer_step(self, optimizer: torch.optim.Optimizer) -> None:
         # Lightning calls this after AMP unscaling and before gradient clipping.
@@ -90,6 +129,7 @@ class ModelInterface(L.LightningModule):
     def optimizer_step(self, *args: Any, **kwargs: Any) -> None:
         super().optimizer_step(*args, **kwargs)
         self._raise_if_nonfinite_parameters(f"optimizer step={self.global_step}")
+        self._check_peak_vram()
 
     def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
         x, y = batch[:2]
