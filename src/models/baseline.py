@@ -494,6 +494,9 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         covariance_shrinkage: float = 0.0,
         include_cls_token: bool = False,
         cls_token_heads: int = 4,
+        slot_latent_dim: int | None = None,
+        slot_query_latent_dim: int | None = None,
+        slot_affinity_dim: int | None = None,
     ) -> None:
 
         # Deliberately initialize nn.Module directly: anchor construction is
@@ -549,6 +552,48 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             self.ccts_score_head = nn.Linear(self.input_dim, 1)
             self.ccts_metadata_projection = nn.Linear(5, self.input_dim)
 
+        # MLA-style low-rank slot affinity (config-gated probe). When
+        # slot_latent_dim is set, the cell-to-slot affinity is computed in a
+        # low-rank latent space (query d_cq, key d_c) via absorbed query
+        # weights (W_UQ^T W_UK), never expanding to the affinity dim. None
+        # keeps the legacy full-dim dot product. Extra parameters are created
+        # ONLY when enabled so existing checkpoints load unchanged.
+        self.slot_latent_dim = (
+            int(slot_latent_dim) if slot_latent_dim is not None else None
+        )
+        self.slot_query_latent_dim = (
+            int(slot_query_latent_dim)
+            if slot_query_latent_dim is not None
+            else (self.slot_latent_dim if self.slot_latent_dim is not None else None)
+        )
+        self.slot_affinity_dim = (
+            int(slot_affinity_dim)
+            if slot_affinity_dim is not None
+            else (
+                max(self.slot_latent_dim, self.slot_query_latent_dim)
+                if self.slot_latent_dim is not None
+                else None
+            )
+        )
+        if self.slot_latent_dim is not None:
+            if not 1 <= self.slot_latent_dim <= self.input_dim:
+                raise ValueError("slot_latent_dim must be in [1, input_dim].")
+            if self.slot_query_latent_dim < 1 or self.slot_affinity_dim < 1:
+                raise ValueError(
+                    "slot_query_latent_dim / slot_affinity_dim must be positive."
+                )
+            self.slot_w_dq = nn.Linear(
+                self.input_dim, self.slot_query_latent_dim, bias=False
+            )
+            self.slot_w_dkv = nn.Linear(
+                self.input_dim, self.slot_latent_dim, bias=False
+            )
+            self.slot_w_uq = nn.Linear(
+                self.slot_query_latent_dim, self.slot_affinity_dim, bias=False
+            )
+            self.slot_w_uk = nn.Linear(
+                self.slot_latent_dim, self.slot_affinity_dim, bias=False
+            )
 
         valid_bag_representations = {"legacy", "poolz", "poolz_l2"}
         if bag_representation not in valid_bag_representations:
@@ -1223,6 +1268,31 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 out["stat_kurtosis"] = (fourth / (std**4 + 1e-6)).to(raw.dtype)
         return out
 
+    def _slot_similarity(
+        self, cells: torch.Tensor, anchors: torch.Tensor
+    ) -> torch.Tensor:
+        """Cell-to-slot affinity (pre-temperature), full-dim or MLA low-rank.
+
+        ``slot_latent_dim is None``: legacy full-dim dot product.
+
+        Otherwise: MLA-style low-rank affinity. Cells (query) are compressed to
+        ``d_cq`` (W_DQ) and anchors (keys) to ``d_c`` (W_DKV); the affinity is
+        computed in the KV latent space with the absorbed query weight
+        ``W_UQ^T W_UK`` (d_cq x d_c), never expanding to the affinity dim.
+
+        cells: [..., num_cells, input_dim]; anchors: [..., num_slots, input_dim].
+        Returns [..., num_cells, num_slots].
+        """
+        if self.slot_latent_dim is None:
+            if cells.ndim == 3:
+                return torch.einsum("bnd,bsd->bns", cells, anchors)
+            return cells @ anchors.transpose(-1, -2)
+        c_q = self.slot_w_dq(cells)  # [..., num_cells, d_cq]
+        c_kv = self.slot_w_dkv(anchors)  # [..., num_slots, d_c]
+        w_abs = self.slot_w_uq.weight.T @ self.slot_w_uk.weight  # [d_cq, d_c]
+        q_latent = torch.einsum("...cd,dn->...cn", c_q, w_abs)  # [..., num_cells, d_c]
+        return torch.einsum("...cd,...sd->...cs", q_latent, c_kv)
+
     def _forward_dense(
         self,
         instances: torch.Tensor,
@@ -1267,7 +1337,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             expanded_anchors = anchors
         else:
             raise ValueError("Anchors must be [slots, dim] or [bags, slots, dim].")
-        similarity = torch.einsum("bnd,bsd->bns", normalized, expanded_anchors.float())
+        similarity = self._slot_similarity(normalized, expanded_anchors.float())
         assignment = torch.softmax(
             similarity / self.assignment_temperature,
             dim=-1,
@@ -1702,7 +1772,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 else bag.new_zeros(self.input_dim)
             )
             normalized = F.normalize(bag.float(), dim=-1)
-            similarity = normalized @ anchors.float().T
+            similarity = self._slot_similarity(normalized, anchors.float())
             assignment = torch.softmax(
                 similarity / self.assignment_temperature,
                 dim=-1,
@@ -5157,6 +5227,9 @@ class BaseModel(nn.Module):
         covariance_relation: dict[str, object] | None = None,
         cls_token_pooling: bool = False,
         cls_token_heads: int = 4,
+        aggregator_slot_latent_dim: int | None = None,
+        aggregator_slot_query_latent_dim: int | None = None,
+        aggregator_slot_affinity_dim: int | None = None,
         num_classes: int = 2,
     ) -> None:
         super().__init__()
@@ -5187,6 +5260,9 @@ class BaseModel(nn.Module):
             covariance_shrinkage=aggregator_covariance_shrinkage,
             include_cls_token=cls_token_pooling,
             cls_token_heads=cls_token_heads,
+            slot_latent_dim=aggregator_slot_latent_dim,
+            slot_query_latent_dim=aggregator_slot_query_latent_dim,
+            slot_affinity_dim=aggregator_slot_affinity_dim,
         )
         relation_config = dict(covariance_relation or {})
         self.aggregator.slot_covariance_descriptor = str(
