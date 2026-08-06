@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-05` — v33 Phase 0 arm B BF16 지속, arm C step-matched 재설계·재시작.
+**Last updated**: `2026-08-06` — arm C top-up 8×A6000 DDP 재개 + NCCL P2P hang 수정(`NCCL_P2P_DISABLE=1`).
 
 **Confirmed baseline**: v30 = v24 residual+bottleneck bag projection + B1
 `bag_representation: poolz_l2` + B2 log-uniform cardinality `[1,1024]`. Musk zero-shot
@@ -51,6 +51,17 @@ six-task + B2)와 arm C(v30 + legacy + B2b) 데이터 컨트롤을 먼저 구현
 (실측 약 3분/epoch, 전체 약 2.5–3시간). **Phase 1 frozen-v30 multi-resolution probe는
 Phase 0 결과 확인 후에만 구현한다.** 상세는
 [`current_status.md`](current_status.md) §41·§39다.
+
+**Active — arm C top-up, 8×A6000 DDP (2026-08-06)**: §42에서 arm C가 과소학습 편향
+(에피소드 8× 부족)으로 gate 미달이었으므로, 사용자 결정으로 **8×RTX A6000 DDP +
+에피소드-매치**로 재개했다. 새 config는 `configs/train_v33_phase0_armC_ddp8.yaml`
+(자체 포함형, medium 체인 미상속, `episodes_per_epoch: 4096`, devices 8 /
+`ddp_find_unused_parameters_false` / bf16-mixed / max_epochs 150)이고 `archive/v33_phase0_armC_bf16/last.ckpt`에서
+resume한다. **gnode5 필수**: 이 머신의 NCCL P2P/CUMEM 전송이 hang을 일으켜
+`scripts/launch_interactive_training.sh`에 `NCCL_P2P_DISABLE=1`을 기본 적용했다
+(진단용 `scripts/nccl_probe.py` 신규). B200 1장 대비 A6000 1장은 ~1.8× 느리지만
+8장 병렬로 노드 총 처리량은 ~4.3× (상세 표는 [`current_status.md`](current_status.md) §43).
+**다음**: top-up 완주(150 epoch) 후 §42 재평가.
 
 **Proposed next investigation — v33 MR-BagPFN (아키텍처)**: CCER와 다른 새 cell evidence를
 만들지 않고, 검증된 v30 bag representation을 동일 bag의 full/partition/subsample view에서

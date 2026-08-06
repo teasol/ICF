@@ -1,0 +1,150 @@
+# v33 Phase 0 arm C top-up — 8×A6000 DDP, episode-matched (4096/epoch), B2b.
+#
+# Self-contained config: does NOT inherit the medium data chain. The arm C
+# dataset (legacy five-task mix + B2b per-bag cardinality, num_cells
+# LogUniform[1,1024]) is completely different from configs/data/medium.yaml, so
+# every data knob is defined here explicitly.
+#
+# Why this run (docs/current_status.md §41/§42):
+#   The step-matched arm C (512 ep/epoch, batch 1) finished 50 epochs with best
+#   at epoch 49 (val_ce 0.5351) — still converging — and its legacy overall
+#   regressed +0.0373 vs committed v30 (gate <= 0.01). That regression was
+#   predicted as an underfitting bias: arm C saw 8x fewer total episodes
+#   (25,600 vs v30/arm B 204,800). This top-up switches to episode-match:
+#      episodes_per_epoch: 4096  (== v30 committed)
+#   Under 8-GPU DDP each rank draws 4096/8 = 512 episodes/epoch (batch 1),
+#   so total 4096 distinct episodes and 512 global optimizer steps per epoch —
+#   exactly v30's episode and step budget. Each worker generates its own data
+#   on its own GPU with a rank-derived seed (see SyntheticEpisodeDataset:
+#   sample_seed = initial_seed + rank*1_000_003 + sample_count, and
+#   _generation_device() resolves bare cuda -> this rank's local GPU).
+#
+# Resume: from the completed step-matched arm C checkpoint
+#   /home/kimds/archive/v33_phase0_armC_bf16/last.ckpt (epoch 49, 25,600 steps)
+# Runs epochs 50..149 (total target 150).
+#
+# Gates (unchanged): legacy overall regression <= 0.01 (paired CI incl. zero)
+# vs committed v30, after convergence.
+
+seed: 42
+ckpt_path: /home/kimds/archive/v33_phase0_armC_bf16/last.ckpt
+
+data:
+  dataset_src: synthetic_data.SyntheticEpisodeDataset
+  episode_dataset: true
+  # B2b is ragged (list-of-bags per episode), so episodes cannot be stacked.
+  episode_batch_size: 1
+  cuda_prefetch: true
+
+  num_workers: 0
+  pin_memory: false
+  persistent_workers: false
+  train_shuffle: true
+  val_shuffle: false
+  test_shuffle: false
+
+  dataset_kwargs:
+    # Episode-match with committed v30 (docs §42). Under 8-GPU DDP each rank
+    # processes 512 episodes/epoch at batch 1 = 512 global optimizer steps.
+    episodes_per_epoch: 4096
+    seed: null
+    generation_device: cuda
+    shape_group_size: 1
+    difficulty_curriculum_episodes: 0
+    # Stationary mixture (same as v30/arm B): no difficulty curriculum.
+    effect_scale_start: [0.9, 2.1]
+    effect_scale_end: [0.9, 2.1]
+
+    num_bags: [60, 100]
+    # B2/B2b cardinality: per-episode (B2) / per-bag (B2b) LogUniform[1,1024].
+    num_cells: [1, 1024]
+    num_cells_log_uniform: true
+    per_bag_cardinality: true
+    latent_dim: 32
+    output_dim: 512
+    mlp_hidden_dim: 96
+    mlp_num_layers: 3
+    class_separation: [1.0, 2.0]
+    latent_scale: [0.6, 1.3]
+
+    shared_component_probability: 1.0
+    num_shared_components: [4, 10]
+    shared_component_fraction: [0.82, 0.96]
+    donor_shift_scale: 0.35
+    donor_component_shift_scale: 0.12
+    donor_mixture_logit_scale: 0.65
+    shared_component_base_logit_scale: 0.70
+    donor_shared_component_logit_scale: 0.70
+
+    continuous_response_probability: 1.0
+    response_score_scale: 1.5
+    response_score_min_margin: 0.15
+    response_mixture_effect_scale: 2.5
+    response_state_effect_scale: [1.5, 3.0]
+    # Legacy five-task mix (equal weights) — arm C keeps the v30 five tasks.
+    response_task_probabilities: [0.2, 0.2, 0.2, 0.2, 0.2]
+    response_covariance_effect_scale: [1.0, 2.0]
+    rare_response_probability: 0.0
+    rare_response_fraction: [0.02, 0.08]
+
+    observation_noise: 0.005
+    normalize_output: true
+    output_norm_eps: 1.0e-8
+    # Independent labels prevent class-count completion shortcuts.
+    balanced: false
+    return_task_metadata: true
+
+  val_dataset_kwargs:
+    episodes_per_epoch: 104
+    seed: 50042
+
+  test_dataset_kwargs:
+    episodes_per_epoch: 104
+    seed: 60042
+
+model: default
+model_overrides:
+  # v30 committed: B1 poolz_l2 + B2 cardinality. Architecture UNCHANGED.
+  bag_representation: poolz_l2
+  project_structured_tokens: true
+  projection_bottleneck_dim: 64
+  projection_residual_mean: true
+  covariance_relation:
+    enabled: true
+    mode: learned_head
+    granularity: subspace
+    subspace_rank: 1
+    subspace_whiten: true
+    subspace_shrinkage: 0.25
+    diagnostic_only: false
+    residual_scale: 0.5
+    eps: 1.0e-6
+
+model_kwargs:
+  training_targets_per_episode: [5, 12]
+  ranking_loss_weight: 0.10
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0
+
+optimizer: adamw_learnability_5e4
+scheduler: warmup_reduce_on_plateau_medium
+
+trainer:
+  # 8 x RTX A6000 DDP.
+  max_epochs: 150
+  accelerator: gpu
+  devices: 8
+  strategy: ddp_find_unused_parameters_false
+  precision: bf16-mixed
+  log_every_n_steps: 100
+  check_val_every_n_epoch: 1
+  num_sanity_val_steps: 0
+  gradient_clip_val: 1.0
+  gradient_clip_algorithm: norm
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v33_phase0_armC_ddp8_topup
+
+callbacks: default

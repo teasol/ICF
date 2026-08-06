@@ -21,6 +21,11 @@ CUDA_DEVICES="${CUDA_DEVICES:-0,1,2,3,4,5,6,7}"
 NPROC_PER_NODE="${NPROC_PER_NODE:-8}"
 # Avoid allocator fragmentation from changing synthetic episode shapes.
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+# NCCL on this node (8x A6000, no NVLink) hangs on the P2P/CUMEM transport;
+# verified with scripts/nccl_probe.py -- only NCCL_P2P_DISABLE=1 completes
+# collectives. Applied by default; override with NCCL_P2P_DISABLE=0 if the
+# node gains working P2P.
+export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
 
 CKPT_PATH="${CKPT_PATH:-}"
 # Optional cross-validation fold. When set, it overrides dataset_kwargs.cv from
@@ -60,6 +65,7 @@ if [[ "${ICF_DETACHED_WORKER:-0}" != "1" && "${ICF_FOREGROUND:-0}" != "1" ]]; th
         "NPROC_PER_NODE=${NPROC_PER_NODE}"
         "CKPT_PATH=${CKPT_PATH}"
         "CV=${CV}"
+        "NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-1}"
     )
     nohup setsid env "${DETACHED_ENV[@]}" "$0" "${RUN_KIND}" "${DEFAULT_CONFIG}" \
         >"${LAUNCH_LOG}" 2>&1 < /dev/null &

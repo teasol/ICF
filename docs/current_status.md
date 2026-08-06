@@ -1,9 +1,9 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-06` (**§42 Phase 0 arm B/C 학습 완료 + gate 평가: arm B sparse gate·arm C legacy 회귀 gate 모두 미달**)
-**Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. v33 Phase 0 arm B(6-task+sparse)와 arm C(legacy+B2b) 학습·평가 완료. arm B는 sparse task AUROC 0.675로 gate(0.75) 미달, arm C는 legacy overall 회귀 +0.037로 gate(0.01) 미달(과소학습 편향 가능성).
+**Last updated**: `2026-08-06` (**§43 arm C top-up 8×A6000 DDP 전환 + NCCL P2P hang 수정 + B200 vs A6000 속도 기록**)
+**Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up을 8×A6000 DDP + 에피소드-매치(4096 ep/epoch)로 재개 중(epoch ~53/150). arm B(6-task+sparse)와 arm C(legacy+B2b) 50ep 학습·평가는 완료 — arm B sparse 0.675, arm C legacy 회귀 +0.037로 모두 gate 미달(과소학습 편향).
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
-* **다음 Action**: arm C top-up(수렴점까지 추가 학습) 여부 결정 → Phase 0 결과 선택 → frozen-v30 multi-resolution probe(Phase 1). ICI 잠금은 유지한다.
+* **다음 Action**: arm C top-up 완주(150 epoch) 후 §42 재평가 → Phase 0 결과 선택 → frozen-v30 multi-resolution probe(Phase 1). ICI 잠금은 유지한다.
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
@@ -1193,3 +1193,50 @@ gate 통과 실패.
   `predictions/synthetic_v33_phase0_armC_legacy_1000ep.pt`.
 - **바로 다음**: ① arm C top-up 여부(사용자 결정), ② (선택) top-up 후 arm C 재평가,
   ③ Phase 0 결과 선택 → frozen-v30 multi-resolution probe(Phase 1).
+
+## 43. 2026-08-06 — arm C top-up: 8×A6000 DDP 전환 + NCCL P2P hang 수정 + B200 vs A6000 속도 기록
+
+**상태**: 사용자 결정으로 arm C top-up을 **8×RTX A6000 (48 GiB) DDP**로 재개했다.
+에피소드-매치(`episodes_per_epoch: 4096`, v30과 동일 총 에피소드 예산)로 전환해
+§41/§42의 과소학습 편향을 제거한다. 진행 중: 2026-08-06 12:54 시작, epoch 49 ckpt
+에서 resume, 현재 ~epoch 53 (총 목표 150).
+
+- **새 config**: `configs/train_v33_phase0_armC_ddp8.yaml` — medium 체인을 상속하지
+  않는 자체 포함형. B2b ragged(`per_bag_cardinality: true`, `episode_batch_size: 1`),
+  `episodes_per_epoch: 4096`, `trainer: devices 8 / ddp_find_unused_parameters_false /
+  bf16-mixed / max_epochs 150`. resume: `archive/v33_phase0_armC_bf16/last.ckpt`.
+- **NCCL P2P hang (gnode5) — 원인 진단 및 수정**:
+  - 증상: 8-GPU torchrun이 `All distributed processes registered` 직후 영원히 hang.
+    GPU 8장 모두 100% util인데 메모리 ~450 MiB 고정, rank CPU가 1코어씩 회전, 로그·
+    metrics 무진행.
+  - 진단: `scripts/nccl_probe.py`(신규, broadcast/all_reduce/대형 broadcast 최소 재현)로
+    **NCCL comm init은 8 rank 모두 정상 완료**됨을 확인. 그러나 **첫 컬렉티브
+    (`dist.barrier()`)에서 hang** → 통신 그룹 생성이 아니라 **전송(transport) 문제**.
+    `NCCL_DEBUG=INFO`에서 `Channel ... via P2P/CUMEM` 채널 사용 확인.
+  - 검증: `NCCL_P2P_DISABLE=1`만 8 rank 프로브가 통과. `NCCL_CUMEM_DISABLE=1`/
+    `NCCL_P2P_LEVEL=SYS`는 여전히 hang → 이 머신의 NCCL P2P/CUMEM 전송이 불안정.
+  - 수정: `scripts/launch_interactive_training.sh`에 `NCCL_P2P_DISABLE=1` 기본 적용 +
+    detached 워커에 env 전달 추가. 단일 노드 8×A6000(NVLink 없음)이므로 SHM 전송으로
+    동작.
+- **B200 1장 vs A6000 8장 속도 비교** (동일 v30 arch · `episode_batch_size=1` ·
+  bf16-mixed · bag 60–100, `n_b ~ LogUniform[1,1024]`, 전형 9k–15k 셀 / worst 102k):
+
+  | 항목 | B200 1장 (기준, step-matched 512 ep/epoch) | A6000 8장 (현재, 4096 ep/epoch) |
+  |---|---|---|
+  | step당 시간 | **0.36 s/step** | **~0.66 s/step** (rank당) |
+  | it/s | 2.5–2.8 it/s | **~1.5 it/s** (rank당) |
+  | 에피소드 처리량 | 2.8 ep/s | **~1.5 ep/s** (rank당) |
+  | epoch 시간 | ≈ 3:05 / epoch (512 steps) | **≈ 5:38 / epoch** (512 steps/rank) |
+  | 50 epochs 총량 | ≈ 2.6 h (25,600 ep) | **≈ 4.7 h** (4096 ep/epoch 기준) |
+  | 노드 총 처리량 | 2.8 ep/s | **≈ 12 ep/s** (8×1.5, ~4.3×) |
+
+  - **해석**: A6000 1장 기준으로는 B200 대비 ~1.8× 느리다(step당 0.36→0.66 s). 원인은
+    (1) A6000(48 GiB) vs B200(180 GiB) 연산·메모리 대역폭 차이, (2) NCCL P2P 비활성화로
+    인한 all-reduce 오버헤드 증가, (3) GPU util이 23–100%로 불균일해 DDP 동기화 대기.
+    그러나 **8장 병렬로 노드 총 처리량은 ~4.3×** (2.8→12 ep/s). 에피소드-매치(204,800 ep)
+    예산 기준으로는 B200 2.6 h 대비 A6000 8장 약 4.7 h (P2P 비활성화 비용 포함).
+- **검증 완료 (epoch 50–53)**: resume 성공(`Restored all states`), 첫 step VRAM
+  peak 0.92 GiB(1.8%), epoch당 VRAM 3.8–7.8 GiB(A6000 48 GiB의 ~8–16%), 체크포인트
+  `epoch=NNN` 자동 저장 확인. val_ce: 0.5381(50) → 0.5375(51) → 0.5377(52) → 0.5370(53).
+- **바로 다음**: ① arm C top-up 완주(150 epoch) 후 §42 재평가(legacy overall 회귀 gate),
+  ② 통과 시 frozen-v30 multi-resolution probe(Phase 1).
