@@ -1,0 +1,38 @@
+base_config: train_v30_cardinality_poolz_l2.yaml
+
+# v34 Phase 0 arm D — large-context training, 512-d input (Exp 1).
+#
+# Gap: v30 trains on bags with num_cells ~ LogUniform[1,1024] (median ~34),
+# while PathoBench bags (slides) hold 3k-30k+ tiles and all-context episodes
+# total ~1.8M cells. This arm widens the cell-count range to PathoBench scale
+# so the model actually learns large contexts.
+#
+# Scratch (no ckpt_path). B2 (per-episode cardinality, all bags share n_b) —
+# same episode structure as v30, only the cell range widens. num_bags stays
+# 60-100.
+#
+# Memory note: the dense aggregator materializes a [bags, cells, slots, dim]
+# difference tensor, so episode_batch_size must be 1 and the cell upper bound
+# is capped: 100 x 16384 x 12 x 512 x 4 = 40 GiB worst-case single episode
+# (comfortable on B200). Fixes the latent _forward_dense empty/broadcast tail
+# bug needed for the batch-1 dense path.
+#
+# Eval: PathoBench all-context with the existing 1536->512 PCA bridge
+# (test_pathobench.py --config <this>, model input_dim = 512).
+#
+# Budget placeholder: episodes_per_epoch / max_epochs tuned after the smoke
+# test (large episodes are much heavier than v30's, so total episodes are
+# scaled down from v30's 204,800).
+data_overrides:
+  dataset_kwargs:
+    num_cells: [1, 16384]
+    episodes_per_epoch: 256
+  episode_batch_size: 1
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v34_phase0_largectx_512
+
+trainer:
+  max_epochs: 25

@@ -1,0 +1,34 @@
+base_config: train_v30_cardinality_poolz_l2.yaml
+
+# v34 Phase 0 arm E — large-context + 1536-d input, scratch (Exp 2).
+#
+# Same large-context intent as arm D but trains at 1536 input dim so
+# PathoBench's raw 1536-d features are fed directly (no 1536->512 PCA):
+#   model_overrides.input_dim = 1536   (build_model reads config['model']['input_dim'])
+#   generator output_dim        = 1536 (synthetic cells are 1536-d)
+#
+# VRAM worst-case guard: input_dim 1536 makes the estimate ~3x tighter, so the
+# cell range is capped at [1, 8192] (100 x 8192 = 0.82M cells, ~112 GiB, ~62%).
+# num_bags stays 60-100. Guard kept as-is (user decision).
+#
+# Eval: test_pathobench.py --config <this> — model input_dim == FEATURE_DIM
+# (1536) so raw features are used directly (no PCA, 512-d cache skipped).
+#
+# Budget placeholder: tuned after the smoke test.
+data_overrides:
+  dataset_kwargs:
+    output_dim: 1536
+    num_cells: [1, 8192]
+    episodes_per_epoch: 256
+  episode_batch_size: 1
+
+model_overrides:
+  input_dim: 1536
+
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v34_phase0_largectx_1536
+
+trainer:
+  max_epochs: 25
