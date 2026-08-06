@@ -51,8 +51,6 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=PROJECT_ROOT / "data" / "pathobench",
     )
-    parser.add_argument("--max-tiles", type=int, default=1024)
-    parser.add_argument("--pca-samples", type=int, default=100_000)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="cuda")
     return parser.parse_args()
@@ -62,7 +60,6 @@ def main() -> None:
     args = parse_args()
     L.seed_everything(args.seed, workers=True)
     device = torch.device(args.device)
-    generator = torch.Generator().manual_seed(args.seed)
 
     table = pd.read_csv(args.csv)
     if not {"slide_id", "label", "split"}.issubset(table.columns):
@@ -70,6 +67,9 @@ def main() -> None:
             f"CSV must have slide_id/label/split columns: {list(table.columns)}"
         )
     table = table[table["split"].isin(("train", "test"))]
+    # Slide ids are stored as string h5 stems; some CSVs have numeric ids
+    # (e.g. BC_Therapy / CPTAC-CCRCC) that pandas reads as int64.
+    table["slide_id"] = table["slide_id"].astype(str)
     raw_labels = table["label"].astype(int)
     if raw_labels.nunique() > 2:
         # Same binarization as the eval: class 0 vs the rest.
@@ -94,22 +94,17 @@ def main() -> None:
     slide_ids = sorted(set(train_table["slide_id"]) | set(test_table["slide_id"]))
     bags: dict[str, torch.Tensor] = {}
     for index, slide_id in enumerate(slide_ids):
-        bags[slide_id] = load_slide_features(
-            slide_id, h5_index, args.max_tiles, generator
-        )
+        bags[slide_id] = load_slide_features(slide_id, h5_index)
         if (index + 1) % 100 == 0 or index + 1 == len(slide_ids):
             print(f"  loaded {index + 1}/{len(slide_ids)} slides", flush=True)
 
-    # PCA fit on TRAIN tiles only (no test leakage), on the GPU.
+    # PCA fit on ALL TRAIN tiles only (no test leakage, no subsampling), GPU.
     train_ids = train_table["slide_id"].tolist()
     train_tiles = torch.cat([bags[s] for s in train_ids], dim=0)
-    if train_tiles.shape[0] > args.pca_samples:
-        p = torch.randperm(train_tiles.shape[0], generator=generator)
-        train_tiles = train_tiles[p[: args.pca_samples]]
     pca_mean, pca_components = fit_pca(
-        train_tiles, MODEL_INPUT_DIM, generator, device
+        train_tiles, MODEL_INPUT_DIM, device
     )
-    print(f"PCA fit on {train_tiles.shape[0]} TRAIN tiles -> {MODEL_INPUT_DIM}-d")
+    print(f"PCA fit on ALL {train_tiles.shape[0]} TRAIN tiles -> {MODEL_INPUT_DIM}-d")
 
     mean_cuda = pca_mean.to(device)
     components_cuda = pca_components.to(device)

@@ -36,7 +36,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.utils.metrics import auroc, bootstrap_auroc_interval, log_loss  # noqa: E402
+from src.utils.metrics import auroc, log_loss  # noqa: E402
 from src.utils.utils import build_model, merge_train_config  # noqa: E402
 
 MODEL_INPUT_DIM = 512
@@ -70,26 +70,8 @@ def parse_args() -> argparse.Namespace:
         choices=("sample", "all"),
         default="sample",
         help="sample = context-per-class train slides (default); "
-        "all = every train slide is context (tiles auto-capped by "
-        "--target-context-cells).",
+        "all = every train slide is context (all tiles).",
     )
-    parser.add_argument(
-        "--target-context-cells",
-        type=int,
-        default=100_000,
-        help="Total context-cell budget for --context-mode all; 0 = no cap "
-        "(all tiles of all train slides).",
-    )
-    parser.add_argument("--max-tiles", type=int, default=1024)
-    parser.add_argument("--pca-samples", type=int, default=100_000)
-    parser.add_argument(
-        "--pca-cache",
-        type=Path,
-        default=PROJECT_ROOT / "data" / "pathobench_pca_1536to512.pt",
-        help="Path to a cached PCA (mean/components) to load instead of "
-        "re-fitting; if missing, fit on the task's train tiles and save it.",
-    )
-    parser.add_argument("--max-queries", type=int, default=None)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--output", type=Path, default=None)
@@ -99,10 +81,8 @@ def parse_args() -> argparse.Namespace:
 def load_slide_features(
     slide_id: str,
     h5_index: dict[str, Path],
-    max_tiles: int,
-    generator: torch.Generator,
 ) -> torch.Tensor:
-    """Load one slide's tile features, deterministically subsampled."""
+    """Load one slide's FULL tile features (no subsampling)."""
     import h5py
 
     path = h5_index.get(slide_id)
@@ -114,9 +94,6 @@ def load_slide_features(
         raise ValueError(
             f"Slide {slide_id} has unexpected features shape {tuple(features.shape)}"
         )
-    if features.shape[0] > max_tiles:
-        perm = torch.randperm(features.shape[0], generator=generator)
-        features = features[perm[:max_tiles]]
     return features
 
 
@@ -134,21 +111,33 @@ def index_h5_files(features_root: Path) -> dict[str, Path]:
 def fit_pca(
     features: torch.Tensor,
     out_dim: int,
-    generator: torch.Generator,
     device: torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """PCA via eigendecomposition of the 1536x1536 covariance, run on GPU.
+    """PCA over ALL given tile features, chunked so the full data fits on GPU.
 
-    Returns (mean [1, dim], components [dim, out_dim]) on CPU.
+    Two exact passes over the whole tile set (mean, then centered covariance,
+    both accumulated in float64), then eigendecomposition of the D x D
+    covariance matrix. Returns (mean [1, dim], components [dim, out_dim]) on
+    CPU.
     """
-    perm = torch.randperm(features.shape[0], generator=generator)
-    sample = features[perm[: min(features.shape[0], 200_000)]].float().to(device)
-    mean = sample.mean(dim=0, keepdim=True)
-    centered = sample - mean
-    covariance = centered.t() @ centered / centered.shape[0]
+    n_total, dim = features.shape
+    chunk = 2**16  # 65536 tiles per GPU block (~400MB float32 at D=1536)
+    mean = torch.zeros(dim, device=device, dtype=torch.float64)
+    for start in range(0, n_total, chunk):
+        block = features[start : start + chunk].to(device).double()
+        mean += block.sum(dim=0)
+    mean /= n_total
+    covariance = torch.zeros(dim, dim, device=device, dtype=torch.float64)
+    for start in range(0, n_total, chunk):
+        centered = features[start : start + chunk].to(device).double() - mean
+        covariance += centered.t() @ centered
+    covariance /= n_total
     eigenvalues, eigenvectors = torch.linalg.eigh(covariance)
     components = eigenvectors[:, -out_dim:]  # top out_dim eigenvectors
-    return mean.cpu(), components.cpu().contiguous()
+    return (
+        mean.float().cpu().unsqueeze(0),
+        components.float().cpu().contiguous(),
+    )
 
 
 def main() -> None:
@@ -161,6 +150,9 @@ def main() -> None:
     if not {"slide_id", "label", "split"}.issubset(table.columns):
         raise ValueError(f"CSV must have slide_id/label/split columns: {list(table.columns)}")
     table = table[table["split"].isin(("train", "test"))]
+    # Slide ids are string h5 stems; some CSVs have numeric ids (e.g.
+    # BC_Therapy / CPTAC-CCRCC) that pandas reads as int64.
+    table["slide_id"] = table["slide_id"].astype(str)
     train_table = table[table["split"] == "train"]
     test_table = table[table["split"] == "test"]
     if len(train_table) < 2 or len(test_table) < 1:
@@ -220,45 +212,20 @@ def main() -> None:
         )
         bags: dict[str, torch.Tensor] = {}
         for index, slide_id in enumerate(slide_ids):
-            bags[slide_id] = load_slide_features(
-                slide_id, h5_index, args.max_tiles, generator
-            )
+            bags[slide_id] = load_slide_features(slide_id, h5_index)
             if (index + 1) % 100 == 0 or index + 1 == len(slide_ids):
                 print(f"  loaded {index + 1}/{len(slide_ids)} slides", flush=True)
         train_ids = train_table["slide_id"].tolist()
         test_ids = test_table["slide_id"].tolist()
         print(f"PathoBench task {args.csv.name}: {len(train_ids)} train / "
-              f"{len(test_ids)} test slides (tiles capped at {args.max_tiles})")
+              f"{len(test_ids)} test slides")
 
-        # PCA bridge 1536 -> 512 fit on train tiles (GPU), cached.
-        pca_cache = args.pca_cache.expanduser().resolve()
-        if pca_cache.exists():
-            pca_state = torch.load(
-                pca_cache, map_location="cpu", weights_only=False
-            )
-            pca_mean = pca_state["mean"]
-            pca_components = pca_state["components"]
-            print(f"Loaded PCA from {pca_cache} "
-                  f"(fit on {pca_state.get('n_tiles', '?')} tiles)")
-        else:
-            train_tiles = torch.cat([bags[s] for s in train_ids], dim=0)
-            if args.pca_samples is not None:
-                p = torch.randperm(train_tiles.shape[0], generator=generator)
-                train_tiles = train_tiles[p[: args.pca_samples]]
-            pca_mean, pca_components = fit_pca(
-                train_tiles, MODEL_INPUT_DIM, generator, device
-            )
-            pca_cache.parent.mkdir(parents=True, exist_ok=True)
-            torch.save(
-                {
-                    "mean": pca_mean,
-                    "components": pca_components,
-                    "n_tiles": train_tiles.shape[0],
-                },
-                pca_cache,
-            )
-            print(f"PCA fit on {train_tiles.shape[0]} train tiles (GPU) "
-                  f"-> saved {pca_cache}")
+        # PCA bridge 1536 -> 512 fit on ALL train tiles (GPU, chunked).
+        train_tiles = torch.cat([bags[s] for s in train_ids], dim=0)
+        pca_mean, pca_components = fit_pca(
+            train_tiles, MODEL_INPUT_DIM, device
+        )
+        print(f"PCA fit on all {train_tiles.shape[0]} train tiles (GPU)")
 
     train_labels = torch.tensor(train_table["label"].tolist(), dtype=torch.long)
     test_labels = torch.tensor(test_table["label"].tolist(), dtype=torch.long)
@@ -285,49 +252,23 @@ def main() -> None:
         print(f"Projected {len(projected)} slides to {MODEL_INPUT_DIM}-d on {device}")
     print(f"Model: arch v{model.model.architecture_version}, checkpoint {args.checkpoint.name}")
     if args.context_mode == "all":
-        print(f"Context: ALL {len(train_ids)} train slides, target "
-              f"{args.target_context_cells} cells total"
-              if args.target_context_cells > 0
-              else f"Context: ALL {len(train_ids)} train slides, no tile cap")
+        print(f"Context: ALL {len(train_ids)} train slides (all tiles)")
     else:
-        print(f"Context: {args.context_per_class} slides per class "
-              f"(max {args.max_tiles} tiles/slide)")
-
-    if args.max_queries is not None:
-        test_ids = test_ids[: args.max_queries]
+        print(f"Context: {args.context_per_class} slides per class (all tiles)")
 
     probabilities: list[float] = []
     queried_ids: list[str] = []
     nan_count = 0
-
-    def subsample_bag(features: torch.Tensor, limit: int) -> torch.Tensor:
-        if features.shape[0] <= limit:
-            return features
-        perm = torch.randperm(features.shape[0], generator=generator)
-        return features[perm[:limit]]
 
     context_summary = f"{args.context_per_class} per class"
     with torch.no_grad():
         for query_index, query_id in enumerate(test_ids):
             if args.context_mode == "all":
                 context_ids = list(train_ids)
-                context_tiles = args.max_tiles
-                if args.target_context_cells > 0:
-                    context_tiles = max(
-                        32,
-                        min(
-                            args.max_tiles,
-                            args.target_context_cells // max(1, len(context_ids)),
-                        ),
-                    )
                 context_summary = (
-                    f"all {len(context_ids)} train slides, "
-                    f"{context_tiles} tiles/slide"
+                    f"all {len(context_ids)} train slides (all tiles)"
                 )
-                context_bags = [
-                    subsample_bag(projected[slide], context_tiles)
-                    for slide in context_ids
-                ]
+                context_bags = [projected[slide] for slide in context_ids]
             else:
                 context_ids = []
                 for class_index in (0, 1):
@@ -341,7 +282,7 @@ def main() -> None:
                     ].tolist()
                     context_ids.extend(pool[index] for index in permutation)
                 context_bags = [projected[slide] for slide in context_ids]
-            query_bag = subsample_bag(projected[query_id], args.max_tiles)
+            query_bag = projected[query_id]
             # Pad the episode into one dense batch and use the vectorized
             # batched path (the per-bag list path was CPU-bound, leaving the
             # GPU idle).
@@ -394,14 +335,14 @@ def main() -> None:
         print("Not enough valid predictions / both classes to compute AUROC.")
         return
 
-    low, high = bootstrap_auroc_interval(probability, target, samples=2000, seed=args.seed)
+    low, high = float("nan"), float("nan")
     predicted = (probability > 0.5).long()
     accuracy = float((predicted == target).float().mean().item())
     sensitivity = float((predicted[target == 1] == 1).float().mean().item())
     specificity = float((predicted[target == 0] == 0).float().mean().item())
 
     print(f"\n=== PathoBench zero-shot — {args.csv.name} — {int(valid.sum())} test slides ===")
-    print(f"AUROC             {auroc(probability, target):.4f}  [{low:.3f}, {high:.3f}]")
+    print(f"AUROC             {auroc(probability, target):.4f}")
     print(f"Accuracy          {accuracy:.4f}")
     print(f"Balanced accuracy {(0.5 * (sensitivity + specificity)):.4f} "
           f"(sens {sensitivity:.3f} / spec {specificity:.3f})")
@@ -418,8 +359,6 @@ def main() -> None:
                 "prediction": predicted,
                 "metrics": {
                     "auroc": auroc(probability, target),
-                    "auroc_ci_low": low,
-                    "auroc_ci_high": high,
                     "accuracy": accuracy,
                     "balanced_accuracy": 0.5 * (sensitivity + specificity),
                     "log_loss": log_loss(probability, target),

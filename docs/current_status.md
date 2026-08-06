@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-06` (**§46 PathoBench zero-shot 평가 — per-task PCA 전처리, all-context AUROC 0.70~0.73** + **§45 arm C top-up 중간 Musk zero-shot — 대형 bag n>34 0.698→0.825**)
+**Last updated**: `2026-08-06` (**§46 PathoBench zero-shot — 전체 타일 PCA/추론, bootstrap 폐기, 17개 이진 task 단일 결과** + **§45 arm C top-up 중간 Musk zero-shot — 대형 bag n>34 0.698→0.825**)
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up을 8×A6000 DDP + 에피소드-매치(4096 ep/epoch)로 재개 중(epoch ~88/150, batch2). arm B(6-task+sparse)와 arm C(legacy+B2b) 50ep 학습·평가는 완료 — arm B sparse 0.675, arm C legacy 회귀 +0.037로 모두 gate 미달(과소학습 편향).
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **다음 Action**: arm C top-up 완주(150 epoch) 후 §42 재평가(legacy 회귀 gate) + Musk 재확인(§45 중간 신호) + PathoBench 재평가(§46 캐시 재현 가능) → Phase 0 결과 선택 → frozen-v30 multi-resolution probe(Phase 1). ICI 잠금은 유지한다.
@@ -1364,37 +1364,52 @@ v30 baseline은 문서값과 **정확히 재현**(0.8539) — 체크포인트/�
 8:2 분할 + train-only PCA(1536→512) 전처리 캐시** 파이프라인을 구축했다
 (`scripts/prepare_pathobench.py`).
 
-- **전처리 프로토콜 (사용자 확정)**: 각 task CSV의 train/test 분할을 그대로 사용해
-  8:2로 나눈 뒤, **train 분할 타일에만 PCA(1536→512, GPU SVD)를 fit**하고 train/test
-  모두 변환해 `data/pathobench/{task}_train.pt` / `{task}_test.pt`로 저장.
-  평가 시(`--data-dir` 기본 `data/pathobench`) 캐시가 있으면 h5 읽기·PCA fit 없이
-  바로 로드(미존재 시 기존 h5+PCA fallback 유지).
-  캐시 형식: `{"slide_id": list, "bag": list[Tensor[n,512]], "label": list[int]}`.
+- **전처리 프로토콜 (사용자 확정, 2026-08-06 갱신)**: 각 task CSV의 train/test 분할을
+  그대로 사용해 8:2로 나눈 뒤, **train 분할의 모든 타일에 PCA(1536→512)를 fit**하고
+  train/test 모두 변환해 `data/pathobench/{task}_train.pt` / `{task}_test.pt`로 저장.
+  - **타일 서브샘플링 없음** (기존 1024장/10만 샘플 제한 폐기). PCA는 두 패스
+    (mean → centered covariance, float64 청크 누적)로 **전체 train 타일을 정확히** 사용.
+  - **추론도 전체 타일 사용** (컨텍스트·query 모두 서브샘플 없음, `--max-tiles`/
+    `--target-context-cells`/`--max-queries` 제거).
+  - **bootstrap CI 폐기** — task가 많으므로 단일 테스트 결과만 출력 (CI 없음).
+  - 평가는 `--data-dir` 기본 `data/pathobench`에서 캐시 우선 로드, 미존재 시 h5+PCA
+    fallback. 캐시 형식: `{"slide_id": list, "bag": list[Tensor[n,512]], "label": list[int]}`.
+  - **slide_id 문자열 캐스팅 추가** (BC_Therapy/CPTAC-CCRCC는 숫자 id라 pandas가
+    int64로 읽어 h5 인덱스와 불일치 → 전부 누락 버그 수정).
+  - **이진 task만 대상**: multi-class(BRACS 등) 제외. HerROI(`herroi_response`)는
+    `features/HER2_tumor_ROIs_v3`가 빈 디렉토리라 피처 부재로 제외. **총 17개 이진 task**.
 - **모델**: `epoch=088-val_ce_loss=0.5282.ckpt` (arch v24 내부, v30 `poolz_l2` +
   B2 log-uniform cardinality, 2026-08-06 16:03 저장, 아직 학습 진행 중).
-  multi-class(BRACS 3클래스)는 0 vs rest로 이진화.
-- **결과 (zero-shot, seed 42, B200)**:
+- **결과 (zero-shot, sample-context 6/class, 전체 타일, seed 42, 단일 테스트)**:
 
-  | task | context | test n | AUROC [95% CI] | Acc | BAcc |
-  |---|---|---|---|---|---|
-  | CPTAC-BRCA TP53 | 6/class sample | 22 | 0.411 [0.125, 0.714] | 0.273 | 0.295 |
-  | CPTAC-LUAD TP53 | 6/class sample | 59 | 0.530 [0.378, 0.680] | 0.525 | 0.528 |
-  | BRACS coarse | 6/class sample | 148 | 0.445 [0.310, 0.581] | 0.493 | 0.459 |
-  | CPTAC-BRCA TP53 | **all (100k cells)** | 22 | **0.732 [0.486, 0.938]** | 0.591 | 0.625 |
-  | CPTAC-LUAD TP53 | **all (30k cells)** | 59 | **0.728 [0.588, 0.862]** | 0.627 | 0.610 |
-  | BRACS coarse | **all (100k cells)** | 148 | **0.702 [0.579, 0.818]** | 0.797 | 0.600 |
+  | task | test n | AUROC | Acc | BAcc |
+  |---|---|---|---|---|
+  | bc_therapy_er | 33 | 0.517 | 0.606 | 0.520 |
+  | bc_therapy_grade | 33 | 0.538 | 0.545 | 0.531 |
+  | bc_therapy_her2 | 33 | 0.542 | 0.455 | 0.510 |
+  | cptac_brca_pik3ca | 21 | 0.582 | 0.333 | 0.429 |
+  | cptac_brca_tp53 | 22 | 0.420 | 0.318 | 0.357 |
+  | cptac_ccrcc_er | 33 | 0.517 | 0.606 | 0.520 |
+  | cptac_ccrcc_grade | 33 | 0.538 | 0.545 | 0.531 |
+  | cptac_ccrcc_her2 | 33 | 0.542 | 0.455 | 0.510 |
+  | cptac_lscc_arid1a | 67 | 0.631 | 0.388 | 0.469 |
+  | cptac_lscc_histologic | 57 | 0.597 | 0.596 | 0.610 |
+  | cptac_lscc_keap1 | 51 | 0.590 | 0.510 | 0.484 |
+  | cptac_luad_egfr | 59 | 0.637 | 0.458 | 0.526 |
+  | cptac_luad_kras | 62 | 0.655 | 0.548 | 0.601 |
+  | cptac_luad_stk11 | 67 | 0.682 | 0.522 | 0.621 |
+  | cptac_luad_tp53 | 59 | 0.612 | 0.610 | 0.612 |
+  | cptac_pda_smad4 | 55 | 0.309 | 0.509 | 0.438 |
+  | ucla_lung_progression_regression | 22 | 0.598 | 0.682 | 0.645 |
 
-- **해석**: sample-context(6 slide/class)는 클래스별 대표성 부족으로 ~0.4~0.5,
-  **all-context(전체 train 슬라이드, 타일 자동 캡)가 일관되게 0.70~0.73**.
-  PCA를 per-task(train-only)로 바꾼 뒤에도 all-context 결과는 유지/개선(BRCA
-  0.714→0.732). LUAD는 30k cell로도 0.728로 강건. 세 task 모두 유의한 AUROC
-  (95% CI 하한 ≥0.48). 이는 BagPFN의 bag-level in-context zero-shot이 실세계
-  슬라이드 MIL에 전이 가능함을 시사.
-- **파일**: `scripts/prepare_pathobench.py`(전처리), `scripts/test_pathobench.py`
-  (평가, 캐시 우선 로드), `data/pathobench/{task}_{train,test}.pt` 6개,
-  `predictions/pathobench_{task}_..._e88_cache.pt` 6개. 구식 공용-PCA 스크립트
-  `scripts/fit_pathobench_pca.py`는 삭제.
+- **해석**: sample-context(6 slide/class, 전체 타일)는 대부분 0.5~0.68의 랜덤~약상승
+  수준. LUAD 계열(egfr/kras/stk11/tp53 0.61~0.68)과 LSCC(arid1a 0.631)가 상대적으로
+  양호, PDA smad4는 랜덤 이하(0.309). **BC_Therapy와 CPTAC-CCRCC는 동일 슬라이드·동일
+  라벨의 중복 데이터**(AUROC/Acc/logloss 완전 동일)로 확인. 이전의 all-context(전체
+  train 슬라이드)가 sample보다 강했던 점(0.70~0.73)을 고려해, 전체 타일 기준
+  all-context 재평가는 후속으로 가능.
+- **파일**: `scripts/prepare_pathobench.py`, `scripts/test_pathobench.py`(갱신),
+  `data/pathobench/{task}_{train,test}.pt` (17 task × 2), `predictions/pathobench_{task}_..._e88_full.pt`.
 - **재실행**: `python scripts/test_pathobench.py --checkpoint <ckpt> --csv
-  /NHNHOME/kimds/Data/PathoBench/csv/<task>.csv [--context-mode all
-  --target-context-cells 30000]`. 전처리는 `python scripts/prepare_pathobench.py
-  --csv ...` 1회. arm C 완주 후 이 프로토콜로 최종 checkpoint 재평가 권장.
+  /NHNHOME/kimds/Data/PathoBench/csv/<task>.csv`. 전처리는
+  `python scripts/prepare_pathobench.py --csv ...` 1회.
