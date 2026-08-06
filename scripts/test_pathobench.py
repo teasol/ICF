@@ -98,6 +98,14 @@ def parse_args() -> argparse.Namespace:
         "Defaults to --max-tiles when unset.",
     )
     parser.add_argument(
+        "--input-dim",
+        type=int,
+        default=None,
+        help="Model input dim. Defaults to config['model']['input_dim'] (512). "
+        "When it equals FEATURE_DIM (1536), the raw 1536-d features are used "
+        "directly (no PCA bridge); the 512-d preprocessed cache is skipped.",
+    )
+    parser.add_argument(
         "--trials",
         type=int,
         default=1,
@@ -302,13 +310,29 @@ def main() -> None:
         print(f"[binarized] {labels.nunique()} classes -> 0 vs rest "
               f"(n_pos {int((table['label'] == 1).sum())})")
 
+    # Resolve the model input dim first: a 512-d model reads the cached
+    # 1536->512 PCA features; a 1536-d model uses the raw 1536-d features
+    # directly (no PCA bridge).
+    config = merge_train_config(args.config.expanduser().resolve())
+    config["seed"] = args.seed
+    input_dim = (
+        args.input_dim
+        if args.input_dim is not None
+        else int(config["model"].get("input_dim", 512))
+    )
+    pca_needed = input_dim != FEATURE_DIM
+
     # Load preprocessed 512-d {task}_train.pt / {task}_test.pt when available
     # (produced by scripts/prepare_pathobench.py); otherwise fall back to
-    # reading h5 + fitting a train-only PCA on the GPU.
+    # reading h5 + (if pca_needed) fitting a train-only PCA on the GPU.
     data_dir = args.data_dir.expanduser().resolve()
     cached_train = data_dir / f"{args.csv.stem}_train.pt"
     cached_test = data_dir / f"{args.csv.stem}_test.pt"
-    use_cache = cached_train.exists() and cached_test.exists()
+    use_cache = (
+        not pca_needed
+        and cached_train.exists()
+        and cached_test.exists()
+    )
     projected: dict[str, torch.Tensor] = {}
     if use_cache:
         train_state = torch.load(
@@ -353,20 +377,22 @@ def main() -> None:
         print(f"PathoBench task {args.csv.name}: {len(train_ids)} train / "
               f"{len(test_ids)} test slides")
 
-        # PCA bridge 1536 -> 512 fit on ALL train tiles (GPU, chunked).
-        train_tiles = torch.cat([bags[s] for s in train_ids], dim=0)
-        pca_mean, pca_components = fit_pca(
-            train_tiles, MODEL_INPUT_DIM, device
-        )
-        print(f"PCA fit on all {train_tiles.shape[0]} train tiles (GPU)")
+        # PCA bridge fit on ALL train tiles (GPU, chunked) only when the model
+        # input dim is smaller than the raw feature dim.
+        if pca_needed:
+            train_tiles = torch.cat([bags[s] for s in train_ids], dim=0)
+            pca_mean, pca_components = fit_pca(
+                train_tiles, input_dim, device
+            )
+            print(f"PCA fit on all {train_tiles.shape[0]} train tiles -> {input_dim}-d (GPU)")
+        else:
+            print(f"Using raw {FEATURE_DIM}-d features (no PCA, model input_dim={input_dim})")
 
     train_labels = torch.tensor(train_table["label"].tolist(), dtype=torch.long)
     test_labels = torch.tensor(test_table["label"].tolist(), dtype=torch.long)
     train_y = {sid: int(train_table.loc[train_table["slide_id"] == sid, "label"].iloc[0]) for sid in train_ids}
     test_y = {sid: int(test_table.loc[test_table["slide_id"] == sid, "label"].iloc[0]) for sid in test_ids}
 
-    config = merge_train_config(args.config.expanduser().resolve())
-    config["seed"] = args.seed
     model = build_model(config)
     checkpoint = torch.load(args.checkpoint.expanduser().resolve(), map_location="cpu")
     model.on_load_checkpoint(checkpoint)
@@ -374,15 +400,21 @@ def main() -> None:
     model.eval()
     model.to(device)
     if not use_cache:
-        # Project every slide once on the GPU (CPU projection is ~1000x slower)
-        # and cache it; per-episode CPU projection was the eval's main bottleneck.
-        pca_mean_cuda = pca_mean.to(device)
-        pca_components_cuda = pca_components.to(device)
-        projected = {
-            slide_id: (bag.to(device) - pca_mean_cuda) @ pca_components_cuda
-            for slide_id, bag in bags.items()
-        }
-        print(f"Projected {len(projected)} slides to {MODEL_INPUT_DIM}-d on {device}")
+        if pca_needed:
+            # Project every slide once on the GPU (CPU projection is ~1000x
+            # slower); per-episode CPU projection was the eval's main bottleneck.
+            pca_mean_cuda = pca_mean.to(device)
+            pca_components_cuda = pca_components.to(device)
+            projected = {
+                slide_id: (bag.to(device) - pca_mean_cuda) @ pca_components_cuda
+                for slide_id, bag in bags.items()
+            }
+            print(f"Projected {len(projected)} slides to {input_dim}-d on {device}")
+        else:
+            projected = {
+                slide_id: bag.to(device) for slide_id, bag in bags.items()
+            }
+            print(f"Moved {len(projected)} slides to {device} as raw {FEATURE_DIM}-d (no PCA)")
     print(f"Model: arch v{model.model.architecture_version}, checkpoint {args.checkpoint.name}")
     context_cap = (
         args.context_max_tiles if args.context_max_tiles is not None else args.max_tiles
