@@ -1394,7 +1394,12 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                     # Arithmetic mean over the top-fraction cells; the per-bag
                     # list path uses the exact same `.mean(dim=0)`.
                     tail_tokens.append(encoded_tail.mean(dim=1))
-                selected_counts.append(torch.tensor(count, device=anchors.device))
+                # Broadcast the shared count to per-bag shape so the later
+                # `torch.stack(..., dim=1)` matches the cell-mask branch (which
+                # appends [num_bags] count_bag tensors).
+                selected_counts.append(
+                    torch.full((num_bags,), count, device=anchors.device, dtype=torch.long)
+                )
             else:
                 # Per-bag tail count (matches the per-bag list path), realized
                 # with a uniform topk over the max count plus a keep mask.
@@ -1446,7 +1451,10 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                     encoded_tail = self.shared_tail_encoder(deviation.float())
                     lse_weights = torch.softmax(encoded_tail * 2.0, dim=1)
                     tail_tokens.append((lse_weights * encoded_tail).sum(dim=1))
-                selected_counts.append(torch.tensor(count, device=anchors.device))
+                # Broadcast the shared count to per-bag shape (see tail_fractions).
+                selected_counts.append(
+                    torch.full((num_bags,), count, device=anchors.device, dtype=torch.long)
+                )
             else:
                 count_bag = torch.minimum(
                     torch.full_like(valid_count.long(), abs_k).clamp_min(1),
