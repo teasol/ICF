@@ -14,13 +14,19 @@ base_config: train_v30_cardinality_poolz_l2.yaml
 # Eval: test_pathobench.py --config <this> — model input_dim == FEATURE_DIM
 # (1536) so raw features are used directly (no PCA, 512-d cache skipped).
 #
-# Budget placeholder: tuned after the smoke test.
+# Budget: 1024 episodes/epoch x 50 epochs = 51,200 episodes (matched to the
+# user's requested budget). episode_batch_size=4 with the MLA-slot + variance
+# tricks keeps peak VRAM well under B200 180 GiB (measured by smoke test).
+# Precision: fp32 (v30 baseline default) -- bf16 autocast was A/B'd via
+# smoke_train_budget.py --bf16 and is *worse* for this model (peak 110.2 GiB
+# vs 85.5 GiB fp32; mean step 669ms vs 412ms) because the aggregator has many
+# .float() casts / fallthrough ops that nullify autocast savings.
 data_overrides:
   dataset_kwargs:
     output_dim: 1536
     num_cells: [1, 8192]
-    episodes_per_epoch: 256
-  episode_batch_size: 1
+    episodes_per_epoch: 1024
+  episode_batch_size: 4
 
 # MLA-slot: low-rank cell->slot affinity (d_c=64) + exact variance-based
 # slot_std/slot_distance (no [cells, slots, dim] tensor).
@@ -37,4 +43,4 @@ logger:
   experiment_name: v34_phase0_largectx_1536
 
 trainer:
-  max_epochs: 25
+  max_epochs: 50

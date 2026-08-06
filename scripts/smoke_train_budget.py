@@ -40,6 +40,12 @@ def parse_args() -> argparse.Namespace:
         "and print the op-level bottleneck table instead of the timing summary.",
     )
     parser.add_argument("--profiler-steps", type=int, default=3)
+    parser.add_argument(
+        "--bf16",
+        action="store_true",
+        help="Run training steps under torch.autocast(bfloat16) to match the "
+        "bf16-mixed precision used by real training (halves activation memory).",
+    )
     return parser.parse_args()
 
 
@@ -48,11 +54,15 @@ def run_step(
     optimizer,
     batch,
     device,
+    *,
+    bf16: bool = False,
 ) -> torch.Tensor:
     """One training step (forward + backward + optimizer) on a moved batch."""
     batch = [b.to(device) if torch.is_tensor(b) else b for b in batch]
     optimizer.zero_grad(set_to_none=True)
-    loss = model.training_step(batch, 0)
+    ctx = torch.autocast("cuda", dtype=torch.bfloat16) if bf16 else torch.nullcontext()
+    with ctx:
+        loss = model.training_step(batch, 0)
     loss.backward()
     optimizer.step()
     torch.cuda.synchronize()
@@ -88,7 +98,7 @@ def main() -> None:
         ) as prof:
             for step in range(n):
                 batch = next(iterator)
-                run_step(model, optimizer, batch, device)
+                run_step(model, optimizer, batch, device, bf16=args.bf16)
         print("\n=== torch.profiler — self CUDA time (top 25) ===")
         print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=25))
         print("\n=== self CPU time (top 12) ===")
@@ -110,7 +120,9 @@ def main() -> None:
         n_cells.append(int(batch[0].numel() // batch[0].shape[-1]))
         optimizer.zero_grad(set_to_none=True)
         t0 = time.perf_counter()
-        loss = model.training_step(batch, step)
+        ctx = torch.autocast("cuda", dtype=torch.bfloat16) if args.bf16 else torch.nullcontext()
+        with ctx:
+            loss = model.training_step(batch, step)
         loss.backward()
         optimizer.step()
         torch.cuda.synchronize()
