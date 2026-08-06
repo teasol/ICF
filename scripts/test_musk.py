@@ -9,8 +9,9 @@ context and the held-out molecule is the masked query. This mirrors the model's
 training objective (predict a masked bag from labeled context bags).
 
 Preprocessing / caveats:
-  * The model expects input_dim=512; Musk conformers are 166-dim, so each
-    instance is zero-padded to 512. This is a crude OOD bridge: the
+  * Musk conformers are 166-dim; each instance is zero-padded to the model's
+    input dim (config input_dim, e.g. 512 for v30 or 1536 for v34-1536). This
+    is a crude OOD bridge: the
     synthetic-trained weights carry no semantics for these chemical
     descriptors, so treat this as a distribution-shift baseline, not a tuned
     model. A learned 166->512 projection trained on Musk itself would be a
@@ -58,6 +59,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data", type=Path, default=Path("/NHNHOME/kimds/Data/Musk/musk.pkl"))
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument(
+        "--input-dim",
+        type=int,
+        default=None,
+        help="Model input dim. Defaults to config['model']['input_dim'] "
+        "(512 for v30; 1536 for v34-1536). Musk 166-d descriptors are "
+        "zero-padded to this dim.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--output", type=Path, default=None)
@@ -78,7 +87,10 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_musk(path: Path) -> tuple[list[str], list[torch.Tensor], torch.Tensor]:
+def load_musk(
+    path: Path,
+    input_dim: int,
+) -> tuple[list[str], list[torch.Tensor], torch.Tensor]:
     """Load musk.pkl into (bag_ids, padded_instance_tensors, labels)."""
     with path.open("rb") as handle:
         records = pickle.load(handle)
@@ -90,7 +102,7 @@ def load_musk(path: Path) -> tuple[list[str], list[torch.Tensor], torch.Tensor]:
         x = torch.as_tensor(record["X"], dtype=torch.float32)  # [n, 166]
         if x.ndim != 2 or x.shape[1] != MUSK_FEATURE_DIM:
             raise ValueError(f"Unexpected Musk instance shape: {tuple(x.shape)}")
-        padded_bag = torch.zeros(x.shape[0], MODEL_INPUT_DIM, dtype=torch.float32)
+        padded_bag = torch.zeros(x.shape[0], input_dim, dtype=torch.float32)
         padded_bag[:, :MUSK_FEATURE_DIM] = x
         padded.append(padded_bag)
         labels.append(int(record["y"]))
@@ -103,7 +115,14 @@ def main() -> None:
     torch.set_float32_matmul_precision("high")
     device = torch.device(args.device)
 
-    bag_ids, bags, labels = load_musk(args.data.expanduser().resolve())
+    config = merge_train_config(args.config.expanduser().resolve())
+    config["seed"] = args.seed
+    input_dim = (
+        args.input_dim
+        if args.input_dim is not None
+        else int(config["model"].get("input_dim", 512))
+    )
+    bag_ids, bags, labels = load_musk(args.data.expanduser().resolve(), input_dim)
     n_bags = len(bags)
     if n_bags < 3:
         raise ValueError("Musk needs at least 3 bags for a leave-one-out episode.")
@@ -111,11 +130,9 @@ def main() -> None:
     print(
         f"Musk: {n_bags} bags ({num_positive} positive / {n_bags - num_positive} "
         f"negative), instances per bag {min(b.shape[0] for b in bags)}.."
-        f"{max(b.shape[0] for b in bags)}"
+        f"{max(b.shape[0] for b in bags)}, zero-padded 166 -> {input_dim}-d"
     )
 
-    config = merge_train_config(args.config.expanduser().resolve())
-    config["seed"] = args.seed
     # Zero-shot preprocessing overrides (no retraining). These are model __init__
     # params (not in state_dict), so overriding them at inference only changes how
     # Musk descriptors are mapped into the input; the weights are untouched.
