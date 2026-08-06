@@ -44,17 +44,65 @@ class EvaluationEpisodeCollator:
         return x, y, mask_index
 
 
+def _collate_ragged_batch(samples: list[Any]):
+    """Pad ragged (B2b, per-bag-cardinality) episodes into a dense batch.
+
+    Returns ``(x, y, cell_mask, bag_mask)`` with shapes
+    [episodes, bags, instances, dim], [episodes, bags],
+    [episodes, bags, instances], [episodes, bags]. ``cell_mask`` marks real
+    cells, ``bag_mask`` marks real bags, and padded bags get label -1 so they
+    are never sampled as queries or treated as context.
+    """
+    first_bag = samples[0][0][0]
+    device = first_bag.device
+    dtype = first_bag.dtype
+    label_dtype = samples[0][1].dtype
+    episodes = len(samples)
+    num_bags = max(len(sample[0]) for sample in samples)
+    num_instances = max(
+        bag.shape[0] for sample in samples for bag in sample[0]
+    )
+    dim = first_bag.shape[-1]
+    x = torch.zeros(
+        (episodes, num_bags, num_instances, dim),
+        dtype=dtype,
+        device=device,
+    )
+    cell_mask = torch.zeros(
+        (episodes, num_bags, num_instances), dtype=torch.bool, device=device
+    )
+    bag_mask = torch.zeros((episodes, num_bags), dtype=torch.bool, device=device)
+    y = torch.full((episodes, num_bags), -1, dtype=label_dtype, device=device)
+    for episode_index, sample in enumerate(samples):
+        bags, labels = sample[0], sample[1]
+        if len(bags) != labels.numel():
+            raise ValueError("Ragged episode labels must match bag count.")
+        n_bags = len(bags)
+        bag_mask[episode_index, :n_bags] = True
+        y[episode_index, :n_bags] = labels
+        for bag_index, bag in enumerate(bags):
+            if bag.ndim != 2 or bag.shape[-1] != dim:
+                raise ValueError("Ragged bag must be [instances, dim].")
+            count = bag.shape[0]
+            cell_mask[episode_index, bag_index, :count] = True
+            x[episode_index, bag_index, :count] = bag
+    return x, y, cell_mask, bag_mask
+
+
 def collate_synthetic_training_episode(samples: list[Any]):
-    """Stack equal-shape synthetic episodes for single-device DDP emulation."""
+    """Stack equal-shape episodes, or pad ragged (B2b) episodes.
+
+    Equal-shape (B2) episodes stack into a dense [episodes, bags, cells, dim]
+    batch. Ragged per-bag-cardinality (B2b) episodes are padded to the batch's
+    max shape and returned as ``(x, y, cell_mask, bag_mask)``, which enables
+    ``episode_batch_size > 1`` and unlocks batched vectorized training.
+    """
     if not samples:
         raise ValueError("A synthetic training batch cannot be empty.")
     if len(samples) == 1:
         return samples[0]
     if not isinstance(samples[0][0], torch.Tensor):
-        raise ValueError(
-            "Ragged (per-bag cardinality, B2b) episodes are not stackable; "
-            "configure episode_batch_size=1."
-        )
+        return _collate_ragged_batch(samples)
     x = torch.stack([sample[0] for sample in samples])
     y = torch.stack([sample[1] for sample in samples])
     field_count = len(samples[0])

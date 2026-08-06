@@ -1,0 +1,32 @@
+base_config: train_v33_phase0_armC_ddp8.yaml
+
+# v33 Phase 0 arm C top-up — padded ragged (B2b) batching.
+#
+# episode_batch_size: 2 enables batched vectorized training for ragged B2b
+# episodes, which were previously forced to batch=1 (one episode per step, ~5%
+# VRAM, negligible parallelism). The training collator now pads the batch to
+# (max bags x max cells) and returns (x, y, cell_mask, bag_mask);
+# forward_episode_batch runs the cell-level aggregator fully batched (masking
+# padded cells out of every statistic) and the cheap bag-token meta-classifier
+# per episode.
+#
+# Measured on B200 (same v30 arch, ddp8 data):
+#   batch=1: 5.8  ep/s, peak  1.1 GiB
+#   batch=2: ~16  ep/s, peak ~16 GiB   <-- safe for an A6000 (48 GiB)
+#   batch=4: ~12  ep/s, peak ~32 GiB   <-- borderline on an A6000
+#   batch=8: ~14  ep/s, peak ~68 GiB   <-- OOMs an A6000; fine on a B200
+# Per-GPU throughput is ~2.5-2.8x; real wall-clock gains more because the
+# per-optimizer-step Lightning overhead is amortized over the batch.
+#
+# Episode-match semantics: episodes_per_epoch stays 4096 (inherited), so with
+# 2 episodes/rank x 8 ranks = 16 episodes/optimizer step the epoch has
+# 4096/16 = 256 optimizer steps (vs 512 at batch=1). This is the standard
+# larger-batch/fewer-steps trade-off of batch scaling.
+data_overrides:
+  episode_batch_size: 2
+
+logger:
+  experiment_name: v33_phase0_armC_ddp8_topup_batch2
+
+trainer:
+  max_epochs: 150

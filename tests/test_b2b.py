@@ -185,7 +185,7 @@ class B2bPipelineContractTest(unittest.TestCase):
             torch.unique(eval_y[context], sorted=True).tolist(), [0, 1]
         )
 
-    def test_collate_rejects_multi_episode_ragged_batch(self) -> None:
+    def test_collate_pads_multi_episode_ragged_batch(self) -> None:
         dataset = SyntheticEpisodeDataset(
             episodes_per_epoch=4,
             seed=3,
@@ -203,8 +203,22 @@ class B2bPipelineContractTest(unittest.TestCase):
             continuous_response_probability=1.0,
             response_task_probabilities=(0.2, 0.2, 0.2, 0.2, 0.2),
         )
-        with self.assertRaisesRegex(ValueError, "episode_batch_size=1"):
-            collate_synthetic_training_episode([dataset[0], dataset[1]])
+        # Ragged multi-episode batches are padded (not rejected) so B2b can
+        # use episode_batch_size > 1 with batched vectorized training.
+        episodes = [dataset[i] for i in range(2)]
+        x, y, cell_mask, bag_mask = collate_synthetic_training_episode(episodes)
+        self.assertEqual(x.ndim, 4)
+        self.assertEqual(y.ndim, 2)
+        self.assertEqual(cell_mask.shape, x.shape[:3])
+        self.assertEqual(bag_mask.shape, y.shape)
+        for episode_index, sample in enumerate(episodes):
+            n_bags = len(sample[0])
+            self.assertTrue(bag_mask[episode_index, :n_bags].all())
+            self.assertFalse(bag_mask[episode_index, n_bags:].any())
+            for bag_index, bag in enumerate(sample[0]):
+                count = bag.shape[0]
+                self.assertTrue(cell_mask[episode_index, bag_index, :count].all())
+                self.assertFalse(cell_mask[episode_index, bag_index, count:].any())
 
     def test_v30_model_forward_is_finite_on_ragged_episode(self) -> None:
         generator = build_b2b_generator()

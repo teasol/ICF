@@ -437,14 +437,23 @@ class ClassTokenPooling(nn.Module):
         )
         self.output_norm = nn.LayerNorm(self.token_dim)
 
-    def forward(self, instances: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, instances: torch.Tensor, cell_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
         """instances: [bags, cells, token_dim] (uniform cell count per call). Returns [bags, token_dim]."""
         if instances.ndim != 3 or instances.shape[-1] != self.token_dim:
             raise ValueError("instances must be [bags, cells, token_dim].")
         bags = instances.shape[0]
         query = self.cls_seed.unsqueeze(0).expand(bags, -1, -1).to(instances.dtype)
         normed = self.input_norm(instances)
-        attended, _ = self.cross_attention(query, normed, normed, need_weights=False)
+        key_padding_mask = None if cell_mask is None else ~cell_mask
+        attended, _ = self.cross_attention(
+            query,
+            normed,
+            normed,
+            need_weights=False,
+            key_padding_mask=key_padding_mask,
+        )
         token = self.attention_norm(query + attended)
         token = self.output_norm(token + self.ffn(token))
         return token.squeeze(1)
@@ -684,20 +693,29 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
 
     @staticmethod
     def _context_pool_stats_batched(
-        x: torch.Tensor, is_context: torch.Tensor
+        x: torch.Tensor,
+        is_context: torch.Tensor,
+        cell_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Batched twin of `_context_pool_stats`.
 
         `x` is [episodes, bags, instances, dim] and `is_context` is
         [episodes, bags]; returns per-episode mean/std shaped [episodes, dim].
+        When `cell_mask` ([episodes, bags, instances]) is given (padded ragged
+        batches), only cells that are both context and unpadded contribute.
         """
         episodes, num_bags, num_instances, dim = x.shape
         values = x.float()
-        mask = (
-            is_context[..., None, None]
-            .expand(episodes, num_bags, num_instances, 1)
-            .to(values.dtype)
+        mask = is_context[..., None, None].expand(
+            episodes, num_bags, num_instances, 1
         )
+        if cell_mask is not None:
+            if cell_mask.shape != (episodes, num_bags, num_instances):
+                raise ValueError(
+                    "cell_mask must be [episodes, bags, instances]."
+                )
+            mask = mask & cell_mask[..., None]
+        mask = mask.to(values.dtype)
         cells = mask.sum(dim=(1, 2)).clamp_min(1.0)
         mean = (values * mask).sum(dim=(1, 2)) / cells
         variance = (
@@ -711,17 +729,44 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         bag: torch.Tensor,
         pool_mean: torch.Tensor | None = None,
         pool_std: torch.Tensor | None = None,
+        cell_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Return classification instances, summary, and centered deltas.
 
         `pool_mean`/`pool_std` are required only when `bag_representation` is a
         pool-standardized mode; they must broadcast against `bag`'s feature axis.
+        `cell_mask` ([..., instances]) marks the real cells of a padded bag;
+        masked (padded) cells are excluded from the mean/spread statistics.
         """
-        bag_mean = bag.mean(dim=-2, keepdim=True)
-        centered_delta = bag - bag_mean
-        global_spread = torch.sqrt(
-            centered_delta.float().square().mean(dim=-2) + 1e-6
-        )
+        if cell_mask is None:
+            bag_mean = bag.mean(dim=-2, keepdim=True)
+            centered_delta = bag - bag_mean
+            global_spread = torch.sqrt(
+                centered_delta.float().square().mean(dim=-2) + 1e-6
+            )
+        else:
+            if (
+                cell_mask.shape[:-1] != bag.shape[:-2]
+                or cell_mask.shape[-1] != bag.shape[-2]
+            ):
+                raise ValueError(
+                    "cell_mask must match the bag's instance axis."
+                )
+            count = cell_mask.sum(dim=-1, keepdim=True).clamp_min(1.0)
+            masked = bag.masked_fill(~cell_mask.unsqueeze(-1), 0.0)
+            bag_mean = masked.sum(dim=-2, keepdim=True) / count.unsqueeze(-1)
+            centered_delta = masked - bag_mean
+            # Padded cells must not pollute downstream covariance/statistics.
+            centered_delta = centered_delta.masked_fill(
+                ~cell_mask.unsqueeze(-1), 0.0
+            )
+            global_spread = torch.sqrt(
+                (centered_delta.float().square() * cell_mask.unsqueeze(-1)).sum(
+                    dim=-2
+                )
+                / count
+                + 1e-6
+            )
         if self.bag_representation in ("poolz", "poolz_l2"):
             if pool_mean is None or pool_std is None:
                 raise ValueError(
@@ -757,12 +802,26 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             summary = bag_mean.squeeze(-2)
         return classification_instances, summary, centered_delta
 
-    def _covariance_sketch(self, centered_delta: torch.Tensor) -> torch.Tensor:
-        """Return a configurable translation-invariant second-moment feature."""
+    def _covariance_sketch(
+        self,
+        centered_delta: torch.Tensor,
+        count: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Return a configurable translation-invariant second-moment feature.
+
+        `count` (per-bag valid cell counts, [num_bags]) overrides the instance
+        axis length for normalization so padded cells do not shrink the
+        covariance of short bags.
+        """
         values = centered_delta.float()
         projected = values @ self._covariance_projection.float()
         covariance = projected.transpose(-1, -2) @ projected
-        covariance = covariance / projected.shape[-2]
+        if count is None:
+            covariance = covariance / projected.shape[-2]
+        else:
+            covariance = covariance / count.reshape(
+                projected.shape[:-2] + (1, 1)
+            )
         row, column = self._covariance_triangle
         raw_feature = covariance[..., row, column]
         if self.covariance_mode == "covariance":
@@ -805,11 +864,25 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         self,
         assignment: torch.Tensor,
         centered_delta: torch.Tensor,
+        count: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Measure local covariance inside aligned population slots."""
+        """Measure local covariance inside aligned population slots.
+
+        `count` (per-bag valid cell counts) fixes the RMS normalization so
+        padded cells do not distort short bags.
+        """
         measurement_dim = min(16, self.covariance_sketch_dim)
         values = centered_delta.float()
-        bag_rms = values.square().mean(dim=(-2, -1), keepdim=True).sqrt().clamp_min(1e-6)
+        if count is None:
+            bag_rms = (
+                values.square().mean(dim=(-2, -1), keepdim=True).sqrt().clamp_min(1e-6)
+            )
+        else:
+            # Normalize by valid cells AND the feature dim to match `.mean()`.
+            denom = count.reshape(values.shape[:-2] + (1, 1)) * values.shape[-1]
+            bag_rms = (
+                values.square().sum(dim=(-2, -1), keepdim=True) / denom
+            ).sqrt().clamp_min(1e-6)
         projection = self._covariance_projection[:, :measurement_dim].float()
         projected = (values / bag_rms) @ projection
         weights = assignment.float()
@@ -928,12 +1001,27 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         }
 
 
-    def _population_candidates(self, bag: torch.Tensor) -> torch.Tensor:
-        """Build stable, order-invariant soft candidates in centered space."""
+    def _population_candidates(
+        self,
+        bag: torch.Tensor,
+        cell_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Build stable, order-invariant soft candidates in centered space.
+
+        `cell_mask` ([..., instances]) excludes padded cells from the soft
+        candidate pool.
+        """
         normalized = F.normalize(bag.float(), dim=-1, eps=1e-6)
-        candidate_count = min(self.context_samples_per_bag, bag.shape[0])
+        if cell_mask is None:
+            candidate_count = min(self.context_samples_per_bag, bag.shape[0])
+        else:
+            candidate_count = min(
+                self.context_samples_per_bag, int(cell_mask.sum().item())
+            )
         directions = self._candidate_directions[:candidate_count].float()
         scores = normalized @ directions.T
+        if cell_mask is not None:
+            scores = scores.masked_fill(~cell_mask.unsqueeze(-1), float("-inf"))
         weights = torch.softmax(scores.mul(10.0), dim=0)
         candidates = weights.T @ normalized
         return F.normalize(candidates, dim=-1, eps=1e-6).to(bag.dtype)
@@ -942,11 +1030,17 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         self,
         bags: list[torch.Tensor],
         context_mask: torch.Tensor,
+        cell_masks: list[torch.Tensor] | None = None,
     ) -> torch.Tensor:
         candidates = torch.cat(
             [
-                self._population_candidates(bag)
-                for bag, is_context in zip(bags, context_mask.tolist())
+                self._population_candidates(
+                    bag,
+                    None if cell_masks is None else cell_masks[b_index],
+                )
+                for b_index, (bag, is_context) in enumerate(
+                    zip(bags, context_mask.tolist())
+                )
                 if is_context
             ],
             dim=0,
@@ -1064,7 +1158,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
 
 
     def _raw_stat_tokens(
-        self, raw: torch.Tensor
+        self, raw: torch.Tensor, cell_mask: torch.Tensor | None = None
     ) -> dict[str, torch.Tensor]:
         """Per-feature bag statistics computed from the RAW cells (before the
         centered _bag_view transform). Each is a [..., 512] tensor keyed by
@@ -1087,22 +1181,46 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         out: dict[str, torch.Tensor] = {}
         if not names:
             return out
-        mean = raw.mean(dim=-2)
-        centered = raw - raw.mean(dim=-2, keepdim=True)
+        if cell_mask is None:
+            mean = raw.mean(dim=-2)
+            centered = raw - raw.mean(dim=-2, keepdim=True)
+            count = None
+        else:
+            count = cell_mask.sum(dim=-1, keepdim=True).clamp_min(1.0)
+            masked = raw.masked_fill(~cell_mask.unsqueeze(-1), 0.0)
+            mean = masked.sum(dim=-2) / count
+            centered = masked - mean.unsqueeze(-2)
         if "mean" in names:
             out["stat_mean"] = F.normalize(mean.float(), dim=-1).to(raw.dtype)
         if "variance" in names:
-            out["stat_variance"] = centered.square().mean(dim=-2).to(raw.dtype)
+            denominator = count if count is not None else None
+            variance = centered.square()
+            if denominator is None:
+                variance = variance.mean(dim=-2)
+            else:
+                variance = variance.sum(dim=-2) / denominator
+            out["stat_variance"] = variance.to(raw.dtype)
         if "skewness" in names or "kurtosis" in names:
-            std = torch.sqrt(centered.square().mean(dim=-2) + 1e-6)
+            std_square = centered.square()
+            if count is None:
+                std_square = std_square.mean(dim=-2)
+            else:
+                std_square = std_square.sum(dim=-2) / count
+            std = torch.sqrt(std_square + 1e-6)
             if "skewness" in names:
-                out["stat_skewness"] = (
-                    (centered**3).mean(dim=-2) / (std**3 + 1e-6)
-                ).to(raw.dtype)
+                cube = centered**3
+                if count is None:
+                    cube = cube.mean(dim=-2)
+                else:
+                    cube = cube.sum(dim=-2) / count
+                out["stat_skewness"] = (cube / (std**3 + 1e-6)).to(raw.dtype)
             if "kurtosis" in names:
-                out["stat_kurtosis"] = (
-                    (centered**4).mean(dim=-2) / (std**4 + 1e-6)
-                ).to(raw.dtype)
+                fourth = centered**4
+                if count is None:
+                    fourth = fourth.mean(dim=-2)
+                else:
+                    fourth = fourth.sum(dim=-2) / count
+                out["stat_kurtosis"] = (fourth / (std**4 + 1e-6)).to(raw.dtype)
         return out
 
     def _forward_dense(
@@ -1114,12 +1232,34 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         covariance_sketch: torch.Tensor | None = None,
         centered_delta: torch.Tensor | None = None,
         raw_stats: dict[str, torch.Tensor] | None = None,
+        cell_mask: torch.Tensor | None = None,
     ) -> (
         dict[str, torch.Tensor]
         | tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]
     ):
-        """Vectorized equivalent of the per-bag path for synthetic episodes."""
+        """Vectorized equivalent of the per-bag path for synthetic episodes.
+
+        `cell_mask` ([bags, instances], bool) marks the real cells of padded
+        ragged (B2b) bags; padded cells are excluded from slot assignment,
+        tails, rare states, and covariance normalization. ``ccts_lambdas`` is
+        not supported on the padded path (v30 configs do not enable it).
+        """
         num_bags, num_instances, _ = instances.shape
+        if cell_mask is not None:
+            if cell_mask.shape != (num_bags, num_instances):
+                raise ValueError("cell_mask must be [bags, instances].")
+            valid = cell_mask
+            valid_count = cell_mask.sum(dim=-1).clamp_min(1)
+            max_valid = int(valid_count.max().item())
+        else:
+            valid = None
+            valid_count = None
+            max_valid = num_instances
+        if cell_mask is not None and self.ccts_lambdas:
+            raise NotImplementedError(
+                "ccts_lambdas is not supported on padded (ragged-batched) "
+                "episodes; v30 configs do not enable it."
+            )
         normalized = F.normalize(instances.float(), dim=-1)
         if anchors.ndim == 2:
             expanded_anchors = anchors.unsqueeze(0).expand(num_bags, -1, -1)
@@ -1132,8 +1272,15 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             similarity / self.assignment_temperature,
             dim=-1,
         ).to(instances.dtype)
+        if valid is not None:
+            # Padded cells must not claim any slot mass. Masking similarity
+            # with -inf is unsafe here: softmax over all -inf slots is NaN.
+            assignment = assignment * valid.unsqueeze(-1)
         mass = assignment.sum(dim=1).clamp_min(1e-6)
-        proportion = mass / num_instances
+        if valid_count is None:
+            proportion = mass / num_instances
+        else:
+            proportion = mass / valid_count.unsqueeze(-1)
         slot_mean = torch.einsum(
             "bns,bnd->bsd", assignment, instances
         ) / mass.unsqueeze(-1)
@@ -1151,19 +1298,52 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         ) / mass
         metadata = torch.stack((proportion.log(), dispersion), dim=-1)
         if centered_delta is None:
-            centered_delta = instances - instances.mean(dim=-2, keepdim=True)
+            if valid is None:
+                centered_delta = instances - instances.mean(dim=-2, keepdim=True)
+            else:
+                masked = instances.masked_fill(~valid.unsqueeze(-1), 0.0)
+                centered_delta = masked - (
+                    masked.sum(dim=-2, keepdim=True)
+                    / valid_count.unsqueeze(-1).unsqueeze(-1)
+                )
         slot_covariance_sketch, slot_covariance_reliability = (
-            self._slot_covariance_sketch(assignment, centered_delta)
+            self._slot_covariance_sketch(
+                assignment, centered_delta, count=valid_count
+            )
         )
 
-        rare_count = min(
-            num_instances,
-            max(1, int(math.ceil(self.slot_rare_fraction * num_instances))),
-        )
         slot_distance = difference.float().square().mean(dim=-1)
         rare_score = assignment.float() * slot_distance
-        values, index = rare_score.transpose(1, 2).topk(rare_count, dim=-1)
-        weights = torch.softmax(values, dim=-1).to(instances.dtype)
+        if valid is not None:
+            rare_score = rare_score.masked_fill(
+                ~valid.unsqueeze(-1), float("-inf")
+            )
+        if valid_count is None:
+            rare_count = min(
+                num_instances,
+                max(1, int(math.ceil(self.slot_rare_fraction * num_instances))),
+            )
+            values, index = rare_score.transpose(1, 2).topk(rare_count, dim=-1)
+            weights = torch.softmax(values, dim=-1).to(instances.dtype)
+        else:
+            # Per-bag rare count (matches the per-bag list path), realized with
+            # a uniform topk over the max count plus a keep mask.
+            rare_count_bag = torch.minimum(
+                torch.clamp(
+                    torch.ceil(self.slot_rare_fraction * valid_count).long(),
+                    min=1,
+                ),
+                valid_count.long(),
+            )
+            k_rare = min(num_instances, int(rare_count_bag.max().item()))
+            values, index = rare_score.transpose(1, 2).topk(k_rare, dim=-1)
+            keep = torch.arange(
+                k_rare, device=instances.device
+            ) < rare_count_bag.unsqueeze(-1).unsqueeze(-1)
+            # Softmax only over kept cells so extra/padded cells do not shift
+            # the kept weights (matches the per-bag list path).
+            masked_values = values.masked_fill(~keep, float("-inf"))
+            weights = torch.softmax(masked_values, dim=-1).to(instances.dtype)
         batch_index = torch.arange(num_bags, device=instances.device)[:, None, None]
         selected = instances[batch_index, index]
         rare_state = (weights.unsqueeze(-1) * selected).sum(dim=2)
@@ -1187,47 +1367,115 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
 
         nearest_similarity, nearest_slot = similarity.max(dim=-1)
         novelty = 1.0 - nearest_similarity
+        if valid is not None:
+            novelty = novelty.masked_fill(~valid, float("-inf"))
         tail_tokens: list[torch.Tensor] = []
-        selected_counts: list[int] = []
+        selected_counts: list[torch.Tensor] = []
         for fraction in self.tail_fractions:
-            count = min(
-                num_instances,
-                max(
-                    self.min_tail_instances,
-                    int(math.ceil(fraction * num_instances)),
-                ),
-            )
-            index = novelty.topk(count, dim=1).indices
-            selected_instances = instances.gather(
-                1, index.unsqueeze(-1).expand(-1, -1, instances.shape[-1])
-            )
-            selected_slots = nearest_slot.gather(1, index)
-            selected_anchors = expanded_anchors.gather(
-                1, selected_slots.unsqueeze(-1).expand(-1, -1, anchors.shape[-1])
-            )
-            deviation = selected_instances - selected_anchors
-            with torch.autocast(device_type=instances.device.type, enabled=False):
-                encoded_tail = self.shared_tail_encoder(deviation.float())
-                lse_weights = torch.softmax(encoded_tail * 2.0, dim=1)
-                tail_tokens.append((lse_weights * encoded_tail).sum(dim=1))
-            selected_counts.append(count)
+            if valid_count is None:
+                count = min(
+                    num_instances,
+                    max(
+                        self.min_tail_instances,
+                        int(math.ceil(fraction * num_instances)),
+                    ),
+                )
+                index = novelty.topk(count, dim=1).indices
+                selected_instances = instances.gather(
+                    1, index.unsqueeze(-1).expand(-1, -1, instances.shape[-1])
+                )
+                selected_slots = nearest_slot.gather(1, index)
+                selected_anchors = expanded_anchors.gather(
+                    1, selected_slots.unsqueeze(-1).expand(-1, -1, anchors.shape[-1])
+                )
+                deviation = selected_instances - selected_anchors
+                with torch.autocast(device_type=instances.device.type, enabled=False):
+                    encoded_tail = self.shared_tail_encoder(deviation.float())
+                    # Arithmetic mean over the top-fraction cells; the per-bag
+                    # list path uses the exact same `.mean(dim=0)`.
+                    tail_tokens.append(encoded_tail.mean(dim=1))
+                selected_counts.append(torch.tensor(count, device=anchors.device))
+            else:
+                # Per-bag tail count (matches the per-bag list path), realized
+                # with a uniform topk over the max count plus a keep mask.
+                count_bag = torch.minimum(
+                    torch.clamp(
+                        torch.ceil(fraction * valid_count).long(),
+                        min=self.min_tail_instances,
+                    ),
+                    valid_count.long(),
+                )
+                k = min(num_instances, int(count_bag.max().item()))
+                index = novelty.topk(k, dim=1).indices
+                selected_instances = instances.gather(
+                    1, index.unsqueeze(-1).expand(-1, -1, instances.shape[-1])
+                )
+                selected_slots = nearest_slot.gather(1, index)
+                selected_anchors = expanded_anchors.gather(
+                    1, selected_slots.unsqueeze(-1).expand(-1, -1, anchors.shape[-1])
+                )
+                deviation = selected_instances - selected_anchors
+                with torch.autocast(device_type=instances.device.type, enabled=False):
+                    encoded_tail = self.shared_tail_encoder(deviation.float())
+                    # Arithmetic mean over the per-bag kept cells (matches the
+                    # per-bag list path's `.mean(dim=0)`); extra/padded cells
+                    # are zeroed so they do not contribute.
+                    keep = (
+                        torch.arange(k, device=instances.device)
+                        < count_bag.unsqueeze(-1)
+                    )
+                    kept = encoded_tail.masked_fill(
+                        ~keep.unsqueeze(-1), 0.0
+                    ).sum(dim=1)
+                    tail_tokens.append(kept / count_bag.unsqueeze(-1))
+                selected_counts.append(count_bag.to(anchors.device))
 
         for abs_k in self.absolute_tail_ks:
-            count = min(num_instances, max(1, abs_k))
-            index = novelty.topk(count, dim=1).indices
-            selected_instances = instances.gather(
-                1, index.unsqueeze(-1).expand(-1, -1, instances.shape[-1])
-            )
-            selected_slots = nearest_slot.gather(1, index)
-            selected_anchors = expanded_anchors.gather(
-                1, selected_slots.unsqueeze(-1).expand(-1, -1, anchors.shape[-1])
-            )
-            deviation = selected_instances - selected_anchors
-            with torch.autocast(device_type=instances.device.type, enabled=False):
-                encoded_tail = self.shared_tail_encoder(deviation.float())
-                lse_weights = torch.softmax(encoded_tail * 2.0, dim=1)
-                tail_tokens.append((lse_weights * encoded_tail).sum(dim=1))
-            selected_counts.append(count)
+            if valid_count is None:
+                count = min(num_instances, max(1, abs_k))
+                index = novelty.topk(count, dim=1).indices
+                selected_instances = instances.gather(
+                    1, index.unsqueeze(-1).expand(-1, -1, instances.shape[-1])
+                )
+                selected_slots = nearest_slot.gather(1, index)
+                selected_anchors = expanded_anchors.gather(
+                    1, selected_slots.unsqueeze(-1).expand(-1, -1, anchors.shape[-1])
+                )
+                deviation = selected_instances - selected_anchors
+                with torch.autocast(device_type=instances.device.type, enabled=False):
+                    encoded_tail = self.shared_tail_encoder(deviation.float())
+                    lse_weights = torch.softmax(encoded_tail * 2.0, dim=1)
+                    tail_tokens.append((lse_weights * encoded_tail).sum(dim=1))
+                selected_counts.append(torch.tensor(count, device=anchors.device))
+            else:
+                count_bag = torch.minimum(
+                    torch.full_like(valid_count.long(), abs_k).clamp_min(1),
+                    valid_count.long(),
+                )
+                k = min(num_instances, int(count_bag.max().item()))
+                index = novelty.topk(k, dim=1).indices
+                selected_instances = instances.gather(
+                    1, index.unsqueeze(-1).expand(-1, -1, instances.shape[-1])
+                )
+                selected_slots = nearest_slot.gather(1, index)
+                selected_anchors = expanded_anchors.gather(
+                    1, selected_slots.unsqueeze(-1).expand(-1, -1, anchors.shape[-1])
+                )
+                deviation = selected_instances - selected_anchors
+                with torch.autocast(device_type=instances.device.type, enabled=False):
+                    encoded_tail = self.shared_tail_encoder(deviation.float())
+                    # Softmax only over kept cells so extra/padded cells do not
+                    # shift the kept weights (matches the per-bag list path).
+                    keep = (
+                        torch.arange(k, device=instances.device)
+                        < count_bag.unsqueeze(-1)
+                    )
+                    tail_logits = encoded_tail.masked_fill(
+                        ~keep.unsqueeze(-1), float("-inf")
+                    )
+                    lse_weights = torch.softmax(tail_logits * 2.0, dim=1)
+                    tail_tokens.append((lse_weights * encoded_tail).sum(dim=1))
+                selected_counts.append(count_bag.to(anchors.device))
 
         if self.ccts_lambdas:
             batch_index = torch.arange(num_bags, device=instances.device)[:, None]
@@ -1266,9 +1514,11 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
 
 
         if global_summary is None:
-            _, global_summary, _ = self._bag_view(instances)
+            _, global_summary, _ = self._bag_view(instances, cell_mask=valid)
         if covariance_sketch is None:
-            covariance_sketch = self._covariance_sketch(instances - instances.mean(dim=-2, keepdim=True))
+            covariance_sketch = self._covariance_sketch(
+                centered_delta, count=valid_count
+            )
         representation = {
             "global_summary": global_summary,
             "slots": slot_tokens,
@@ -1283,7 +1533,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 else centered_delta.new_zeros((num_bags, 1, 1))
             ),
             "cls_token": (
-                self.cls_token_pooling(instances)
+                self.cls_token_pooling(instances, cell_mask=valid)
                 if self.include_cls_token
                 else global_summary.new_zeros((num_bags, self.input_dim))
             ),
@@ -1306,12 +1556,12 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             "population_proportions": proportion,
             "population_dispersions": dispersion,
             "population_slot_means": slot_mean,
-            "instance_counts": torch.full(
-                (num_bags,), num_instances, device=anchors.device
+            "instance_counts": (
+                valid_count
+                if valid_count is not None
+                else torch.full((num_bags,), num_instances, device=anchors.device)
             ),
-            "tail_counts": torch.tensor(selected_counts, device=anchors.device).expand(
-                num_bags, -1
-            ),
+            "tail_counts": torch.stack(selected_counts, dim=1),
             "slot_residual_scale": residual_scale,
         }
 
@@ -4156,6 +4406,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
         self,
         query_instances: torch.Tensor,
         class_memories: torch.Tensor,
+        query_cell_mask: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         encoded = self.instance_input_projection(
             self.instance_input_norm(query_instances)
@@ -4169,21 +4420,64 @@ class StructuredPopulationMetaClassifier(nn.Module):
         evidence = torch.logsumexp(similarities, dim=-1) - math.log(
             self.class_memory_tokens
         )
+        if query_cell_mask is not None:
+            if query_cell_mask.shape != query_instances.shape[:3]:
+                raise ValueError(
+                    "query_cell_mask must be [episodes, queries, instances]."
+                )
+            # evidence is [E, Q, C, n]; broadcast the cell mask over classes.
+            cell_mask_expanded = query_cell_mask.unsqueeze(-2).expand_as(evidence)
+            evidence = evidence.masked_fill(~cell_mask_expanded, float("-inf"))
+            valid_query = query_cell_mask.sum(dim=-1).clamp_min(1)  # [E, Q]
+        else:
+            cell_mask_expanded = None
+            valid_query = None
         fraction_scores = []
-        counts = []
+        counts: list[torch.Tensor] = []
         for fraction in self.rare_evidence_fractions:
-            count = min(
-                query_instances.shape[2],
-                max(1, int(math.ceil(fraction * query_instances.shape[2]))),
-            )
-            fraction_scores.append(evidence.topk(count, dim=-1).values.mean(dim=-1))
-            counts.append(count)
+            if valid_query is None:
+                count = min(
+                    query_instances.shape[2],
+                    max(1, int(math.ceil(fraction * query_instances.shape[2]))),
+                )
+                values, index = evidence.topk(count, dim=-1)
+                fraction_scores.append(values.mean(dim=-1))
+                counts.append(
+                    torch.full(
+                        query_instances.shape[:2],
+                        count,
+                        device=query_instances.device,
+                        dtype=torch.long,
+                    )
+                )
+            else:
+                # Per-query count (matches the list path's top-fraction mean),
+                # realized with a uniform topk over the max count plus a mask.
+                count_query = torch.minimum(
+                    torch.clamp(
+                        torch.ceil(fraction * valid_query).long(), min=1
+                    ),
+                    valid_query.long(),
+                )
+                k = min(query_instances.shape[2], int(count_query.max().item()))
+                values, index = evidence.topk(k, dim=-1)
+                keep = (
+                    torch.arange(k, device=evidence.device)
+                    < count_query.unsqueeze(-1).unsqueeze(-1)
+                )
+                masked = values.masked_fill(~keep, 0.0)
+                # [E, Q, 1] denominator so [E, Q, C] / [E, Q, 1] -> [E, Q, C].
+                denom = count_query.unsqueeze(-1)
+                fraction_scores.append(masked.sum(dim=-1) / denom)
+                counts.append(count_query)
         stacked_scores = torch.stack(fraction_scores, dim=-1)
         logits = self.rare_evidence_head(
             stacked_scores.to(query_instances.dtype)
         ).squeeze(-1)
-        rare_counts = torch.tensor(counts, device=query_instances.device).expand(
-            query_instances.shape[0], query_instances.shape[1], -1
+        rare_counts = torch.stack(counts, dim=-1).expand(
+            query_instances.shape[0],
+            query_instances.shape[1],
+            len(self.rare_evidence_fractions),
         )
         return logits, stacked_scores, rare_counts
 
@@ -4273,6 +4567,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
         context_labels: torch.Tensor,
         query: dict[str, torch.Tensor],
         query_instances: torch.Tensor,
+        query_cell_mask: torch.Tensor | None = None,
         return_auxiliary: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
         context_global_tokens = context["global_summary"]
@@ -4394,7 +4689,11 @@ class StructuredPopulationMetaClassifier(nn.Module):
             + population_attention_scale * population_attention_logits
         )
         tail_logits, rare_fraction_scores, rare_counts = (
-            self._rare_instance_logits_batched(query_instances, class_memories)
+            self._rare_instance_logits_batched(
+                query_instances,
+                class_memories,
+                query_cell_mask=query_cell_mask,
+            )
         )
         if self.ccer_temperatures:
             ccer_logits, ccer_route_scores, ccer_presence, ccer_route_weights = (
@@ -5021,8 +5320,18 @@ class BaseModel(nn.Module):
         y: torch.Tensor,
         mask_index: torch.Tensor,
         return_auxiliary: bool = False,
+        cell_mask: torch.Tensor | None = None,
+        bag_mask: torch.Tensor | None = None,
     ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        """Run dense equal-shape episodes through one batched aggregator."""
+        """Run dense equal-shape episodes through one batched aggregator.
+
+        `cell_mask` ([episodes, bags, instances], bool) and `bag_mask`
+        ([episodes, bags], bool) mark the real cells/bags of padded ragged
+        (B2b) batches; padded entries are excluded from every statistic. The
+        cell-level aggregator stays fully batched; the (cheap, bag-token-level)
+        meta-classifier runs per episode because padded episodes have different
+        context sizes.
+        """
         if x.ndim != 4:
             raise ValueError(
                 "Batched x must be [episodes, bags, instances, input_dim]."
@@ -5034,14 +5343,30 @@ class BaseModel(nn.Module):
             raise ValueError("Batched mask_index must be [episodes, queries].")
         if torch.any((mask_index < 0) | (mask_index >= num_bags)):
             raise IndexError("mask_index contains an out-of-range bag index.")
+        if cell_mask is not None and cell_mask.shape != x.shape[:3]:
+            raise ValueError("cell_mask must be [episodes, bags, instances].")
+        if bag_mask is not None and bag_mask.shape != (episodes, num_bags):
+            raise ValueError("bag_mask must be [episodes, bags].")
 
         is_context = torch.ones(episodes, num_bags, dtype=torch.bool, device=x.device)
         is_context.scatter_(1, mask_index.long(), False)
+        if bag_mask is not None:
+            is_context = is_context & bag_mask
         flat_x = x.reshape(episodes * num_bags, num_instances, input_dim)
+        flat_cell_mask = (
+            cell_mask.reshape(episodes * num_bags, num_instances)
+            if cell_mask is not None
+            else None
+        )
+        flat_valid_count = (
+            flat_cell_mask.sum(dim=-1).clamp_min(1)
+            if flat_cell_mask is not None
+            else None
+        )
         if self.aggregator.bag_representation in ("poolz", "poolz_l2"):
             # Per-episode context-pool stats, broadcast back over that episode's bags.
             episode_mean, episode_std = self.aggregator._context_pool_stats_batched(
-                x, is_context
+                x, is_context, cell_mask=cell_mask
             )
             pool_mean = (
                 episode_mean[:, None, :]
@@ -5056,18 +5381,28 @@ class BaseModel(nn.Module):
         else:
             pool_mean = pool_std = None
         classification_flat, global_summary, centered_delta = self.aggregator._bag_view(
-            flat_x, pool_mean, pool_std
+            flat_x, pool_mean, pool_std, cell_mask=flat_cell_mask
         )
-        covariance_sketch = self.aggregator._covariance_sketch(centered_delta)
+        covariance_sketch = self.aggregator._covariance_sketch(
+            centered_delta, count=flat_valid_count
+        )
         if self.aggregator.raw_stat_tokens:
-            raw_stats = self.aggregator._raw_stat_tokens(flat_x)
+            raw_stats = self.aggregator._raw_stat_tokens(
+                flat_x, cell_mask=flat_cell_mask
+            )
         else:
             raw_stats = None
         classification_x = classification_flat.reshape_as(x)
         anchors = torch.stack(
             [
                 self.aggregator._context_anchors(
-                    list(classification_x[episode].unbind(0)), is_context[episode]
+                    list(classification_x[episode].unbind(0)),
+                    is_context[episode],
+                    (
+                        list(cell_mask[episode].unbind(0))
+                        if cell_mask is not None
+                        else None
+                    ),
                 )
                 for episode in range(episodes)
             ]
@@ -5085,39 +5420,93 @@ class BaseModel(nn.Module):
             covariance_sketch=covariance_sketch,
             centered_delta=centered_delta,
             raw_stats=raw_stats,
+            cell_mask=flat_cell_mask,
         )
         representation = {
             name: tokens.reshape(episodes, num_bags, *tokens.shape[1:])
             for name, tokens in flat_representation.items()
         }
 
-        context_count = num_bags - mask_index.shape[1]
-        context_index = torch.nonzero(is_context, as_tuple=False)[:, 1].reshape(
-            episodes, context_count
-        )
+        if cell_mask is None and bag_mask is None:
+            # Uniform-context dense path (arm B): batch the meta-classifier too.
+            context_count = num_bags - mask_index.shape[1]
+            context_index = torch.nonzero(is_context, as_tuple=False)[:, 1].reshape(
+                episodes, context_count
+            )
 
-        def gather_bags(tokens: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
-            view_shape = index.shape + (1,) * (tokens.ndim - 2)
-            expanded = index.reshape(view_shape).expand(index.shape + tokens.shape[2:])
-            return tokens.gather(1, expanded)
+            def gather_bags(tokens: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
+                view_shape = index.shape + (1,) * (tokens.ndim - 2)
+                expanded = index.reshape(view_shape).expand(
+                    index.shape + tokens.shape[2:]
+                )
+                return tokens.gather(1, expanded)
 
-        context = {
-            name: gather_bags(tokens, context_index)
-            for name, tokens in representation.items()
+            context = {
+                name: gather_bags(tokens, context_index)
+                for name, tokens in representation.items()
+            }
+            query = {
+                name: gather_bags(tokens, mask_index.long())
+                for name, tokens in representation.items()
+            }
+            context_labels = y.gather(1, context_index)
+            query_instances = gather_bags(classification_x, mask_index.long())
+            return self.meta_classifier.forward_batched(
+                context=context,
+                context_labels=context_labels,
+                query=query,
+                query_instances=query_instances,
+                return_auxiliary=return_auxiliary,
+            )
+
+        # Padded ragged path: context sizes vary per episode, so the
+        # meta-classifier (over ~100 bag tokens) runs per episode while the
+        # expensive cell-level aggregator above stayed batched. Padded query
+        # cells are masked so the rare-evidence branch ignores them.
+        logits_list: list[torch.Tensor] = []
+        auxiliary_list: list[dict[str, torch.Tensor]] = []
+        for episode in range(episodes):
+            context_index = torch.nonzero(
+                is_context[episode], as_tuple=False
+            ).flatten()
+            context = {
+                name: tokens[episode][context_index].unsqueeze(0)
+                for name, tokens in representation.items()
+            }
+            query = {
+                name: tokens[episode][mask_index[episode]].unsqueeze(0)
+                for name, tokens in representation.items()
+            }
+            context_labels = y[episode][context_index].unsqueeze(0)
+            query_instances = (
+                classification_x[episode][mask_index[episode]].unsqueeze(0)
+            )
+            query_cell_mask = (
+                cell_mask[episode][mask_index[episode]].unsqueeze(0)
+                if cell_mask is not None
+                else None
+            )
+            result = self.meta_classifier.forward_batched(
+                context=context,
+                context_labels=context_labels,
+                query=query,
+                query_instances=query_instances,
+                query_cell_mask=query_cell_mask,
+                return_auxiliary=return_auxiliary,
+            )
+            if return_auxiliary:
+                logits_list.append(result[0])
+                auxiliary_list.append(result[1])
+            else:
+                logits_list.append(result)
+        logits = torch.cat(logits_list, dim=0)
+        if not return_auxiliary:
+            return logits
+        combined = {
+            key: torch.cat([aux[key] for aux in auxiliary_list], dim=0)
+            for key in auxiliary_list[0]
         }
-        query = {
-            name: gather_bags(tokens, mask_index.long())
-            for name, tokens in representation.items()
-        }
-        context_labels = y.gather(1, context_index)
-        query_instances = gather_bags(classification_x, mask_index.long())
-        return self.meta_classifier.forward_batched(
-            context=context,
-            context_labels=context_labels,
-            query=query,
-            query_instances=query_instances,
-            return_auxiliary=return_auxiliary,
-        )
+        return logits, combined
 
     def forward(
         self,

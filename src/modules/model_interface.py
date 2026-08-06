@@ -149,17 +149,39 @@ class ModelInterface(L.LightningModule):
             episode_terms.append(terms)
             query_counts.append(mask_index.numel())
         elif x.ndim == 4 and y.ndim == 2 and x.shape[0] == y.shape[0]:
-            first_mask = self._sample_training_queries(y[0])
+            # A padded ragged (B2b) batch is a 4-tuple (x, y, cell_mask,
+            # bag_mask); a dense equal-shape (B2) batch is a 2-tuple (with an
+            # optional non-bool task field).
+            cell_mask = None
+            bag_mask = None
+            if (
+                len(batch) >= 3
+                and torch.is_tensor(batch[2])
+                and batch[2].dtype == torch.bool
+            ):
+                cell_mask = batch[2]
+                bag_mask = batch[3]
+            first_mask = self._sample_training_queries(
+                y[0],
+                valid_mask=None if bag_mask is None else bag_mask[0],
+            )
             query_count = first_mask.numel()
             masks = [first_mask] + [
                 self._sample_training_queries(
-                    episode_y, num_targets_override=query_count
+                    episode_y,
+                    num_targets_override=query_count,
+                    valid_mask=None if bag_mask is None else bag_mask[episode],
                 )
-                for episode_y in y[1:]
+                for episode, episode_y in enumerate(y[1:], start=1)
             ]
             mask_index = torch.stack(masks)
             logits, batched_auxiliary = self.model.forward_episode_batch(
-                x, y, mask_index, return_auxiliary=True
+                x,
+                y,
+                mask_index,
+                return_auxiliary=True,
+                cell_mask=cell_mask,
+                bag_mask=bag_mask,
             )
             for episode in range(x.shape[0]):
                 auxiliary = {
@@ -422,8 +444,14 @@ class ModelInterface(L.LightningModule):
         self,
         y: torch.Tensor,
         num_targets_override: int | None = None,
+        valid_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Sample queries while retaining at least one context bag per class."""
+        """Sample queries while retaining at least one context bag per class.
+
+        `valid_mask` ([num_bags], bool) restricts sampling to the real bags of a
+        padded (ragged-batched) episode; padded bags are never queried and do
+        not count toward the class/context bookkeeping.
+        """
         target_range = self.hparams.get("training_targets_per_episode", 1)
         if isinstance(target_range, Sequence) and not isinstance(
             target_range, (str, bytes)
@@ -438,10 +466,18 @@ class ModelInterface(L.LightningModule):
         if not 1 <= min_targets <= max_targets:
             raise ValueError("The training target range must contain positive values.")
 
+        if valid_mask is not None:
+            if valid_mask.shape != y.shape or valid_mask.dtype != torch.bool:
+                raise ValueError(
+                    "valid_mask must be a bool tensor matching y."
+                )
+            y_valid = y[valid_mask]
+        else:
+            y_valid = y
         num_classes = int(getattr(self.model, "num_classes", 2))
-        if torch.any((y < 0) | (y >= num_classes)):
+        if torch.any((y_valid < 0) | (y_valid >= num_classes)):
             raise ValueError(f"Episode labels must be in [0, {num_classes - 1}].")
-        class_counts = torch.bincount(y.long(), minlength=num_classes)
+        class_counts = torch.bincount(y_valid.long(), minlength=num_classes)
         if torch.any(class_counts == 0):
             missing = (
                 torch.nonzero(class_counts == 0, as_tuple=False).flatten().tolist()
@@ -450,7 +486,12 @@ class ModelInterface(L.LightningModule):
                 f"Every episode must contain all classes; missing {missing}."
             )
 
-        max_removable = y.numel() - num_classes
+        num_bags_total = (
+            int(valid_mask.sum().item())
+            if valid_mask is not None
+            else y.numel()
+        )
+        max_removable = num_bags_total - num_classes
         max_targets = min(max_targets, max_removable)
         if min_targets > max_targets:
             raise ValueError(
@@ -475,14 +516,14 @@ class ModelInterface(L.LightningModule):
                 targets
                 for targets in valid_targets
                 if any(
-                    abs((y.numel() - targets) - center) <= context_jitter
+                    abs((num_bags_total - targets) - center) <= context_jitter
                     for center in context_sizes
                 )
             ]
             if not valid_targets:
                 raise ValueError(
-                    f"Episode with {y.numel()} bags cannot produce a configured "
-                    "training context using the available query range."
+                    f"Episode with {num_bags_total} bags cannot produce a "
+                    "configured training context using the available query range."
                 )
         if num_targets_override is not None:
             num_targets = int(num_targets_override)
@@ -502,14 +543,24 @@ class ModelInterface(L.LightningModule):
         # use the first occurrence so a fixed episode keeps a fixed split.
         protected: list[torch.Tensor] = []
         for class_index in range(num_classes):
-            candidates = torch.nonzero(y == class_index, as_tuple=False).flatten()
+            if valid_mask is None:
+                candidates = torch.nonzero(
+                    y == class_index, as_tuple=False
+                ).flatten()
+            else:
+                candidates = torch.nonzero(
+                    (y == class_index) & valid_mask, as_tuple=False
+                ).flatten()
             choice = (
                 torch.zeros((), dtype=torch.long, device=y.device)
                 if fixed_queries
                 else torch.randint(candidates.numel(), (), device=y.device)
             )
             protected.append(candidates[choice])
-        can_query = torch.ones(y.numel(), dtype=torch.bool, device=y.device)
+        if valid_mask is None:
+            can_query = torch.ones(y.numel(), dtype=torch.bool, device=y.device)
+        else:
+            can_query = valid_mask.clone()
         can_query[torch.stack(protected)] = False
         candidates = torch.nonzero(can_query, as_tuple=False).flatten()
         order = (
