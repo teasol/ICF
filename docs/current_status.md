@@ -1,16 +1,16 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-06` (**§45 arm C top-up 중간 Musk zero-shot — 대형 bag n>34 0.698→0.825, 소형 n≤4 −0.092 trade-off**)
-**Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up을 8×A6000 DDP + 에피소드-매치(4096 ep/epoch)로 재개 중(epoch ~84/150, batch2). arm B(6-task+sparse)와 arm C(legacy+B2b) 50ep 학습·평가는 완료 — arm B sparse 0.675, arm C legacy 회귀 +0.037로 모두 gate 미달(과소학습 편향).
+**Last updated**: `2026-08-06` (**§46 PathoBench zero-shot 평가 — per-task PCA 전처리, all-context AUROC 0.70~0.73** + **§45 arm C top-up 중간 Musk zero-shot — 대형 bag n>34 0.698→0.825**)
+**Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up을 8×A6000 DDP + 에피소드-매치(4096 ep/epoch)로 재개 중(epoch ~88/150, batch2). arm B(6-task+sparse)와 arm C(legacy+B2b) 50ep 학습·평가는 완료 — arm B sparse 0.675, arm C legacy 회귀 +0.037로 모두 gate 미달(과소학습 편향).
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
-* **다음 Action**: arm C top-up 완주(150 epoch) 후 §42 재평가(legacy 회귀 gate) + Musk 재확인(§45 중간 신호) → Phase 0 결과 선택 → frozen-v30 multi-resolution probe(Phase 1). ICI 잠금은 유지한다.
+* **다음 Action**: arm C top-up 완주(150 epoch) 후 §42 재평가(legacy 회귀 gate) + Musk 재확인(§45 중간 신호) + PathoBench 재평가(§46 캐시 재현 가능) → Phase 0 결과 선택 → frozen-v30 multi-resolution probe(Phase 1). ICI 잠금은 유지한다.
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§45 (arm C top-up 중간 Musk 신호 — 대형 bag 개선)**, **§44 (B2b 패딩 배칭, 병목 프로파일)**, **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
+**Read first if you are picking this up**: **§46 (PathoBench zero-shot 평가)**, **§45 (arm C top-up 중간 Musk 신호 — 대형 bag 개선)**, **§44 (B2b 패딩 배칭, 병목 프로파일)**, **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
 **§36 (CCER-v2 평가)**, **§29 (v30 확정 baseline)**.
 
 **열린 과제**: ① v30 six-task 효과 분리, ② B2b within-episode cardinality 효과 분리, ③ frozen-v30 multi-resolution headroom, ④ v30 medium 참조 재학습, ⑤ ICI 잠금 유지. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
@@ -1356,3 +1356,45 @@ v30 baseline은 문서값과 **정확히 재현**(0.8539) — 체크포인트/�
    완주 후에도 유지되는지).
 2. (논의) §45의 "대형 bag 개선 / 소형 희생"이 실질 개선이라면 Phase 0 결과 선택 기준 재검토.
 3. frozen-v30 multi-resolution probe(Phase 1)는 Phase 0 결과 확정 후에만.
+
+## 46. 2026-08-06 — PathoBench zero-shot 평가: per-task PCA 전처리 + 결과
+
+**상태**: 실행 중인 arm C checkpoint(`v33_phase0_armC_ddp8_batch2` epoch 88)의
+실세계 전체슬라이드 MIL(PathoBench) zero-shot 평가를 완료했다. 평가를 위해 **task별
+8:2 분할 + train-only PCA(1536→512) 전처리 캐시** 파이프라인을 구축했다
+(`scripts/prepare_pathobench.py`).
+
+- **전처리 프로토콜 (사용자 확정)**: 각 task CSV의 train/test 분할을 그대로 사용해
+  8:2로 나눈 뒤, **train 분할 타일에만 PCA(1536→512, GPU SVD)를 fit**하고 train/test
+  모두 변환해 `data/pathobench/{task}_train.pt` / `{task}_test.pt`로 저장.
+  평가 시(`--data-dir` 기본 `data/pathobench`) 캐시가 있으면 h5 읽기·PCA fit 없이
+  바로 로드(미존재 시 기존 h5+PCA fallback 유지).
+  캐시 형식: `{"slide_id": list, "bag": list[Tensor[n,512]], "label": list[int]}`.
+- **모델**: `epoch=088-val_ce_loss=0.5282.ckpt` (arch v24 내부, v30 `poolz_l2` +
+  B2 log-uniform cardinality, 2026-08-06 16:03 저장, 아직 학습 진행 중).
+  multi-class(BRACS 3클래스)는 0 vs rest로 이진화.
+- **결과 (zero-shot, seed 42, B200)**:
+
+  | task | context | test n | AUROC [95% CI] | Acc | BAcc |
+  |---|---|---|---|---|---|
+  | CPTAC-BRCA TP53 | 6/class sample | 22 | 0.411 [0.125, 0.714] | 0.273 | 0.295 |
+  | CPTAC-LUAD TP53 | 6/class sample | 59 | 0.530 [0.378, 0.680] | 0.525 | 0.528 |
+  | BRACS coarse | 6/class sample | 148 | 0.445 [0.310, 0.581] | 0.493 | 0.459 |
+  | CPTAC-BRCA TP53 | **all (100k cells)** | 22 | **0.732 [0.486, 0.938]** | 0.591 | 0.625 |
+  | CPTAC-LUAD TP53 | **all (30k cells)** | 59 | **0.728 [0.588, 0.862]** | 0.627 | 0.610 |
+  | BRACS coarse | **all (100k cells)** | 148 | **0.702 [0.579, 0.818]** | 0.797 | 0.600 |
+
+- **해석**: sample-context(6 slide/class)는 클래스별 대표성 부족으로 ~0.4~0.5,
+  **all-context(전체 train 슬라이드, 타일 자동 캡)가 일관되게 0.70~0.73**.
+  PCA를 per-task(train-only)로 바꾼 뒤에도 all-context 결과는 유지/개선(BRCA
+  0.714→0.732). LUAD는 30k cell로도 0.728로 강건. 세 task 모두 유의한 AUROC
+  (95% CI 하한 ≥0.48). 이는 BagPFN의 bag-level in-context zero-shot이 실세계
+  슬라이드 MIL에 전이 가능함을 시사.
+- **파일**: `scripts/prepare_pathobench.py`(전처리), `scripts/test_pathobench.py`
+  (평가, 캐시 우선 로드), `data/pathobench/{task}_{train,test}.pt` 6개,
+  `predictions/pathobench_{task}_..._e88_cache.pt` 6개. 구식 공용-PCA 스크립트
+  `scripts/fit_pathobench_pca.py`는 삭제.
+- **재실행**: `python scripts/test_pathobench.py --checkpoint <ckpt> --csv
+  /NHNHOME/kimds/Data/PathoBench/csv/<task>.csv [--context-mode all
+  --target-context-cells 30000]`. 전처리는 `python scripts/prepare_pathobench.py
+  --csv ...` 1회. arm C 완주 후 이 프로토콜로 최종 checkpoint 재평가 권장.

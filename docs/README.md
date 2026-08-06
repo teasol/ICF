@@ -1,6 +1,6 @@
 # Documentation map
 
-**Last updated**: `2026-08-05`
+**Last updated**: `2026-08-06`
 **Architecture Version**: `30` 확정 baseline (2026-08-04) — v24 + B1 `poolz_l2` 표현 + B2 cardinality-faithful 샘플링. v24(이전 확정)는 `configs/train_v24_medium_bag_proj_residual.yaml`로 보존.
 
 문서는 **새 대화 세션으로 접속하는 Agent가 최우선으로 읽는 Living 문서 5개와 현행 proposal 1개(`docs/` 루트)**, **과거 기록/딥다이브 분석서(`docs/history/`)**로 이원화하여 관리합니다.
