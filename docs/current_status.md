@@ -1,16 +1,16 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-06` (**§44 B2b 패딩 배칭 구현 — batch>1로 병렬/VRAM 활용, B200 ~2.8× 처리량**)
-**Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up을 8×A6000 DDP + 에피소드-매치(4096 ep/epoch)로 재개 중(epoch ~53/150). arm B(6-task+sparse)와 arm C(legacy+B2b) 50ep 학습·평가는 완료 — arm B sparse 0.675, arm C legacy 회귀 +0.037로 모두 gate 미달(과소학습 편향).
+**Last updated**: `2026-08-06` (**§45 arm C top-up 중간 Musk zero-shot — 대형 bag n>34 0.698→0.825, 소형 n≤4 −0.092 trade-off**)
+**Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up을 8×A6000 DDP + 에피소드-매치(4096 ep/epoch)로 재개 중(epoch ~84/150, batch2). arm B(6-task+sparse)와 arm C(legacy+B2b) 50ep 학습·평가는 완료 — arm B sparse 0.675, arm C legacy 회귀 +0.037로 모두 gate 미달(과소학습 편향).
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
-* **다음 Action**: arm C top-up 완주(150 epoch) 후 §42 재평가 → Phase 0 결과 선택 → frozen-v30 multi-resolution probe(Phase 1). ICI 잠금은 유지한다.
+* **다음 Action**: arm C top-up 완주(150 epoch) 후 §42 재평가(legacy 회귀 gate) + Musk 재확인(§45 중간 신호) → Phase 0 결과 선택 → frozen-v30 multi-resolution probe(Phase 1). ICI 잠금은 유지한다.
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§44 (B2b 패딩 배칭, 병목 프로파일)**, **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
+**Read first if you are picking this up**: **§45 (arm C top-up 중간 Musk 신호 — 대형 bag 개선)**, **§44 (B2b 패딩 배칭, 병목 프로파일)**, **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
 **§36 (CCER-v2 평가)**, **§29 (v30 확정 baseline)**.
 
 **열린 과제**: ① v30 six-task 효과 분리, ② B2b within-episode cardinality 효과 분리, ③ frozen-v30 multi-resolution headroom, ④ v30 medium 참조 재학습, ⑤ ICI 잠금 유지. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
@@ -1279,3 +1279,80 @@ commit `568c5f8`.
   **전체 38 tests 통과 (~256s)**.
 - **바로 다음**: ① (선택) A6000 top-up을 batch2 config로 재런칭/적용 — 기존 batch=1
   런과의 비교 판단은 사용자 결정, ② §42 재평가, ③ Phase 1 probe.
+
+## 45. 2026-08-06 — arm C top-up 중간 Musk zero-shot: 대형 bag(n>34) 개선 + 소형 trade-off
+
+**상태**: arm C top-up 진행 중(epoch ~84/150)에 **중간 checkpoint(epoch 64,
+`best_epoch64_valce0.5287.ckpt`)의 Musk zero-shot을 측정**해 v30 확정 baseline과
+비교했다. 목적은 top-up 완주 전에 B2b 추가 학습이 Musk 방향을 어떻게 움직이는지
+조기 신호를 잡는 것. **대형 bag(n>34)이 0.698→0.825로 크게 개선**됐고, 대신
+**소형(n≤4)이 0.792→0.700으로 희생**됐다.
+
+### 실행 환경 (gnode4, 8×A5000 — gnode5와 파일서버 공유)
+
+- 이 세션은 NHN(B200)/gnode5(A6000)가 아닌 **gnode4**에서 진행. arm C top-up 자체는
+  gnode5에서 돌며 NFS로 체크포인트/metrics가 gnode4에 실시간 동기된다.
+- **v30 checkpoint는 워크스페이스 `checkpoints/`에 없고 `/home/kimds/archive/`에 있다**
+  (`/data-hdd`는 백업 서버). 워크스페이스 root도 `/NHNHOME/kimds/ICF`가 아닌
+  `/home/kimds/ICF` — 다중 위치 동기화 환경이라 경로 확인 필요.
+- Musk 데이터: `/home/kimds/BagPFN/Data/Musk/musk.pkl` (NHN 경로 아님).
+- 사용된 checkpoint:
+  - v30 baseline: `archive/v30_cardinality_poolz_l2/epoch=048-val_ce_loss=0.4442.ckpt`
+  - v33 arm C: `archive/v33_phase0_armC_ddp8_topup_20260806/best_epoch64_valce0.5287.ckpt`
+- config: v30 `train_v30_cardinality_poolz_l2.yaml`, v33 `train_v33_phase0_armC_ddp8.yaml`
+  (arm C도 `bag_representation: poolz_l2` — v30 arch 그대로. "legacy"는 데이터 믹스
+  의미일 뿐 표현 아님). preprocess는 기본 `bag_view` (v30 S2 측정과 동일).
+
+### 결과 (102 bags leave-one-out, seed 42)
+
+| 지표 | v30 baseline | v33 arm C (ep64) |
+|---|---|---|
+| **AUROC [95% CI]** | **0.8539 [0.774, 0.925]** | **0.8799 [0.810, 0.946]** |
+| Accuracy | 0.794 | 0.814 |
+| Balanced acc | 0.785 (sens 0.744 / spec 0.825) | 0.796 (sens 0.718 / spec 0.873) |
+| Log loss | 0.476 | 0.441 |
+| corr(prob, log n) | +0.057 | −0.146 |
+
+v30 baseline은 문서값과 **정확히 재현**(0.8539) — 체크포인트/파이프라인 무결성 확인.
+
+### 밴드별 AUROC (stratified, 같은 102 bag)
+
+| 밴드 | v30 baseline | v33 arm C | Δ |
+|---|---|---|---|
+| ALL | 0.854 | 0.880 | **+0.026** |
+| **n≤4** | 0.792 | 0.700 | **−0.092** |
+| 5..10 | 0.833 | 0.925 | +0.092 |
+| 11..34 | 0.964 | 0.970 | +0.006 |
+| **n>34 (대형)** | **0.698** | **0.825** | **+0.127** |
+
+### paired bootstrap (4,000 resample)
+
+| stratum | bags | v30 | v33 | Δ | 95% CI | P(v33>v30) |
+|---|---|---|---|---|---|---|
+| ALL | 102 | 0.854 | 0.880 | +0.026 | [−0.021, +0.078] | 0.858 |
+| n≤4 | 29 | 0.792 | 0.700 | −0.092 | [−0.258, +0.033] | 0.084 |
+| n>4 | 73 | 0.864 | 0.913 | +0.049 | [−0.014, +0.118] | 0.932 |
+
+### 판독 (사용자 관점 포함)
+
+- **전체 +0.026은 통계적으로 무의미**(CI 0 포함, P=0.858). 그러나 **구간 구조는 명확**:
+  v33이 **소형(n≤4)을 팔아 중·대형 전 구간(5..10, n>34)을 샀다**.
+- 원래 v30의 고질적 약점이던 **n>34가 0.698→0.825 (+0.127)** — 이것이 이 신호의 핵심.
+  5..10도 +0.092. 대형·중형 양쪽에서 개선.
+- **사용자 판단**: "소형 bag 희생할 만하다"는 쪽으로 기우는 중. (v30이 B2로 처음 고쳤던
+  n≤4를 되돌리는 trade-off이므로, gate 관점에서 주의해서 볼 필요는 있음.)
+- **한계**: ① **중간 checkpoint(epoch 64/150)** 기준 — 완주 후 재확인 필요. ② n>34는
+  bag 수가 적어(약 13개) CI가 넓음(v33 0.825 [0.60, 0.98]). ③ synthetic legacy 회귀
+  gate(§42, ≤0.01)는 별개로 아직 미검증 — top-up 완주 후 평가해야 함.
+
+### 예측 산출물
+
+- `predictions/musk_v30_baseline_best.pt`
+- `predictions/musk_v33_armC_current_best.pt`
+
+### 바로 다음
+
+1. arm C top-up 완주(150 epoch) 후 §42 재평가(legacy 회귀 gate) + **Musk 재확인**(§45 신호가
+   완주 후에도 유지되는지).
+2. (논의) §45의 "대형 bag 개선 / 소형 희생"이 실질 개선이라면 Phase 0 결과 선택 기준 재검토.
+3. frozen-v30 multi-resolution probe(Phase 1)는 Phase 0 결과 확정 후에만.
