@@ -1354,15 +1354,29 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         slot_mean = torch.einsum(
             "bns,bnd->bsd", assignment, instances
         ) / mass.unsqueeze(-1)
-        difference = instances[:, :, None, :] - slot_mean[:, None, :, :]
-        slot_std = torch.sqrt(
-            (
-                assignment.float().transpose(1, 2).unsqueeze(-1)
-                * difference.float().square().transpose(1, 2)
-            ).sum(dim=2)
-            / mass.float().unsqueeze(-1)
-            + 1e-6
-        ).to(instances.dtype)
+        if self.slot_latent_dim is not None:
+            # Exact variance reformulation (Var = E[X^2] - E[X]^2): the
+            # [cells, slots, dim] difference tensor is never materialized.
+            # slot_std[s,d]^2 = (Sum_c assignment[c,s] x[c,d]^2)/mass[s]
+            #                  - slot_mean[s,d]^2.
+            x_sq = instances.float().square()
+            second_moment = (
+                torch.einsum("bns,bnd->bsd", assignment.float(), x_sq)
+                / mass.float().unsqueeze(-1)
+            )
+            slot_std = torch.sqrt(
+                (second_moment - slot_mean.float().square()).clamp_min(0.0) + 1e-6
+            ).to(instances.dtype)
+        else:
+            difference = instances[:, :, None, :] - slot_mean[:, None, :, :]
+            slot_std = torch.sqrt(
+                (
+                    assignment.float().transpose(1, 2).unsqueeze(-1)
+                    * difference.float().square().transpose(1, 2)
+                ).sum(dim=2)
+                / mass.float().unsqueeze(-1)
+                + 1e-6
+            ).to(instances.dtype)
         dispersion = (assignment * (1.0 - similarity).to(assignment.dtype)).sum(
             dim=1
         ) / mass
@@ -1382,7 +1396,20 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             )
         )
 
-        slot_distance = difference.float().square().mean(dim=-1)
+        if self.slot_latent_dim is not None:
+            # Expanded squared-distance (no [cells, slots, dim] tensor):
+            # dist^2 = E_d[x^2] - 2 (x . m)/dim + E_d[m^2].
+            x_mean_sq = instances.float().square().mean(dim=-1)  # [B, cells]
+            m_mean_sq = slot_mean.float().square().mean(dim=-1)  # [B, slots]
+            x_dot_m = (
+                torch.einsum("bnd,bsd->bns", instances.float(), slot_mean.float())
+                / instances.shape[-1]
+            )  # [B, cells, slots]
+            slot_distance = (
+                x_mean_sq.unsqueeze(-1) - 2.0 * x_dot_m + m_mean_sq.unsqueeze(-2)
+            ).to(instances.dtype)
+        else:
+            slot_distance = difference.float().square().mean(dim=-1)
         rare_score = assignment.float() * slot_distance
         if valid is not None:
             rare_score = rare_score.masked_fill(
@@ -1780,15 +1807,26 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             mass = assignment.sum(dim=0).clamp_min(1e-6)
             proportion = mass / bag.shape[0]
             slot_mean = (assignment.T @ bag) / mass.unsqueeze(-1)
-            difference = bag[:, None, :] - slot_mean[None, :, :]
-            slot_std = torch.sqrt(
-                (
-                    assignment.float().T.unsqueeze(-1)
-                    * difference.float().square().transpose(0, 1)
-                ).sum(dim=1)
-                / mass.float().unsqueeze(-1)
-                + 1e-6
-            ).to(bag.dtype)
+            if self.slot_latent_dim is not None:
+                # Exact variance reformulation (no [cells, slots, dim] tensor).
+                x_sq = bag.float().square()
+                second_moment = (
+                    (assignment.float().T @ x_sq) / mass.float().unsqueeze(-1)
+                )
+                slot_std = torch.sqrt(
+                    (second_moment - slot_mean.float().square()).clamp_min(0.0)
+                    + 1e-6
+                ).to(bag.dtype)
+            else:
+                difference = bag[:, None, :] - slot_mean[None, :, :]
+                slot_std = torch.sqrt(
+                    (
+                        assignment.float().T.unsqueeze(-1)
+                        * difference.float().square().transpose(0, 1)
+                    ).sum(dim=1)
+                    / mass.float().unsqueeze(-1)
+                    + 1e-6
+                ).to(bag.dtype)
             dispersion = (assignment * (1.0 - similarity).to(assignment.dtype)).sum(
                 dim=0
             ) / mass
@@ -1808,7 +1846,16 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 bag.shape[0],
                 max(1, int(math.ceil(self.slot_rare_fraction * bag.shape[0]))),
             )
-            slot_distance = difference.float().square().mean(dim=-1)
+            if self.slot_latent_dim is not None:
+                # Expanded squared-distance (no [cells, slots, dim] tensor).
+                x_mean_sq = bag.float().square().mean(dim=-1)
+                m_mean_sq = slot_mean.float().square().mean(dim=-1)
+                x_dot_m = (bag.float() @ slot_mean.float().T) / bag.shape[-1]
+                slot_distance = (
+                    x_mean_sq.unsqueeze(-1) - 2.0 * x_dot_m + m_mean_sq.unsqueeze(0)
+                ).to(bag.dtype)
+            else:
+                slot_distance = difference.float().square().mean(dim=-1)
             for slot_index in range(self.num_slots):
                 rare_score = (
                     assignment[:, slot_index].float() * slot_distance[:, slot_index]

@@ -78,6 +78,44 @@ class TestSlotMla(unittest.TestCase):
         self.assertIsNotNone(cells.grad)
         self.assertTrue(torch.isfinite(cells.grad).all())
 
+    def test_variance_trick_matches_direct_formula(self) -> None:
+        # The low-rank slot path computes slot_std / slot_distance with the
+        # exact Var = E[X^2] - E[X]^2 reformulation (no [cells, slots, dim]
+        # difference tensor). It must match the direct formula to float32.
+        torch.manual_seed(0)
+        b, cells, slots, dim = 3, 50, 4, 64
+        assignment = torch.rand(b, cells, slots).softmax(dim=-1)
+        instances = torch.nn.functional.normalize(torch.randn(b, cells, dim), dim=-1)
+        mass = assignment.sum(dim=1).clamp_min(1e-6)
+        slot_mean = torch.einsum("bns,bnd->bsd", assignment, instances) / mass.unsqueeze(-1)
+
+        difference = instances[:, :, None, :] - slot_mean[:, None, :, :]
+        std_direct = torch.sqrt(
+            (
+                assignment.float().transpose(1, 2).unsqueeze(-1)
+                * difference.float().square().transpose(1, 2)
+            ).sum(dim=2)
+            / mass.float().unsqueeze(-1)
+            + 1e-6
+        )
+        dist_direct = difference.float().square().mean(dim=-1)
+
+        x_sq = instances.float().square()
+        second_moment = (
+            torch.einsum("bns,bnd->bsd", assignment.float(), x_sq)
+            / mass.float().unsqueeze(-1)
+        )
+        std_trick = torch.sqrt(
+            (second_moment - slot_mean.float().square()).clamp_min(0.0) + 1e-6
+        )
+        x_mean_sq = instances.float().square().mean(dim=-1)
+        m_mean_sq = slot_mean.float().square().mean(dim=-1)
+        x_dot_m = torch.einsum("bnd,bsd->bns", instances.float(), slot_mean.float()) / dim
+        dist_trick = x_mean_sq.unsqueeze(-1) - 2.0 * x_dot_m + m_mean_sq.unsqueeze(-2)
+
+        torch.testing.assert_close(std_trick, std_direct, atol=1e-5, rtol=1e-4)
+        torch.testing.assert_close(dist_trick, dist_direct, atol=1e-5, rtol=1e-4)
+
 
 if __name__ == "__main__":
     unittest.main()
