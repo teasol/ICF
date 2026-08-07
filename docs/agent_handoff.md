@@ -22,7 +22,8 @@ full-dim dot과 byte-identical, 파라미터 0), ③ **slot_std 분산 트릭**(
 (`checkpoints/20260806_215800/v34_phase0_largectx_1536/epoch=048-...`).
 
 평가(§50): ① PathoBench **17개 binary task 5-fold CV 평균 pooled 0.843** (LUAD/LSCC 유전체
-task 0.91~0.99 강세, bc_therapy==ccrcc 동일 슬라이드). ② Musk — `test_musk.py`가 config
+task 0.91~0.99 강세). ⚠️ **§51 정정: 로컬 `cptac_ccrcc_{er,grade,her2}` CSV가 `bc_therapy`
+복사본으로 확정 — 실제 CPTAC-CCRCC 코호트는 미평가, 실측 6개 데이터셋·14개 유효 task.** ② Musk — `test_musk.py`가 config
 input_dim 동적 패딩 + `--pad-mode`(zero/tile, `4aca7f1`/`6d4c5bc`): **tile(166×9+42) 0.858**
 vs zero-pad 0.822 (v30 0.854와 동등). ③ **ICI 실세계 5-seed 0.512±0.027 = 랜덤** (명시적
 잠금 해제, `f8181be`: `ICIDataset` input_dim/pad_mode 타일 + `test_v34_phase0_largectx_1536_ici.yaml`).

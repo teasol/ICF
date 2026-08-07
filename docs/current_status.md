@@ -3,7 +3,7 @@
 **Last updated**: `2026-08-07` (**§50 v34-1536 추가 평가: Musk 패딩 브리지(타일 0.858) + ICI(랜덤 0.512) + PathoBench 17-task 전체 CV(평균 0.843)** + **§49 아키텍처 효율화/학습 완주** + **§48 arm C 완주/v33 평가**)  
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
-* **v34 (신규, §49·§50)**: 아키텍처 효율화(MLA-slot 저랭크 affinity, slot_std 분산 트릭, 배치 population candidates, 정규화 통합)로 대규모 컨텍스트 학습이 가능해졌다. **v34-1536(1024ep×50, batch=4, fp32) 완주** — best val_ce **0.4419**. 전체 평가 완료: ① PathoBench 17개 binary task 5-fold CV 평균 **pooled 0.843** (LUAD/LSCC 유전체 task 0.91~0.99 강세), ② Musk **tile 브리지 0.858** (zero-pad 0.822 대비 +0.036, v30 0.854와 동등), ③ **ICI 실세계 5-seed AUROC 0.512±0.027 = 랜덤** (기존과 일관, 명시적 잠금 해제로 평가). v30과의 직접 CV 비교는 **PCA-per-fold 미지원으로 보류**.
+* **v34 (신규, §49·§50)**: 아키텍처 효율화(MLA-slot 저랭크 affinity, slot_std 분산 트릭, 배치 population candidates, 정규화 통합)로 대규모 컨텍스트 학습이 가능해졌다. **v34-1536(1024ep×50, batch=4, fp32) 완주** — best val_ce **0.4419**. 전체 평가 완료: ① PathoBench **14개 유효 task** 5-fold CV 평균 **pooled 0.843** ⚠️(§51: 로컬 `cptac_ccrcc_*`가 `bc_therapy` 복사본 — 실제 CCRCC 코호트 미평가, 실측 6개 데이터셋), ② Musk **tile 브리지 0.858** (zero-pad 0.822 대비 +0.036, v30 0.854와 동등), ③ **ICI 실세계 5-seed AUROC 0.512±0.027 = 랜덤** (기존과 일관, 명시적 잠금 해제로 평가). v30과의 직접 CV 비교는 **PCA-per-fold 미지원으로 보류**.
 * **다음 Action**: ① **v34-1536 종합 판정(사용자)** — PathoBench·Musk 실질 신호 vs ICI 랜덤, ② v30 vs v34 공정 비교용 **PCA-per-fold CV** (여전히 미지원), ③ **v34-512 학습** + 동일 평가, ④ Phase 0 결과 선택(사용자) — arm C의 n>34(0.849)·lscc 개선 채택 여부, ⑤ v30 medium 참조 재학습, ⑥ frozen-v30 multi-resolution probe(§39, 아키텍처 가설 여전히 미검증).
 
 > **사용자 결정 (2026-08-05, 확정)**:
@@ -11,7 +11,7 @@
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§50 (v34-1536 추가 평가: Musk 타일 브리지, ICI 랜덤, PathoBench 17-task 전체 CV)**, **§49 (아키텍처 효율화 MLA-slot + v34-1536 학습 완주 + PathoBench 5-fold CV)**, **§48 (arm C top-up 완주 + v33 평가: legacy gate 미달, PathoBench v30 우위)**, **§47 (e125 재평가/타일 스윕)**, **§46 (PathoBench zero-shot 평가)**, **§45 (arm C top-up 중간 Musk 신호 — 대형 bag 개선)**, **§44 (B2b 패딩 배칭, 병목 프로파일)**, **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
+**Read first if you are picking this up**: **§51 (PathoBench 원본 검증: 로컬 ccrcc CSV는 bc_therapy 복사본)**, **§50 (v34-1536 추가 평가: Musk 타일 브리지, ICI 랜덤, PathoBench 17-task 전체 CV)**, **§49 (아키텍처 효율화 MLA-slot + v34-1536 학습 완주 + PathoBench 5-fold CV)**, **§48 (arm C top-up 완주 + v33 평가: legacy gate 미달, PathoBench v30 우위)**, **§47 (e125 재평가/타일 스윕)**, **§46 (PathoBench zero-shot 평가)**, **§45 (arm C top-up 중간 Musk 신호 — 대형 bag 개선)**, **§44 (B2b 패딩 배칭, 병목 프로파일)**, **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
 **§36 (CCER-v2 평가)**, **§29 (v30 확정 baseline)**.
 
 **열린 과제**: ① v30 vs v34 CV 공정 비교(PCA-per-fold), ② v34-512 학습, ③ v30 six-task 효과 분리, ④ B2b within-episode cardinality 효과 분리, ⑤ frozen-v30 multi-resolution headroom, ⑥ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
@@ -1293,8 +1293,10 @@ v30 baseline은 문서값과 **정확히 재현**(0.8539) — 체크포인트/�
 - **해석**: sample-context(6 slide/class, 전체 타일)는 대부분 0.5~0.68의 랜덤~약상승
   수준. LUAD 계열(egfr/kras/stk11/tp53 0.61~0.68)과 LSCC(arid1a 0.631)가 상대적으로
   양호, PDA smad4는 랜덤 이하(0.309). **BC_Therapy와 CPTAC-CCRCC는 동일 슬라이드·동일
-  라벨의 중복 데이터**(AUROC/Acc/logloss 완전 동일)로 확인. 이전의 all-context(전체
-  train 슬라이드)가 sample보다 강했던 점(0.70~0.73)을 고려해, 전체 타일 기준
+  라벨의 중복 데이터**(AUROC/Acc/logloss 완전 동일)로 확인. ⚠️ **§51(2026-08-07) 정정:
+  이는 벤치마크 속성이 아니라 로컬 데이터 오류** — 로컬 `cptac_ccrcc_{er,grade,her2,residual}.csv`가
+  `bc_therapy`의 바이트 단위 복사본이고, 공식 CPTAC-CCRCC 코호트(`C3L/C3N`)는 전혀 미포함이다.
+  이전의 all-context(전체 train 슬라이드)가 sample보다 강했던 점(0.70~0.73)을 고려해, 전체 타일 기준
   all-context 재평가는 후속으로 가능.
 - **파일**: `scripts/prepare_pathobench.py`, `scripts/test_pathobench.py`(갱신),
   `data/pathobench/{task}_{train,test}.pt` (17 task × 2), `predictions/pathobench_{task}_..._e88_full.pt`.
@@ -1591,12 +1593,14 @@ seed 42) 5-task 평가. 예측 파일 `predictions/pathobench_{task}_v30_allctx_
 - 신규 12개: `bc_therapy_{er,grade,her2}`, `brca_pik3ca`, `ccrcc_{er,grade,her2}`,
   `lscc_{histologic,keap1}`, `luad_{egfr,kras}`, `ucla_lung_progression_regression`
   (§49의 5개와 합쳐 17개).
-- **14개 고유 데이터셋 평균 pooled 0.843** (fold-mean 0.846):
+- **14개 유효 고유 task 평균 pooled 0.843** (fold-mean 0.846) ⚠️ §51 정정: 로컬 `cptac_ccrcc_*`는
+  `bc_therapy`의 잘못된 복사본이라 실측 데이터셋은 **6개(BC_Therapy/BRCA/LSCC/LUAD/PDA/UCLA)**다.
   - 강함(0.91~0.99): lscc_keap1 0.985, luad_stk11 0.977, luad_kras 0.958, lscc_histologic 0.948,
     luad_egfr 0.945, luad_tp53 0.944, lscc_arid1a 0.908
   - 중간(0.78~0.86): brca_tp53 0.848, pda_smad4 0.831, ucla_lung 0.784
   - 약함(0.63~0.70): bc/ccrcc_er 0.704, bc/ccrcc_grade 0.674, bc/ccrcc_her2 0.673, brca_pik3ca 0.627
-  - bc_therapy == ccrcc 동일 슬라이드(중복, §46 확인).
+  - ⚠️ bc/ccrcc_er·grade·her2는 모두 **bc_therapy 수치의 재표기**(cv5 예측 바이트 동일)이며,
+    **실제 CPTAC-CCRCC 코호트(BAP1/PBRM1/VHL/Immune/OS)는 미평가** (§51).
 - **유전체 alteration task(KEAP1/STK11/KRAS 등)에서 매우 강함**, 호르몬/등급 표현형은 상대적 약세.
 
 ### 4. 열린 과제
@@ -1604,3 +1608,48 @@ seed 42) 5-task 평가. 예측 파일 `predictions/pathobench_{task}_v30_allctx_
 - **PCA-per-fold CV**(v30 vs v34 공정 비교) — 여전히 미지원.
 - **v34-512 학습 미실행** (학습 시 같은 fold 파일로 재평가 가능).
 - v34-1536 종합: PathoBench·Musk는 실질 신호, ICI는 랜덤 — 채택/판정은 사용자.
+
+---
+
+## 51. 2026-08-07 — PathoBench 원본 검증: 로컬 cptac_ccrcc CSV는 bc_therapy의 잘못된 복사본
+
+**상태**: 사용자 요청으로 **공식 Patho-Bench(HF `MahmoodLab/Patho-Bench`, arXiv:2502.06750) 원본
+스플릿을 확보**해 로컬 데이터와 대조했다. **결론: 로컬 `cptac_ccrcc_{er,grade,her2,residual}.csv`는
+`bc_therapy`의 바이트 단위 복사본이며, 공식 CPTAC-CCRCC 코호트를 전혀 담지 않은 로컬 데이터 오류다.**
+이전 §46·§50의 “BC_Therapy==CPTAC-CCRCC 동일 슬라이드” 표현은 벤치마크 속성이 아니라
+**로컬 취득 오류**로 정정한다. 예측 수치(0.843)는 그대로지만 커버리지 해석은 바뀐다.
+
+### 1. 공식 원본 (HuggingFace `MahmoodLab/Patho-Bench`, 2026-08-07 확보, `/tmp/pb_official/`)
+
+- 공식 task 이름 (`available_splits.yaml`):
+  - `bc_therapy`: **er_status / grade / her2_status / residual_cancer_burden** (166 슬라이드, 숫자 ID)
+  - `cptac_ccrcc`: **BAP1_mutation / Immune_class / OS / PBRM1_mutation / VHL_mutation** (245 슬라이드, `C3L-*`/`C3N-*`)
+- `bc_therapy`·`cptac_ccrcc`는 **서로 다른 소스 데이터셋** (Zenodo 6337925 vs TCIA CPTAC-CCRCC).
+
+### 2. 로컬 vs 공식 대조 결과
+
+| 대조 | 결과 |
+|---|---|
+| 로컬 `bc_therapy_er.csv` vs 공식 `bc_therapy/er_status/k=all.tsv` | **166/166 슬라이드 일치, 라벨 불일치 0** → 로컬 bc_therapy는 정상(이름만 축약) |
+| 로컬 `cptac_ccrcc_er.csv` vs 공식 `cptac_ccrcc/BAP1_mutation/k=all.tsv` | **0/166 슬라이드 일치** |
+| 공식 ccrcc 슬라이드 vs 로컬 ccrcc | 겹침 0 (로컬은 `634925` 등 bc_therapy 숫자 ID) |
+| 로컬 `cptac_ccrcc_er.csv` vs `bc_therapy_er.csv` | **바이트 단위 동일** (diff IDENTICAL, er/grade/her2/residual 전부) |
+| cv5 예측 `cptac_ccrcc_{er,grade,her2}` vs `bc_therapy_*` | **fold AUROC·pooled·확률 전부 바이트 동일** |
+
+### 3. §50 “17개 task CV”에 대한 영향
+
+- 17개 항목 중 **3개(`cptac_ccrcc_{er,grade,her2}`)는 bc_therapy의 잘못된 중복** → 유효 고유 task
+  **14개** (실측 **6개 데이터셋**: BC_Therapy/BRCA/LSCC/LUAD/PDA/UCLA).
+- **“14개 유효 task 평균 pooled 0.843”** 수치는 14개 task 단순평균으로 **수치 자체는 유효**
+  (bc/ccrcc 3개를 1회로 중복 제거한 계산과 일치).
+- 단, **실제 CPTAC-CCRCC 코호트(BAP1/PBRM1/VHL/Immune/OS)는 한 번도 평가되지 않음** —
+  §49·§50의 “전체 17개 binary task”는 사실상 ccrcc 코호트가 빠진 6개 데이터셋 평가였다.
+- `bc/ccrcc_er 0.704 / grade 0.674 / her2 0.673`은 bc_therapy 수치의 재표기.
+
+### 4. 열린 과제 (수정 방향)
+
+- (권장) 로컬 `cptac_ccrcc_*` CSV를 공식 TSV로 교체/삭제하고, **실제 cptac_ccrcc
+  task(BAP1/PBRM1/VHL/Immune/OS 등) 5-fold CV 재실행**해 보고 평균을 재계산.
+- 공식 스플릿은 `k=all.tsv`(case_id/slide_id/label + fold_0..49) — 기존 `slide_id,label,split`
+  CSV 포맷으로 변환 필요.
+- `data/pathobench/` 캐시(fold .pt)도 해당 task 재생성 필요.
