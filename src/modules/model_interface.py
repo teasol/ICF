@@ -570,14 +570,6 @@ class ModelInterface(L.LightningModule):
         )
         return candidates[order[:num_targets]]
 
-    def _episode_loss(
-        self,
-        x: torch.Tensor,
-        y: torch.Tensor,
-        mask_index: torch.Tensor,
-    ) -> torch.Tensor:
-        return self._episode_losses(x, y, mask_index)[0]
-
     def _episode_losses(
         self,
         x: torch.Tensor,

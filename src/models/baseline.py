@@ -974,78 +974,6 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         return descriptor.to(centered_delta.dtype), reliability.to(centered_delta.dtype)
 
 
-    def _local_geometry_sketch(
-        self,
-        instances: torch.Tensor,
-        neighbor_counts: Sequence[int] = (4, 8, 16),
-    ) -> dict[str, torch.Tensor]:
-        """Summarize order-invariant local geometry without component slots."""
-        if instances.ndim != 3:
-            raise ValueError("instances must be [bags, instances, features].")
-        counts = tuple(sorted({int(value) for value in neighbor_counts}))
-        if len(counts) < 2 or counts[0] < 2 or instances.shape[1] < 3:
-            raise ValueError(
-                "neighbor counts require at least two settings and three instances."
-            )
-        effective_counts = tuple(
-            min(value, instances.shape[1] - 1) for value in counts
-        )
-        projection_dim = min(16, self.covariance_sketch_dim)
-        projection = self._covariance_projection[:, :projection_dim].float()
-        quantiles = torch.tensor(
-            (0.10, 0.25, 0.50, 0.75, 0.90),
-            device=instances.device,
-            dtype=torch.float32,
-        )
-        distance_features = []
-        anisotropy_features = []
-        for bag in instances:
-            projected = F.normalize(
-                bag.float() @ projection, dim=-1, eps=1e-6
-            )
-            similarity = projected @ projected.T
-            similarity.fill_diagonal_(float("-inf"))
-            nearest = similarity.topk(effective_counts[-1], dim=-1).indices
-            neighbor_values = projected[nearest]
-            center_values = projected.unsqueeze(1)
-            squared_distance = (neighbor_values - center_values).square().sum(dim=-1)
-            bag_distance = []
-            for count in effective_counts:
-                local = squared_distance[:, :count]
-                local_mean = local.mean(dim=-1)
-                local_std = local.std(dim=-1, unbiased=False)
-                bag_distance.extend(
-                    (torch.quantile(local_mean, quantiles),
-                     torch.quantile(local_std, quantiles))
-                )
-            distance_features.append(torch.cat(bag_distance))
-
-            local_difference = neighbor_values[:, : effective_counts[1]] - center_values
-            local_covariance = torch.einsum(
-                "nki,nkj->nij", local_difference, local_difference
-            ) / effective_counts[1]
-            eigenvalues = torch.linalg.eigvalsh(local_covariance).clamp_min(1e-8)
-            normalized = eigenvalues / eigenvalues.sum(dim=-1, keepdim=True).clamp_min(1e-8)
-            top_fraction = normalized[:, -1]
-            entropy = -(normalized * normalized.clamp_min(1e-8).log()).sum(dim=-1)
-            effective_rank = entropy.exp() / projection_dim
-            anisotropy_features.append(
-                torch.cat(
-                    (
-                        torch.quantile(top_fraction, quantiles),
-                        torch.quantile(effective_rank, quantiles),
-                    )
-                )
-            )
-        distance = torch.stack(distance_features).to(instances.dtype)
-        anisotropy = torch.stack(anisotropy_features).to(instances.dtype)
-        return {
-            "distance": distance,
-            "anisotropy": anisotropy,
-            "combined": torch.cat((distance, anisotropy), dim=-1),
-        }
-
-
     def _population_candidates(
         self,
         bag: torch.Tensor,
@@ -1207,58 +1135,6 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             diversity = torch.minimum(diversity, (1.0 - similarity).clamp_min(0.0))
         rare = torch.stack(selected)
         return torch.cat((density, rare), dim=0).to(candidates.dtype)
-
-
-    def _context_spherical_kmeans_anchors(
-        self,
-        bags: list[torch.Tensor],
-        context_mask: torch.Tensor,
-        num_slots: int,
-        refinement_steps: int = 12,
-    ) -> torch.Tensor:
-        """Cluster context-wide population candidates into component anchors."""
-        if num_slots < 1:
-            raise ValueError("num_slots must be positive.")
-        candidates = torch.cat(
-            [
-                self._population_candidates(bag)
-                for bag, is_context in zip(bags, context_mask.tolist())
-                if is_context
-            ],
-            dim=0,
-        )
-        if candidates.shape[0] < num_slots:
-            raise ValueError("Context does not contain enough anchor candidates.")
-        normalized = F.normalize(candidates.float(), dim=-1, eps=1e-6)
-        global_center = F.normalize(normalized.mean(dim=0, keepdim=True), dim=-1)
-        first = (normalized * global_center).sum(dim=-1).argmax()
-        selected = [first]
-        nearest_similarity = normalized @ normalized[first]
-        for _ in range(1, num_slots):
-            index = nearest_similarity.argmin()
-            selected.append(index)
-            nearest_similarity = torch.maximum(
-                nearest_similarity, normalized @ normalized[index]
-            )
-        anchors = normalized[torch.stack(selected)]
-        for _ in range(refinement_steps):
-            similarity = normalized @ anchors.T
-            assignment = similarity.argmax(dim=-1)
-            updated = []
-            for slot_index in range(num_slots):
-                members = normalized[assignment == slot_index]
-                if members.numel() == 0:
-                    updated.append(anchors[slot_index])
-                else:
-                    updated.append(
-                        F.normalize(members.mean(dim=0), dim=-1, eps=1e-6)
-                    )
-            new_anchors = torch.stack(updated)
-            if torch.allclose(new_anchors, anchors, atol=1e-5, rtol=1e-5):
-                anchors = new_anchors
-                break
-            anchors = new_anchors
-        return anchors.to(candidates.dtype)
 
 
     def _raw_stat_tokens(
@@ -2745,8 +2621,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
             #
             # Deliberately NOT embedding slot index (unlike the T5-A design
             # doc's original proposal): slots come from per-episode
-            # spherical k-means over context cells
-            # (_context_spherical_kmeans_anchors), so slot index is an
+            # spherical k-means over context cells, so slot index is an
             # arbitrary/exchangeable cluster id with no stable meaning across
             # bags or episodes -- a global embedding keyed on it has no
             # consistent target to learn (unlike token_type/tail_fraction,
