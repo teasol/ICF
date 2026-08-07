@@ -1840,6 +1840,13 @@ Patho-Bench 프로토콜**(공식 k=all.tsv fold · 공식 코호트 · 공식 �
   `current_experiments.md`·`README.md`)만 유지. 현행 proposal 없음(모두 history).
 - configs 최상위는 **v30·v34만** 유지 (10개). scripts 최상위는 **활성 12개** 유지
   (train·test·evaluate·pathobench 계열 포함).
+- **tests**: 기본 discovery는 **활성 5파일 / 32 tests**만 실행 —
+  `test_core_contracts`(16, ragged 평가 경로 포함)·`test_slot_mla`(7, v34)·`test_vram_guard`(6,
+  안전장치)·`test_scheduler`(2)·`test_checkpoint_callback`(1). **v33 arm C 전용인
+  `test_b2b`(10)·`test_ragged_batching`(3)은 `tests/history/legacy_{b2b,ragged_batching}.py`로
+  이관** (활성 config에서 `per_bag_cardinality` 미사용, ragged 평가 경로는 core가 커버). 수집
+  검증: 활성 32 tests import·collect 정상, 레거시는 기본 discovery 제외. **전체 실행은 배치 완료
+  후 재검증 권장** (CPU 경쟁 방지).
 - 문서 내 이동 경로 참조(`scripts/archive/...` 등)는 sed로 일괄 갱신 완료.
 
 ### 2. v34 git 태그
