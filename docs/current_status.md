@@ -11,7 +11,7 @@
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§51 (PathoBench 원본 검증: 로컬 ccrcc CSV는 bc_therapy 복사본)**, **§50 (v34-1536 추가 평가: Musk 타일 브리지, ICI 랜덤, PathoBench 17-task 전체 CV)**, **§49 (아키텍처 효율화 MLA-slot + v34-1536 학습 완주 + PathoBench 5-fold CV)**, **§48 (arm C top-up 완주 + v33 평가: legacy gate 미달, PathoBench v30 우위)**, **§47 (e125 재평가/타일 스윕)**, **§46 (PathoBench zero-shot 평가)**, **§45 (arm C top-up 중간 Musk 신호 — 대형 bag 개선)**, **§44 (B2b 패딩 배칭, 병목 프로파일)**, **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
+**Read first if you are picking this up**: **§52 (실제 ccrcc 평가·SEAL 비교·공식 50-fold 계획)**, **§51 (PathoBench 원본 검증: 로컬 ccrcc CSV는 bc_therapy 복사본)**, **§50 (v34-1536 추가 평가: Musk 타일 브리지, ICI 랜덤, PathoBench 17-task 전체 CV)**, **§49 (아키텍처 효율화 MLA-slot + v34-1536 학습 완주 + PathoBench 5-fold CV)**, **§48 (arm C top-up 완주 + v33 평가: legacy gate 미달, PathoBench v30 우위)**, **§47 (e125 재평가/타일 스윕)**, **§46 (PathoBench zero-shot 평가)**, **§45 (arm C top-up 중간 Musk 신호 — 대형 bag 개선)**, **§44 (B2b 패딩 배칭, 병목 프로파일)**, **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
 **§36 (CCER-v2 평가)**, **§29 (v30 확정 baseline)**.
 
 **열린 과제**: ① v30 vs v34 CV 공정 비교(PCA-per-fold), ② v34-512 학습, ③ v30 six-task 효과 분리, ④ B2b within-episode cardinality 효과 분리, ⑤ frozen-v30 multi-resolution headroom, ⑥ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
@@ -1738,8 +1738,9 @@ split은 지정 fold(기본 fold_0)의 train/val/test) — **31개 task 전부**
 - ⚠️ **프로토콜 차이 (논문 작성 시 명시 필수)**: SEAL은 지도 MIL 학습(ABMIL/MeanMIL,
   50-fold, macro-AUC), 우리는 **zero-shot in-context(학습 없음)** all-context 5-fold pooled
   AUROC. fold 수(50 vs 5)·컨텍스트 구성이 다르므로 "동일 프로토콜 직접 비교"는 아님.
-- ⚠️ **n 차이(ccrcc)**: SEAL ccrcc BAP1·VHL n=218 vs 우리 245 슬라이드 — SEAL이 다른
-  코호트 버전/전처리(50-fold) 사용 가능성 → 같은 데이터인지 확인 필요.
+- ⚠️ **n 차이(ccrcc)**: SEAL ccrcc BAP1·VHL n=218 vs 우리 245 슬라이드 → §52.4에서 규명:
+  SEAL은 임상(OS) 데이터 보유 94 case/218장만 사용, 공식 Patho-Bench는 103 case/245장 전체.
+  **우리는 공식 프로토콜(245장)을 따른다.**
 - SEAL에 없는 7개 (우리만 평가): lscc_arid1a 0.908, lscc_histologic 0.948, lscc_keap1 0.985,
   luad_kras 0.958, pda_smad4 0.831, ucla_lung 0.784, ccrcc_pbrm1 0.778.
 
@@ -1753,3 +1754,16 @@ split은 지정 fold(기본 fold_0)의 train/val/test) — **31개 task 전부**
 - **검증 완료**: bc_therapy/er_status 2-fold smoke (166 슬라이드, 50 공식 fold 인식).
 - **다음 할일**: 17개 task(7개 데이터셋)에 대해 공식 fold 따라 **50-fold 평가** 실행 →
   SEAL과 동일 프로토콜의 수치로 재비교. 예상: task당 ~50분, 17개 전체는 수 시간(GPU 백그라운드).
+
+### 4. ccrcc 코호트 차이 규명 + 우리 프로토콜 명시
+
+- **공식 Patho-Bench ccrcc = 245장 / 103 case** (BAP1/PBRM1/VHL, 50 folds) — HF 커밋 이력
+  검증(2025-02 추가 이후 0장 증감, 버전 무관).
+- **SEAL n=218 = 임상(OS) 데이터 보유 subset(94 case)** — OS task 슬라이드 수(218)와 정확히
+  일치. 차이 27장 = OS 데이터 없는 9개 case(`C3L-00812/13/14`, `C3N-00148/49/50/54`,
+  `C3N-00573`, `C3N-00646`). 이 9개 case는 타일 수 정상(중앙값 8,935 vs 4,379)이나
+  **BAP1 양성률 2배(33% vs 16%)** — 추출 실패가 아닌 임상 데이터 유무 차이.
+- **우리 프로토콜 명시**: 모든 PathoBench 평가는 **공식 Patho-Bench 프로토콜을 따른다** —
+  ① 공식 `k=all.tsv`의 **공식 fold**(50-fold 등), ② **공식 코호트**(ccrcc 변이 = 103 case/245장,
+  SEAL의 218장 subset 미채택), ③ **공식 라벨**(`config.yaml`의 `task_col`). SEAL과 비교 시에는
+  코호트 차이(245 vs 218)를 명시하고, 필요하면 218장 subset 병행 보고로 투명화한다.
