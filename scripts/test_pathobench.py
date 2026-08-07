@@ -163,6 +163,18 @@ def parse_args() -> argparse.Namespace:
         "are skipped. Folds are static/deterministic, so results never change. "
         "Useful for resume after interruption.",
     )
+    parser.add_argument(
+        "--batch-queries",
+        action="store_true",
+        help="Mask every query slide of a fold in ONE ragged forward call "
+        "instead of one call per query (context re-encoded once per fold "
+        "instead of once per query -- faster). NOT bit-identical to the "
+        "default: batching queries together measurably shifts each query's "
+        "own logits (verified up to ~0.02 logit / ~0.005 probability from "
+        "an unrelated co-batched query alone). Treat as a distinct,  "
+        "unvalidated protocol; default False matches every previously "
+        "reported number.",
+    )
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--output", type=Path, default=None)
     return parser.parse_args()
@@ -263,8 +275,38 @@ def evaluate_trial(
     context_max_tiles: int | None = None,
     seed: int,
     device: torch.device,
+    batch_queries: bool = False,
 ) -> dict:
     """Run one all-context (or sample-context) inference pass.
+
+    Every query slide in ``test_ids`` shares the exact same context set.
+    Default (``batch_queries=False``, matches every previously reported
+    number): one ragged ``forward()`` call PER query, context re-encoded
+    each time.
+
+    ``batch_queries=True`` masks all of ``test_ids`` as queries in a SINGLE
+    ragged forward call, so context encoding happens once per fold instead
+    of once per query -- ``model.model.forward`` already accepts an
+    arbitrary number of query indices in this ragged (list-of-bags) path
+    (see ``_normalize_mask_index``), and training already masks multiple
+    query bags per episode (``training_targets_per_episode``).
+
+    WARNING: this is NOT bit-identical to the default. Verified against the
+    v34-1536 checkpoint and isolated in a minimal repro: the coupling is
+    ``StructuredPopulationMetaClassifier._covariance_relation_scores``
+    (src/models/baseline.py), which normalizes each query's margin by the
+    batch-wide margin RMS along the QUERY axis:
+    ``margin_rms = margin.square().mean(dim=-1, keepdim=True).sqrt()`` then
+    ``bounded_margin = tanh(margin / margin_rms)``. With one query
+    ``margin_rms == |margin|`` so this is the fixed tanh(+-1) scale; with
+    multiple queries the shared RMS couples them (order-independent but
+    content-dependent, matching the observed shift). This branch is active
+    in the v34 config (``covariance_relation.enabled=true``), so batching
+    otherwise-independent query bags shifts each query's own logits by
+    ~0.01-0.05 probability purely from the other queries' presence/content.
+    Treat ``batch_queries=True`` as a distinct, unvalidated protocol -- do
+    not use it for reported numbers without first quantifying the AUROC
+    impact across a full task and getting sign-off.
 
     Uses the ragged per-episode path (list of bags) so each bag is processed
     individually — full-tile all-context episodes (up to tens of thousands of
@@ -292,52 +334,74 @@ def evaluate_trial(
     def subsample_context_bag(features: torch.Tensor) -> torch.Tensor:
         return cap(features, context_limit)
 
+    def sample_context_ids() -> list[str]:
+        if context_mode == "all":
+            return list(train_ids)
+        context_ids: list[str] = []
+        for class_index in (0, 1):
+            pool = [s for s in train_ids if train_y[s] == class_index]
+            if not pool:
+                raise ValueError(f"No train slides of class {class_index}.")
+            permutation = torch.randperm(len(pool), generator=generator)[
+                : min(context_per_class, len(pool))
+            ].tolist()
+            context_ids.extend(pool[index] for index in permutation)
+        return context_ids
+
     probabilities: list[float] = []
     queried_ids: list[str] = []
     nan_count = 0
-    with torch.no_grad():
-        for query_index, query_id in enumerate(test_ids):
-            if context_mode == "all":
-                context_ids = list(train_ids)
-                context_bags = [
-                    subsample_context_bag(projected[s]) for s in context_ids
-                ]
-            else:
-                context_ids = []
-                for class_index in (0, 1):
-                    pool = [s for s in train_ids if train_y[s] == class_index]
-                    if not pool:
-                        raise ValueError(
-                            f"No train slides of class {class_index}."
-                        )
-                    permutation = torch.randperm(len(pool), generator=generator)[
-                        : min(context_per_class, len(pool))
-                    ].tolist()
-                    context_ids.extend(pool[index] for index in permutation)
-                context_bags = [
-                    subsample_context_bag(projected[s]) for s in context_ids
-                ]
-            query_bag = subsample_bag(projected[query_id])
-            episode_bags = [*context_bags, query_bag]
-            episode_y = torch.tensor(
-                [train_y[s] for s in context_ids] + [test_y[query_id]],
-                dtype=torch.long,
-                device=device,
-            )
-            mask_index = torch.tensor([len(context_ids)], device=device)
+
+    if batch_queries:
+        # Single shared context (built/subsampled once), all queries masked
+        # together in one forward call. See WARNING in the docstring above.
+        context_ids = sample_context_ids()
+        context_bags = [subsample_context_bag(projected[s]) for s in context_ids]
+        query_bags = [subsample_bag(projected[s]) for s in test_ids]
+        episode_bags = [*context_bags, *query_bags]
+        episode_y = torch.tensor(
+            [train_y[s] for s in context_ids] + [test_y[s] for s in test_ids],
+            dtype=torch.long,
+            device=device,
+        )
+        n_context = len(context_ids)
+        mask_index = torch.arange(
+            n_context, n_context + len(test_ids), device=device
+        )
+        with torch.no_grad():
             logits = model.model.forward(episode_bags, episode_y, mask_index)
-            probability = float(
-                torch.softmax(logits.float(), dim=-1)[0, 1].item()
-            )
-            if probability != probability:
-                nan_count += 1
-            probabilities.append(probability)
-            queried_ids.append(query_id)
-            if (query_index + 1) % 20 == 0 or query_index + 1 == len(test_ids):
-                print(
-                    f"  ... {query_index + 1}/{len(test_ids)} episodes",
-                    flush=True,
+        probability_t = torch.softmax(logits.float(), dim=-1)[:, 1].cpu()
+        probabilities = probability_t.tolist()
+        queried_ids = list(test_ids)
+        nan_count = int(sum(1 for p in probabilities if p != p))
+    else:
+        with torch.no_grad():
+            for query_index, query_id in enumerate(test_ids):
+                context_ids = sample_context_ids()
+                context_bags = [
+                    subsample_context_bag(projected[s]) for s in context_ids
+                ]
+                query_bag = subsample_bag(projected[query_id])
+                episode_bags = [*context_bags, query_bag]
+                episode_y = torch.tensor(
+                    [train_y[s] for s in context_ids] + [test_y[query_id]],
+                    dtype=torch.long,
+                    device=device,
                 )
+                mask_index = torch.tensor([len(context_ids)], device=device)
+                logits = model.model.forward(episode_bags, episode_y, mask_index)
+                probability = float(
+                    torch.softmax(logits.float(), dim=-1)[0, 1].item()
+                )
+                if probability != probability:
+                    nan_count += 1
+                probabilities.append(probability)
+                queried_ids.append(query_id)
+                if (query_index + 1) % 20 == 0 or query_index + 1 == len(test_ids):
+                    print(
+                        f"  ... {query_index + 1}/{len(test_ids)} episodes",
+                        flush=True,
+                    )
 
     probability = torch.tensor(probabilities)
     target = torch.tensor([test_y[s] for s in queried_ids], dtype=torch.long)
@@ -402,6 +466,7 @@ def evaluate_cv(
             context_max_tiles=args.context_max_tiles,
             seed=args.seed + fold_index,
             device=device,
+            batch_queries=args.batch_queries,
         )
         if result["nan_count"]:
             print(f"WARNING: {result['nan_count']}/{len(result['queried_ids'])} "
@@ -563,6 +628,7 @@ def evaluate_official_folds(
             context_max_tiles=args.context_max_tiles,
             seed=args.seed + k,
             device=device,
+            batch_queries=args.batch_queries,
         )
         probability = result["probability"]
         target = result["target"]
@@ -905,6 +971,7 @@ def main() -> None:
             context_max_tiles=args.context_max_tiles,
             seed=trial_seed,
             device=device,
+            batch_queries=args.batch_queries,
         )
         if result["nan_count"]:
             print(f"WARNING: {result['nan_count']}/{len(result['queried_ids'])} "

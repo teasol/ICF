@@ -58,6 +58,11 @@ def parse_args() -> argparse.Namespace:
                         default=Path("/tmp/pathobench_official_workers"))
     parser.add_argument("--max-tiles", type=int, default=None)
     parser.add_argument("--context-max-tiles", type=int, default=None)
+    parser.add_argument(
+        "--batch-queries", action="store_true",
+        help="Forwarded to test_pathobench.py --batch-queries (NOT "
+        "bit-identical to the default protocol -- see its help text).",
+    )
     parser.add_argument("--keep-tmp", action="store_true")
     return parser.parse_args()
 
@@ -106,6 +111,8 @@ def main() -> None:
             cmd += ["--max-tiles", str(args.max_tiles)]
         if args.context_max_tiles is not None:
             cmd += ["--context-max-tiles", str(args.context_max_tiles)]
+        if args.batch_queries:
+            cmd += ["--batch-queries"]
         with worker_log.open("w") as lf:
             p = subprocess.Popen(cmd, env=env, stdout=lf, stderr=subprocess.STDOUT)
         procs.append((i, s, e, p, worker_out, worker_log))

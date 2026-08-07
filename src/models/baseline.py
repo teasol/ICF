@@ -2684,6 +2684,9 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 nn.GELU(),
                 nn.Linear(32, self.num_classes),
             )
+        # Query-count-invariant margin: the relation scorers use raw tanh(margin)
+        # (no query-axis batch RMS and no learned scale), so each query's output
+        # depends only on its own margin and 1-query == multi-query == training.
         self.minimum_population_residual_scale = float(
             minimum_population_residual_scale
         )
@@ -3010,10 +3013,13 @@ class StructuredPopulationMetaClassifier(nn.Module):
             class_scores = torch.stack(scale_scores).mean(dim=0)
 
         margin = class_scores[..., 1] - class_scores[..., 0]
-        margin_rms = margin.square().mean(dim=-1, keepdim=True).sqrt().clamp_min(
-            self.covariance_relation_eps
-        )
-        bounded_margin = torch.tanh(margin / margin_rms)
+        # Query-count-invariant margin: raw tanh (no batch normalization). The
+        # old margin_rms averaged over the QUERY axis, coupling batched queries
+        # and degenerating to tanh(+-1) at 1-query eval while training used
+        # 5-12 queries/episode. Margins are already context-dispersion-scaled
+        # (d0/d1 = distance/dispersion), so tanh(margin) is per-query and
+        # 1-query == multi-query == training.
+        bounded_margin = torch.tanh(margin)
         logits = torch.stack((-0.5 * bounded_margin, 0.5 * bounded_margin), dim=-1)
         if not batched:
             return logits.squeeze(0), separation.squeeze(0)
@@ -3115,10 +3121,10 @@ class StructuredPopulationMetaClassifier(nn.Module):
             class_scores = torch.stack(scale_scores).mean(dim=0)
 
         slot_margin = class_scores[:, :, 1] - class_scores[:, :, 0]
-        margin_rms = slot_margin.square().mean(dim=(-2, -1), keepdim=True).sqrt()
-        slot_margin = torch.tanh(
-            slot_margin / margin_rms.clamp_min(self.covariance_relation_eps)
-        )
+        # Query-count-invariant: raw tanh, NOT a (query, slot) batch RMS or a
+        # learned scale (see _covariance_relation_scores) -- each (query, slot)
+        # margin depends only on itself, so 1-query == multi-query == training.
+        slot_margin = torch.tanh(slot_margin)
         query_weights = query_reliability.float().clamp_min(0)
         if self.covariance_relation_slot_routing == "context_top1":
             routing = torch.zeros_like(separation_per_slot)

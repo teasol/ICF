@@ -4,3 +4,4 @@ pandas==3.0.3
 wandb==0.28.0
 tensorboard==2.21.0
 numpy==2.4.4
+h5py==3.16.0
