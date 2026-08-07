@@ -1684,4 +1684,17 @@ seed 42) 5-task 평가. 예측 파일 `predictions/pathobench_{task}_v30_allctx_
 
 - 재다운로드: `python scripts/fetch_pathobench_official.py [--source ...]`.
 - 참고: OS·bracs task는 `nfold=5`, 그 외는 50 — 공식 설정이 task별로 다르다.
-- 다음: 공식 `k=all.tsv` → 로컬 `slide_id,label,split` CSV 변환 + 실제 ccrcc task 평가.
+
+### 7. 공식 라벨 CSV 생성 (2026-08-07, `scripts/build_pathobench_official_csvs.py`)
+
+공식 `k=all.tsv`(+`config.yaml`의 `task_col`)에서 **슬라이드 단위 공식 라벨 CSV**를 생성했다:
+`/NHNHOME/kimds/Data/PathoBench/csv_official/{source}_{task}.csv` (`slide_id,label,split`,
+split은 지정 fold(기본 fold_0)의 train/val/test) — **31개 task 전부**.
+
+- **교차 검증 (legacy CSV 존재 26개)**: 전부 **라벨 100% 일치** (bc_therapy/brca/lscc/luad/pda/
+  mbc/ucla/bracs/herroi + OS 3종). → 기존 로컬 CSV는 ccrcc 4건 외엔 모두 정상임을 공식 라벨로 재확인.
+- **실제 cptac_ccrcc 5개 task 라벨 신규 확보** (기존에 없었음): `BAP1_mutation`(245장, 이진),
+  `PBRM1_mutation`(245), `VHL_mutation`(245), `Immune_class`(245, 3클래스), `OS`(218, 7클래스) —
+  전부 `C3L/C3N` 슬라이드.
+- 재생성: `python scripts/build_pathobench_official_csvs.py [--fold 0]`.
+- 다음: 실제 ccrcc task(BAP1/PBRM1/VHL 등) 5-fold CV 평가 + 보고 평균 재계산.
