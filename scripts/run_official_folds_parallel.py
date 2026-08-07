@@ -49,9 +49,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=5)
     parser.add_argument("--gpus", type=str, default="0",
                         help="Comma-separated CUDA device ids to round-robin across workers.")
-    parser.add_argument("--data-dir", type=Path,
-                        default=PROJECT_ROOT / "data" / "pathobench",
-                        help="Dir for the per-task raw 1536-d feature cache.")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--tmp-dir", type=Path,
@@ -77,27 +74,6 @@ def main() -> None:
     gpus = [g.strip() for g in args.gpus.split(",") if g.strip()]
 
     total_folds = count_folds(task_dir)
-
-    # Build the per-task raw 1536-d feature cache ONCE, so every worker skips h5.
-    cache_path = args.data_dir.expanduser().resolve() / f"{task_dir.name}_raw1536.pt"
-    if not cache_path.exists():
-        print(f"Building raw 1536-d feature cache ({task_dir.name}) ...")
-        subprocess.run(
-            [
-                sys.executable, str(PROJECT_ROOT / "scripts" / "test_pathobench.py"),
-                "--checkpoint", str(args.checkpoint.expanduser().resolve()),
-                "--config", str(args.config.expanduser().resolve()),
-                "--official-folds", str(task_dir),
-                "--cache-only",
-                "--features", str(args.features.expanduser().resolve()),
-                "--data-dir", str(args.data_dir.expanduser().resolve()),
-            ],
-            check=True,
-        )
-        print(f"Cache ready: {cache_path.name}")
-    else:
-        print(f"Using existing raw 1536-d cache: {cache_path.name}")
-
     n = args.workers
     chunk = math.ceil(total_folds / n)
     ranges = [(s, min(s + chunk, total_folds)) for s in range(0, total_folds, chunk)]
@@ -117,7 +93,6 @@ def main() -> None:
             "--official-fold-start", str(s),
             "--official-nfolds", str(e - s),
             "--features", str(args.features.expanduser().resolve()),
-            "--data-dir", str(args.data_dir.expanduser().resolve()),
             "--output", str(worker_out),
             "--seed", str(args.seed),
         ]

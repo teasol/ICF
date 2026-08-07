@@ -154,12 +154,6 @@ def parse_args() -> argparse.Namespace:
         help="First official fold index to evaluate (for parallel fold "
         "splitting across worker processes).",
     )
-    parser.add_argument(
-        "--cache-only",
-        action="store_true",
-        help="With --official-folds: only build the raw 1536-d feature cache "
-        "for the task, then exit (no evaluation).",
-    )
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--output", type=Path, default=None)
     return parser.parse_args()
@@ -509,27 +503,13 @@ def evaluate_official_folds(
         print(f"[binarized] {n_classes} classes -> 0 vs rest")
         labels_raw = {s: int(labels_raw[s] != 0) for s in labels_raw}
 
-    h5_index = None
-    cache_path = args.data_dir.expanduser().resolve() / f"{tsv.parent.name}_raw1536.pt"
-    if cache_path.exists():
-        cache = torch.load(cache_path, map_location="cpu", weights_only=False)
-        slide_ids = list(cache["slide_id"])
-        bag_list = list(cache["bag"])
-        print(f"Loaded raw {FEATURE_DIM}-d cache {cache_path.name} ({len(slide_ids)} slides)")
-    else:
-        h5_index = index_h5_files(args.features)
-        slide_ids = [s for s in slide_ids if s in h5_index]
-        missing = len(records) - len(slide_ids)
-        if missing:
-            print(f"WARNING: dropping {missing} slides with no feature file")
-        bag_list = [load_slide_features(s, h5_index) for s in slide_ids]
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({"slide_id": slide_ids, "bag": bag_list}, cache_path)
-        print(f"Built raw {FEATURE_DIM}-d cache {cache_path.name} ({len(slide_ids)} slides)")
-    if args.cache_only:
-        print("Cache ready (--cache-only, skipping evaluation).")
-        return
-    projected = {sid: bag.to(device) for sid, bag in zip(slide_ids, bag_list)}
+    h5_index = index_h5_files(args.features)
+    slide_ids = [s for s in slide_ids if s in h5_index]
+    missing = len(records) - len(slide_ids)
+    if missing:
+        print(f"WARNING: dropping {missing} slides with no feature file")
+    bags = {sid: load_slide_features(sid, h5_index) for sid in slide_ids}
+    projected = {sid: bag.to(device) for sid, bag in bags.items()}
     print(f"Loaded {len(projected)} slides, {len(fold_cols)} official folds "
           f"({fold_cols[0]}..{fold_cols[-1]}), raw {FEATURE_DIM}-d")
 
