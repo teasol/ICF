@@ -56,7 +56,7 @@ reliability-gated mixture를 제안한다. 구현 전 P0–P2 checkpoint 진단�
 
 **Active — v32b DR-CCER (2026-08-05)**: v32 원안의 비판적 재검토 개선안
 ([`history/architecture_v32b_dr_ccer_proposal.md`](history/architecture_v32b_dr_ccer_proposal.md))을 작성하고,
-P0–P3 probe(`scripts/probe_v32_headroom.py`) + DR-CCER 아키텍처(`architecture_version=32`,
+P0–P3 probe(`scripts/archive/probes_smoke/probe_v32_headroom.py`) + DR-CCER 아키텍처(`architecture_version=32`,
 donor-resolved expert + reliability-gated convex mixture)를 구현했다. **결과: CCER 계열 실증적
 폐기** — ① Stage A 학습(`20260805_182126`, 10 epochs)에서 donor-resolved expert standalone CE가
 0.693(무작위) 정체, ② Stage-0 probe에서 P2 fusion headroom **-0.00034**, P3 donor-agreement
@@ -87,7 +87,7 @@ Phase 0 결과 확인 후에만 구현한다.** 상세는
 `ddp_find_unused_parameters_false` / bf16-mixed / max_epochs 150)이고 `archive/v33_phase0_armC_bf16/last.ckpt`에서
 resume한다. **gnode5 필수**: 이 머신의 NCCL P2P/CUMEM 전송이 hang을 일으켜
 `scripts/launch_interactive_training.sh`에 `NCCL_P2P_DISABLE=1`을 기본 적용했다
-(진단용 `scripts/nccl_probe.py` 신규). B200 1장 대비 A6000 1장은 ~1.8× 느리지만
+(진단용 `scripts/archive/probes_smoke/nccl_probe.py` 신규). B200 1장 대비 A6000 1장은 ~1.8× 느리지만
 8장 병렬로 노드 총 처리량은 ~4.3× (상세 표는 [`current_status.md`](current_status.md) §43).
 **다음**: top-up 완주(150 epoch) 후 §42 재평가.
 
@@ -95,7 +95,7 @@ resume한다. **gnode5 필수**: 이 머신의 NCCL P2P/CUMEM 전송이 hang을 
 만들지 않고, 검증된 v30 bag representation을 동일 bag의 full/partition/subsample view에서
 공유해 sampling resolution 정보를 보존한다. 단, Phase 0(arm B/C) 결과와 frozen-v30
 multi-resolution combiner의 paired AUROC `+0.01` headroom 확인 후에만 구현한다. 상세는
-[`architecture_v33_multiresolution_bag_proposal.md`](architecture_v33_multiresolution_bag_proposal.md)와
+[`history/architecture_v33_multiresolution_bag_proposal.md`](history/architecture_v33_multiresolution_bag_proposal.md)와
 [`current_status.md`](current_status.md) §39다.
 
 **Persistent invariants**: ICI는 사용자 지시로 잠금 상태다. 잠금 해제 시

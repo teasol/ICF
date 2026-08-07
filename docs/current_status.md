@@ -264,7 +264,7 @@ task별: composition 0.8022 / combined 0.8170 / interaction 0.7453 / state 0.659
 
 ### 🛑 T2-1/T2-2 결과 (2026-07-31): state도 관측 descriptor 헤드룸 없음 → Tier 2 종료
 
-`scripts/diagnose_state_upper_bound.py`, 1,000 validation episodes 중 state 177 episodes / 2,910 query, episode cluster bootstrap:
+`scripts/archive/diagnostics/diagnose_state_upper_bound.py`, 1,000 validation episodes 중 state 177 episodes / 2,910 query, episode cluster bootstrap:
 
 | access | descriptor | AUROC | 95% CI |
 |---|---|---:|---|
@@ -286,7 +286,7 @@ task별: composition 0.8022 / combined 0.8170 / interaction 0.7453 / state 0.659
 
 재현:
 ```bash
-/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python scripts/diagnose_state_upper_bound.py \
+/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python scripts/archive/diagnostics/diagnose_state_upper_bound.py \
   --val-episodes 1000 --bootstrap 2000 \
   --output logs/v22_state_upper_bound_1000ep.csv
 ```
@@ -373,7 +373,7 @@ v21 조사의 결론("모든 비교가 노이즈였다")에 대응해 평가 체
 
 ### ① 검정력 분석 — 가장 중요한 결과
 
-`scripts/power_analysis.py` (baseline AUROC 0.55, 모델 간 상관 ρ=0.7 — 실측 Phase 6b vs 6c Pearson ρ=0.737 기반):
+`scripts/archive/probes_smoke/power_analysis.py` (baseline AUROC 0.55, 모델 간 상관 ρ=0.7 — 실측 Phase 6b vs 6c Pearson ρ=0.737 기반):
 
 | 실제 AUROC 향상 | 검출 확률 |
 |---:|---:|
@@ -393,7 +393,7 @@ v21 조사의 결론("모든 비교가 노이즈였다")에 대응해 평가 체
 
 | 스크립트 | 역할 |
 |---|---|
-| `scripts/power_analysis.py` | 실험 전 검출 가능 효과 크기 확인 |
+| `scripts/archive/probes_smoke/power_analysis.py` | 실험 전 검출 가능 효과 크기 확인 |
 | `scripts/launch_ici_protocol.sh` | 5 seed × 5 fold sweep (seed 내 fold 병렬, seed 간 순차), manifest 기록 |
 | `scripts/evaluate_protocol.py` | per-seed / across-seed SD / pooled bootstrap CI / 외부 코호트를 구분해 보고 |
 | `scripts/test.py` | 모든 AUROC에 bootstrap 95% CI **자동 부착** |
@@ -417,7 +417,7 @@ v21 조사의 결론("모든 비교가 노이즈였다")에 대응해 평가 체
 - Loss & Metrics: `src/modules/model_interface.py`
 - 통계 비교 도구: `scripts/compare_predictions.py` (§6 참고)
 - 검증 스위트: `tests/test_base_model.py`, `tests/test_model_interface.py`, `tests/test_batched_episode_forward.py`, `tests/test_evaluation_protocol.py`
-- 평가 프로토콜: `scripts/power_analysis.py`, `scripts/launch_ici_protocol.sh`, `scripts/evaluate_protocol.py`, `scripts/evaluate_synthetic.py`
+- 평가 프로토콜: `scripts/archive/probes_smoke/power_analysis.py`, `scripts/launch_ici_protocol.sh`, `scripts/evaluate_protocol.py`, `scripts/evaluate_synthetic.py`
 - **공용 평가 지표 구현**: `src/utils/metrics.py` (rank 기반 AUROC, cluster bootstrap) — 모든 평가 스크립트가 이 하나를 사용하므로 지표가 스크립트마다 어긋날 수 없음
 - 브랜치/버전 정책: [`history/branch_structure.md`](history/branch_structure.md)
 
@@ -555,7 +555,7 @@ bag-stat)와 지렛대 3(IA-MIL) 모두 음성으로 종료.
 
 **상태**: 진단 완료(학습 없음, 전부 재현 가능) / 제안 미구현 — 사용자 판단 대기
 **문서**: [`history/musk_transfer_diagnosis_v30_proposal.md`](history/musk_transfer_diagnosis_v30_proposal.md)
-**신규 스크립트**: `scripts/diagnose_musk_cardinality.py` (체크포인트·학습 불필요)
+**신규 스크립트**: `scripts/archive/diagnostics/diagnose_musk_cardinality.py` (체크포인트·학습 불필요)
 
 **핵심 결론**: §25의 proposal은 "입력 표현이 병목"이라는 **방향은 맞지만 메커니즘·수정 방향·검증
 경로가 모두 틀렸습니다.** 진짜 병목은 **per-bag centering이 작은 bag을 rank 결핍으로 소멸시키는 것**
@@ -655,9 +655,9 @@ S5 인스턴스 수준 채널(§22의 독립 신호원, 0.95 마진 확보). **�
 향후 ICI 잠금 해제 시 반드시 먼저 처리할 항목으로 남깁니다. S6(ICI)는 이 제안 범위에서 제외.
 
 **이번 세션 완료 조치**:
-- `scripts/diagnose_musk_cardinality.py` 신규 (cardinality/stratified/decompose/ceiling 4종 리포트,
+- `scripts/archive/diagnostics/diagnose_musk_cardinality.py` 신규 (cardinality/stratified/decompose/ceiling 4종 리포트,
   `--design-norm {feature,scalar}`) — 위 수치 전부 재현. src/ 변경 없음.
-- `scripts/diagnose_normalization_ceiling.py`에 `poolz`/`poolz_l2` 변형 추가.
+- `scripts/archive/diagnostics/diagnose_normalization_ceiling.py`에 `poolz`/`poolz_l2` 변형 추가.
 - **config 재현성 전면 복구 — `base_config`를 가진 65개 config 전부 로드 성공(실패 0)**:
   1) 상대경로 13건 수정: v20(2), v21_retrieval(3), v23_v24_candidates(3), v25_typed_bag(1),
      musklike_easy_levers(2), ia_mil(2).
@@ -719,9 +719,9 @@ S5 인스턴스 수준 채널(§22의 독립 신호원, 0.95 마진 확보). **�
   로드 검증 절차 추가 (지금까지 모든 아카이빙 커밋이 활성 config만 확인하고 아카이브를 누락했음).
 
 **신규/변경 스크립트** (src/ 모델 코드 변경 없음 → 모델 거동 불변):
-- `scripts/diagnose_musk_cardinality.py` (신규): cardinality / stratified / decompose / ceiling 4종
+- `scripts/archive/diagnostics/diagnose_musk_cardinality.py` (신규): cardinality / stratified / decompose / ceiling 4종
   리포트, `--design-norm {feature,scalar}`. §26의 모든 Musk 수치를 재현합니다.
-- `scripts/diagnose_normalization_ceiling.py`: `poolz` / `poolz_l2` 변형 추가.
+- `scripts/archive/diagnostics/diagnose_normalization_ceiling.py`: `poolz` / `poolz_l2` 변형 추가.
 
 **다음 Action**: 헤더 "열린 과제" 3건 — ① v30 승격 여부, ② `poolz` 단독 vs `poolz_l2` 병행 학습,
 ③ P1 보류 여부. B1 구현 시 착수점은 `_bag_view`(`baseline.py:618`)에 `bag_representation` 플래그
@@ -858,7 +858,7 @@ v32 DR-CCER proposal 작성 기록. §38에서 폐기 판정. 본문은 [`histor
 
 ### 2. 구현 (Stage-0 probe + DR-CCER 아키텍처)
 
-- **probe**: `scripts/probe_v32_headroom.py` — P0(분기/백본 분해) + P1(standalone evidence,
+- **probe**: `scripts/archive/probes_smoke/probe_v32_headroom.py` — P0(분기/백본 분해) + P1(standalone evidence,
   route별 AUROC, v30 오류 조건부 AUROC) + P2(episode-grouped CV logistic fusion headroom) +
   P3(donor-agreement headroom) + n>34/11–34 band 분해. 6-task 혼합(any_positive_sparse 포함)
   1,000-episode 고정 스트림에서 CCER-v2 epoch-18/v30 체크포인트를 paired 평가.
@@ -904,7 +904,7 @@ v32 DR-CCER proposal 작성 기록. §38에서 폐기 판정. 본문은 [`histor
 
 ### 4. Stage-0 probe (P0–P3) — **모든 게이트 실패: CCER 계열 실증적 폐기**
 
-- `scripts/probe_v32_headroom.py`, 100-episode 6-task 혼합, CCER-v2 epoch-18 vs v30 paired
+- `scripts/archive/probes_smoke/probe_v32_headroom.py`, 100-episode 6-task 혼합, CCER-v2 epoch-18 vs v30 paired
   (공유 서버 고부하로 1,000→500→100 ep로 축소; delta 부호/0은 ep 수에 무관하게 결정적).
   결과: `logs/probe_v32_headroom_20260805.csv` + `/tmp/probe_v32_100.log`.
 
@@ -939,7 +939,7 @@ v32 DR-CCER proposal 작성 기록. §38에서 폐기 판정. 본문은 [`histor
 
 **상태**: 결과 평가와 proposal 작성만 완료. v33 구현·학습은 시작하지 않았고 v30 baseline은 유지한다.
 
-- 현행 proposal: [`architecture_v33_multiresolution_bag_proposal.md`](architecture_v33_multiresolution_bag_proposal.md)
+- 현행 proposal: [`history/architecture_v33_multiresolution_bag_proposal.md`](history/architecture_v33_multiresolution_bag_proposal.md)
 - v32/v32b proposal은 구현·평가 종료에 따라 `history/`로 이관했다.
 - **평가**: P1 standalone `0.51055`, P2 fusion `-0.00034`, P3 donor fusion `+0.00000`,
   Stage-A expert CE `0.6931` 정체가 같은 결론을 지지한다. CCER/DR-CCER 표현에는 v30의 오류를
@@ -1097,7 +1097,7 @@ gate 통과 실패.
   - 증상: 8-GPU torchrun이 `All distributed processes registered` 직후 영원히 hang.
     GPU 8장 모두 100% util인데 메모리 ~450 MiB 고정, rank CPU가 1코어씩 회전, 로그·
     metrics 무진행.
-  - 진단: `scripts/nccl_probe.py`(신규, broadcast/all_reduce/대형 broadcast 최소 재현)로
+  - 진단: `scripts/archive/probes_smoke/nccl_probe.py`(신규, broadcast/all_reduce/대형 broadcast 최소 재현)로
     **NCCL comm init은 8 rank 모두 정상 완료**됨을 확인. 그러나 **첫 컬렉티브
     (`dist.barrier()`)에서 hang** → 통신 그룹 생성이 아니라 **전송(transport) 문제**.
     `NCCL_DEBUG=INFO`에서 `Channel ... via P2P/CUMEM` 채널 사용 확인.
@@ -1819,3 +1819,40 @@ Patho-Bench 프로토콜**(공식 k=all.tsv fold · 공식 코호트 · 공식 �
 - 공식 50-fold 17개 전체 완료 → 최종 표 + SEAL 재비교 (§53 갱신).
 - **v34-512 학습** (미실행). **PCA-per-fold CV** (v30 vs v34 공정 비교, 미지원).
 - v30 medium 참조 재학습, frozen-v30 multi-resolution probe(§39) 등은 기존 열린 과제 유지.
+
+---
+
+## 54. 2026-08-07 — 아카이빙 정리 (최신 버전만 유지) + v34 태그
+
+**상태**: 사용자 요청으로 **최신 버전만 남기고 구버전 문서·config·스크립트를 아카이빙**했다.
+아카이빙은 삭제가 아닌 **이동(git mv)**이라 이력·참조 가능성은 보존된다. 50-fold 배치는 인터넷
+단절로 중단됐지만 **per-fold 체크포인트 덕분에 리쥼 가능**(진행 상태 §53 참고).
+
+### 1. 아카이빙 대상 → 이동
+
+| 위치 | 이동 대상 | 이동 경로 |
+|---|---|---|
+| docs/ | v33 proposal `architecture_v33_multiresolution_bag_proposal.md` (폐기) | `docs/history/` |
+| configs/ | 폐기 아키텍처 config (v22·v24·v26·v31·v32·v33 등 41개) | `configs/archive/{ver}/` |
+| scripts/ | 진단·프로브·스모크·구식 스크립트 (19개) | `scripts/archive/` (probes_smoke·diagnostics) |
+
+- docs 최상위는 **living 5개**(`agent_handoff.md`·`current_status.md`·`current_architecture.md`·
+  `current_experiments.md`·`README.md`)만 유지. 현행 proposal 없음(모두 history).
+- configs 최상위는 **v30·v34만** 유지 (10개). scripts 최상위는 **활성 12개** 유지
+  (train·test·evaluate·pathobench 계열 포함).
+- 문서 내 이동 경로 참조(`scripts/archive/...` 등)는 sed로 일괄 갱신 완료.
+
+### 2. v34 git 태그
+
+- `v34` annotated 태그를 HEAD에 생성·원격 푸시 (기존 `v30`/`v25`/`v21`/`arch-v18` 관례와 동일).
+
+### 3. 안전성
+
+- 이동할 스크립트를 import하는 살아있는 테스트가 있는지 사전 확인: `diagnose_*`는
+  `tests/history/` 레거시만 참조 → 진단·프로브 일괄 이동. 실행 중 배치가 쓰는 스크립트
+  (`test_pathobench.py`·`run_official_folds_parallel.py`)는 **최상위 유지** — 배치 영향 없음.
+
+### 4. 열린 과제 (유지)
+
+- 50-fold 배치 리쥼 → 완료 후 §53 표 갱신.
+- configs/scripts 아카이브의 `base_config` 참조는 §26/§27 규칙대로 향후 로드 검증 권장.

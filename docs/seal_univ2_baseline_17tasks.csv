@@ -1,0 +1,18 @@
+no,pathobench_dataset,pathobench_task,in_seal,seal_dataset_caption,seal_task_caption,seal_figure_label,seal_table,n,folds,metric,abmil_mean,abmil_std,meanmil_mean,meanmil_std,note
+1,bc_therapy,er_status,yes,BRCA neoadjuvant therapy response dataset,ER status classification task,BC THERAPY ER,18,166,50,macro-AUC,0.717,0.086,0.712,0.091,
+2,bc_therapy,grade,yes,BRCA neoadjuvant therapy response dataset,subtype classification task,BC THERAPY GRADE,37,166,50,macro-AUC,0.770,0.066,0.751,0.058,"Table 37 caption reads 'subtype classification' but Methods lists ER/HER2/grade for this dataset and the figure panel is labelled BC THERAPY GRADE; treat as grade. Metric is AUC here, not weighted kappa as in Atlas 2."
+3,bc_therapy,her2_status,yes,BRCA neoadjuvant therapy response dataset,HER2 status classification task,BC THERAPY HER2,19,166,50,macro-AUC,0.663,0.092,0.684,0.073,
+4,cptac_brca,PIK3CA_mutation,yes,CPTAC BRCA dataset,PIK3CA mutation classification task,BRCA PIK3CA,23,112,50,macro-AUC,0.595,0.103,0.544,0.120,
+5,cptac_brca,TP53_mutation,yes,CPTAC BRCA dataset,TP53 Mutation classification task,BRCA TP53,24,112,50,macro-AUC,0.801,0.093,0.787,0.088,
+6,cptac_lscc,ARID1A_mutation,no,,,,,,,,,,,,CPTAC-LSCC cohort not evaluated in SEAL
+7,cptac_lscc,Histologic_Grade,no,,,,,,,,,,,,CPTAC-LSCC cohort not evaluated in SEAL
+8,cptac_lscc,KEAP1_mutation,no,,,,,,,,,,,,CPTAC-LSCC cohort not evaluated in SEAL
+9,cptac_luad,EGFR_mutation,yes,CPTAC LUAD dataset,EGFR mutation classification task,LUAD EGFR,31,324,50,macro-AUC,0.830,0.089,0.777,0.099,"ABMIL 0.830 exceeds the best value reported elsewhere (Virchow2 0.817, Atlas 2)"
+10,cptac_luad,KRAS_mutation,no,,,,,,,,,,,,"SEAL evaluated only EGFR, STK11, TP53 on CPTAC-LUAD"
+11,cptac_luad,STK11_mutation,yes,CPTAC LUAD dataset,STK11 Mutation classification task,LUAD STK11,32,324,50,macro-AUC,0.908,0.052,0.873,0.072,"ABMIL 0.908 exceeds the best value reported elsewhere (UNI2-H 0.888, Atlas 2)"
+12,cptac_luad,TP53_mutation,yes,CPTAC LUAD dataset,TP53 Mutation classification task,LUAD TP53,33,324,50,macro-AUC,0.751,0.102,0.735,0.102,
+13,cptac_pda,SMAD4_mutation,no,,,,,,,,,,,,"SEAL calls this cohort CPTAC-PDAC and used it only for pathway expression regression (Tables 52-54)"
+14,ucla_lung,progression_regression,no,,,,,,,,,,,,Dataset not used in SEAL
+15,cptac_ccrcc,BAP1_mutation,yes,CPTAC CCRCC dataset,BAP1 mutation classification task,CCRCC BAP1,25,218,50,macro-AUC,0.693,0.150,0.720,0.145,
+16,cptac_ccrcc,PBRM1_mutation,no,,,,,,,,,,,,"Methods claims PBRM1 on CPTAC-CCRCC but no such table exists; Table 34 PBRM1 is the MUT-HET-RCC cohort (n=1291), a different task"
+17,cptac_ccrcc,VHL_mutation,yes,CPTAC CCRCC dataset,VHL mutation classification task,CCRCC VHL,26,218,50,macro-AUC,0.538,0.128,0.542,0.133,
