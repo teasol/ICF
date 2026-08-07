@@ -1,10 +1,10 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-07` (**§56 config 리팩터링 + 공식 50-fold 6/17(ARID1A 완료, 배치 일시정지) + 폐기 분기 최신화(CCER·DR-CCER 제거, 검증 완료)** + **§55 리팩터링 1단계**)  
+**Last updated**: `2026-08-07` (**§57 50-fold 재개 전 진단: 5-fold CV case leakage로 lscc_arid1a 0.908 부풀려짐 → 공식 50-fold 0.462가 정직한 값, 재개 안전** + **§56 config 리팩터링 + 공식 50-fold 6/17(배치 일시정지) + 폐기 분기 최신화(CCER·DR-CCER 제거, 검증 완료)** + **§55 리팩터링 1단계**)  
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **v34 확정 (§52·§53·§56)**: **v34-1536을 PathoBench 보고용 모델로 확정**(사용자 결정). 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv fold·코호트·라벨) 기준 **50-fold**(SEAL macro-AUC와 동일 구조) — **5/17 완료**(bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569, brca_TP53), **12개는 config 수정으로 재시작**(§56, 백그라운드). v30은 합성/Musk baseline 유지. 이전 5-fold와 수치 ±0.04 이내 동일(평가 견고성). config 시스템을 v34 base + group default 참조형으로 리팩터링(§56). 자세한 진행 §53·§56.
-* **다음 Action**: ① 공식 **50-fold 12개 완료**(백그라운드 진행, §56) → **17개 전체 최종 표** + **SEAL 재비교**, ② v30 vs v34 공정 비교용 **PCA-per-fold CV** (미지원), ③ **v34-512 학습** + 동일 평가, ④ Phase 0 결과 선택(사용자) — arm C의 n>34(0.849)·lscc 개선 채택 여부, ⑤ v30 medium 참조 재학습, ⑥ frozen-v30 multi-resolution probe(§39, 미검증).
+* **다음 Action**: ① 공식 **50-fold 잔여 11개 재개**(§57 진단 완료, 재개 안전 — `nohup bash scripts/run_official50_batch.sh`) → **17개 전체 최종 표** + **SEAL 재비교**(단, §57: 5-fold 결과는 case leakage로 multi-slide task 부풀려짐 → 50-fold 수치로 갱신), ② v30 vs v34 공정 비교용 **PCA-per-fold CV** (미지원), ③ **v34-512 학습** + 동일 평가, ④ Phase 0 결과 선택(사용자) — arm C의 n>34(0.849)·lscc 개선 채택 여부, ⑤ v30 medium 참조 재학습, ⑥ frozen-v30 multi-resolution probe(§39, 미검증).
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
@@ -1963,5 +1963,52 @@ Patho-Bench 프로토콜**(공식 k=all.tsv fold · 공식 코호트 · 공식 �
 - 50-fold 잔여 11개 재개 → §53 표 **17개 전체 갱신** + SEAL 재비교.
 - 폐기 분기 최신화 계속(typed_bag→cls_token→MIL→CCTS→mean_pool) 또는 여기서 종료.
 - v34-512 학습 + 동일 평가(열린 과제 ③), v30 vs v34 PCA-per-fold 공정 비교.
+
+---
+
+## 57. 2026-08-07 — 50-fold 재개 전 진단: 5-fold CV의 case leakage로 lscc_arid1a 0.908이 부풀려짐
+
+**상태**: 공식 50-fold 재개 전에 "이상한 AUROC"(lscc_arid1a 50-fold pooled **0.462** vs
+기존 5-fold **0.908**)를 진단했다. 결론: **50-fold 계산은 정상**이며, **기존 5-fold CV가
+case leakage로 multi-slide task의 AUROC를 부풀렸다.** 공식 50-fold 0.4616이 ARID1A의
+정직한 성능(실질 랜덤)이다.
+
+### 1. 검증된 사실 (계산 버그 아님)
+
+- 완료된 50-fold 6개 전부 **pooled 재계산 = 저장값 일치** (bc_therapy 0.6721/0.7126/0.6696,
+  PIK3CA 0.5690, TP53 0.8084, ARID1A 0.4616).
+- 50-fold와 5-fold는 **같은 체크포인트**(`epoch=048-val_ce_loss=0.4419.ckpt`)·같은 raw 1536-d·
+  all-context·전체 타일. 라벨도 공식/repro/legacy **전부 일치** (304장, diff 0).
+- 차이는 오직 **폴드 구성**:
+  - **cv5(§50)**: slide-level 층화 5-fold — **108 case 중 82개 case가 여러 fold에 분산**
+    (총 406개 cross-fold case slot). → query slide의 **같은 case 슬라이드가 context에 존재**.
+  - **공식 50-fold**(k=all.tsv, `sample_col: case_id`): fold 내 case 분할 **0건** (case-disjoint).
+
+### 2. leakage 메커니즘 직접 확인 (cv5 예측 파일 재분석)
+
+| query 그룹 | n | AUROC | pos prob mean | neg prob mean |
+|---|---:|---:|---:|---:|
+| case-mate가 context에 있음 | 268/304 (88%) | **0.9258** | 0.561 | 0.139 |
+| case-mate 없음 | 36 | 0.6857 (양성 1장뿐, 사실상 랜덤) | 0.322 | 0.283 |
+
+→ 모델이 형태학적으로 동일한 **case-mate 슬라이드를 context에서 "인식"해 라벨을 예측**.
+leakage가 없으면 ARID1A는 zero-shot in-context로 실질 랜덤 (공식 50-fold fold-mean
+0.4693 ± 0.1093, pooled 0.4616).
+
+### 3. 영향 (중요)
+
+- **공식 50-fold 프로토콜이 정직한 기준** — case-disjoint이므로 재개·보고해도 안전 (잔여 11개).
+- **§50/§52의 5-fold 결과는 multi-slide task에 대해 case leakage로 부풀려짐**:
+  - bc_therapy (166 case = 166 slide, 1:1): 안정 (er 0.704→0.672, grade 0.674→0.713, her2 0.673→0.670).
+  - brca (112 slide/103 case): 하락 (PIK3CA 0.627→0.569, TP53 0.848→0.808).
+  - **ARID1A (304 slide/108 case): 붕괴 (0.908→0.462)**.
+- §52 SEAL 재비교는 17개 50-fold 완료 후 **공식 50-fold 수치로 전면 갱신**해야 한다.
+  lscc_arid1a 0.908 (leaked) → 0.462 (honest)는 논문에 반드시 명시.
+
+### 4. 다음
+
+- 공식 50-fold **잔여 11개 재개** (`nohup bash scripts/run_official50_batch.sh`) → §53 표 17개 전체 갱신.
+- (선택) multi-slide task에 대한 **case-disjoint 5-fold 재평가**로 §50 표 교체 (보고 시).
+- 폐기 분기 최신화(§56.5)는 우선순위 낮음.
 - 활성 스크립트 참조 정리 완료: `queue_v30_poolz.sh`·`evaluate_synthetic.py`·`test_musk.py` →
   archive 경로.

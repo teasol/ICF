@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-07` — v34-1536 확정(PathoBench 보고용). 공식 50-fold **6/17 완료**(ARID1A 포함, 배치 일시정지됨 — 잔여 11개). config 시스템 v34 base + group default 참조형 + 재아카이빙(§56). **폐기 분기 최신화**: CCER(v31)·DR-CCER(v32) 제거(검증 완료, 32 tests 통과), 백업 태그 `repro-pre-deprecated-cleanup-20260807` + `src/repro_backup_20260807/`. 로컬 ccrcc CSV 오류 정정(§51), SEAL baseline 비교(§52).
+**Last updated**: `2026-08-07` — v34-1536 확정(PathoBench 보고용). 공식 50-fold **6/17 완료**(배치 일시정지됨 — 잔여 11개). **§57 진단**: 50-fold 재개 전 확인 결과 **계산은 정상**, 기존 5-fold CV는 **case leakage**(cv5 slide-level split, 108 case 중 82개가 fold 간 분산)로 lscc_arid1a 0.908이 부풀려짐 → 공식 50-fold **0.462가 정직한 값(실질 랜덤)**. 공식 50-fold는 case-disjoint라 **재개 안전**. config 시스템 v34 base + group default 참조형 + 재아카이빙(§56). **폐기 분기 최신화**: CCER(v31)·DR-CCER(v32) 제거(검증 완료, 32 tests 통과), 백업 태그 `repro-pre-deprecated-cleanup-20260807` + `src/repro_backup_20260807/`. 로컬 ccrcc CSV 오류 정정(§51), SEAL baseline 비교(§52).
 
 **Confirmed baseline**: v30 = v24 residual+bottleneck bag projection + B1
 `bag_representation: poolz_l2` + B2 log-uniform cardinality `[1,1024]`. Musk zero-shot
