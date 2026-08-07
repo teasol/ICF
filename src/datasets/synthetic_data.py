@@ -63,6 +63,7 @@ class SyntheticManifoldGenerator:
         num_bags: int | tuple[int, int] = 50,
         num_cells: int | tuple[int, int] = 1000,
         num_cells_log_uniform: bool = False,
+        num_cells_log_uniform_power: float = 1.0,
         per_bag_cardinality: bool = False,
         latent_dim: int = 8,
         output_dim: int = 512,
@@ -119,6 +120,8 @@ class SyntheticManifoldGenerator:
                 "num_cells must be a positive integer or an ordered "
                 "[min_cells, max_cells] integer range."
             )
+        if not num_cells_log_uniform_power > 0.0:
+            raise ValueError("num_cells_log_uniform_power must be positive.")
         if latent_dim < 1 or output_dim < 1 or mlp_hidden_dim < 1:
             raise ValueError("All feature dimensions must be positive.")
         if mlp_num_layers < 1:
@@ -268,6 +271,7 @@ class SyntheticManifoldGenerator:
         self.num_bags = tuple(num_bags)
         self.num_cells = tuple(num_cells)
         self.num_cells_log_uniform = bool(num_cells_log_uniform)
+        self.num_cells_log_uniform_power = float(num_cells_log_uniform_power)
         self.per_bag_cardinality = bool(per_bag_cardinality)
         self.latent_dim = latent_dim
         self.output_dim = output_dim
@@ -763,12 +767,24 @@ class SyntheticManifoldGenerator:
         v30 B2 needs: real bags are heavy-tailed (Musk2 spans 1..1044 with a median
         of 12), so a plain uniform draw over [1, 1024] would put half its mass above
         512 and the model would still almost never meet a small bag.
+
+        ``num_cells_log_uniform_power`` (v35, docs §5) tilts that log-uniform draw
+        toward large bags via ``fraction = U ** (1 / power)`` while KEEPING the
+        small-bag mass that Musk needs -- power must not be used to replace the
+        lower bound. With ``[1, 32768]`` and ``power=1.5`` the closed form gives
+        ``P(n <= 34) = (ln 34 / ln 32768) ** 1.5 = 19.8%`` (Musk's weakest band is
+        still trained), ``P(n >= 8192) = 19.3%`` (real PathoBench slide sizes are
+        reached) and ``E[n] = 4487`` vs v34's 909, i.e. 4.94x the per-episode cell
+        budget -- so episode counts must be re-matched, not inherited (docs §42).
+        ``power=1.0`` reproduces the v34 draw exactly.
         """
         device = torch.device(device)
         low, high = self.num_cells
         if not self.num_cells_log_uniform or low == high:
             return self._sample_integer(self.num_cells, generator, device)
         fraction = torch.rand((), device=device, generator=generator)
+        if self.num_cells_log_uniform_power != 1.0:
+            fraction = fraction.pow(1.0 / self.num_cells_log_uniform_power)
         span = math.log(float(high)) - math.log(float(low))
         value = math.exp(math.log(float(low)) + float(fraction) * span)
         return int(min(high, max(low, round(value))))

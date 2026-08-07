@@ -1,20 +1,20 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-07` (**§58 v35 설계 확정: rare-instance branch 제거 + context/query 공통 chunk-as-pseudo-bag + context·query 대형화 — 제안서 문서화, 구현 전** + **§57 50-fold 재개 전 진단: 5-fold CV case leakage로 lscc_arid1a 0.908 부풀려짐 → 공식 50-fold 0.462가 정직한 값, 재개 안전** + **§56 config 리팩터링 + 공식 50-fold 6/17(배치 일시정지) + 폐기 분기 최신화(CCER·DR-CCER 제거, 검증 완료)** + **§55 리팩터링 1단계**)  
+**Last updated**: `2026-08-07` (**§59 v35 제안서 rev.2 전면 개정(§58 결정 3건 중 2건 폐기 권고 — anchor 오염·집계 수학 오류·Musk 소형 bag 파괴·구현 불가) + 정확 스트리밍 구현(peak VRAM 2.16× 절감, 수치 동일 검증) + VRAM 가드 버그 수정 + v35 학습 시작(2×B200, 진행 중) + ⚠️ 완료된 50-fold 9개 수치가 `5869535` 이후 stale** + §58 v35 설계(rev.1) + **§57 case leakage 진단** + §56 config 리팩터링)  
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **v34 확정 (§52·§53·§56)**: **v34-1536을 PathoBench 보고용 모델로 확정**(사용자 결정). 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv fold·코호트·라벨) 기준 **50-fold**(SEAL macro-AUC와 동일 구조) — **5/17 완료**(bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569, brca_TP53), **12개는 config 수정으로 재시작**(§56, 백그라운드). v30은 합성/Musk baseline 유지. 이전 5-fold와 수치 ±0.04 이내 동일(평가 견고성). config 시스템을 v34 base + group default 참조형으로 리팩터링(§56). 자세한 진행 §53·§56.
-* **v35 설계 (§58, 신규)**: PathoBench 보고 모델 v34-1536 재학습용 v35 설계 확정 — **코드 변경 없음, 구현 전**. 핵심: ① raw cell을 쓰는 유일한 branch `_rare_instance_logits` 제거(분류 헤드는 고정 token만 사용, query token 수는 구조적 제약이 아님), ② 모든 bag을 ≤2048 chunk로 분할 후 원본 bag 단위 token 집계(meta-classifier 1회, context·query 공통 경로), ③ context·query 모두 실제 slide 크기로 대형화(context `[1,30000]`, query `[3000,50000]`, log-power 1.5~2.0). 제안서: `history/architecture_v35_tokenonly_chunked_query_proposal.md`.
-* **다음 Action**: ① **v35 오픈 문제 확정 + 구현**(rare 제거 → chunk 공통 경로 → config, 2 GPU 0·1·100ep — §58), ② 공식 **50-fold 잔여 11개 재개**(§57 진단 완료, 재개 안전 — `nohup bash scripts/run_official50_batch.sh`) → **17개 전체 최종 표** + **SEAL 재비교**(단, §57: 5-fold 결과는 case leakage로 multi-slide task 부풀려짐 → 50-fold 수치로 갱신), ③ v30 vs v34 공정 비교용 **PCA-per-fold CV** (미지원), ④ **v34-512 학습** + 동일 평가, ⑤ Phase 0 결과 선택(사용자), ⑥ v30 medium 참조 재학습, ⑦ frozen-v30 multi-resolution probe(§39, 미검증).
+* **v35 (§58 rev.1 설계 → §59 rev.2 개정 + 학습 시작)**: rev.1의 3개 결정 중 **①rare 제거·③context/query 대형화 분리는 폐기 권고**(§59.1: anchor 오염, 집계 수학 오류, Musk 소형 bag 파괴 = 확정 목표 위반, query 위치를 dataset이 알 수 없어 구현 불가, 그리고 동기 자체에 직접 반증 — context 2k cap Δpooled **−0.0019**). ②chunk는 **근사 평균이 아닌 정확 충분통계 축약**으로 재설계. 구현·검증 완료분: **bag 단위 정확 스트리밍**(peak VRAM 40,990 → 18,930 MiB, AUROC 동일), `num_cells_log_uniform_power`, VRAM 가드 `episode_batch_size` 누락 버그 수정, **41 tests**. **학습 진행 중**: 데이터 단독 arm(`num_cells [1,32768]` power 1.5, rare branch 유지), `logs/20260807_203606/`, 2×B200 GPU 0·1, 51,200 episodes(v34와 에피소드 매칭).
+* **다음 Action**: ① **v35 학습 완주 → 공식 50-fold 평가**(단 §59.5: **v34도 현재 코드로 재실행**해야 공정 비교), ② **P0 게이트(무료, 학습 0)** — query 크기 스윕 + `rare_logits=0` ablation; 전자가 +0.005 미달이면 대형화 노선 폐기(rev.2 §4), ③ 공식 50-fold **잔여 8개**(스트리밍으로 workers 2 → 8+ 가능), ④ v30 vs v34 공정 비교용 **PCA-per-fold CV**(미지원), ⑤ **v34-512 학습**, ⑥ rev.2 §3의 **chunk 단위**(bag 내부) 스트리밍 — 현재는 bag 단위까지만, ⑦ rev.2 §8 zero-init chunk-attention(ABMIL 격차 대응).
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§58 (v35 설계 확정 — rare 제거 + chunk 공통 경로 + 대형화)**, **§57 (50-fold case leakage 진단)**, **§56 (config 리팩터링 + 공식 50-fold 재시작)**, **§53 (v34 최종 확정 + 공식 50-fold 평가)**, **§52 (v34 확정·50-fold 계획)**,
+**Read first if you are picking this up**: **§59 (v35 rev.2 개정 + 스트리밍 구현 + 학습 시작 + 50-fold stale 경고)**, **§58 (v35 rev.1 설계 — §59가 상당 부분 정정하므로 §59와 함께 읽을 것)**, **§57 (50-fold case leakage 진단)**, **§53 (v34 확정 + 공식 50-fold 표 — §59.5에 따라 재실행 필요)**,
 
-**열린 과제**: ① **공식 50-fold 12개 완료**(백그라운드, §56) → 최종 표+SEAL 재비교, ② v30 vs v34 CV 공정 비교(PCA-per-fold), ③ v34-512 학습, ④ v30 six-task 효과 분리, ⑤ B2b within-episode cardinality 효과 분리, ⑥ frozen-v30 multi-resolution headroom, ⑦ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
+**열린 과제**: ① **v35 학습 완주 + 평가**(§59.6-7), ② **P0 게이트**(query 크기 스윕 / rare ablation, 무료), ③ **§53 표 9개 재실행**(`5869535` 이후 stale, §59.5) + 공식 50-fold 잔여 8개 → 17개 최종 표 + SEAL 재비교, ④ v30 vs v34 CV 공정 비교(PCA-per-fold), ⑤ v34-512 학습, ⑥ **chunk 단위(bag 내부) 스트리밍** 미구현(rev.2 §3), ⑦ v30 six-task / B2b cardinality 효과 분리, ⑧ frozen-v30 multi-resolution headroom, ⑨ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
 
 **Branches**: `main` = v30 확정 baseline + 미채택 v31 CCER-v2 재현 코드. 참고용 branch/tag 구조는
 [`history/branch_structure.md`](history/branch_structure.md).
@@ -1824,78 +1824,11 @@ Patho-Bench 프로토콜**(공식 k=all.tsv fold · 공식 코호트 · 공식 �
 
 ---
 
-## 54. 2026-08-07 — 아카이빙 정리 (최신 버전만 유지) + v34 태그
+## 54-55. 2026-08-07 — 아카이빙 정리 + 리팩터링 1단계 (완료, 아카이브됨)
 
-**상태**: 사용자 요청으로 **최신 버전만 남기고 구버전 문서·config·스크립트를 아카이빙**했다.
-아카이빙은 삭제가 아닌 **이동(git mv)**이라 이력·참조 가능성은 보존된다. 50-fold 배치는 인터넷
-단절로 중단됐지만 **per-fold 체크포인트 덕분에 리쥼 가능**(진행 상태 §53 참고).
-
-### 1. 아카이빙 대상 → 이동
-
-| 위치 | 이동 대상 | 이동 경로 |
-|---|---|---|
-| docs/ | v33 proposal `architecture_v33_multiresolution_bag_proposal.md` (폐기) | `docs/history/` |
-| configs/ | 폐기 아키텍처 config (v22·v24·v26·v31·v32·v33 등 41개) | `configs/archive/{ver}/` |
-| scripts/ | 진단·프로브·스모크·구식 스크립트 (19개) | `scripts/archive/` (probes_smoke·diagnostics) |
-
-- docs 최상위는 **living 5개**(`agent_handoff.md`·`current_status.md`·`current_architecture.md`·
-  `current_experiments.md`·`README.md`)만 유지. 현행 proposal 없음(모두 history).
-- configs 최상위는 **v30·v34만** 유지 (10개). scripts 최상위는 **활성 12개** 유지
-  (train·test·evaluate·pathobench 계열 포함).
-- **tests**: 기본 discovery는 **활성 5파일 / 32 tests**만 실행 —
-  `test_core_contracts`(16, ragged 평가 경로 포함)·`test_slot_mla`(7, v34)·`test_vram_guard`(6,
-  안전장치)·`test_scheduler`(2)·`test_checkpoint_callback`(1). **v33 arm C 전용인
-  `test_b2b`(10)·`test_ragged_batching`(3)은 `tests/history/legacy_{b2b,ragged_batching}.py`로
-  이관** (활성 config에서 `per_bag_cardinality` 미사용, ragged 평가 경로는 core가 커버). 수집
-  검증: 활성 32 tests import·collect 정상, 레거시는 기본 discovery 제외. **전체 실행은 배치 완료
-  후 재검증 권장** (CPU 경쟁 방지).
-- 문서 내 이동 경로 참조(`scripts/archive/...` 등)는 sed로 일괄 갱신 완료.
-
-### 2. v34 git 태그
-
-- `v34` annotated 태그를 HEAD에 생성·원격 푸시 (기존 `v30`/`v25`/`v21`/`arch-v18` 관례와 동일).
-
-### 3. 안전성
-
-- 이동할 스크립트를 import하는 살아있는 테스트가 있는지 사전 확인: `diagnose_*`는
-  `tests/history/` 레거시만 참조 → 진단·프로브 일괄 이동. 실행 중 배치가 쓰는 스크립트
-  (`test_pathobench.py`·`run_official_folds_parallel.py`)는 **최상위 유지** — 배치 영향 없음.
-
-### 4. 열린 과제 (유지)
-
-- 50-fold 배치 리쥼 → 완료 후 §53 표 갱신.
-- configs/scripts 아카이브의 `base_config` 참조는 §26/§27 규칙대로 향후 로드 검증 권장.
-
----
-
-## 55. 2026-08-07 — 코드 리팩터링 1단계: 미사용 함수 제거
-
-**상태**: 전체 코드 리팩터링 시작. 첫 단계로 **미사용 함수 탐지·제거**를 AST 정적 분석으로
-수행했다.
-
-### 1. 미사용 함수 탐지 (AST 정적 분석)
-
-- src/ 전체(모듈 함수 24, 메서드 175)를 AST로 파싱해 Name/Attribute/Import 참조를 전수 집계.
-- 판정 기준: 모듈 함수는 **Name 참조 0건**, 메서드는 **attr·Name 참조 0건** (dunder·Lightning 훅 제외).
-- 결과: **모듈 함수 미사용 0개**, 메서드 미사용 2개. (`validation_step`/`test_step`/`predict_step`는
-  Lightning 훅이라 제외, `build_logger`/`build_callbacks`/`_collate_ragged_batch`는 사용 확인.)
-
-### 2. 제거 (참조 0 확정)
-
-- `SyntheticEpisode.flipped_y` (synthetic_data.py:52) — `1-self.y` property, 참조 0.
-- `SyntheticManifoldGenerator.sample_num_cells_per_bag` (synthetic_data.py:781) — B2b per-bag
-  셀 수 샘플링 헬퍼(B2b 폐기), 참조 0.
-- repo 전체(문서·config·notebook 포함) 검색으로 동적/문자열 참조 없음 확인 후 삭제.
-
-### 3. 검증
-
-- 기본 테스트 **32 tests / 149s 통과** (회귀 없음).
-
-### 4. 다음 (리팩터링 계속)
-
-- 폐기 아키텍처 분기(v22/v25/v31/v32/v33 등)의 **미사용 메서드/코드** 정리.
-- `baseline.py`(5.8k줄) 분리 검토, 컨벤션 정리.
-- 참고: **50-fold 배치는 5/17만 완료였고 아카이빙 회귀로 리쥼 실패** → §56에서 config 수정 후 **12개 재시작**(백그라운드 진행).
+두 절 모두 종료된 정리 작업이라 전문을 [`history/archive.md`](history/archive.md)로 이관했다.
+요약: §54 = 구버전 문서/config/스크립트 아카이빙 + v34 태그, §55 = AST 정적 분석으로 미사용
+함수 제거. 열린 과제 없음.
 
 ---
 
@@ -2074,3 +2007,103 @@ leakage가 없으면 ARID1A는 zero-shot in-context로 실질 랜덤 (공식 50-
 - ② 결정 1(rare 제거) 구현 + 32 tests 갱신.
 - ③ v35 재학습 config 작성(100ep, 2 GPU 0·1 DDP) + 학습.
 - ④ (병행 가능) 공식 50-fold 잔여 11개 재개 → 17개 최종 표 + SEAL 재비교.
+
+---
+
+## 59. 2026-08-07 — v35 제안서 비판적 재검토(rev.2) + 정확 스트리밍 구현 + v35 학습 시작
+
+**상태**: §58 v35 설계를 **코드 대조로 비판적 재검토**해 제안서를 **rev.2로 전면 개정**했고
+(결정 3건 중 2건 폐기 권고), 개정안의 1단계(정확 스트리밍 축약)와 5단계(데이터)를 구현·검증하고
+**2-GPU 학습을 시작했다**. 테스트 32 → **41개 통과**.
+
+### 1. §58 설계의 치명적 결함 (전부 코드로 확인)
+
+§58.1의 구조 분석(고정 token, raw cell 소비자는 `_rare_instance_logits`뿐)은 **정확**했다. 문제는
+거기서 도출한 결정들이다.
+
+| §58의 주장 | 코드 확인 결과 |
+|---|---|
+| §58.2-2 "`_context_anchors`는 chunk에 안전" | **반대.** `_population_candidates`(977)는 bag 크기와 무관하게 **bag당 정확히 32개**(`context_samples_per_bag`) 후보를 낸다. 50k bag을 25 chunk로 쪼개면 그 bag 후보가 **800개(25×)**가 되고, anchor는 이 풀 위의 k-means 유사 refinement(1106-1116)+argmax farthest-point(1128-1136)라 **대형 bag이 anchor를 지배**한다. anchor는 에피소드 전역 → 모든 bag의 모든 token이 바뀐다 |
+| §58.2-2 "`covariance_matrix`는 보정식으로 수학적으로 동일" | **구현 불가.** 보정식이 요구하는 chunk 평균 `μ_c`를 `_bag_view`가 `poolz_l2` 경로에서 **반환하지 않고 버린다**(826-830). representation dict에도 없다 |
+| §58.2-2 "count 가중 평균" 일반 | `global_summary`는 1차 모멘트가 **아니라** bag 평균에 대한 **표준편차**(`global_summary: centered_spread`, `_bag_view` 789 `sqrt(mean(cd²)+1e-6)`). `covariance_sketch`는 `correlation` 모드라 rsqrt 정규화가 들어가고, `slot_covariance`는 `diagonal.log()`, `slot_metadata`는 `log(proportion)` — **전부 비선형**이라 chunk 평균은 편향. `slot_metadata`는 §58 집계표에 아예 누락 |
+| §58.2-3 "query `[3000,50000]`" | **확정 목표 위반.** `sample_num_cells` docstring이 log-uniform 이유를 명시("Musk2 spans 1..1044 with a median of 12"). 하한 3000은 소형 bag 학습을 제거 → **Musk 0.95(2026-08-05 사용자 확정)** 와 충돌 |
+| §58.2-3 context/query 분리 | **폐기된 B2b 재도입.** bag별 다른 cell 수 = per-bag cardinality = v33 arm C, 이미 **회귀 0.0412로 폐기**(§4·§42, "B2b 데이터 자체가 회귀 원인") |
+| §58.3 "query 위치 정렬"은 검증 항목 | **설계 모순.** query 위치는 dataset이 정하지 않는다 — `_sample_training_queries`(`src/modules/model_interface.py` 440)가 **훈련 스텝에서 무작위**로 뽑고(535) 개수도 매번 다르며 클래스당 1개는 보호(541-556). dataset은 알 수 없다 → §58의 query≥context 비대칭 전체가 성립 불가 |
+| 동기: train/eval 크기 불일치 | **직접 반증.** 본 세션 실측(EGFR 공식 50-fold, 동일 ckpt): context 2,000 tile cap **pooled 0.7695** vs full **0.7714** → **Δ −0.0019**. token은 전부 표본통계(일치추정량)라 bag이 커지면 기대값이 아니라 **분산만** 준다 |
+| 방향성 | chunk token 평균 = region-level **mean pooling**. 우리 위치는 이미 MeanMIL 수준·ABMIL 미달(EGFR 0.771 vs 0.777/0.830, STK11 0.828 vs 0.873/0.908)인데, §58은 평균 쪽으로 가면서 **유일한 선택적 기제(rare branch)를 삭제**한다 |
+
+### 2. rev.2 재설계 (제안서 전면 개정)
+
+- **핵심 전환**: 완성 token을 평균하지 말고 **충분통계를 누적**한다. `assignment = softmax(·, dim=-1)`은
+  **slot 축** softmax라 cell별 독립(1753) → slot 통계는 순수 합. `_population_candidates`는 cell축
+  softmax 가중평균 → **online softmax로 정확** 축약. `topk`는 분산 top-k merge로 정확.
+  **⇒ 근사할 필요가 없다.** 그러면 ① v34 ckpt가 그대로 유효, ② **rare branch를 지울 이유가 없어짐**,
+  ③ 저장소 관행(MLA "byte-identical", §56 "forward 동치 diff 0")과 일치.
+- **P0 게이트 신설(무료, 학습 0)**: ⓐ query 크기 스윕(2k→full 이득 **+0.005 미만이면 대형화 프로그램 폐기**),
+  ⓑ `rare_logits=0` ablation으로 rare branch 기여도 측정 → 결정 1의 근거를 숫자로 종결.
+- 데이터는 **하한 1 유지** + `power` tilt로 대형 노출만 추가(§5).
+
+### 3. 구현 (전부 수치 중립 검증)
+
+| 변경 | 내용 |
+|---|---|
+| `_context_pool_stats`(713) | 전체 context cell `torch.cat` 제거 → **bag별 float64 2-pass 스트리밍**. 기존 cat은 full-tile 에피소드에서 ~12 GB |
+| `BaseModel.forward`(~4890) | `_bag_view`를 **query bag에만** 적용(기존: 전체 bag → 또 ~12 GB를 만들어 1장으로 인덱싱) |
+| aggregator `forward` | **2-pass bag 스트리밍**(`stream_eval_bags`, 기본 on, list/eval 경로 한정). pass 1 = bag별 후보 32개 → anchors, pass 2 = 토큰 루프에서 bag별 view 재계산. `BAGPFN_DISABLE_BAG_STREAMING=1`로 A/B |
+| `_select_anchors` 신설 | `_context_anchors`에서 anchor 선택부 분리 → 스트리밍이 **동일 후보 풀**을 넘겨 bit-identical |
+| `num_cells_log_uniform_power` | `sample_num_cells`에 `fraction = U**(1/power)` 추가. `power=1.0`은 v34 draw와 동일 |
+| **VRAM 가드 버그 수정** | `estimate_training_vram_bytes`가 **`episode_batch_size`를 무시**하고 있었다(4× batch가 공짜로 보임). batch 반영 + 배수를 실측 기반 재교정(21× → 7×; 실측 v34 6.0×·v35 6.5×) |
+| 신규 config | `configs/train_v35_phase0_largebag_1536.yaml` |
+| 신규 테스트 | `tests/test_stream_eval_bags.py`(7개) + vram 2개 → **41 tests, 48s** |
+
+### 4. 검증 (실측)
+
+- **스트리밍 == eager, 실데이터**: cptac_lscc/KEAP1 fold 1 (304 슬라이드, 전체 타일) AUROC **0.7804 동일**,
+  peak VRAM **40,990 → 18,930 MiB (2.16× 절감)**. workers>2가 OOM이던 원인이 이것(2×40 GB=80 GB, 4×40=164 GB).
+- **9개 representation key 전부** + 최종 logit이 `‖Δ‖∞ < 1e-4`, anchors는 **bit-identical**(테스트로 고정).
+- **worst-case 학습 smoke**: 100 bags × 32768 cells = 3.28M cells → peak **122.4 GiB (69%)**, 1.9 s/step.
+- 전체 config 81개(base_config 보유) 해석 성공.
+
+### 5. ⚠️ 중요: 완료된 공식 50-fold 9개 수치가 **stale**
+
+`5869535`(tanh margin) 이후 **1-query eval 결과가 바뀐다**(커밋 메시지대로 기존 margin_rms는 1-query에서
+tanh(±1) sign-only로 붕괴했음). bc_therapy/er_status fold 1-3:
+
+| | fold 1 | fold 2 | fold 3 |
+|---|---:|---:|---:|
+| 저장된 예측(§53 표의 근거) | 0.43913 | 0.78696 | 0.69130 |
+| 현재 코드 | 0.4348 | 0.7565 | 0.7217 |
+
+**내 변경이 원인이 아님을 확인**: HEAD(`0487b6d`, 내 변경 없음)를 별도 worktree에서 실행해 현재 코드와
+**완전히 동일**(0.4348/0.7565/0.7217)했다. 따라서 §58.4의 "bc_therapy 재실행 bit-identical(pooled 0.6721)"은
+**fix 적용 전 검증**이다. → **§53의 9개 task 표는 `5869535` 이후 코드로 재실행해야 한다** (|Δ| 최대 0.030).
+
+### 6. v35 학습 시작 (진행 중)
+
+- **단일 인자 arm**: 데이터만 변경, 아키텍처는 v34-1536 그대로(**rare branch 유지**, context/query 분리 없음,
+  cardinality는 에피소드 단위 1회 = B2b 아님).
+- 데이터: `num_cells [1, 32768]`, `num_cells_log_uniform_power 1.5`. 닫힌 형식: `P(n≤34)=19.8%`(Musk 밴드 보존),
+  `P(n≥8192)=19.3%`, median 700, **E[n]=4487 vs v34 909 = 4.94×**.
+- VRAM: peak는 **스텝당 총 cell 수**에 비례 → `episode_batch_size 1 × 100 bags × 32768 = 3.28M cells`로
+  v34(`4 × 100 × 8192`)와 **동일 envelope**. 실측 peak **119.95 GiB (62.6%)**.
+- 예산: **에피소드 매칭**(§42 교훈) — 1024 ep/epoch × 50 epoch = **51,200 episodes**, v34와 동일.
+- 실행: `logs/20260807_203606/v35_largebag.out`, ckpt `checkpoints/20260807_203606/v35_largebag/`,
+  PID 369656, 2×B200(GPU 0·1) DDP, 512 steps/epoch, **~92 s/epoch**(50 epoch 약 1.5시간).
+- **초기 val_ce 추이**: ep0 `0.4547` → ep1 `0.4289` → ep2 `0.4143` → **ep3 `0.4096`**.
+  **v34의 best(`0.4419` @ ep48)를 epoch 3에서 이미 하회**했다. 단 ⓐ val 분포도 같이 커졌으므로
+  (val_dataset_kwargs가 같은 generator 설정을 상속) **v34와 val_ce를 직접 비교하는 것은 부당**하고,
+  ⓑ 판정은 §59.7-1대로 **공식 50-fold AUROC**로 해야 한다. 유망한 초기 신호로만 기록한다.
+- **주의**: `episode_batch_size`가 4→1이라 DDP 2랭크로도 유효 batch가 2(v34는 4)다. 강제된 2차 변경이므로
+  결과 해석 시 명시할 것.
+
+### 7. 다음
+
+1. **v35 학습 완주** → 공식 50-fold 평가. 단 §5 때문에 **v34도 현재 코드로 재실행**해야 공정 비교가 된다.
+2. **P0 게이트 실행**(무료): ⓐ query 크기 스윕, ⓑ `rare_logits=0` ablation. rev.2 §4의 판정 기준대로,
+   ⓐ가 미달이면 대형화 노선 자체를 접는다.
+3. 공식 50-fold **잔여 8개**(KEAP1·KRAS·TP53·BAP1·PBRM1·VHL·SMAD4·ucla_lung) — 스트리밍 덕분에
+   workers를 2 → 8 이상으로 올릴 수 있다.
+4. rev.2 §3의 **chunk 단위**(bag 내부) 스트리밍은 미구현 — 현재는 **bag 단위**까지만. 단일 bag이
+   메모리를 넘길 때 필요하며 설계는 rev.2 §3.2-3.3에 확정되어 있다.
+5. rev.2 §8: chunk token 위 **zero-init residual attention**(region-level ABMIL 유사물)이 ABMIL 격차에
+   대한 올바른 베팅 — 단독 arm + 동일 게이트로만.

@@ -1,6 +1,14 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-07` — v34-1536 확정(PathoBench 보고용). 공식 50-fold **6/17 완료**(배치 일시정지됨 — 잔여 11개). **§57 진단**: 50-fold 재개 전 확인 결과 **계산은 정상**, 기존 5-fold CV는 **case leakage**(cv5 slide-level split, 108 case 중 82개가 fold 간 분산)로 lscc_arid1a 0.908이 부풀려짐 → 공식 50-fold **0.462가 정직한 값(실질 랜덤)**. 공식 50-fold는 case-disjoint라 **재개 안전**. config 시스템 v34 base + group default 참조형 + 재아카이빙(§56). **폐기 분기 최신화**: CCER(v31)·DR-CCER(v32) 제거(검증 완료, 32 tests 통과), 백업 태그 `repro-pre-deprecated-cleanup-20260807` + `src/repro_backup_20260807/`. 로컬 ccrcc CSV 오류 정정(§51), SEAL baseline 비교(§52).
+**Last updated**: `2026-08-07` — v34-1536 확정(PathoBench 보고용). 공식 50-fold **9/17 완료**(잔여 8개; 배치 스트림 2개가 원인 로그 없이 종료된 이력 있음 — §59.7).
+> [!WARNING]
+> **완료된 공식 50-fold 9개 수치는 `5869535`(tanh margin fix) 이후 stale하다** (§59.5). 같은 ckpt·같은 폴드로 bc_therapy/er_status fold 1-3이 `0.43913/0.78696/0.69130` → `0.4348/0.7565/0.7217`로 바뀐다. HEAD를 별도 worktree에서 돌려 **내 변경이 원인이 아님**을 확인했다. §53 표는 재실행 후 갱신할 것.
+>
+> **평가 경로 계약 (§59.3)**: aggregator의 ragged/eval 경로는 기본적으로 **bag 단위 정확 스트리밍**(`stream_eval_bags`, 기본 on)을 쓴다. `_bag_view`/`_covariance_sketch`를 나중에 계산하고 보관하지 않을 뿐이라 **수치가 동일**하며(9개 representation key `‖Δ‖∞<1e-4`, anchors bit-identical, 실데이터 AUROC 동일), peak VRAM은 **40,990 → 18,930 MiB**로 준다. A/B는 `BAGPFN_DISABLE_BAG_STREAMING=1`. 훈련(dense) 경로는 손대지 않았다.
+>
+> **VRAM 가드 계약 (§59.3)**: `estimate_training_vram_bytes`는 이제 **`episode_batch_size`를 반영**한다(이전엔 무시 → 4× batch가 공짜로 보였다). 배수는 실측 기반 재교정(21× → 7×; 실측 v34 6.0×·v35 6.5×). peak는 **스텝당 총 cell 수**(batch × bags × cells)에 비례한다는 것이 핵심 불변식이다.
+
+**§57 진단**: 50-fold 재개 전 확인 결과 **계산은 정상**, 기존 5-fold CV는 **case leakage**(cv5 slide-level split, 108 case 중 82개가 fold 간 분산)로 lscc_arid1a 0.908이 부풀려짐 → 공식 50-fold **0.462가 정직한 값(실질 랜덤)**. 공식 50-fold는 case-disjoint라 **재개 안전**. config 시스템 v34 base + group default 참조형 + 재아카이빙(§56). **폐기 분기 최신화**: CCER(v31)·DR-CCER(v32) 제거(검증 완료, 32 tests 통과), 백업 태그 `repro-pre-deprecated-cleanup-20260807` + `src/repro_backup_20260807/`. 로컬 ccrcc CSV 오류 정정(§51), SEAL baseline 비교(§52).
 
 **Confirmed baseline**: v30 = v24 residual+bottleneck bag projection + B1
 `bag_representation: poolz_l2` + B2 log-uniform cardinality `[1,1024]`. Musk zero-shot
@@ -41,6 +49,23 @@ checkpoint·32 tests) 완료. v30은 합성/Musk baseline
 프로토콜(지도 vs zero-shot in-context)·코호트(ccrcc 218 vs 245) 차이 명시. 상세
 §52·§53·§56.
 
+**Active — v35 데이터 단독 arm (2026-08-07, §59)**: v35 제안서는 **rev.2로 개정**됐다
+([`history/architecture_v35_tokenonly_chunked_query_proposal.md`](history/architecture_v35_tokenonly_chunked_query_proposal.md)).
+rev.1의 결정 3건 중 **①rare branch 제거와 ③context/query 분리 대형화는 폐기 권고**다: anchor 후보가
+bag당 32개 고정이라 chunk 분할 시 대형 bag이 anchor를 지배하고(§59.1), 집계표의 `global_summary`는
+1차 모멘트가 아니라 표준편차이며 `covariance_matrix` 보정식은 `_bag_view`가 버리는 chunk 평균을
+요구하고, `query_num_cells [3000,50000]`은 Musk 소형 bag 학습을 없애 **확정 목표(Musk 0.95)와 충돌**하며,
+query 위치는 `_sample_training_queries`가 훈련 스텝에서 뽑으므로 dataset이 알 수 없다. 동기 자체도
+반증됐다 — context 2,000 tile cap의 pooled AUROC 차이는 **−0.0019**뿐이다. ②chunk는 **근사 평균이
+아닌 정확 충분통계 축약**으로 재설계했고(`assignment`가 slot축 softmax라 cell별 독립 → slot 통계는
+순수 합, 후보는 online softmax, tail/rare는 분산 top-k merge로 전부 정확), 이 경우 **rare branch를
+지울 이유가 없다**. 구현된 것은 **bag 단위** 스트리밍까지이며 **chunk 단위(bag 내부)는 미구현**이다.
+학습 arm은 **데이터만 바꾼 단독 arm**: `num_cells [1,32768]` + `num_cells_log_uniform_power 1.5`
+(`P(n≤34)=19.8%`로 Musk 밴드 보존, `E[n]=4487` = v34의 4.94×), `episode_batch_size 1`로
+v34와 **동일 cell envelope**(3.28M cells/step), 51,200 episodes로 **에피소드 매칭**.
+`logs/20260807_203606/`, 2×B200(GPU 0·1). **P0 게이트(무료)** 미실행: query 크기 스윕이 +0.005
+미달이면 대형화 노선을 접는다(rev.2 §4).
+
 **Rejected candidate — architecture v31 CCER-v2**: projection 전 aligned slot-center로
 support class prototype을 만들고, 기존 rare branch와 독립인 support/query encoder에서
 class-centered cell evidence를 계산한다. `Top-1`, `Top-4`, `mean` route는 총 `0.30`의
@@ -76,7 +101,7 @@ six-task + B2)와 arm C(v30 + legacy + B2b) 데이터 컨트롤을 먼저 구현
 `n_b ~ LogUniform[1,1024]`을 추첨해 ragged list-of-bags를 반환하는 새 데이터 경로다
 (collator/training_step ragged 분기, `episode_batch_size=1` 필요). config:
 `configs/train_v33_phase0_armB.yaml`·`armC.yaml`. 신규 테스트 `tests/test_b2b.py` 10개 포함
-기본 suite는 compact화 후 **19 tests / 약 143초**다. 학습: arm B는
+기본 suite는 현재 **41 tests / 약 48초**다 (§59 기준). 학습: arm B는
 `logs/20260805_220642/`에서 BF16으로 기존 checkpoint를 복원해 계속 진행한다. 최초 arm C
 `logs/20260805_214751/`는 batch 1에서 4096 updates/epoch가 되어 중단했다. 해결 run은
 `logs/20260805_220843/`: train episode를 512/epoch로 줄여 arm B와 동일한
@@ -168,7 +193,7 @@ multi-resolution combiner의 paired AUROC `+0.01` headroom 확인 후에만 구�
      ```bash
      timeout 300s /home/aibio_3/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
      ```
-   - 기본 스위트는 현재 **19 tests, 약 143초**다. 폐기 architecture/연구 진단 175개는
+   - 기본 스위트는 현재 **41 tests, 약 48초**다 (§59: streaming 7개 + vram 2개 추가). 폐기 architecture/연구 진단 175개는
      `tests/history/legacy_*.py`로 이관되어 기본 discovery에서 실행되지 않는다. archive suite는
      수정 대상이 해당 보존 경로일 때만 개별 실행한다.
 
@@ -231,9 +256,10 @@ scripts/launch_interactive_training.sh \
 
 1. **`configs/` 최상위 루트 유지 조건**:
    - 현재 활성 파이프라인에서 직접 사용하는 entry point config만 `configs/` 최상위에 유지합니다.
-   - 현재 `configs/` 최상위 유지 대상: **v34 전용 — `train_v34_phase0_largectx_1536.yaml`
+   - 현재 `configs/` 최상위 유지 대상: **v34 — `train_v34_phase0_largectx_1536.yaml`
      (PathoBench 보고용, 자체 포함형)**, `train_v34_phase0_largectx_512.yaml` (arm D),
-     `test_v34_phase0_largectx_1536_ici.yaml` (평가). **v34 config는 `base_config` 없이 전체
+     `test_v34_phase0_largectx_1536_ici.yaml` (평가), **v35 —
+     `train_v35_phase0_largebag_1536.yaml`** (§59 데이터 단독 arm, group default 참조형). **v34 config는 `base_config` 없이 전체
      base 체인(v30→v24→v22→v18_v19)과 named group을 인라인한 자체 포함형**이라 아카이브와
      무관하게 단독 실행됩니다 (2026-08-07 §56).
    - v30/v24/v22/eval_v30 체인은 `configs/archive/v30/`·`archive/v24/`·`archive/v22/`로 이관

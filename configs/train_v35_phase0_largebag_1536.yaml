@@ -1,0 +1,73 @@
+# v35 Phase 0 — large-bag cardinality arm (docs/history/architecture_v35_*.md §5).
+#
+# SINGLE-FACTOR arm: only the synthetic cell-count distribution changes. The
+# architecture is v34-1536 untouched -- the rare-evidence branch is KEPT (rev.2
+# §2.10/§4.2: it is the only selective mechanism in the model, and its
+# contribution has not been measured yet), no context/query size split (rev.2
+# §2.6: not implementable, `_sample_training_queries` picks the query bags at
+# train time), and cardinality stays one draw per EPISODE (rev.2 §2.5: per-bag
+# cardinality is v33 arm C / B2b, already rejected at -0.0412 AUROC).
+#
+# Data change (rev.2 §5):
+#   num_cells [1, 8192] -> [1, 32768] with num_cells_log_uniform_power 1.5.
+#   The lower bound stays 1 on purpose. A floor would delete the small-bag
+#   regime that Musk needs (Musk2 median 12; "Musk 0.95" is a standing user
+#   decision), which is why rev.1's `query_num_cells [3000, 50000]` was dropped.
+#   Closed form for [1, 32768] at power 1.5:
+#     P(n <= 34)   = (ln 34 / ln 32768) ** 1.5 = 19.8%   (Musk band retained)
+#     P(n >= 8192) = 1 - (ln 8192 / ln 32768) ** 1.5 = 19.3%  (real slide sizes)
+#     median 700,  E[n] = 4487  vs v34's 909  ->  4.94x cells per episode
+#   Pinned by tests/test_stream_eval_bags.py::TestLogUniformPower.
+#
+# VRAM: peak scales with TOTAL cells per optimizer batch = episode_batch_size x
+# num_bags x num_cells. v34-1536's validated worst case was 4 x 100 x 8192 =
+# 3.28M cells (~112 GiB, ~62% of a B200). This arm keeps that envelope exactly
+# by trading batch for cells: 1 x 100 x 32768 = 3.28M cells. Hence
+# episode_batch_size 1 (not 4) -- a deliberate, forced deviation. Two DDP ranks
+# restore an effective batch of 2 episodes/step (v34 had 4); documented rather
+# than hidden because it is a second changed factor at the optimizer level.
+#
+# Episode budget (rev.2 §5, docs §42-43 arm C lesson): comparisons must be
+# episode-MATCHED, so this keeps v34's 1024 episodes/epoch x 50 epochs =
+# 51,200 episodes. At 4.94x cells/episode the wall-clock is ~5x v34's; that
+# cost is accepted rather than paid for by silently shortening training.
+#
+# Launch (2 GPUs, per agent_handoff §5):
+#   CUDA_DEVICES=0,1 NPROC_PER_NODE=2 \
+#   TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun \
+#   NETRC=/NHNHOME/BASE/kimds/.netrc \
+#   scripts/launch_interactive_training.sh v35_largebag \
+#     configs/train_v35_phase0_largebag_1536.yaml
+
+seed: 42
+ckpt_path:
+
+data: default
+data_overrides:
+  episode_batch_size: 1
+  dataset_kwargs:
+    num_cells: [1, 32768]
+    num_cells_log_uniform_power: 1.5
+
+model: default
+
+optimizer: default
+scheduler: default
+
+trainer: default
+trainer_overrides:
+  devices: 2
+  strategy: ddp_find_unused_parameters_false
+  max_epochs: 50
+
+logger: default
+logger_overrides:
+  experiment_name: v35_phase0_largebag_1536
+
+callbacks: default
+
+model_kwargs:
+  training_targets_per_episode: [5, 12]
+  ranking_loss_weight: 0.10
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0

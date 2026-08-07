@@ -1855,3 +1855,82 @@ v24 표현으로는 원리적으로 학습 불가**입니다.
 3. B3(2차 통계 shrinkage) / B4(생성기 any-positive)는 그 다음.
 
 ---
+
+---
+
+# (archived 2026-08-07 from current_status.md §59) 완료된 정리 작업
+
+## 54. 2026-08-07 — 아카이빙 정리 (최신 버전만 유지) + v34 태그
+
+**상태**: 사용자 요청으로 **최신 버전만 남기고 구버전 문서·config·스크립트를 아카이빙**했다.
+아카이빙은 삭제가 아닌 **이동(git mv)**이라 이력·참조 가능성은 보존된다. 50-fold 배치는 인터넷
+단절로 중단됐지만 **per-fold 체크포인트 덕분에 리쥼 가능**(진행 상태 §53 참고).
+
+### 1. 아카이빙 대상 → 이동
+
+| 위치 | 이동 대상 | 이동 경로 |
+|---|---|---|
+| docs/ | v33 proposal `architecture_v33_multiresolution_bag_proposal.md` (폐기) | `docs/history/` |
+| configs/ | 폐기 아키텍처 config (v22·v24·v26·v31·v32·v33 등 41개) | `configs/archive/{ver}/` |
+| scripts/ | 진단·프로브·스모크·구식 스크립트 (19개) | `scripts/archive/` (probes_smoke·diagnostics) |
+
+- docs 최상위는 **living 5개**(`agent_handoff.md`·`current_status.md`·`current_architecture.md`·
+  `current_experiments.md`·`README.md`)만 유지. 현행 proposal 없음(모두 history).
+- configs 최상위는 **v30·v34만** 유지 (10개). scripts 최상위는 **활성 12개** 유지
+  (train·test·evaluate·pathobench 계열 포함).
+- **tests**: 기본 discovery는 **활성 5파일 / 32 tests**만 실행 —
+  `test_core_contracts`(16, ragged 평가 경로 포함)·`test_slot_mla`(7, v34)·`test_vram_guard`(6,
+  안전장치)·`test_scheduler`(2)·`test_checkpoint_callback`(1). **v33 arm C 전용인
+  `test_b2b`(10)·`test_ragged_batching`(3)은 `tests/history/legacy_{b2b,ragged_batching}.py`로
+  이관** (활성 config에서 `per_bag_cardinality` 미사용, ragged 평가 경로는 core가 커버). 수집
+  검증: 활성 32 tests import·collect 정상, 레거시는 기본 discovery 제외. **전체 실행은 배치 완료
+  후 재검증 권장** (CPU 경쟁 방지).
+- 문서 내 이동 경로 참조(`scripts/archive/...` 등)는 sed로 일괄 갱신 완료.
+
+### 2. v34 git 태그
+
+- `v34` annotated 태그를 HEAD에 생성·원격 푸시 (기존 `v30`/`v25`/`v21`/`arch-v18` 관례와 동일).
+
+### 3. 안전성
+
+- 이동할 스크립트를 import하는 살아있는 테스트가 있는지 사전 확인: `diagnose_*`는
+  `tests/history/` 레거시만 참조 → 진단·프로브 일괄 이동. 실행 중 배치가 쓰는 스크립트
+  (`test_pathobench.py`·`run_official_folds_parallel.py`)는 **최상위 유지** — 배치 영향 없음.
+
+### 4. 열린 과제 (유지)
+
+- 50-fold 배치 리쥼 → 완료 후 §53 표 갱신.
+- configs/scripts 아카이브의 `base_config` 참조는 §26/§27 규칙대로 향후 로드 검증 권장.
+
+---
+
+## 55. 2026-08-07 — 코드 리팩터링 1단계: 미사용 함수 제거
+
+**상태**: 전체 코드 리팩터링 시작. 첫 단계로 **미사용 함수 탐지·제거**를 AST 정적 분석으로
+수행했다.
+
+### 1. 미사용 함수 탐지 (AST 정적 분석)
+
+- src/ 전체(모듈 함수 24, 메서드 175)를 AST로 파싱해 Name/Attribute/Import 참조를 전수 집계.
+- 판정 기준: 모듈 함수는 **Name 참조 0건**, 메서드는 **attr·Name 참조 0건** (dunder·Lightning 훅 제외).
+- 결과: **모듈 함수 미사용 0개**, 메서드 미사용 2개. (`validation_step`/`test_step`/`predict_step`는
+  Lightning 훅이라 제외, `build_logger`/`build_callbacks`/`_collate_ragged_batch`는 사용 확인.)
+
+### 2. 제거 (참조 0 확정)
+
+- `SyntheticEpisode.flipped_y` (synthetic_data.py:52) — `1-self.y` property, 참조 0.
+- `SyntheticManifoldGenerator.sample_num_cells_per_bag` (synthetic_data.py:781) — B2b per-bag
+  셀 수 샘플링 헬퍼(B2b 폐기), 참조 0.
+- repo 전체(문서·config·notebook 포함) 검색으로 동적/문자열 참조 없음 확인 후 삭제.
+
+### 3. 검증
+
+- 기본 테스트 **32 tests / 149s 통과** (회귀 없음).
+
+### 4. 다음 (리팩터링 계속)
+
+- 폐기 아키텍처 분기(v22/v25/v31/v32/v33 등)의 **미사용 메서드/코드** 정리.
+- `baseline.py`(5.8k줄) 분리 검토, 컨벤션 정리.
+- 참고: **50-fold 배치는 5/17만 완료였고 아카이빙 회귀로 리쥼 실패** → §56에서 config 수정 후 **12개 재시작**(백그라운드 진행).
+
+---

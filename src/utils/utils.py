@@ -201,28 +201,45 @@ def estimate_training_vram_bytes(
     max_cells_per_bag: int,
     input_dim: int,
     param_count: int,
+    episode_batch_size: int = 1,
     activation_layers: int = 6,
-    backward_factor: float = 3.0,
+    backward_factor: float = 1.0,
     context_overhead_bytes: int = 1 << 30,
 ) -> int:
     """Conservative worst-case resident bytes for a single training step.
 
-    Covers, for the biggest possible episode:
+    Covers, for the biggest possible optimizer step:
       * bf16 weights + two fp32 Adam moments + fp32 gradients;
-      * the B2b dense-generation buffer at ``num_bags_max x max_cells``;
+      * the dense episode buffer at
+        ``episode_batch_size x num_bags_max x max_cells``;
       * the per-cell activation chain (input tensor plus ``activation_layers``
         layer tensors) scaled by a backward-retention factor;
       * a fixed CUDA/context overhead.
 
-    This deliberately over-estimates the true footprint -- the set encoder
-    runs over ~100 bag tokens, not over cells -- so it is a *safety* bound:
-    passing it means the real working set is comfortably smaller.
+    ``episode_batch_size`` matters because peak memory scales with the TOTAL
+    cells in a step, not per episode: v34-1536 (batch 4 x 100 bags x 8192
+    cells) and v35 (batch 1 x 100 x 32768) both reach 3.28M cells and both peak
+    around 112-122 GiB. Omitting it made the bound blind to the batch dimension
+    entirely, so a 4x batch increase looked free.
+
+    The multiplier is calibrated against measured peaks rather than guessed:
+    ``(1 + activation_layers) * backward_factor = 7`` per input-tensor byte,
+    versus measured 6.0x for v34-1536 (112 GiB peak / 18.8 GiB of cells) and
+    6.5x for v35 (122.4 GiB, `torch.cuda.max_memory_allocated` after
+    forward+backward+step at exactly 100 x 32768). That leaves ~1.25x headroom
+    and still blocks genuinely oversized configs (batch 4 x 32768 cells would
+    estimate ~600 GiB). The previous default of ``backward_factor=3.0`` implied
+    21x, which over-estimated by ~3.4x and -- combined with the missing batch
+    term -- happened to roughly cancel out for v34 while rejecting v35.
     """
     weights_bytes = param_count * 2
     adam_bytes = param_count * 8
     gradient_bytes = param_count * 4
-    dense_buffer_bytes = num_bags_max * max_cells_per_bag * input_dim * 4
-    worst_cells = num_bags_max * max_cells_per_bag
+    batch = max(1, int(episode_batch_size))
+    dense_buffer_bytes = (
+        batch * num_bags_max * max_cells_per_bag * input_dim * 4
+    )
+    worst_cells = batch * num_bags_max * max_cells_per_bag
     activation_bytes = (
         worst_cells
         * input_dim
@@ -271,12 +288,16 @@ def validate_vram_budget(
     )
     input_dim = int(config.get("model", {}).get("input_dim", 512))
     param_count = sum(parameter.numel() for parameter in model.parameters())
+    episode_batch_size = int(
+        config.get("data", {}).get("episode_batch_size", 1) or 1
+    )
 
     estimate = estimate_training_vram_bytes(
         num_bags_max=num_bags_max,
         max_cells_per_bag=num_cells_max,
         input_dim=input_dim,
         param_count=param_count,
+        episode_batch_size=episode_batch_size,
     )
     fraction = estimate / total
 

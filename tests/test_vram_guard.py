@@ -51,6 +51,55 @@ class EstimateTrainingVramBytesTest(unittest.TestCase):
         self.assertGreater(more_bags, base)
         self.assertGreater(more_cells, base)
 
+    def test_scales_with_episode_batch_size(self):
+        """Peak memory tracks TOTAL cells per step, so batch must count.
+
+        v34-1536 (batch 4 x 100 bags x 8192 cells) and v35 (batch 1 x 100 x
+        32768) reach the same 3.28M cells and the same measured peak band; a
+        bound that ignored batch would call a 4x batch increase free.
+        """
+        single = estimate_training_vram_bytes(
+            num_bags_max=100,
+            max_cells_per_bag=8192,
+            input_dim=1536,
+            param_count=ARM_C_PARAM_COUNT,
+            episode_batch_size=1,
+        )
+        quadruple = estimate_training_vram_bytes(
+            num_bags_max=100,
+            max_cells_per_bag=8192,
+            input_dim=1536,
+            param_count=ARM_C_PARAM_COUNT,
+            episode_batch_size=4,
+        )
+        self.assertGreater(quadruple, single)
+        # Equal total cells (batch x bags x cells) must give equal estimates.
+        traded = estimate_training_vram_bytes(
+            num_bags_max=100,
+            max_cells_per_bag=32768,
+            input_dim=1536,
+            param_count=ARM_C_PARAM_COUNT,
+            episode_batch_size=1,
+        )
+        self.assertEqual(quadruple, traded)
+
+    def test_multiplier_stays_above_measured_peaks(self):
+        """The bound must exceed the two peaks measured on a B200.
+
+        v34-1536: 112 GB at 3.28M cells x 1536-d. v35: 122.4 GB
+        (`max_memory_allocated` after forward+backward+step, 100 x 32768).
+        """
+        estimate = estimate_training_vram_bytes(
+            num_bags_max=100,
+            max_cells_per_bag=32768,
+            input_dim=1536,
+            param_count=41_670_000,
+            episode_batch_size=1,
+        )
+        self.assertGreater(estimate, 122.4e9)
+        # ...but must not be so loose that it stops rejecting oversized configs.
+        self.assertLess(estimate, 0.9 * 192e9)
+
     def test_arm_c_worst_case_fits_a6000_with_large_margin(self):
         estimate = estimate_training_vram_bytes(
             num_bags_max=ARM_C_NUM_BAGS_MAX,

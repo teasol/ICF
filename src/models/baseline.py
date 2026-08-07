@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 import math
+import os
 
 import torch
 from torch import nn
@@ -497,6 +498,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         slot_latent_dim: int | None = None,
         slot_query_latent_dim: int | None = None,
         slot_affinity_dim: int | None = None,
+        stream_eval_bags: bool = True,
     ) -> None:
 
         # Deliberately initialize nn.Module directly: anchor construction is
@@ -648,6 +650,16 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         self.covariance_sketch_dim = int(covariance_sketch_dim)
         self.covariance_mode = str(covariance_mode)
         self.covariance_shrinkage = float(covariance_shrinkage)
+        # Eval-only bag-at-a-time streaming (docs v35 §3.3). Numerically exact --
+        # the same `_bag_view`/`_covariance_sketch` on the same inputs, only
+        # computed later and not retained -- so it is safe on by default. Set
+        # False (or export BAGPFN_DISABLE_BAG_STREAMING=1, which is how the
+        # equality claim is A/B'd against a real checkpoint) to force the eager
+        # path.
+        self.stream_eval_bags = (
+            bool(stream_eval_bags)
+            and os.environ.get("BAGPFN_DISABLE_BAG_STREAMING") != "1"
+        )
         self.slot_covariance_descriptor = "correlation"
         self.emit_covariance_matrix = False
         self.include_cls_token = bool(include_cls_token)
@@ -721,20 +733,37 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         `_normalize_covariance_relation`.
         """
         selected = [
-            bag.reshape(-1, bag.shape[-1]).float()
+            bag.reshape(-1, bag.shape[-1])
             for bag, keep in zip(bags, context_mask.flatten().tolist())
             if keep
         ]
         if not selected:
             raise ValueError("context_mask must identify at least one context bag.")
-        pool = torch.cat(selected, dim=0)
-        mean = pool.mean(dim=0)
-        # unbiased=False so this matches `_context_pool_stats_batched` exactly.
-        # With Bessel's correction the training (batched) and evaluation (list)
-        # paths would disagree by a factor sqrt(cells/(cells-1)), i.e. a silent
-        # ~0.25% scale mismatch between train and real-data inference.
-        std = pool.std(dim=0, unbiased=False).clamp_min(1e-6)
-        return mean, std
+        # Streaming (bag-by-bag, float64) accumulation. The old `torch.cat` of
+        # every context cell materialized a [total_cells, dim] copy -- ~12 GB for
+        # a full-tile PathoBench episode (270 slides x ~7.5k tiles x 1536) -- and
+        # was a main driver of the eval OOM (docs v35 §3). Two passes (mean, then
+        # centered variance) keep this numerically equal to
+        # `_context_pool_stats_batched`, which also centers before squaring.
+        # unbiased=False (divide by cells, no Bessel correction) so the training
+        # (batched) and evaluation (list) paths agree; with the correction they
+        # would differ by sqrt(cells/(cells-1)), a silent ~0.25% scale mismatch.
+        dim = selected[0].shape[-1]
+        device = selected[0].device
+        total = 0
+        sum_x = torch.zeros(dim, dtype=torch.float64, device=device)
+        for flat in selected:
+            sum_x += flat.sum(dim=0, dtype=torch.float64)
+            total += flat.shape[0]
+        mean64 = sum_x / total
+        mean32 = mean64.float()
+        sum_sq = torch.zeros(dim, dtype=torch.float64, device=device)
+        for flat in selected:
+            sum_sq += (
+                (flat.float() - mean32).square().sum(dim=0, dtype=torch.float64)
+            )
+        std = (sum_sq / total).clamp_min(0.0).sqrt().float().clamp_min(1e-6)
+        return mean32, std
 
     @staticmethod
     def _context_pool_stats_batched(
@@ -1077,6 +1106,17 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 ],
                 dim=0,
             )
+        return self._select_anchors(candidates)
+
+    def _select_anchors(self, candidates: torch.Tensor) -> torch.Tensor:
+        """Pick population anchors from an already-built candidate pool.
+
+        Split out of `_context_anchors` so the streaming path (docs v35 §3.3)
+        can build the per-bag candidates one bag at a time and still land on
+        BIT-IDENTICAL anchors: `_population_candidates` returns exactly
+        `context_samples_per_bag` candidates per bag regardless of the bag's
+        cell count, so the pool this sees is the same tensor either way.
+        """
         if candidates.shape[0] < self.num_slots:
             raise ValueError(
                 "Context does not contain enough cells for population slots."
@@ -1643,12 +1683,52 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             pool_mean, pool_std = self._context_pool_stats(raw_bags, context_mask)
         else:
             pool_mean = pool_std = None
-        prepared = [self._bag_view(bag, pool_mean, pool_std) for bag in raw_bags]
-        bags = [item[0] for item in prepared]
-        global_summaries = [item[1] for item in prepared]
-        centered_deltas = [item[2] for item in prepared]
-        covariance_sketches = [self._covariance_sketch(delta) for delta in centered_deltas]
-        anchors = self._context_anchors(bags, context_mask)
+        # Streaming (docs v35 §3.3): hold ONE bag's view at a time instead of
+        # every bag's. The eager `prepared` list below keeps the standardized
+        # view AND the centered delta for all bags alive simultaneously -- for a
+        # full-tile PathoBench episode (270 slides x ~7.5k tiles x 1536) that is
+        # ~25 GB and is what capped eval at 2 workers/GPU.
+        #
+        # Pass 1 builds only the per-bag soft candidates (32 per bag, regardless
+        # of bag size) so `_select_anchors` receives the identical pool; pass 2
+        # recomputes one bag's view inside the token loop. This is EXACT -- the
+        # same `_bag_view` on the same inputs -- at the cost of one extra
+        # `_bag_view` per context bag.
+        #
+        # Kept eager for: the dense/tensor path (needs stacked tensors for
+        # `_forward_dense`), `ccts_lambdas` (its scores span all bags), and
+        # training (which uses the batched `_population_candidates_batched`
+        # anchor path and equal-shape episodes where the copies are bounded).
+        stream_bags = (
+            self.stream_eval_bags
+            and not isinstance(instances, torch.Tensor)
+            and not self.ccts_lambdas
+            and not self.training
+        )
+        if stream_bags:
+            anchors = self._select_anchors(
+                torch.cat(
+                    [
+                        self._population_candidates(
+                            self._bag_view(raw_bags[index], pool_mean, pool_std)[0]
+                        )
+                        for index in range(len(raw_bags))
+                        if bool(context_mask[index])
+                    ],
+                    dim=0,
+                )
+            )
+            prepared = bags = centered_deltas = None
+            global_summaries = covariance_sketches = None
+        else:
+            prepared = [self._bag_view(bag, pool_mean, pool_std) for bag in raw_bags]
+            bags = [item[0] for item in prepared]
+            global_summaries = [item[1] for item in prepared]
+            centered_deltas = [item[2] for item in prepared]
+            covariance_sketches = [
+                self._covariance_sketch(delta) for delta in centered_deltas
+            ]
+            anchors = self._context_anchors(bags, context_mask)
         if self.raw_stat_tokens:
             if isinstance(instances, torch.Tensor):
                 # Dense path: all bags share one shape, stack is safe.
@@ -1681,7 +1761,9 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
                 return representation, auxiliary
             return result
 
-        ccts_per_bag_tokens: list[list[torch.Tensor]] = [[] for _ in range(len(bags))]
+        ccts_per_bag_tokens: list[list[torch.Tensor]] = [
+            [] for _ in range(len(raw_bags))
+        ]
         if self.ccts_lambdas:
             all_raw_scores: list[torch.Tensor] = []
             all_encoded_list: list[torch.Tensor] = []
@@ -1742,7 +1824,29 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         slot_means: list[torch.Tensor] = []
         selected_counts: list[list[int]] = []
         cls_tokens: list[torch.Tensor] = []
-        for b_idx, (bag, centered_delta) in enumerate(zip(bags, centered_deltas)):
+        covariance_matrices: list[torch.Tensor] = []
+        centered_delta_means: list[torch.Tensor] = []
+        if stream_bags:
+            # Pass 2: these are filled per bag below instead of up front.
+            global_summaries = []
+            covariance_sketches = []
+        for b_idx in range(len(raw_bags)):
+            if stream_bags:
+                bag, bag_summary, centered_delta = self._bag_view(
+                    raw_bags[b_idx], pool_mean, pool_std
+                )
+                global_summaries.append(bag_summary)
+                covariance_sketches.append(self._covariance_sketch(centered_delta))
+            else:
+                bag = bags[b_idx]
+                centered_delta = centered_deltas[b_idx]
+            covariance_matrices.append(
+                self._projected_covariance_matrix(centered_delta)
+                if self.emit_covariance_matrix
+                else centered_delta.new_zeros((1, 1))
+            )
+            if return_auxiliary:
+                centered_delta_means.append(centered_delta.float().mean(dim=0))
             cls_tokens.append(
                 self.cls_token_pooling(bag.unsqueeze(0)).squeeze(0)
                 if self.include_cls_token
@@ -1897,21 +2001,16 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             "slot_covariance_reliability": torch.stack(
                 slot_covariance_reliabilities
             ),
-            "covariance_matrix": (
-                torch.stack([
-                    self._projected_covariance_matrix(delta)
-                    for delta in centered_deltas
-                ])
-                if self.emit_covariance_matrix
-                else centered_deltas[0].new_zeros((len(centered_deltas), 1, 1))
-            ),
+            # Accumulated inside the token loop so the streaming path never holds
+            # every bag's centered delta at once (docs v35 §3.3).
+            "covariance_matrix": torch.stack(covariance_matrices),
             "cls_token": torch.stack(cls_tokens),
         }
         if self.raw_stat_tokens:
             for stat_name in self.raw_stat_tokens:
                 representation[f"stat_{stat_name}"] = raw_stats[
                     f"stat_{stat_name}"
-                ].to(centered_deltas[0].dtype)
+                ].to(covariance_matrices[0].dtype)
         if not return_auxiliary:
             return representation
         return representation, {
@@ -1923,13 +2022,14 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             "population_dispersions": torch.stack(dispersions),
             "population_slot_means": torch.stack(slot_means),
             "instance_counts": torch.tensor(
-                [len(bag) for bag in bags], device=anchors.device
+                [len(bag) for bag in raw_bags], device=anchors.device
             ),
             "tail_counts": torch.tensor(selected_counts, device=anchors.device),
             "slot_residual_scale": torch.sigmoid(self.slot_residual_logit),
-            "centered_delta_mean": torch.stack(
-                [delta.float().mean(dim=0) for delta in centered_deltas]
-            ),
+            # Accumulated in the token loop (docs v35 §3.3) so the streaming path
+            # does not have to keep every bag's centered delta alive for this
+            # diagnostic-only tensor.
+            "centered_delta_mean": torch.stack(centered_delta_means),
             "global_summary": torch.stack(global_summaries),
         }
 
@@ -4808,12 +4908,16 @@ class BaseModel(nn.Module):
             )
         else:
             pool_mean = pool_std = None
-        classification_bags = [
-            self.aggregator._bag_view(bag, pool_mean, pool_std)[0]
-            for bag in normalized_bags
-        ]
+        # Only the QUERY bags' views are needed here (they feed the rare-evidence
+        # / MIL branches). Building the view for every bag materialized a second
+        # full [total_cells, dim] copy on top of the aggregator's own -- ~12 GB
+        # per full-tile PathoBench episode, for data that was then indexed down
+        # to a single query slide (docs v35 §3). Restricting it to the queried
+        # bags is exact: `_bag_view` is per-bag and the pool statistics it uses
+        # are unchanged.
         query_instances = [
-            classification_bags[index] for index in query_index.detach().cpu().tolist()
+            self.aggregator._bag_view(normalized_bags[index], pool_mean, pool_std)[0]
+            for index in query_index.detach().cpu().tolist()
         ]
         if isinstance(x, torch.Tensor):
             query_instances = torch.stack(query_instances)
