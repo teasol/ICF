@@ -47,6 +47,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--features", type=Path,
                         default=Path("/NHNHOME/kimds/Data/PathoBench/features"))
     parser.add_argument("--workers", type=int, default=5)
+    parser.add_argument("--nfolds-total", type=int, default=None,
+                        help="Only evaluate the first K official folds (scaling "
+                        "probe). Default: all folds.")
     parser.add_argument("--gpus", type=str, default="0",
                         help="Comma-separated CUDA device ids to round-robin across workers.")
     parser.add_argument("--output", type=Path, required=True)
@@ -74,6 +77,8 @@ def main() -> None:
     gpus = [g.strip() for g in args.gpus.split(",") if g.strip()]
 
     total_folds = count_folds(task_dir)
+    if args.nfolds_total is not None:
+        total_folds = min(args.nfolds_total, total_folds)
     n = args.workers
     chunk = math.ceil(total_folds / n)
     ranges = [(s, min(s + chunk, total_folds)) for s in range(0, total_folds, chunk)]
