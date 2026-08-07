@@ -154,6 +154,15 @@ def parse_args() -> argparse.Namespace:
         help="First official fold index to evaluate (for parallel fold "
         "splitting across worker processes).",
     )
+    parser.add_argument(
+        "--official-ckpt",
+        type=Path,
+        default=None,
+        help="Per-fold incremental checkpoint path for --official-folds. Each "
+        "completed fold is saved immediately; on re-run, already-done folds "
+        "are skipped. Folds are static/deterministic, so results never change. "
+        "Useful for resume after interruption.",
+    )
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--output", type=Path, default=None)
     return parser.parse_args()
@@ -517,13 +526,24 @@ def evaluate_official_folds(
     total_folds = len(fold_cols)
     n_folds = args.official_nfolds or (total_folds - start)
     end = start + n_folds
-    fold_aurocs: list[float] = []
-    fold_indices: list[int] = []
-    pooled_prob: list[torch.Tensor] = []
-    pooled_target: list[torch.Tensor] = []
-    all_records: list[dict] = []
+    scope = list(range(start, min(end, total_folds)))
+
+    ckpt_path = args.official_ckpt.expanduser().resolve() if args.official_ckpt else None
+    results: dict[int, dict] = {}
+    if ckpt_path and ckpt_path.exists():
+        try:
+            results = torch.load(ckpt_path, map_location="cpu", weights_only=False)["results"]
+            print(f"Resuming official-fold checkpoint {ckpt_path.name}: "
+                  f"{len(results)} folds already done")
+        except Exception:
+            results = {}
+            print("WARNING: could not read checkpoint (will recompute)")
+
     index = {sid: i for i, sid in enumerate(slide_ids)}
-    for k in range(start, min(end, total_folds)):
+    for k in scope:
+        if k in results:
+            print(f"  fold {k + 1}/{total_folds}: already done (skip)")
+            continue
         fc = fold_cols[k]
         test_ids = [s for s in slide_ids if records[index[s]][fc].strip() == "test"]
         context_ids = [s for s in slide_ids if records[index[s]][fc].strip() != "test"]
@@ -550,22 +570,28 @@ def evaluate_official_folds(
             print(f"  fold {k + 1}/{total_folds}: insufficient valid predictions/classes")
             continue
         fa = auroc(probability, target)
-        fold_aurocs.append(fa)
-        fold_indices.append(k)
-        pooled_prob.append(probability)
-        pooled_target.append(target)
+        results[k] = {
+            "slide_id": result["queried_ids"],
+            "label": target,
+            "probability": probability,
+        }
         print(f"  fold {k + 1}/{total_folds}: AUROC {fa:.4f}  n_query {len(probability)}", flush=True)
-        all_records.append(
-            {"slide_id": result["queried_ids"], "label": target, "probability": probability}
-        )
+        if ckpt_path:
+            ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save({"task": tsv.parent.name, "results": results}, ckpt_path)
 
-    if not fold_aurocs:
-        print("No valid folds.")
+    done_scope = [k for k in scope if k in results]
+    if not done_scope:
+        print("No folds recorded.")
         return
-    pooled = auroc(torch.cat(pooled_prob), torch.cat(pooled_target))
+    fold_aurocs = [float(auroc(results[k]["probability"], results[k]["label"])) for k in done_scope]
+    pooled = auroc(
+        torch.cat([results[k]["probability"] for k in done_scope]),
+        torch.cat([results[k]["label"] for k in done_scope]),
+    )
     mean = sum(fold_aurocs) / len(fold_aurocs)
     std = (sum((x - mean) ** 2 for x in fold_aurocs) / len(fold_aurocs)) ** 0.5
-    print(f"\n=== PathoBench official {n_folds}-fold — {tsv.parent.parent.name}/"
+    print(f"\n=== PathoBench official {len(done_scope)}-fold — {tsv.parent.parent.name}/"
           f"{tsv.parent.name} — {len(slide_ids)} slides (folds {start + 1}..{end}) ===")
     print(f"per-fold AUROC: {' '.join(f'{x:.4f}' for x in fold_aurocs)}")
     print(f"fold-mean AUROC: {mean:.4f} ± {std:.4f}   pooled AUROC: {pooled:.4f}")
@@ -576,14 +602,14 @@ def evaluate_official_folds(
         torch.save(
             {
                 "task": tsv.parent.name,
-                "official_folds": n_folds,
+                "official_folds": len(done_scope),
                 "fold_start": start,
-                "fold_indices": fold_indices,
+                "fold_indices": done_scope,
                 "fold_aurocs": fold_aurocs,
                 "fold_auroc_mean": mean,
                 "fold_auroc_std": std,
                 "auroc_pooled": float(pooled),
-                "per_fold": all_records,
+                "per_fold": [results[k] for k in done_scope],
                 "n_slides": len(slide_ids),
             },
             out,

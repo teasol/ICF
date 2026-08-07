@@ -98,6 +98,7 @@ def main() -> None:
             "--official-fold-start", str(s),
             "--official-nfolds", str(e - s),
             "--features", str(args.features.expanduser().resolve()),
+            "--official-ckpt", str(tmp_dir / f"{task_dir.name}_official_folds.ckpt"),
             "--output", str(worker_out),
             "--seed", str(args.seed),
         ]
