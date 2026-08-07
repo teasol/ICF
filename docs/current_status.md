@@ -4,7 +4,7 @@
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **v34 확정 (§52·§53·§56)**: **v34-1536을 PathoBench 보고용 모델로 확정**(사용자 결정). 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv fold·코호트·라벨) 기준 **50-fold**(SEAL macro-AUC와 동일 구조) — **5/17 완료**(bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569, brca_TP53), **12개는 config 수정으로 재시작**(§56, 백그라운드). v30은 합성/Musk baseline 유지. 이전 5-fold와 수치 ±0.04 이내 동일(평가 견고성). config 시스템을 v34 base + group default 참조형으로 리팩터링(§56). 자세한 진행 §53·§56.
-* **v35 (§58 rev.1 설계 → §59 rev.2 개정 + 학습 시작)**: rev.1의 3개 결정 중 **①rare 제거·③context/query 대형화 분리는 폐기 권고**(§59.1: anchor 오염, 집계 수학 오류, Musk 소형 bag 파괴 = 확정 목표 위반, query 위치를 dataset이 알 수 없어 구현 불가, 그리고 동기 자체에 직접 반증 — context 2k cap Δpooled **−0.0019**). ②chunk는 **근사 평균이 아닌 정확 충분통계 축약**으로 재설계. 구현·검증 완료분: **bag 단위 정확 스트리밍**(peak VRAM 40,990 → 18,930 MiB, AUROC 동일), `num_cells_log_uniform_power`, VRAM 가드 `episode_batch_size` 누락 버그 수정, **41 tests**. **학습 진행 중**: 데이터 단독 arm(`num_cells [1,32768]` power 1.5, rare branch 유지), `logs/20260807_203606/`, 2×B200 GPU 0·1, 51,200 episodes(v34와 에피소드 매칭).
+* **v35 (§58 rev.1 설계 → §59 rev.2 개정 + 학습 시작)**: rev.1의 3개 결정 중 **①rare 제거·③context/query 대형화 분리는 폐기 권고**(§59.1: anchor 오염, 집계 수학 오류, Musk 소형 bag 파괴 = 확정 목표 위반, query 위치를 dataset이 알 수 없어 구현 불가, 그리고 동기 자체에 직접 반증 — context 2k cap Δpooled **−0.0019**). ②chunk는 **근사 평균이 아닌 정확 충분통계 축약**으로 재설계. 구현·검증 완료분: **bag 단위 정확 스트리밍**(peak VRAM 40,990 → 18,930 MiB, AUROC 동일), `num_cells_log_uniform_power`, VRAM 가드 `episode_batch_size` 누락 버그 수정, **41 tests**. **학습 진행 중(2차)**: 데이터 단독 arm(`num_cells [1,16384]` power 1.5, rare branch 유지) — 1차 `[1,32768]` 런은 **CUDA OOM 크래시**(epoch 0부터 324회 경고, 21:24 SIGABRT, best val_ce 0.3574 @ ep6), 사용자 결정으로 상한 16384 축소 후 `last.ckpt`에서 재개 → `logs/20260807_224559/`, 2×B200 GPU 0·1, 51,200 episodes(v34와 에피소드 매칭).
 * **다음 Action**: ① **v35 학습 완주 → 공식 50-fold 평가**(단 §59.5: **v34도 현재 코드로 재실행**해야 공정 비교), ② **P0 게이트(무료, 학습 0)** — query 크기 스윕 + `rare_logits=0` ablation; 전자가 +0.005 미달이면 대형화 노선 폐기(rev.2 §4), ③ 공식 50-fold **잔여 8개**(스트리밍으로 workers 2 → 8+ 가능), ④ v30 vs v34 공정 비교용 **PCA-per-fold CV**(미지원), ⑤ **v34-512 학습**, ⑥ rev.2 §3의 **chunk 단위**(bag 내부) 스트리밍 — 현재는 bag 단위까지만, ⑦ rev.2 §8 zero-init chunk-attention(ABMIL 격차 대응).
 
 > **사용자 결정 (2026-08-05, 확정)**:
@@ -2078,21 +2078,20 @@ tanh(±1) sign-only로 붕괴했음). bc_therapy/er_status fold 1-3:
 **완전히 동일**(0.4348/0.7565/0.7217)했다. 따라서 §58.4의 "bc_therapy 재실행 bit-identical(pooled 0.6721)"은
 **fix 적용 전 검증**이다. → **§53의 9개 task 표는 `5869535` 이후 코드로 재실행해야 한다** (|Δ| 최대 0.030).
 
-### 6. v35 학습 시작 (진행 중)
+### 6. v35 학습 — 1차 [1,32768] OOM 크래시 → 2차 [1,16384] 재개 (진행 중)
 
 - **단일 인자 arm**: 데이터만 변경, 아키텍처는 v34-1536 그대로(**rare branch 유지**, context/query 분리 없음,
   cardinality는 에피소드 단위 1회 = B2b 아님).
-- 데이터: `num_cells [1, 32768]`, `num_cells_log_uniform_power 1.5`. 닫힌 형식: `P(n≤34)=19.8%`(Musk 밴드 보존),
-  `P(n≥8192)=19.3%`, median 700, **E[n]=4487 vs v34 909 = 4.94×**.
-- VRAM: peak는 **스텝당 총 cell 수**에 비례 → `episode_batch_size 1 × 100 bags × 32768 = 3.28M cells`로
-  v34(`4 × 100 × 8192`)와 **동일 envelope**. 실측 peak **119.95 GiB (62.6%)**.
+- **1차 런 `[1, 32768]` (20260807_203606) = CUDA OOM 크래시**: epoch 0부터 `expandable_segments: memory
+  mapping failed with OOM` 324회(free ~10 MB), 21:24:08 `rank1 SIGABRT(exit -6)` → launcher exit 1.
+  런치 시 VRAM 가드가 **162.72 GiB (85% of B200) -- caution**으로 경고했는데도 진행했고, 실제로 GPU를 거의
+  가득 채워 죽었다(§59.6 당시 "실측 peak 119.95 GiB" 기록은 이 크래시로 반증됨). best val_ce
+  **0.3574 @ ep6**(ep0 0.4547 → ep4 0.3883 → ep5 0.3643 → ep6 0.3574) — v34 best(0.4419)는 이미 하회.
+- **2차 런 `[1, 16384]` (20260807_224559, 사용자 결정)**: 상한을 절반으로 축소. 닫힌 형식
+  `P(n≤34)=21.9%`(Musk 밴드 보존), `P(n≥8192)=10.5%`, median 452, **E[n]=2394 vs v34 909 = 2.63×**.
+  VRAM 가드 **82.19 GiB (42.9%) -- OK**, 실측 peak **54.72 GiB (28.6%)**. `last.ckpt`(ep6)에서 resume,
+  **Epoch 7부터 연속**(8.6 it/s, 512 steps/epoch).
 - 예산: **에피소드 매칭**(§42 교훈) — 1024 ep/epoch × 50 epoch = **51,200 episodes**, v34와 동일.
-- 실행: `logs/20260807_203606/v35_largebag.out`, ckpt `checkpoints/20260807_203606/v35_largebag/`,
-  PID 369656, 2×B200(GPU 0·1) DDP, 512 steps/epoch, **~92 s/epoch**(50 epoch 약 1.5시간).
-- **초기 val_ce 추이**: ep0 `0.4547` → ep1 `0.4289` → ep2 `0.4143` → **ep3 `0.4096`**.
-  **v34의 best(`0.4419` @ ep48)를 epoch 3에서 이미 하회**했다. 단 ⓐ val 분포도 같이 커졌으므로
-  (val_dataset_kwargs가 같은 generator 설정을 상속) **v34와 val_ce를 직접 비교하는 것은 부당**하고,
-  ⓑ 판정은 §59.7-1대로 **공식 50-fold AUROC**로 해야 한다. 유망한 초기 신호로만 기록한다.
 - **주의**: `episode_batch_size`가 4→1이라 DDP 2랭크로도 유효 batch가 2(v34는 4)다. 강제된 2차 변경이므로
   결과 해석 시 명시할 것.
 

@@ -771,10 +771,10 @@ class SyntheticManifoldGenerator:
         ``num_cells_log_uniform_power`` (v35, docs §5) tilts that log-uniform draw
         toward large bags via ``fraction = U ** (1 / power)`` while KEEPING the
         small-bag mass that Musk needs -- power must not be used to replace the
-        lower bound. With ``[1, 32768]`` and ``power=1.5`` the closed form gives
-        ``P(n <= 34) = (ln 34 / ln 32768) ** 1.5 = 19.8%`` (Musk's weakest band is
-        still trained), ``P(n >= 8192) = 19.3%`` (real PathoBench slide sizes are
-        reached) and ``E[n] = 4487`` vs v34's 909, i.e. 4.94x the per-episode cell
+        lower bound. With ``[1, 16384]`` and ``power=1.5`` the closed form gives
+        ``P(n <= 34) = (ln 34 / ln 16384) ** 1.5 = 21.9%`` (Musk's weakest band is
+        still trained), ``P(n >= 8192) = 10.5%`` (real PathoBench slide sizes are
+        reached) and ``E[n] = 2394`` vs v34's 909, i.e. 2.63x the per-episode cell
         budget -- so episode counts must be re-matched, not inherited (docs §42).
         ``power=1.0`` reproduces the v34 draw exactly.
         """

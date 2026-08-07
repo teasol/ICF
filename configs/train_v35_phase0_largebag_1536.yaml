@@ -9,20 +9,23 @@
 # cardinality is v33 arm C / B2b, already rejected at -0.0412 AUROC).
 #
 # Data change (rev.2 §5):
-#   num_cells [1, 8192] -> [1, 32768] with num_cells_log_uniform_power 1.5.
+#   num_cells [1, 8192] -> [1, 16384] with num_cells_log_uniform_power 1.5.
 #   The lower bound stays 1 on purpose. A floor would delete the small-bag
 #   regime that Musk needs (Musk2 median 12; "Musk 0.95" is a standing user
 #   decision), which is why rev.1's `query_num_cells [3000, 50000]` was dropped.
-#   Closed form for [1, 32768] at power 1.5:
-#     P(n <= 34)   = (ln 34 / ln 32768) ** 1.5 = 19.8%   (Musk band retained)
-#     P(n >= 8192) = 1 - (ln 8192 / ln 32768) ** 1.5 = 19.3%  (real slide sizes)
-#     median 700,  E[n] = 4487  vs v34's 909  ->  4.94x cells per episode
+#   Closed form for [1, 16384] at power 1.5:
+#     P(n <= 34)   = (ln 34 / ln 16384) ** 1.5 = 21.9%   (Musk band retained)
+#     P(n >= 8192) = 1 - (ln 8192 / ln 16384) ** 1.5 = 10.5%  (real slide sizes)
+#     median 452,  E[n] = 2394  vs v34's 909  ->  2.63x cells per episode
 #   Pinned by tests/test_stream_eval_bags.py::TestLogUniformPower.
+#   2026-08-07: initial [1, 32768] launch (logs/20260807_203606) crashed with
+#   CUDA OOM (324 allocator warnings from epoch 0, SIGABRT rank 1 at 21:24).
+#   Guard estimate was 162.72 GiB (85% of B200) -- halved the upper bound.
 #
 # VRAM: peak scales with TOTAL cells per optimizer batch = episode_batch_size x
 # num_bags x num_cells. v34-1536's validated worst case was 4 x 100 x 8192 =
-# 3.28M cells (~112 GiB, ~62% of a B200). This arm keeps that envelope exactly
-# by trading batch for cells: 1 x 100 x 32768 = 3.28M cells. Hence
+# 3.28M cells (~112 GiB, ~62% of a B200). This arm caps the envelope at
+# 1 x 100 x 16384 = 1.64M cells (half the 32768 launch that OOMed). Hence
 # episode_batch_size 1 (not 4) -- a deliberate, forced deviation. Two DDP ranks
 # restore an effective batch of 2 episodes/step (v34 had 4); documented rather
 # than hidden because it is a second changed factor at the optimizer level.
@@ -46,7 +49,7 @@ data: default
 data_overrides:
   episode_batch_size: 1
   dataset_kwargs:
-    num_cells: [1, 32768]
+    num_cells: [1, 16384]
     num_cells_log_uniform_power: 1.5
 
 model: default
