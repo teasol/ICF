@@ -44,7 +44,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from src.utils.metrics import auroc as auroc_metric  # noqa: E402
 from src.utils.metrics import bootstrap_auroc_interval  # noqa: E402
 
-DEFAULT_DATA = Path("/NHNHOME/kimds/Data/Musk/musk.pkl")
+DEFAULT_DATA = Path("/NHNHOME/BASE/kimds/Data/Musk/musk.pkl")
 DEFAULT_PREDICTIONS = (
     "musk_v24_zero_shot.pt",
     "musk_v24_musklike_easy.pt",

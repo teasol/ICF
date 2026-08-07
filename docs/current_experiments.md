@@ -182,8 +182,8 @@ v21의 K=24 retrieval을 제거한 근거는 [`current_status.md`](current_statu
 - **실행**:
   ```bash
   CUDA_DEVICES=0 NPROC_PER_NODE=1 \
-  TORCHRUN_BIN=/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/torchrun \
-  NETRC=/NHNHOME/kimds/.netrc \
+  TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun \
+  NETRC=/NHNHOME/BASE/kimds/.netrc \
   scripts/launch_interactive_training.sh v22_medium configs/train_v22_medium.yaml
   ```
 - **✅ v22 기준선 (2026-07-29 확정, 버그 수정 반영본)**: `val_ce_loss: 0.5946` @ epoch 13 / 20 epoch / 10,240 steps.
@@ -348,7 +348,7 @@ ICI 실데이터: 87명 환자, donor당 1,000 세포 샘플링, 512-dim scConce
 ## 5. 검증 스위트
 
 ```bash
-timeout 300s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
+timeout 300s /home/aibio_3/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
 ```
 
 - `tests/test_base_model.py` — aggregator/meta-classifier 계약, `architecture_version == 22`

@@ -41,10 +41,10 @@
 ## 2. 5단계 파이프라인 실증 성과 및 실행 프로토콜
 
 ### Phase 1: v21 Medium Synthetic Problem (20 Epochs)
-- **Config**: [`configs/train_v21_medium.yaml`](file:///NHNHOME/kimds/ICF/configs/train_v21_medium.yaml)
+- **Config**: [`configs/train_v21_medium.yaml`](file:///NHNHOME/BASE/kimds/ICF/configs/train_v21_medium.yaml)
 - **실행 명령어**:
   ```bash
-  CUDA_DEVICES=0 NPROC_PER_NODE=1 TORCHRUN_BIN=/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/torchrun NETRC=/NHNHOME/kimds/.netrc scripts/launch_interactive_training.sh v21_medium configs/train_v21_medium.yaml
+  CUDA_DEVICES=0 NPROC_PER_NODE=1 TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun NETRC=/NHNHOME/BASE/kimds/.netrc scripts/launch_interactive_training.sh v21_medium configs/train_v21_medium.yaml
   ```
 - **완료 성과**: **`val_ce_loss: 0.5921`** (Ep 18/20 수렴)
 - **체크포인트**: `checkpoints/20260727_141002/v21_medium/epoch=018-val_ce_loss=0.5921.ckpt`
@@ -53,7 +53,7 @@
 ---
 
 ### Phase 1-R: v21 Medium Pretrain (Naive Retrieval K=24)
-- **Config**: [`configs/train_v21_medium_retrieved.yaml`](file:///NHNHOME/kimds/ICF/configs/train_v21_medium_retrieved.yaml)
+- **Config**: [`configs/train_v21_medium_retrieved.yaml`](file:///NHNHOME/BASE/kimds/ICF/configs/train_v21_medium_retrieved.yaml)
 - **실행 결과**: `val_ce_loss: 0.6839` (Ep 9/20 수렴 정체 - Naive Retrieval의 95% 배경 노이즈 주입이 원인으로 규명됨)
 - **체크포인트**: `checkpoints/20260727_234145/v21_medium_retrieved/epoch=009-val_ce_loss=0.6839.ckpt`
 - **로그 파일**: `logs/20260727_234145/v21_medium_retrieved.out`
@@ -61,11 +61,11 @@
 ---
 
 ### Phase 2: Stage 2 Hard Real-World Synthetic Problem (50 Epochs)
-- **Config**: [`configs/train_v21_hard.yaml`](file:///NHNHOME/kimds/ICF/configs/train_v21_hard.yaml)
+- **Config**: [`configs/train_v21_hard.yaml`](file:///NHNHOME/BASE/kimds/ICF/configs/train_v21_hard.yaml)
 - **주요 파라미터**: $D=512$, Observation Noise `0.05`, Donor Shift `0.70`, Sub-1% Rare Cell (`0.005`~`0.03`)
 - **실행 명령어**:
   ```bash
-  CUDA_DEVICES=0 NPROC_PER_NODE=1 TORCHRUN_BIN=/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/torchrun NETRC=/NHNHOME/kimds/.netrc scripts/launch_interactive_training.sh v21_hard configs/train_v21_hard.yaml
+  CUDA_DEVICES=0 NPROC_PER_NODE=1 TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun NETRC=/NHNHOME/BASE/kimds/.netrc scripts/launch_interactive_training.sh v21_hard configs/train_v21_hard.yaml
   ```
 - **완료 성과**: **`val_ce_loss: 0.6845`** (Ep 44/50 수렴)
 - **체크포인트**: `checkpoints/20260727_150034/v21_hard/epoch=044-val_ce_loss=0.6845.ckpt`
@@ -74,7 +74,7 @@
 ---
 
 ### Phase 2-R: v21 Hard Pretrain (Naive Retrieval K=24)
-- **Config**: [`configs/train_v21_hard_retrieved.yaml`](file:///NHNHOME/kimds/ICF/configs/train_v21_hard_retrieved.yaml)
+- **Config**: [`configs/train_v21_hard_retrieved.yaml`](file:///NHNHOME/BASE/kimds/ICF/configs/train_v21_hard_retrieved.yaml)
 - **실행 결과**: `val_ce_loss: 0.6803` (Ep 12/50)
 - **체크포인트**: `checkpoints/20260728_003034/v21_hard_retrieved/epoch=012-val_ce_loss=0.6803.ckpt`
 - **로그 파일**: `logs/20260728_003034/v21_hard_retrieved.out`
@@ -96,10 +96,10 @@
 
 ### Phase 5: Signal-Aware 40-token Feature Retrieval Pretraining (20 Epochs, 완료)
 - **목표**: Naive Retrieval의 배경 노이즈 편향을 극복하기 위해 모델 내부 40-token Signal-Aware Retrieval 및 대형 candidate pool ($N=60 \sim 100$) 적용 사전학습.
-- **Config**: [`configs/train_v21_large_context_pretrain.yaml`](file:///NHNHOME/kimds/ICF/configs/train_v21_large_context_pretrain.yaml) (`base_config: train_v21_medium.yaml`, `episode_batch_size: 32`, `retrieval_k: 24`, `dataset_kwargs.num_bags: [60, 100]`, `num_cells: [500, 1000]`)
+- **Config**: [`configs/train_v21_large_context_pretrain.yaml`](file:///NHNHOME/BASE/kimds/ICF/configs/train_v21_large_context_pretrain.yaml) (`base_config: train_v21_medium.yaml`, `episode_batch_size: 32`, `retrieval_k: 24`, `dataset_kwargs.num_bags: [60, 100]`, `num_cells: [500, 1000]`)
 - **실행 명령어**:
   ```bash
-  CUDA_DEVICES=0 NPROC_PER_NODE=1 TORCHRUN_BIN=/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/torchrun NETRC=/NHNHOME/kimds/.netrc scripts/launch_interactive_training.sh v21_large_context_pretrain configs/train_v21_large_context_pretrain.yaml
+  CUDA_DEVICES=0 NPROC_PER_NODE=1 TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun NETRC=/NHNHOME/BASE/kimds/.netrc scripts/launch_interactive_training.sh v21_large_context_pretrain configs/train_v21_large_context_pretrain.yaml
   ```
 - **완료 성과**: **Best `val_ce_loss: 0.5940`** (epoch 14) — Phase 1 Full-Context(`0.5921`) 대비 0.0019 이내로 근접, Phase 1-R Naive Retrieval(`0.6839`) 대비 0.09 이상 개선. 20 epoch 전체 완주.
 - **체크포인트**: `checkpoints/20260728_144957/v21_large_context_pretrain/epoch=014-val_ce_loss=0.5940.ckpt`

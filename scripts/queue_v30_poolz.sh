@@ -15,9 +15,9 @@ set -euo pipefail
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-PYTHON_BIN=/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python
-TORCHRUN_BIN=/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/torchrun
-NETRC=/NHNHOME/kimds/.netrc
+PYTHON_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/python
+TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun
+NETRC=/NHNHOME/BASE/kimds/.netrc
 QUEUE_LOG="${ICF_QUEUE_LOG:-${PROJECT_ROOT}/logs/queue_v30_poolz.log}"
 TRAIN_SPAWN_TIMEOUT="${TRAIN_SPAWN_TIMEOUT:-300}"
 VAL_EPISODES="${VAL_EPISODES:-1000}"

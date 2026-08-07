@@ -50,7 +50,7 @@ def main() -> None:
     parser.add_argument(
         "--out-dir",
         type=Path,
-        default=Path("/NHNHOME/kimds/Data/PathoBench/official"),
+        default=Path("/NHNHOME/BASE/kimds/Data/PathoBench/official"),
     )
     parser.add_argument("--source", default=None, help="Only this source (default: all).")
     args = parser.parse_args()

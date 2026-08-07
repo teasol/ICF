@@ -166,7 +166,7 @@ multi-resolution combiner의 paired AUROC `+0.01` headroom 확인 후에만 구�
 5. **테스트 검증 필수**:
    - 코드를 변경한 뒤에는 아래 unittest 수트를 통과해야 완결로 인정한다:
      ```bash
-     timeout 300s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
+     timeout 300s /home/aibio_3/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
      ```
    - 기본 스위트는 현재 **19 tests, 약 143초**다. 폐기 architecture/연구 진단 175개는
      `tests/history/legacy_*.py`로 이관되어 기본 discovery에서 실행되지 않는다. archive suite는
@@ -176,11 +176,17 @@ multi-resolution combiner의 paired AUROC `+0.01` headroom 확인 후에만 구�
 
 ## 4. 작업 위치 및 바이너리 경로 명세
 
-- **Workspace Root**: `/NHNHOME/kimds/ICF`
-- **Python Binary**: `/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python`
-- **Torchrun Binary**: `/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/torchrun`
-- **Netrc File**: `/NHNHOME/kimds/.netrc`
-- **Target Hardware**: NVIDIA B200 GPU 1장 (`CUDA_VISIBLE_DEVICES=0`, 180GB VRAM)
+- **Workspace Root**: `/NHNHOME/BASE/kimds/ICF`
+- **Python Binary**: `/home/aibio_3/miniconda3/envs/BagPFN/bin/python`
+- **Torchrun Binary**: `/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun`
+- **Netrc File**: `/NHNHOME/BASE/kimds/.netrc`
+- **Target Hardware**: **8× NVIDIA B200 노드, 사용 GPU 0·1 (2장)** (`CUDA_VISIBLE_DEVICES=0,1`, 180GB VRAM/장)
+
+> **2026-08-07 환경 전환 (8-GPU 컨테이너)**: 이전 `/NHNHOME/kimds` 경로는 폐기하고
+> 워크스페이스는 `/NHNHOME/BASE/kimds/ICF`로, conda env는 `/home/aibio_3/miniconda3/envs/BagPFN`으로
+> 변경됐다. 저장소 내 스크립트·문서·설정의 `/NHNHOME/kimds` 참조는 전부 이 경로로
+> 마이그레이션 완료. `logs/`·`predictions/`의 과거 실행 로그(gitignore)는 역사적 기록으로 유지.
+> **GPU 배정 (사용자 지정)**: 노드에 8×B200이 보이지만 사용하는 GPU는 **0·1 (2장)**만.
 
 ---
 
@@ -189,12 +195,12 @@ multi-resolution combiner의 paired AUROC `+0.01` headroom 확인 후에만 구�
 SSH 연결이나 VS Code 터미널이 종료되어도 백그라운드에서 지속해서 안정 구동되는 표준 실행 명령:
 
 ```bash
-cd /NHNHOME/kimds/ICF
+cd /NHNHOME/BASE/kimds/ICF
 
-CUDA_DEVICES=0 \
-NPROC_PER_NODE=1 \
-TORCHRUN_BIN=/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/torchrun \
-NETRC=/NHNHOME/kimds/.netrc \
+CUDA_DEVICES=0,1 \
+NPROC_PER_NODE=2 \
+TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun \
+NETRC=/NHNHOME/BASE/kimds/.netrc \
 scripts/launch_interactive_training.sh \
   <RUN_NAME> \
   <CONFIG_PATH>
@@ -257,7 +263,7 @@ scripts/launch_interactive_training.sh \
    > 로드 불가 상태였고 unittest 1건이 상시 실패했습니다 (복구 기록: [`current_status.md`](current_status.md) §26).
    > **아카이빙/삭제 커밋 전 반드시 아래를 통과시킬 것** (활성 config만이 아니라 **전체**):
    > ```bash
-   > timeout 300s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -c "
+   > timeout 300s /home/aibio_3/miniconda3/envs/BagPFN/bin/python -c "
    > import sys; sys.path.insert(0,'.')
    > from pathlib import Path
    > from src.utils.utils import merge_train_config

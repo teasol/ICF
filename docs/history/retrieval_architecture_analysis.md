@@ -26,7 +26,7 @@ BagPFN 아키텍처 v21에서의 사전학습 및 ICI Real-World 5-Fold Cross Va
 ## 2. Naive Retrieval의 실패 원인 (Background Noise vs True Response Signal)
 
 ### ① Naive Global Mean Cosine Similarity의 심각한 허점
-기존 외부 Collator([`data_interface.py`](file:///NHNHOME/kimds/ICF/src/modules/data_interface.py))는 1,000개 세포의 단순 평균(Mean)과 표준편차(Spread)를 normalize하여 Cosine Similarity를 계산하였습니다.
+기존 외부 Collator([`data_interface.py`](file:///NHNHOME/BASE/kimds/ICF/src/modules/data_interface.py))는 1,000개 세포의 단순 평균(Mean)과 표준편차(Spread)를 normalize하여 Cosine Similarity를 계산하였습니다.
 
 $$
 \text{Summary}(X) = \text{Concat}\left( \text{Normalize}(\bar{X}), \text{Normalize}(\text{Std}(X)) \right) \in \mathbb{R}^{1024}

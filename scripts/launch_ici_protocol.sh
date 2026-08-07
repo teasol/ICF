@@ -63,8 +63,8 @@ for SEED in ${SEEDS}; do
         CV="${FOLD}" \
         CUDA_DEVICES=0 \
         NPROC_PER_NODE=1 \
-        TORCHRUN_BIN=/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/torchrun \
-        NETRC=/NHNHOME/kimds/.netrc \
+        TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun \
+        NETRC=/NHNHOME/BASE/kimds/.netrc \
         CKPT_PATH="${PRETRAINED_CKPT}" \
         ICF_RUN_TIME="${RUN_TIME}" \
         scripts/launch_interactive_training.sh "${RUN_KIND}" "${CONFIG}"

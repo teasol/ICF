@@ -25,7 +25,7 @@ Preprocessing / caveats:
 
 Usage:
     python scripts/test_musk.py \
-        --data /NHNHOME/kimds/Data/Musk/musk.pkl \
+        --data /NHNHOME/BASE/kimds/Data/Musk/musk.pkl \
         --checkpoint checkpoints/20260731_220100/v24_medium_bag_proj_residual/epoch=041-val_ce_loss=0.5903.ckpt \
         --config configs/archive/v24/train_v24_medium_bag_proj_residual.yaml
 """
@@ -58,7 +58,7 @@ MUSK_FEATURE_DIM = 166
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--data", type=Path, default=Path("/NHNHOME/kimds/Data/Musk/musk.pkl"))
+    parser.add_argument("--data", type=Path, default=Path("/NHNHOME/BASE/kimds/Data/Musk/musk.pkl"))
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument(

@@ -75,3 +75,4 @@ Thumbs.db
 # Local agent configuration
 .agents/
 .codex/
+.claude/

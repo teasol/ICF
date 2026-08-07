@@ -1018,7 +1018,7 @@ magnitude를 이미 받으므로, val_ce 개선이 없으면 이 방향도 종�
 
 ## 21. 2026-08-03 — Zero-shot Musk (Musk2) MIL 벤치마크 테스트
 
-**배경**: 사용자 요청 — `/NHNHOME/kimds/Data/Musk/musk.pkl`로 **Musk MIL 벤치마크** 테스트 파일 작성.
+**배경**: 사용자 요청 — `/NHNHOME/BASE/kimds/Data/Musk/musk.pkl`로 **Musk MIL 벤치마크** 테스트 파일 작성.
 Musk2: 102개 분자(bag), 각 bag은 컨포머 인스턴스(166 화학 descriptor, 1~1044개), bag 라벨은
 "아무 컨포머라도 musk면 양성". 전형적 multiple-instance 문제로 BagPFN(bag 단위 in-context
 meta-classifier)의 자연스러운 테스트 대상.
@@ -1048,7 +1048,7 @@ zero-padding**(모델 input_dim=512; OOD 브리지로 명시, 화학 descriptor�
 **산출물/명령**:
 - 스크립트: `scripts/test_musk.py`
 - 예측: `predictions/musk_v24_zero_shot.pt`
-- 재실행: `python scripts/test_musk.py --data /NHNHOME/kimds/Data/Musk/musk.pkl --config configs/train_v24_medium_bag_proj_residual.yaml --checkpoint checkpoints/20260731_220100/v24_medium_bag_proj_residual/epoch=041-val_ce_loss=0.5903.ckpt`
+- 재실행: `python scripts/test_musk.py --data /NHNHOME/BASE/kimds/Data/Musk/musk.pkl --config configs/train_v24_medium_bag_proj_residual.yaml --checkpoint checkpoints/20260731_220100/v24_medium_bag_proj_residual/epoch=041-val_ce_loss=0.5903.ckpt`
 
 **다음 Action (사용자 판단)**: ① Musk 정식 검증(projection/MIL baseline) 진행 여부, ② no-L2 학습
 완료 후 v24와 비교(§20 계속), ③ 경로 A/ICI 관점.

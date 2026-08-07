@@ -1,7 +1,7 @@
 """Build slide-level CSV files with OFFICIAL Patho-Bench labels from k=all.tsv.
 
 Reads the official fold-based splits downloaded by ``fetch_pathobench_official.py``
-(/NHNHOME/kimds/Data/PathoBench/official/{source}/{task}/k=all.tsv + config.yaml)
+(/NHNHOME/BASE/kimds/Data/PathoBench/official/{source}/{task}/k=all.tsv + config.yaml)
 and writes, for each task, a slide-level CSV with the official label column
 (``config.yaml.task_col``) and a chosen official fold's split:
 
@@ -111,14 +111,14 @@ def main() -> None:
     parser.add_argument(
         "--official-dir",
         type=Path,
-        default=Path("/NHNHOME/kimds/Data/PathoBench/official"),
+        default=Path("/NHNHOME/BASE/kimds/Data/PathoBench/official"),
     )
     parser.add_argument(
         "--out-dir",
         type=Path,
-        default=Path("/NHNHOME/kimds/Data/PathoBench/csv_official"),
+        default=Path("/NHNHOME/BASE/kimds/Data/PathoBench/csv_official"),
     )
-    parser.add_argument("--legacy-dir", type=Path, default=Path("/NHNHOME/kimds/Data/PathoBench/csv"))
+    parser.add_argument("--legacy-dir", type=Path, default=Path("/NHNHOME/BASE/kimds/Data/PathoBench/csv"))
     parser.add_argument("--fold", type=int, default=0)
     parser.add_argument("--source", default=None)
     args = parser.parse_args()

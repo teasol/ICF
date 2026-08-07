@@ -10,7 +10,7 @@ distribution and a total-time breakdown.
 Usage:
     python scripts/profile_pathobench.py \
         --checkpoint checkpoints/20260804_132334/v30_cardinality_poolz_l2/epoch=048-val_ce_loss=0.4442.ckpt \
-        --csv /NHNHOME/kimds/Data/PathoBench/csv/cptac_lscc_keap1.csv \
+        --csv /NHNHOME/BASE/kimds/Data/PathoBench/csv/cptac_lscc_keap1.csv \
         [--episodes 20]
 """
 from __future__ import annotations

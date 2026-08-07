@@ -12,8 +12,8 @@
 set -euo pipefail
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
-TORCHRUN_BIN=/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/torchrun
-NETRC=/NHNHOME/kimds/.netrc
+TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun
+NETRC=/NHNHOME/BASE/kimds/.netrc
 QUEUE_LOG="${ICF_QUEUE_LOG:-/tmp/phase1_queue.log}"
 # Max seconds to wait for a launched training to actually spawn scripts/train.py.
 TRAIN_SPAWN_TIMEOUT="${TRAIN_SPAWN_TIMEOUT:-180}"

@@ -22,8 +22,8 @@ Usage:
     python scripts/test_pathobench.py \
         --checkpoint checkpoints/20260806_145050/v33_phase0_armC_ddp8_batch2/epoch=125-val_ce_loss=0.5142.ckpt \
         --config configs/train_v33_phase0_armC_ddp8_batch2.yaml \
-        --csv /NHNHOME/kimds/Data/PathoBench/csv/cptac_luad_tp53.csv \
-        --features /NHNHOME/kimds/Data/PathoBench/features \
+        --csv /NHNHOME/BASE/kimds/Data/PathoBench/csv/cptac_luad_tp53.csv \
+        --features /NHNHOME/BASE/kimds/Data/PathoBench/features \
         --output predictions/pathobench_cptac_luad_tp53.pt
 
     # tile-limit sweep (random subsample, repeated): e.g. 2000 tiles, 5 trials
@@ -72,7 +72,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--features",
         type=Path,
-        default=Path("/NHNHOME/kimds/Data/PathoBench/features"),
+        default=Path("/NHNHOME/BASE/kimds/Data/PathoBench/features"),
     )
     parser.add_argument(
         "--data-dir",

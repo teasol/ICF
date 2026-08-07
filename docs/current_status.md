@@ -71,15 +71,17 @@
 > 2. 새로 접속한 Agent는 **`docs/` 최상위 루트의 Living md 파일 5개(`agent_handoff.md`, `current_status.md`, `current_architecture.md`, `current_experiments.md`, `README.md`)와 현행 `architecture_*_proposal.md` 1개를 최우선으로 정독**하여 전체 개발 맥락과 프로젝트 규칙을 파악합니다.
 > 3. 터미널 조회가 필요한 명령어는 NVML/쉘 hang 방지를 위해 **반드시 `timeout 3s ps aux | grep python`과 같이 타임아웃**을 적용합니다.
 > 4. 코드 변경 시 unittest 통과 필수:
->    `timeout 300s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"`
+>    `timeout 300s /home/aibio_3/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"`
 
 ---
 
 ## 2. 프로젝트 핵심 아키텍처 및 환경 명세 (Architecture **v24 확정**)
 
-* **Python Binary**: `/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python`
-* **Torchrun Binary**: `/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/torchrun`
-* **Target Hardware**: NVIDIA B200 GPU 1장 (`CUDA_VISIBLE_DEVICES=0`, 183GB VRAM)
+* **Python Binary**: `/home/aibio_3/miniconda3/envs/BagPFN/bin/python`
+* **Torchrun Binary**: `/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun`
+* **Target Hardware**: **8× NVIDIA B200 노드, 사용 GPU 0·1 (2장)** (`CUDA_VISIBLE_DEVICES=0,1`, 183GB VRAM/장) —
+  2026-08-07 8-GPU 컨테이너 전환, 워크스페이스 `/NHNHOME/BASE/kimds/ICF`, conda
+  `/home/aibio_3/miniconda3/envs/BagPFN` (이전 `/NHNHOME/kimds` 경로 폐기)
 * **Precision Policy**: `bf16-mixed`
 * **핵심 수학 기술 4종** (v19부터 이어져 v24에서도 그대로 유지):
   1. **Bag Centering + Per-Cell L2 Projection**: per-bag centroid $\mu_i$를 빼고 **per-cell L2**로
@@ -285,7 +287,7 @@ task별: composition 0.8022 / combined 0.8170 / interaction 0.7453 / state 0.659
 
 재현:
 ```bash
-/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python scripts/archive/diagnostics/diagnose_state_upper_bound.py \
+/home/aibio_3/miniconda3/envs/BagPFN/bin/python scripts/archive/diagnostics/diagnose_state_upper_bound.py \
   --val-episodes 1000 --bootstrap 2000 \
   --output logs/v22_state_upper_bound_1000ep.csv
 ```
@@ -969,7 +971,7 @@ v32 DR-CCER proposal 작성 기록. §38에서 폐기 판정. 본문은 [`histor
   `tests/history/legacy_*.py`로 이동했고 파일명 패턴상 기본 `test_*.py`에서 실행되지 않는다.
 - archive 정책: [`../tests/history/README.md`](../tests/history/README.md). 보존 코드 경로를
   직접 수정할 때만 해당 legacy module을 명시 실행한다.
-- 표준 명령: `timeout 300s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"`.
+- 표준 명령: `timeout 300s /home/aibio_3/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"`.
 
 
 ---
@@ -1180,7 +1182,7 @@ commit `568c5f8`.
 - 이 세션은 NHN(B200)/gnode5(A6000)가 아닌 **gnode4**에서 진행. arm C top-up 자체는
   gnode5에서 돌며 NFS로 체크포인트/metrics가 gnode4에 실시간 동기된다.
 - **v30 checkpoint는 워크스페이스 `checkpoints/`에 없고 `/home/kimds/archive/`에 있다**
-  (`/data-hdd`는 백업 서버). 워크스페이스 root도 `/NHNHOME/kimds/ICF`가 아닌
+  (`/data-hdd`는 백업 서버). 워크스페이스 root도 `/NHNHOME/BASE/kimds/ICF`가 아닌
   `/home/kimds/ICF` — 다중 위치 동기화 환경이라 경로 확인 필요.
 - Musk 데이터: `/home/kimds/BagPFN/Data/Musk/musk.pkl` (NHN 경로 아님).
 - 사용된 checkpoint:
@@ -1300,7 +1302,7 @@ v30 baseline은 문서값과 **정확히 재현**(0.8539) — 체크포인트/�
 - **파일**: `scripts/prepare_pathobench.py`, `scripts/test_pathobench.py`(갱신),
   `data/pathobench/{task}_{train,test}.pt` (17 task × 2), `predictions/pathobench_{task}_..._e88_full.pt`.
 - **재실행**: `python scripts/test_pathobench.py --checkpoint <ckpt> --csv
-  /NHNHOME/kimds/Data/PathoBench/csv/<task>.csv`. 전처리는
+  /NHNHOME/BASE/kimds/Data/PathoBench/csv/<task>.csv`. 전처리는
   `python scripts/prepare_pathobench.py --csv ...` 1회.
 
 ### all-context (전체 타일) — 5개 task 확장 (2026-08-06)
@@ -1653,7 +1655,7 @@ seed 42) 5-task 평가. 예측 파일 `predictions/pathobench_{task}_v30_allctx_
   CSV 포맷으로 변환 필요.
 - `data/pathobench/` 캐시(fold .pt)도 해당 task 재생성 필요.
 
-### 5. 전체 30개 CSV 전수 감사 (2026-08-07, `/NHNHOME/kimds/Data` 검증)
+### 5. 전체 30개 CSV 전수 감사 (2026-08-07, `/NHNHOME/BASE/kimds/Data` 검증)
 
 사용자 요청으로 `features/*.h5`(원시 피처)와 **전체 30개 로컬 CSV**를 공식 스플릿과
 전수 대조했다. **원시 피처(h5)는 정상**: 모든 데이터셋 keys=[barcodes,coords,features],
@@ -1677,7 +1679,7 @@ seed 42) 5-task 평가. 예측 파일 `predictions/pathobench_{task}_v30_allctx_
 ### 6. 공식 fold별 split 확보 (2026-08-07, `scripts/fetch_pathobench_official.py`)
 
 사용자 요청으로 **공식 fold별 split 전체를 다운로드**했다:
-`/NHNHOME/kimds/Data/PathoBench/official/{source}/{task}/{k=all.tsv, config.yaml}` (10개 소스,
+`/NHNHOME/BASE/kimds/Data/PathoBench/official/{source}/{task}/{k=all.tsv, config.yaml}` (10개 소스,
 **31개 task**). `k=all.tsv`는 `case_id, slide_id, <task_col>, fold_0..fold_49`(값 train/val/test),
 `config.yaml`이 `task_col`/`label_dict`/`task_type`을 정의한다. `SplitFactory.from_local` 호환 레이아웃.
 
@@ -1687,7 +1689,7 @@ seed 42) 5-task 평가. 예측 파일 `predictions/pathobench_{task}_v30_allctx_
 ### 7. 공식 라벨 CSV 생성 (2026-08-07, `scripts/build_pathobench_official_csvs.py`)
 
 공식 `k=all.tsv`(+`config.yaml`의 `task_col`)에서 **슬라이드 단위 공식 라벨 CSV**를 생성했다:
-`/NHNHOME/kimds/Data/PathoBench/csv_official/{source}_{task}.csv` (`slide_id,label,split`,
+`/NHNHOME/BASE/kimds/Data/PathoBench/csv_official/{source}_{task}.csv` (`slide_id,label,split`,
 split은 지정 fold(기본 fold_0)의 train/val/test) — **31개 task 전부**.
 
 - **교차 검증 (legacy CSV 존재 26개)**: 전부 **라벨 100% 일치** (bc_therapy/brca/lscc/luad/pda/

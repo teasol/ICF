@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.utils.metrics import auroc as auroc_metric
 
-DEFAULT_DATA = Path("/NHNHOME/kimds/Data/Musk/musk.pkl")
+DEFAULT_DATA = Path("/NHNHOME/BASE/kimds/Data/Musk/musk.pkl")
 
 
 def load_musk(path: Path) -> tuple[list[str], list[np.ndarray], np.ndarray]:

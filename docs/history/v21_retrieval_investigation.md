@@ -30,14 +30,14 @@
 > 2. 새로 접속한 Agent는 **`docs/` 최상위 루트의 Living md 파일 5개(`agent_handoff.md`, `current_status.md`, `current_architecture.md`, `current_experiments.md`, `README.md`)만 최우선으로 정독**하여 전체 개발 맥락과 프로젝트 규칙을 파악합니다.
 > 3. 터미널 조회가 필요한 명령어는 NVML/쉘 hang 방지를 위해 **반드시 `timeout 3s ps aux | grep python`과 같이 타임아웃**을 적용합니다.
 > 4. 코드 변경 시 unittest 통과 필수:
->    `/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"`
+>    `/home/aibio_3/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"`
 
 ---
 
 ## 2. 프로젝트 핵심 아키텍처 및 환경 명세 (Architecture v21)
 
-* **Python Binary**: `/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python`
-* **Torchrun Binary**: `/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/torchrun`
+* **Python Binary**: `/home/aibio_3/miniconda3/envs/BagPFN/bin/python`
+* **Torchrun Binary**: `/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun`
 * **Target Hardware**: NVIDIA B200 GPU 1장 (`CUDA_VISIBLE_DEVICES=0`, 180GB VRAM)
 * **Precision Policy**: `bf16-mixed` (FP16 공분산 역행렬 연산 시 Exponent Overflow/NaN 문제 100% 완전 해결)
 * **Architecture v21 4대 수학적 핵심 기술**:
@@ -236,4 +236,4 @@ Config를 고친 뒤에도 학습이 5차례 연속 크래시했고, 매번 근�
 4. **(구현 부채) per-query retrieval 재학습 검증**: `BaseModel.retrieve_context_indices_per_query`를 구현해 두었으나 eval-only 교체로는 개선되지 않음(train/eval 불일치). 이 경로를 살리려면 per-query retrieval로 **재학습**해야 검증 가능. 위 1번이 해결되기 전에는 우선순위 낮음.
 2. **`test_4d_batched_forward` CPU 지연/무응답 원인 확인 (§4-③ 참고)**: GPU(`CUDA_VISIBLE_DEVICES=0`)에서 재현 여부 확인하거나, 10분+ 타임아웃으로 단독 실행해 실제 종료 여부와 소요 시간 측정.
 3. **단위 테스트 전체 실행 및 검증 완료 확인**:
-   - `timeout 600s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"` (All tests PASS 확인, `test_feature_retrieval.py`, `test_large_context_pretrain.py` 포함. 반드시 timeout 적용하여 행 발생 시 자동 종료되도록 할 것. 2번 이슈로 인해 이번 세션에서는 전체 discover 대신 개별 스크립트 검증만 수행함)
+   - `timeout 600s /home/aibio_3/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"` (All tests PASS 확인, `test_feature_retrieval.py`, `test_large_context_pretrain.py` 포함. 반드시 timeout 적용하여 행 발생 시 자동 종료되도록 할 것. 2번 이슈로 인해 이번 세션에서는 전체 discover 대신 개별 스크립트 검증만 수행함)

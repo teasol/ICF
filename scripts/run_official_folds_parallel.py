@@ -13,8 +13,8 @@ Usage:
     python scripts/run_official_folds_parallel.py \
         --checkpoint checkpoints/.../epoch=048-val_ce_loss=0.4419.ckpt \
         --config configs/train_v34_phase0_largectx_1536.yaml \
-        --task-dir /NHNHOME/kimds/Data/PathoBench/official/bc_therapy/er_status \
-        --features /NHNHOME/kimds/Data/PathoBench/features \
+        --task-dir /NHNHOME/BASE/kimds/Data/PathoBench/official/bc_therapy/er_status \
+        --features /NHNHOME/BASE/kimds/Data/PathoBench/features \
         --workers 5 --output predictions/pathobench_bc_therapy_er_status_official50.pt
 """
 
@@ -45,7 +45,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--task-dir", type=Path, required=True,
                         help="Official task dir with k=all.tsv + config.yaml.")
     parser.add_argument("--features", type=Path,
-                        default=Path("/NHNHOME/kimds/Data/PathoBench/features"))
+                        default=Path("/NHNHOME/BASE/kimds/Data/PathoBench/features"))
     parser.add_argument("--workers", type=int, default=5)
     parser.add_argument("--nfolds-total", type=int, default=None,
                         help="Only evaluate the first K official folds (scaling "

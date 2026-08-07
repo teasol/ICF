@@ -12,8 +12,8 @@ Saved format (torch):
 
 Usage:
     python scripts/prepare_pathobench.py \
-        --csv /NHNHOME/kimds/Data/PathoBench/csv/cptac_luad_tp53.csv \
-        --features /NHNHOME/kimds/Data/PathoBench/features
+        --csv /NHNHOME/BASE/kimds/Data/PathoBench/csv/cptac_luad_tp53.csv \
+        --features /NHNHOME/BASE/kimds/Data/PathoBench/features
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--features",
         type=Path,
-        default=Path("/NHNHOME/kimds/Data/PathoBench/features"),
+        default=Path("/NHNHOME/BASE/kimds/Data/PathoBench/features"),
     )
     parser.add_argument(
         "--out-dir",

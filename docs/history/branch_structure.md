@@ -106,7 +106,7 @@ v25 폐기 사유와 평가 수치는 [`current_status.md`](../current_status.md
 git checkout v22
 git cherry-pick c05ff8d          # Cholesky
 git cherry-pick 835b726          # rank-local (충돌 가능 — synthetic_data.py가 많이 바뀜)
-timeout 1500s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
+timeout 1500s /home/aibio_3/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
 ```
 
 `835b726`은 `scripts/check_ddp_episode_data.py`, `scripts/record_learnability_run.py` 등 v22에 없는 파일도 건드리므로 `src/datasets/synthetic_data.py` 변경분만 골라 적용하는 편이 깔끔합니다.

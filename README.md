@@ -33,9 +33,9 @@ bag 내부 40-token 구조화 요약을 1개 학습 projection token으로 압�
 
 ## 실행 환경
 
-- **Workspace Root**: `/NHNHOME/kimds/ICF`
-- **Python / Torchrun**: `/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/{python,torchrun}`
-- **Hardware**: NVIDIA B200 GPU 1장 (`CUDA_VISIBLE_DEVICES=0`)
+- **Workspace Root**: `/NHNHOME/BASE/kimds/ICF`
+- **Python / Torchrun**: `/home/aibio_3/miniconda3/envs/BagPFN/bin/{python,torchrun}`
+- **Hardware**: 8× NVIDIA B200 노드, 사용 GPU 0·1 (2장) (`CUDA_VISIBLE_DEVICES=0,1`)
 - ICI 데이터(`data/`)는 Git에 포함되지 않으며 저장소 루트에 위치:
   `ICI_CVOnly_scConcept_512/`, `ICI_GSE285888_scConcept_512.pt`, `ICI_GSE285888_scConcept_512_info.csv`
 
@@ -44,11 +44,11 @@ bag 내부 40-token 구조화 요약을 1개 학습 projection token으로 압�
 표준 런처(`nohup + setsid` 완전 이탈형 백그라운드, SSH/터미널 종료와 무관하게 지속):
 
 ```bash
-cd /NHNHOME/kimds/ICF
+cd /NHNHOME/BASE/kimds/ICF
 
 CUDA_DEVICES=0 \
 NPROC_PER_NODE=1 \
-TORCHRUN_BIN=/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/torchrun \
+TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun \
 scripts/launch_interactive_training.sh \
   <RUN_NAME> <CONFIG_PATH>
 ```
@@ -63,7 +63,7 @@ scripts/launch_interactive_training.sh \
 코드 변경 후 반드시 전체 unittest 통과 (약 12분, 141 tests):
 
 ```bash
-timeout 1500s /NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python \
+timeout 1500s /home/aibio_3/miniconda3/envs/BagPFN/bin/python \
   -m unittest discover -s tests -p "test_*.py"
 ```
 

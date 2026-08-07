@@ -94,7 +94,7 @@ n=1이면 정확히 0벡터(정보량 0), n=2면 대척 단위벡터 한 쌍, me
 전부 `scripts/diagnose_musk_cardinality.py`로 재현됩니다 (학습·체크포인트 불필요):
 
 ```bash
-/NHNHOME/kimds/miniconda3/envs/BagPFN/bin/python scripts/diagnose_musk_cardinality.py --report all
+/home/aibio_3/miniconda3/envs/BagPFN/bin/python scripts/diagnose_musk_cardinality.py --report all
 ```
 
 ### 1.1 Musk2 bag 크기는 작고 극단적으로 치우쳐 있다
