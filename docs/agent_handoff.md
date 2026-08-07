@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-07` — 아키텍처 효율화(MLA-slot) + v34-1536 대규모 컨텍스트 학습 완주 + PathoBench 5-fold CV.
+**Last updated**: `2026-08-07` — v34-1536 전체 평가: Musk 타일 브리지(0.858), ICI(랜덤 0.512), PathoBench 17-task CV(평균 0.843).
 
 **Confirmed baseline**: v30 = v24 residual+bottleneck bag projection + B1
 `bag_representation: poolz_l2` + B2 log-uniform cardinality `[1,1024]`. Musk zero-shot
@@ -19,10 +19,14 @@ full-dim dot과 byte-identical, 파라미터 0), ③ **slot_std 분산 트릭**(
 [C,max_cells,1536] 패딩 OOM 방지, `000aead`). config: `train_v34_phase0_largectx_512.yaml`
 ([1,32768]) / `..._1536.yaml`(1536-d, [1,8192]), 둘 다 scratch + slot MLA. **v34-1536
 (1024ep×50, batch=4, fp32) 완주** — best val_ce 0.4419
-(`checkpoints/20260806_215800/v34_phase0_largectx_1536/epoch=048-...`). PathoBench **5-fold CV**
-(`test_pathobench.py --cv-folds N`, raw 1536-d no-PCA, train+test 전체 슬라이드 stratified,
-영구 `data/pathobench/{task}_cvfold{i}.pt`로 h5 재읽기 방지) 평균 **fold-mean 0.905 / pooled
-0.902**. v30과 CV 직접 비교는 **PCA-per-fold 미지원으로 보류**. 상세 §49.
+(`checkpoints/20260806_215800/v34_phase0_largectx_1536/epoch=048-...`).
+
+평가(§50): ① PathoBench **17개 binary task 5-fold CV 평균 pooled 0.843** (LUAD/LSCC 유전체
+task 0.91~0.99 강세, bc_therapy==ccrcc 동일 슬라이드). ② Musk — `test_musk.py`가 config
+input_dim 동적 패딩 + `--pad-mode`(zero/tile, `4aca7f1`/`6d4c5bc`): **tile(166×9+42) 0.858**
+vs zero-pad 0.822 (v30 0.854와 동등). ③ **ICI 실세계 5-seed 0.512±0.027 = 랜덤** (명시적
+잠금 해제, `f8181be`: `ICIDataset` input_dim/pad_mode 타일 + `test_v34_phase0_largectx_1536_ici.yaml`).
+v30과 CV 직접 비교는 **PCA-per-fold 미지원으로 보류**. 상세 §49·§50.
 
 **Rejected candidate — architecture v31 CCER-v2**: projection 전 aligned slot-center로
 support class prototype을 만들고, 기존 rare branch와 독립인 support/query encoder에서

@@ -1,20 +1,20 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-07` (**§49 아키텍처 효율화(MLA-slot) + v34-1536 대규모 컨텍스트 학습(1024×50, batch=4) 완주 + PathoBench 5-fold CV(평균 pooled 0.902)** + **§48 arm C 완주/v33 평가** + **§47 e125 기준 확정/타일 스윕**)
+**Last updated**: `2026-08-07` (**§50 v34-1536 추가 평가: Musk 패딩 브리지(타일 0.858) + ICI(랜덤 0.512) + PathoBench 17-task 전체 CV(평균 0.843)** + **§49 아키텍처 효율화/학습 완주** + **§48 arm C 완주/v33 평가**)  
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
-* **v34 (신규, §49)**: 아키텍처 효율화(MLA-slot 저랭크 affinity, slot_std 분산 트릭, 배치 population candidates, 정규화 통합)로 대규모 컨텍스트 학습이 가능해졌다. **v34-1536(1024ep×50, batch=4, fp32) 완주** — best val_ce **0.4419**(v30 0.4442보다 소폭 하회). PathoBench **5-fold CV**(train+test 전체 슬라이드, raw 1536-d no-PCA, all-context) 평균 **fold-mean 0.905 / pooled 0.902** (LUAD 계열 0.94~0.98 강세). v30과의 직접 CV 비교는 **PCA-per-fold 미지원으로 보류**.
-* **다음 Action**: ① v34-1536 Musk zero-shot 평가, ② v30 vs v34 공정 비교용 **PCA-per-fold CV** (현재 CV는 raw 1536-d 전용), ③ v34-512 학습, ④ Phase 0 결과 선택(사용자) — arm C의 n>34(0.849)·lscc 개선 채택 여부, ⑤ v30 medium 참조 재학습, ⑥ frozen-v30 multi-resolution probe(§39, 아키텍처 가설 여전히 미검증). ICI 잠금 유지.
+* **v34 (신규, §49·§50)**: 아키텍처 효율화(MLA-slot 저랭크 affinity, slot_std 분산 트릭, 배치 population candidates, 정규화 통합)로 대규모 컨텍스트 학습이 가능해졌다. **v34-1536(1024ep×50, batch=4, fp32) 완주** — best val_ce **0.4419**. 전체 평가 완료: ① PathoBench 17개 binary task 5-fold CV 평균 **pooled 0.843** (LUAD/LSCC 유전체 task 0.91~0.99 강세), ② Musk **tile 브리지 0.858** (zero-pad 0.822 대비 +0.036, v30 0.854와 동등), ③ **ICI 실세계 5-seed AUROC 0.512±0.027 = 랜덤** (기존과 일관, 명시적 잠금 해제로 평가). v30과의 직접 CV 비교는 **PCA-per-fold 미지원으로 보류**.
+* **다음 Action**: ① **v34-1536 종합 판정(사용자)** — PathoBench·Musk 실질 신호 vs ICI 랜덤, ② v30 vs v34 공정 비교용 **PCA-per-fold CV** (여전히 미지원), ③ **v34-512 학습** + 동일 평가, ④ Phase 0 결과 선택(사용자) — arm C의 n>34(0.849)·lscc 개선 채택 여부, ⑤ v30 medium 참조 재학습, ⑥ frozen-v30 multi-resolution probe(§39, 아키텍처 가설 여전히 미검증).
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§49 (아키텍처 효율화 MLA-slot + v34-1536 대규모 컨텍스트 학습 완주 + PathoBench 5-fold CV)**, **§48 (arm C top-up 완주 + v33 평가: legacy gate 미달, PathoBench v30 우위)**, **§47 (e125 재평가/타일 스윕)**, **§46 (PathoBench zero-shot 평가)**, **§45 (arm C top-up 중간 Musk 신호 — 대형 bag 개선)**, **§44 (B2b 패딩 배칭, 병목 프로파일)**, **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
+**Read first if you are picking this up**: **§50 (v34-1536 추가 평가: Musk 타일 브리지, ICI 랜덤, PathoBench 17-task 전체 CV)**, **§49 (아키텍처 효율화 MLA-slot + v34-1536 학습 완주 + PathoBench 5-fold CV)**, **§48 (arm C top-up 완주 + v33 평가: legacy gate 미달, PathoBench v30 우위)**, **§47 (e125 재평가/타일 스윕)**, **§46 (PathoBench zero-shot 평가)**, **§45 (arm C top-up 중간 Musk 신호 — 대형 bag 개선)**, **§44 (B2b 패딩 배칭, 병목 프로파일)**, **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
 **§36 (CCER-v2 평가)**, **§29 (v30 확정 baseline)**.
 
-**열린 과제**: ① v34-512 학습 + v34-1536 Musk 평가, ② v30 vs v34 CV 공정 비교(PCA-per-fold), ③ v30 six-task 효과 분리, ④ B2b within-episode cardinality 효과 분리, ⑤ frozen-v30 multi-resolution headroom, ⑥ v30 medium 참조 재학습, ⑦ ICI 잠금 유지. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
+**열린 과제**: ① v30 vs v34 CV 공정 비교(PCA-per-fold), ② v34-512 학습, ③ v30 six-task 효과 분리, ④ B2b within-episode cardinality 효과 분리, ⑤ frozen-v30 multi-resolution headroom, ⑥ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
 
 **Branches**: `main` = v30 확정 baseline + 미채택 v31 CCER-v2 재현 코드. 참고용 branch/tag 구조는
 [`history/branch_structure.md`](history/branch_structure.md).
@@ -1561,3 +1561,46 @@ seed 42) 5-task 평가. 예측 파일 `predictions/pathobench_{task}_v30_allctx_
 - **v34-1536 Musk zero-shot 평가 미실행** (musklike-easy).
 - v34-1536 합성 val_auroc ~0.835는 v30 synthetic(~0.95)보다 낮지만 분포가 달라 직접 비교 불가
   — PathoBench가 실질 판정 기준.
+
+---
+
+## 50. 2026-08-07 — v34-1536 추가 평가: Musk 패딩 브리지(타일), ICI(랜덤), PathoBench 17-task 전체 CV
+
+**상태**: v30 baseline 유지. v34-1536의 나머지 평가(Musk 브리지 실험, ICI 최종 테스트, PathoBench 전체 17개 binary task)를 완료했다.
+
+### 1. Musk — 패딩 브리지 실험
+
+- `test_musk.py`가 config input_dim으로 동적 패딩(`4aca7f1`), `--pad-mode` 추가(`6d4c5bc`).
+- **zero-pad**(166→1536, 90% 0): AUROC **0.8217** [0.731, 0.905].
+- **tile**(166×9 + 42 zero): AUROC **0.8575** [0.772, 0.928] (+0.036) — 입력 대부분이
+  실제 신호를 담아 개선, v30(0.854)과 동등~소폭 상회.
+- tile stratified vs v30: n≤4 0.667(0.800), 5..10 0.917(+0.084), 11..34 0.988(+0.030),
+  n>34 0.683(0.698) — 중간 밴드 크게 개선, 소형 bag은 여전히 trade-off.
+
+### 2. ICI — 실세계 최종 테스트 (명시적 잠금 해제, 헤더 사용자 결정 2항 예외)
+
+- `ICIDataset`에 input_dim/pad_mode 추가(`f8181be`): ICI 512-d scConcept를
+  512×3=1536으로 타일. `target_cells=-1` = **전체 cell**(1.2k~6.3k/donor, 1000 제한 없음).
+- config `test_v34_phase0_largectx_1536_ici.yaml`.
+- 5-seed 프로토콜: **across-seed AUROC 0.5117 ± 0.0268** (범위 0.4859..0.5449),
+  seed 평균 per-donor **0.5070 [0.381, 0.629]** — **실질 랜덤**. 기존 ICI 결과
+  (0.5454~0.5665)와 일관. 실세계 ICI는 여전히 미통과.
+
+### 3. PathoBench — 전체 17개 binary task 5-fold CV
+
+- 신규 12개: `bc_therapy_{er,grade,her2}`, `brca_pik3ca`, `ccrcc_{er,grade,her2}`,
+  `lscc_{histologic,keap1}`, `luad_{egfr,kras}`, `ucla_lung_progression_regression`
+  (§49의 5개와 합쳐 17개).
+- **14개 고유 데이터셋 평균 pooled 0.843** (fold-mean 0.846):
+  - 강함(0.91~0.99): lscc_keap1 0.985, luad_stk11 0.977, luad_kras 0.958, lscc_histologic 0.948,
+    luad_egfr 0.945, luad_tp53 0.944, lscc_arid1a 0.908
+  - 중간(0.78~0.86): brca_tp53 0.848, pda_smad4 0.831, ucla_lung 0.784
+  - 약함(0.63~0.70): bc/ccrcc_er 0.704, bc/ccrcc_grade 0.674, bc/ccrcc_her2 0.673, brca_pik3ca 0.627
+  - bc_therapy == ccrcc 동일 슬라이드(중복, §46 확인).
+- **유전체 alteration task(KEAP1/STK11/KRAS 등)에서 매우 강함**, 호르몬/등급 표현형은 상대적 약세.
+
+### 4. 열린 과제
+
+- **PCA-per-fold CV**(v30 vs v34 공정 비교) — 여전히 미지원.
+- **v34-512 학습 미실행** (학습 시 같은 fold 파일로 재평가 가능).
+- v34-1536 종합: PathoBench·Musk는 실질 신호, ICI는 랜덤 — 채택/판정은 사용자.
