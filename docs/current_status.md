@@ -1653,3 +1653,23 @@ seed 42) 5-task 평가. 예측 파일 `predictions/pathobench_{task}_v30_allctx_
 - 공식 스플릿은 `k=all.tsv`(case_id/slide_id/label + fold_0..49) — 기존 `slide_id,label,split`
   CSV 포맷으로 변환 필요.
 - `data/pathobench/` 캐시(fold .pt)도 해당 task 재생성 필요.
+
+### 5. 전체 30개 CSV 전수 감사 (2026-08-07, `/NHNHOME/kimds/Data` 검증)
+
+사용자 요청으로 `features/*.h5`(원시 피처)와 **전체 30개 로컬 CSV**를 공식 스플릿과
+전수 대조했다. **원시 피처(h5)는 정상**: 모든 데이터셋 keys=[barcodes,coords,features],
+[n,1536] float32, NaN 0건 — 손상 없음.
+
+| 상태 | CSV |
+|---|---|
+| ✅ 슬라이드·라벨 정상 | `bc_therapy_{er,grade,her2,residual}`(166/166·159/159), `cptac_brca_{immune,pik3ca,tp53}`(112), `cptac_lscc_{arid1a,histologic,immune,keap1}`(304/292), `cptac_luad_{egfr,immune,kras,stk11,tp53}`(324/312), `cptac_pda_{immune,smad4}`(242), `mbc_recist`(97), `ucla_lung_progression_regression`(112), `bracs_{coarse,fine}`(547), `herroi_response`(85) — 공식과 슬라이드·라벨 100% 일치 |
+| ❌ **데이터 소스 오류** | `cptac_ccrcc_{er,grade,her2,residual}` — `bc_therapy`의 바이트 동일 복사본 (§51 상세) |
+| ❌ **라벨 오류** | `cptac_luad_os`(313), `cptac_pda_os`(227), `mbc_os`(96) — 슬라이드는 정상이나 **라벨이 공식 이진 `OS_event`가 아닌 생존기간류(0~7) 값** |
+| ⚠️ 피처 부재(기지) | `herroi_response`: `HER2_tumor_ROIs_v3` 빈 폴더(85장 전부) → 평가 제외. `bracs`: 7장 피처 없음 |
+
+- **§49·§50의 17-task CV 수치에는 영향 없음**: 평가된 17개 중 OS task는 없고, ccrcc 3개는
+  중복 제거됨 → 14개 유효 task 수치(0.843)는 유효.
+- 로컬에 존재하는 OS task 3종은 **라벨이 잘못되어 평가·사용 금지** — 사용 시 공식
+  `k=all.tsv`의 `OS_event` 컬럼으로 교체 필요.
+- **결론**: "데이터 자체"는 정상(피처 무손상, 24/30 CSV 정상). 잘못된 것은 ccrcc 4건(소스
+  오류) + OS 3건(라벨 오류) = **7건의 로컬 CSV 제작 오류**다.
