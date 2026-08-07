@@ -324,8 +324,6 @@ def initialize_model_weights(
         key
         for key in missing
         if key == "model._architecture_version"
-        or key.startswith("model.meta_classifier.ccer_v2_")
-        or key.startswith("model.meta_classifier.dr_ccer_")
     }
     disallowed_missing = sorted(set(missing) - allowed_missing)
     if disallowed_missing or unexpected:

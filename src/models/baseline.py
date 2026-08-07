@@ -2418,14 +2418,6 @@ class StructuredPopulationMetaClassifier(nn.Module):
         routing_temperature: float = 0.5,
         class_memory_tokens: int = 8,
         rare_evidence_fractions: Sequence[float] = (0.01, 0.05, 0.10, 0.20),
-        dr_ccer_enabled: bool = False,
-        dr_ccer_abs_topks: Sequence[int] = (1, 4, 16),
-        dr_ccer_frac_topks: Sequence[float] = (0.01, 0.05),
-        dr_ccer_donor_topk: int = 3,
-        dr_ccer_use_bottom_tail: bool = True,
-        dr_ccer_expert_hidden: int = 128,
-        dr_ccer_route_floor: float = 0.05,
-        dr_ccer_max_donors: int = 32,
         fusion_residual_scale: float = 0.10,
         covariance_ridge_logit_scale: float = 2.0,
         covariance_residual_scale: float = 0.25,
@@ -2468,22 +2460,6 @@ class StructuredPopulationMetaClassifier(nn.Module):
         rare_fractions = tuple(float(value) for value in rare_evidence_fractions)
         if not rare_fractions or any(not 0 < value <= 1 for value in rare_fractions):
             raise ValueError("rare_evidence_fractions must contain values in (0, 1].")
-        dr_ccer_abs_topks = tuple(int(value) for value in dr_ccer_abs_topks)
-        if any(value < 1 for value in dr_ccer_abs_topks):
-            raise ValueError("dr_ccer_abs_topks must contain positive integers.")
-        if len(set(dr_ccer_abs_topks)) != len(dr_ccer_abs_topks):
-            raise ValueError("dr_ccer_abs_topks must not contain duplicates.")
-        dr_ccer_frac_topks = tuple(float(value) for value in dr_ccer_frac_topks)
-        if any(not 0 < value <= 1 for value in dr_ccer_frac_topks):
-            raise ValueError("dr_ccer_frac_topks must contain values in (0, 1].")
-        if dr_ccer_donor_topk < 1:
-            raise ValueError("dr_ccer_donor_topk must be positive.")
-        if not 0 <= dr_ccer_route_floor < 1:
-            raise ValueError("dr_ccer_route_floor must be in [0, 1).")
-        if dr_ccer_max_donors < 2:
-            raise ValueError("dr_ccer_max_donors must be at least 2.")
-        if dr_ccer_enabled and not dr_ccer_abs_topks and not dr_ccer_frac_topks:
-            raise ValueError("DR-CCER requires at least one scan route.")
         if not 0 < fusion_residual_scale < 1:
             raise ValueError("fusion_residual_scale must be in (0, 1).")
         if covariance_ridge_logit_scale <= 0:
@@ -2498,13 +2474,6 @@ class StructuredPopulationMetaClassifier(nn.Module):
         self.routing_temperature = float(routing_temperature)
         self.class_memory_tokens = int(class_memory_tokens)
         self.rare_evidence_fractions = rare_fractions
-        self.dr_ccer_enabled = bool(dr_ccer_enabled)
-        self.dr_ccer_abs_topks = dr_ccer_abs_topks
-        self.dr_ccer_frac_topks = dr_ccer_frac_topks
-        self.dr_ccer_donor_topk = int(dr_ccer_donor_topk)
-        self.dr_ccer_use_bottom_tail = bool(dr_ccer_use_bottom_tail)
-        self.dr_ccer_route_floor = float(dr_ccer_route_floor)
-        self.dr_ccer_max_donors = int(dr_ccer_max_donors)
         self.mean_pool_structured_tokens = bool(mean_pool_structured_tokens)
         self.project_structured_tokens = bool(project_structured_tokens)
         if self.mean_pool_structured_tokens and self.project_structured_tokens:
@@ -2818,53 +2787,6 @@ class StructuredPopulationMetaClassifier(nn.Module):
             nn.GELU(),
             nn.Linear(relation_hidden_dim, 1),
         )
-        if self.dr_ccer_enabled:
-            # DR-CCER owns a complete donor-resolved evidence path.  The expert
-            # is trained with its own loss (CE + ranking + donor consistency)
-            # while v30 is frozen, then gated into v30 by a reliability router.
-            self.dr_ccer_donor_encoder = nn.Sequential(
-                nn.LayerNorm(token_dim),
-                nn.Linear(token_dim, dr_ccer_expert_hidden),
-                nn.GELU(),
-                nn.Linear(dr_ccer_expert_hidden, dr_ccer_expert_hidden),
-            )
-            self.dr_ccer_instance_encoder = nn.Sequential(
-                nn.LayerNorm(token_dim),
-                nn.Linear(token_dim, dr_ccer_expert_hidden),
-                nn.GELU(),
-                nn.Linear(dr_ccer_expert_hidden, dr_ccer_expert_hidden),
-            )
-            self.dr_ccer_similarity_log_scale = nn.Parameter(
-                torch.tensor(math.log(3.0))
-            )
-            self.dr_ccer_expert_log_scale = nn.Parameter(torch.tensor(0.0))
-            self.dr_ccer_route_count = (
-                len(self.dr_ccer_abs_topks)
-                + len(self.dr_ccer_frac_topks)
-                + 1  # dense mean
-                + (1 if self.dr_ccer_use_bottom_tail else 0)
-                + 1  # agreement mean
-            )
-            route_feature_dim = self.dr_ccer_route_count + 3  # spread + disp + log n
-            self.dr_ccer_route_router = nn.Sequential(
-                nn.LayerNorm(route_feature_dim),
-                nn.Linear(route_feature_dim, dr_ccer_expert_hidden // 2),
-                nn.GELU(),
-                nn.Linear(dr_ccer_expert_hidden // 2, self.dr_ccer_route_count),
-            )
-            gate_feature_dim = 6  # |routed|, spread, disp, log n, sep, mean|margin|
-            self.dr_ccer_reliability_router = nn.Sequential(
-                nn.LayerNorm(gate_feature_dim),
-                nn.Linear(gate_feature_dim, 16),
-                nn.GELU(),
-                nn.Linear(16, 1),
-            )
-            # Closed gate at init: g = sigmoid(-4) ~= 0.018, so the exact v30
-            # prediction is preserved until the expert earns replacement.
-            nn.init.zeros_(self.dr_ccer_reliability_router[-1].weight)
-            nn.init.constant_(self.dr_ccer_reliability_router[-1].bias, -4.0)
-            self.dr_ccer_output_head = nn.Linear(1, 1, bias=False)
-            nn.init.zeros_(self.dr_ccer_output_head.weight)
         self.fusion_scorer = nn.Sequential(
             nn.LayerNorm(9),
             nn.Linear(9, relation_hidden_dim),
@@ -3596,255 +3518,6 @@ class StructuredPopulationMetaClassifier(nn.Module):
             torch.tensor(query_counts, device=class_memories.device),
         )
 
-    def _dr_ccer_scan_routes(
-        self,
-        cell_margin: torch.Tensor,
-        agree_margin: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Absolute, fractional, dense, bottom-tail, and agreement scan routes.
-
-        Routes are means over the cell axis. The returned counts let the caller
-        mask duplicate ``k`` values that collapse for small bags (e.g. a 1%
-        fraction and Top-1 both selecting the same single cell).
-        """
-        route_values: list[torch.Tensor] = []
-        route_counts: list[int] = []
-        n = cell_margin.shape[-1]
-        for k in self.dr_ccer_abs_topks:
-            count = min(n, int(k))
-            route_values.append(cell_margin.topk(count, dim=-1).values.mean(dim=-1))
-            route_counts.append(count)
-        for frac in self.dr_ccer_frac_topks:
-            count = min(n, max(1, int(math.ceil(frac * n))))
-            route_values.append(cell_margin.topk(count, dim=-1).values.mean(dim=-1))
-            route_counts.append(count)
-        route_values.append(cell_margin.mean(dim=-1))
-        route_counts.append(n)
-        if self.dr_ccer_use_bottom_tail:
-            count = min(n, 4)
-            route_values.append(
-                cell_margin.topk(count, dim=-1, largest=False).values.mean(dim=-1)
-            )
-            route_counts.append(count)
-        route_values.append(agree_margin.mean(dim=-1))
-        route_counts.append(n)
-        return (
-            torch.stack(route_values, dim=-1),
-            torch.as_tensor(route_counts, device=cell_margin.device),
-        )
-
-    def _dr_ccer_logits(
-        self,
-        context: dict[str, torch.Tensor],
-        context_labels: torch.Tensor,
-        query_instances: torch.Tensor,
-        base_logits: torch.Tensor,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        """Donor-resolved evidence expert plus a reliability-gated margin mixture.
-
-        Works on both the batched (leading episode dim) and single-episode
-        paths via ``...`` einsum. The mixture operates on the class margin, so
-        at ``g ~ 0`` the exact v30 prediction (up to the softmax-shift that CE
-        is invariant to) is preserved. ``base_logits`` are the v30 logits
-        computed before this branch.
-        """
-        slots = context["slots"]
-        if slots.ndim == 5:
-            centers = slots[:, :, :, 0, :].float()  # [E,B,S,D]
-        elif slots.ndim == 4:
-            centers = slots[:, :, 0, :].float()  # [B,S,D]
-        else:
-            raise ValueError("DR-CCER context slots must be 4D or 5D.")
-        query_instances = query_instances.float()
-        labels = context_labels.long()
-
-        # ---- per-donor class prototypes (donor axis retained) ----
-        encoded_centers = F.normalize(
-            self.dr_ccer_donor_encoder(centers), dim=-1
-        )
-        donor_proto = F.normalize(
-            torch.logsumexp(encoded_centers, dim=-2), dim=-1
-        )  # [..., B, H]
-
-        # ---- per-cell similarity to every donor ----
-        encoded_instances = F.normalize(
-            self.dr_ccer_instance_encoder(query_instances), dim=-1
-        )  # [..., Q, N, H]
-        scale = self.dr_ccer_similarity_log_scale.exp().clamp(0.05, 20.0)
-        donor_sim = scale * torch.einsum(
-            "...qnh, ...bh -> ...qnb", encoded_instances, donor_proto
-        )  # [..., Q, N, B]
-
-        # ---- per-class masked donor statistics ----
-        class_valid = F.one_hot(labels, num_classes=self.num_classes).to(
-            donor_sim.dtype
-        )  # [..., B, C]
-        valid_count = class_valid.sum(dim=-2).clamp_min(1.0)  # [..., C]
-        # Expand to [..., 1, 1, B, C] so it broadcasts with [..., Q, N, B, C].
-        class_valid_exp = class_valid.view(
-            *class_valid.shape[:-2], 1, 1, *class_valid.shape[-2:]
-        )
-        valid = class_valid_exp == 1
-        ev = donor_sim.unsqueeze(-1).expand(
-            donor_sim.shape + (self.num_classes,)
-        )
-        # Materialize the broadcast mask to the full evidence shape so every
-        # downstream boolean reduction is unambiguous.
-        valid_b = valid.expand(ev.shape)
-        ev = torch.where(
-            valid_b, ev, torch.full_like(ev, -1e6)
-        )  # [..., Q, N, B, C], invalid donors at the floor
-
-        donor_k = min(
-            self.dr_ccer_donor_topk, max(1, int(valid_count.max().item()))
-        )
-        topk_values = ev.topk(donor_k, dim=-2).values  # [..., Q, N, k, C]
-        valid_topk = topk_values > -1e5
-        topk_mean = (
-            (topk_values * valid_topk.to(topk_values.dtype)).sum(dim=-2)
-            / valid_topk.sum(dim=-2).clamp_min(1.0)
-        )  # [..., Q, N, C] -- repeatable class evidence
-        max_ev = ev.max(dim=-2).values  # [..., Q, N, C] -- upper envelope
-        # Invalid donors sit at -1e6 (< 0), so `ev > 0` already selects only
-        # valid donors for the agreement statistic -- no mask broadcast needed.
-        # valid_count is [..., C]; reshape to [..., 1, 1, C] to divide [..., Q, N, C].
-        per_cell = valid_count.unsqueeze(-2).unsqueeze(-2)
-        agreement = (
-            (ev > 0.0).to(donor_sim.dtype).sum(dim=-2) / per_cell
-        )  # [..., Q, N, C]
-        squared_dev = torch.where(
-            valid_b,
-            (ev - topk_mean.unsqueeze(-2)) ** 2,
-            torch.zeros_like(ev),
-        )
-        dispersion = torch.sqrt(
-            squared_dev.sum(dim=-2) / per_cell.clamp_min(1.0)
-        )  # [..., Q, N, C]
-
-        def contrast(tensor: torch.Tensor) -> torch.Tensor:
-            return tensor[..., 1] - tensor[..., 0]
-
-        cell_margin = contrast(topk_mean)  # [..., Q, N]
-        agree_margin = contrast(agreement)  # [..., Q, N]
-        disp_feat = dispersion[..., 0] + dispersion[..., 1]  # [..., Q, N]
-
-        # Support-derived null standardization: divide the margin by the donor
-        # dispersion so a noisy support set does not inflate raw margins.
-        null_scale = disp_feat.mean(dim=-1, keepdim=True).clamp_min(1e-3)
-        cell_margin_n = cell_margin / null_scale
-
-        routes, route_counts = self._dr_ccer_scan_routes(
-            cell_margin_n, agree_margin
-        )  # [..., Q, R], [R]
-
-        # Mask duplicate-route counts (small bags collapse several routes).
-        unique_route = torch.ones_like(routes, dtype=torch.bool)
-        seen: dict[int, int] = {}
-        for route_index, count in enumerate(route_counts.tolist()):
-            if count in seen:
-                unique_route[..., route_index] = False
-            else:
-                seen[count] = route_index
-
-        log_n = math.log(float(cell_margin.shape[-1]))
-        log_n = torch.full(
-            routes.shape[:-1], log_n, device=routes.device, dtype=routes.dtype
-        )  # [..., Q]
-        route_spread = routes.amax(dim=-1) - routes.amin(dim=-1)  # [..., Q]
-        mean_disp = disp_feat.mean(dim=-1)  # [..., Q]
-        # Support separation (per episode, broadcast over queries).
-        class_mean_proto = torch.einsum(
-            "...bh, ...bc -> ...ch", donor_proto, class_valid
-        ) / valid_count.unsqueeze(-1)  # [..., C, H]
-        support_sep = (
-            class_mean_proto[..., 1, :] - class_mean_proto[..., 0, :]
-        ).norm(dim=-1)  # [..., ]
-        support_sep_q = support_sep.unsqueeze(-1).expand(
-            support_sep.shape + (routes.shape[-2],)
-        )  # [..., Q]
-
-        route_features = torch.cat(
-            (
-                routes,
-                route_spread.unsqueeze(-1),
-                mean_disp.unsqueeze(-1),
-                log_n.unsqueeze(-1),
-            ),
-            dim=-1,
-        )
-        route_logits = self.dr_ccer_route_router(route_features)
-        route_logits = torch.where(
-            unique_route,
-            route_logits,
-            torch.full_like(route_logits, -1e6),
-        )
-        soft_weights = torch.softmax(route_logits.float(), dim=-1).to(routes.dtype)
-        # Distribute the route floor over unmasked routes only, so duplicate
-        # (masked) routes never receive floor mass.
-        unmasked = unique_route.to(routes.dtype)
-        unmasked_count = unmasked.sum(dim=-1, keepdim=True).clamp_min(1.0)
-        floor_mass = unmasked * (self.dr_ccer_route_floor / unmasked_count)
-        route_weights = (
-            (1.0 - self.dr_ccer_route_floor) * soft_weights + floor_mass
-        )
-        routed = (routes * route_weights).sum(dim=-1)  # [..., Q]
-
-        # ---- expert margin ----
-        head_scale = self.dr_ccer_expert_log_scale.exp().clamp(1e-2, 10.0)
-        expert_margin = head_scale * self.dr_ccer_output_head(
-            routed.unsqueeze(-1)
-        ).squeeze(-1)  # [..., Q]
-
-        # ---- reliability gate ----
-        mean_abs_margin = cell_margin_n.abs().mean(dim=-1)  # [..., Q]
-        gate_features = torch.stack(
-            (
-                routed.abs(),
-                route_spread,
-                mean_disp,
-                log_n,
-                support_sep_q,
-                mean_abs_margin,
-            ),
-            dim=-1,
-        )
-        gate_logit = self.dr_ccer_reliability_router(gate_features).squeeze(-1)
-        gate = torch.sigmoid(gate_logit)  # [..., Q]
-
-        # ---- standardized convex mixture on the margin ----
-        base_margin = base_logits[..., 1] - base_logits[..., 0]  # [..., Q]
-        with torch.no_grad():
-            mu_b = base_margin.mean(dim=-1)
-            sd_b = base_margin.std(dim=-1, unbiased=False).clamp_min(1e-4)
-            mu_e = expert_margin.mean(dim=-1)
-            sd_e = expert_margin.std(dim=-1, unbiased=False).clamp_min(1e-4)
-        expert_scaled = (
-            (expert_margin - mu_e.unsqueeze(-1))
-            / sd_e.unsqueeze(-1)
-            * sd_b.unsqueeze(-1)
-            + mu_b.unsqueeze(-1)
-        )
-        final_margin = (1.0 - gate) * base_margin + gate * expert_scaled
-        final_logits = torch.stack(
-            (-final_margin / 2.0, final_margin / 2.0), dim=-1
-        )
-
-        auxiliary = {
-            "dr_ccer_expert_logits": torch.stack(
-                (-expert_margin / 2.0, expert_margin / 2.0), dim=-1
-            ),
-            "dr_ccer_expert_margin": expert_margin,
-            "dr_ccer_gate": gate,
-            "dr_ccer_routed": routed,
-            "dr_ccer_routes": routes,
-            "dr_ccer_route_weights": route_weights,
-            "dr_ccer_agree": agree_margin.mean(dim=-1),
-            "dr_ccer_disp": mean_disp,
-            "dr_ccer_log_n": log_n,
-            "dr_ccer_support_sep": support_sep_q,
-        }
-        return final_logits, auxiliary
-
     def _fuse_evidence(
         self,
         global_shape_logits: torch.Tensor,
@@ -4430,12 +4103,6 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 query_instances, class_memories
             )
             logits = logits + torch.sigmoid(self.mil_residual_logit) * mil_logits
-        if self.dr_ccer_enabled:
-            # The reliability-gated mixture replaces additive residual fusion:
-            # final = (1-g)*v30 + g*expert with a closed gate at init.
-            logits, dr_auxiliary = self._dr_ccer_logits(
-                context, context_labels, query_instances, base_logits=logits
-            )
         if not return_auxiliary:
             return logits
         episodes = context_labels.shape[0]
@@ -4485,7 +4152,6 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 if self.typed_bag_preserving_branch
                 else {}
             ),
-            **(dr_auxiliary if self.dr_ccer_enabled else {}),
         }
 
     def forward(
@@ -4645,10 +4311,6 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 query_instances, class_memories
             )
             logits = logits + torch.sigmoid(self.mil_residual_logit) * mil_logits
-        if self.dr_ccer_enabled:
-            logits, dr_auxiliary = self._dr_ccer_logits(
-                context, context_labels, query_instances, base_logits=logits
-            )
         if not return_auxiliary:
             return logits
         return logits, {
@@ -4692,7 +4354,6 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 if self.typed_bag_preserving_branch
                 else {}
             ),
-            **(dr_auxiliary if self.dr_ccer_enabled else {}),
         }
 
 
@@ -4742,14 +4403,6 @@ class BaseModel(nn.Module):
         meta_routing_temperature: float = 0.5,
         meta_class_memory_tokens: int = 8,
         meta_rare_evidence_fractions: Sequence[float] = (0.01, 0.05, 0.10, 0.20),
-        meta_dr_ccer_enabled: bool = False,
-        meta_dr_ccer_abs_topks: Sequence[int] = (1, 4, 16),
-        meta_dr_ccer_frac_topks: Sequence[float] = (0.01, 0.05),
-        meta_dr_ccer_donor_topk: int = 3,
-        meta_dr_ccer_use_bottom_tail: bool = True,
-        meta_dr_ccer_expert_hidden: int = 128,
-        meta_dr_ccer_route_floor: float = 0.05,
-        meta_dr_ccer_max_donors: int = 32,
         meta_fusion_residual_scale: float = 0.10,
         meta_covariance_ridge_logit_scale: float = 2.0,
         meta_covariance_residual_scale: float = 0.25,
@@ -4840,14 +4493,6 @@ class BaseModel(nn.Module):
             routing_temperature=meta_routing_temperature,
             class_memory_tokens=meta_class_memory_tokens,
             rare_evidence_fractions=meta_rare_evidence_fractions,
-            dr_ccer_enabled=meta_dr_ccer_enabled,
-            dr_ccer_abs_topks=meta_dr_ccer_abs_topks,
-            dr_ccer_frac_topks=meta_dr_ccer_frac_topks,
-            dr_ccer_donor_topk=meta_dr_ccer_donor_topk,
-            dr_ccer_use_bottom_tail=meta_dr_ccer_use_bottom_tail,
-            dr_ccer_expert_hidden=meta_dr_ccer_expert_hidden,
-            dr_ccer_route_floor=meta_dr_ccer_route_floor,
-            dr_ccer_max_donors=meta_dr_ccer_max_donors,
             fusion_residual_scale=meta_fusion_residual_scale,
             covariance_ridge_logit_scale=meta_covariance_ridge_logit_scale,
             covariance_residual_scale=meta_covariance_residual_scale,
@@ -4876,8 +4521,7 @@ class BaseModel(nn.Module):
         # oracle-gating check found zero headroom in episode-conditional
         # fusion (docs/architecture_v28_proposal.md SS6.1).
         self.architecture_version = (
-            32 if meta_dr_ccer_enabled
-            else 26 if cls_token_pooling
+            26 if cls_token_pooling
             else 25 if typed_bag_preserving_branch
             else 24 if project_structured_tokens
             else 23 if mean_pool_structured_tokens
@@ -4888,29 +4532,6 @@ class BaseModel(nn.Module):
             torch.tensor(self.architecture_version, dtype=torch.long),
             persistent=True,
         )
-
-    def apply_dr_ccer_stage(self, stage: str) -> None:
-        """Freeze parameters outside the DR-CCER scope for a staged training run.
-
-        Stage A trains only the donor-resolved expert (v30 and the reliability
-        gate frozen). Stage B trains only the reliability gate (expert frozen).
-        ``None``/"both" leaves every DR-CCER parameter trainable and freezes
-        nothing beyond what the optimizer selects.
-        """
-        if stage not in ("A", "B", "both", None):
-            raise ValueError(f"Unknown dr_ccer_stage: {stage}")
-        if not self.meta_classifier.dr_ccer_enabled:
-            return
-        for name, parameter in self.named_parameters():
-            is_dr = name.startswith("meta_classifier.dr_ccer_")
-            is_gate = "dr_ccer_reliability_router" in name
-            if not is_dr:
-                parameter.requires_grad = False
-                continue
-            if stage == "A" and is_gate:
-                parameter.requires_grad = False
-            elif stage == "B" and not is_gate:
-                parameter.requires_grad = False
 
     @staticmethod
     def _normalize_mask_index(
