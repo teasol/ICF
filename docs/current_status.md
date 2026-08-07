@@ -1662,14 +1662,26 @@ seed 42) 5-task 평가. 예측 파일 `predictions/pathobench_{task}_v30_allctx_
 
 | 상태 | CSV |
 |---|---|
-| ✅ 슬라이드·라벨 정상 | `bc_therapy_{er,grade,her2,residual}`(166/166·159/159), `cptac_brca_{immune,pik3ca,tp53}`(112), `cptac_lscc_{arid1a,histologic,immune,keap1}`(304/292), `cptac_luad_{egfr,immune,kras,stk11,tp53}`(324/312), `cptac_pda_{immune,smad4}`(242), `mbc_recist`(97), `ucla_lung_progression_regression`(112), `bracs_{coarse,fine}`(547), `herroi_response`(85) — 공식과 슬라이드·라벨 100% 일치 |
+| ✅ 슬라이드·라벨 정상 | `bc_therapy_{er,grade,her2,residual}`(166/166·159/159), `cptac_brca_{immune,pik3ca,tp53}`(112), `cptac_lscc_{arid1a,histologic,immune,keap1}`(304/292), `cptac_luad_{egfr,immune,kras,stk11,tp53}`(324/312), `cptac_luad_os`(313)·`cptac_pda_os`(227)·`mbc_os`(96), `cptac_pda_{immune,smad4}`(242), `mbc_recist`(97), `ucla_lung_progression_regression`(112), `bracs_{coarse,fine}`(547), `herroi_response`(85) — 공식 `task_col`과 슬라이드·라벨 100% 일치 |
 | ❌ **데이터 소스 오류** | `cptac_ccrcc_{er,grade,her2,residual}` — `bc_therapy`의 바이트 동일 복사본 (§51 상세) |
-| ❌ **라벨 오류** | `cptac_luad_os`(313), `cptac_pda_os`(227), `mbc_os`(96) — 슬라이드는 정상이나 **라벨이 공식 이진 `OS_event`가 아닌 생존기간류(0~7) 값** |
 | ⚠️ 피처 부재(기지) | `herroi_response`: `HER2_tumor_ROIs_v3` 빈 폴더(85장 전부) → 평가 제외. `bracs`: 7장 피처 없음 |
 
+- **OS task는 survival task다**: 공식 `task_type: survival`, `task_col: OS`(0~7 복합 라벨 =
+  OS_days 사분위 + OS_event), `extra_cols: [OS_event, OS_days]`, metric `cindex`.
+  ⚠️ 초기 감사에서 이진 `OS_event`와 잘못 비교해 OS 3종을 "라벨 오류"로 오탐했으나,
+  공식 `OS` 컬럼과 **100% 일치**로 정정 — **로컬 OS CSV는 정상**.
 - **§49·§50의 17-task CV 수치에는 영향 없음**: 평가된 17개 중 OS task는 없고, ccrcc 3개는
   중복 제거됨 → 14개 유효 task 수치(0.843)는 유효.
-- 로컬에 존재하는 OS task 3종은 **라벨이 잘못되어 평가·사용 금지** — 사용 시 공식
-  `k=all.tsv`의 `OS_event` 컬럼으로 교체 필요.
-- **결론**: "데이터 자체"는 정상(피처 무손상, 24/30 CSV 정상). 잘못된 것은 ccrcc 4건(소스
-  오류) + OS 3건(라벨 오류) = **7건의 로컬 CSV 제작 오류**다.
+- **결론**: "데이터 자체"는 정상(피처 무손상, **26/30 CSV 정상**). 잘못된 것은 **ccrcc 4건
+  (소스 오류)뿐**이다.
+
+### 6. 공식 fold별 split 확보 (2026-08-07, `scripts/fetch_pathobench_official.py`)
+
+사용자 요청으로 **공식 fold별 split 전체를 다운로드**했다:
+`/NHNHOME/kimds/Data/PathoBench/official/{source}/{task}/{k=all.tsv, config.yaml}` (10개 소스,
+**31개 task**). `k=all.tsv`는 `case_id, slide_id, <task_col>, fold_0..fold_49`(값 train/val/test),
+`config.yaml`이 `task_col`/`label_dict`/`task_type`을 정의한다. `SplitFactory.from_local` 호환 레이아웃.
+
+- 재다운로드: `python scripts/fetch_pathobench_official.py [--source ...]`.
+- 참고: OS·bracs task는 `nfold=5`, 그 외는 50 — 공식 설정이 task별로 다르다.
+- 다음: 공식 `k=all.tsv` → 로컬 `slide_id,label,split` CSV 변환 + 실제 ccrcc task 평가.
