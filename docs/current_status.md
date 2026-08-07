@@ -1,11 +1,11 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-08` (**§60 v35-16384 50ep 완주(best val_ce 0.3469 @ ep48) + 메모리/val plateau 진단 + LUAD EGFR v35 공식 50-fold 평가 진행 중** + §59 v35 rev.2 + **§41–§48 v33 arm C saga 아카이브 → history/current_status_archive_20260808_v33_armC.md**)  
+**Last updated**: `2026-08-08` (**§60 v35 공식 50-fold 2개 완료 — LUAD EGFR 0.7819 / BRCA PIK3CA 0.5668(pooled) + SEAL baseline 비교(지도 ABMIL·MeanMIL과 근접/동급) + v35-16384 50ep 완주(best val_ce 0.3469 @ ep48) + 메모리/val plateau 진단** + §59 v35 rev.2 + **§41–§48 v33 arm C saga 아카이브 → history/current_status_archive_20260808_v33_armC.md**)  
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **v34 확정 (§52·§53·§56)**: **v34-1536을 PathoBench 보고용 모델로 확정**(사용자 결정). 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv fold·코호트·라벨) 기준 **50-fold**(SEAL macro-AUC와 동일 구조) — **5/17 완료**(bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569, brca_TP53), **12개는 config 수정으로 재시작**(§56, 백그라운드). v30은 합성/Musk baseline 유지. 이전 5-fold와 수치 ±0.04 이내 동일(평가 견고성). config 시스템을 v34 base + group default 참조형으로 리팩터링(§56). 자세한 진행 §53·§56.
-* **v35 (§58 rev.1 설계 → §59 rev.2 개정 + 학습 시작)**: rev.1의 3개 결정 중 **①rare 제거·③context/query 대형화 분리는 폐기 권고**(§59.1: anchor 오염, 집계 수학 오류, Musk 소형 bag 파괴 = 확정 목표 위반, query 위치를 dataset이 알 수 없어 구현 불가, 그리고 동기 자체에 직접 반증 — context 2k cap Δpooled **−0.0019**). ②chunk는 **근사 평균이 아닌 정확 충분통계 축약**으로 재설계. 구현·검증 완료분: **bag 단위 정확 스트리밍**(peak VRAM 40,990 → 18,930 MiB, AUROC 동일), `num_cells_log_uniform_power`, VRAM 가드 `episode_batch_size` 누락 버그 수정, **41 tests**. **학습 완주(2차, §60)**: 데이터 단독 arm(`num_cells [1,16384]` power 1.5, rare branch 유지) 50 epochs 정상 완주 — 1차 `[1,32768]`은 CUDA OOM 크래시(epoch 0부터 324회, 21:24 SIGABRT, best 0.3574 @ ep6), 상한 16384 축소 후 재개해 **OOM 없이 완주**, best val_ce **0.3469 @ ep48**. 메모리 진단(§60): 단조 누수가 아니라 `expandable_segments:True` + 극단 ragged shape(epoch 9/23 ~178GB 스파이크, 스텝 사이 92GB). val plateau는 v34와 동일한 정상 수렴. → **LUAD EGFR v35 공식 50-fold 평가 진행 중**(4 worker, GPU 0·1, §60).
-* **다음 Action**: ① **v35 공식 50-fold 평가**(§60, LUAD EGFR 진행 중 → 17개 완료 후 v34 재실행으로 공정 비교, §59.5), ② **P0 게이트(무료, 학습 0)** — query 크기 스윕 + `rare_logits=0` ablation; 전자가 +0.005 미달이면 대형화 노선 폐기(rev.2 §4), ③ 공식 50-fold **잔여 8개**(스트리밍으로 workers 2 → 8+ 가능), ④ v30 vs v34 공정 비교용 **PCA-per-fold CV**(미지원), ⑤ **v34-512 학습**, ⑥ rev.2 §3의 **chunk 단위**(bag 내부) 스트리밍 — 현재는 bag 단위까지만, ⑦ rev.2 §8 zero-init chunk-attention(ABMIL 격차 대응).
+* **v35 (§58 rev.1 설계 → §59 rev.2 개정 + 학습 시작)**: rev.1의 3개 결정 중 **①rare 제거·③context/query 대형화 분리는 폐기 권고**(§59.1: anchor 오염, 집계 수학 오류, Musk 소형 bag 파괴 = 확정 목표 위반, query 위치를 dataset이 알 수 없어 구현 불가, 그리고 동기 자체에 직접 반증 — context 2k cap Δpooled **−0.0019**). ②chunk는 **근사 평균이 아닌 정확 충분통계 축약**으로 재설계. 구현·검증 완료분: **bag 단위 정확 스트리밍**(peak VRAM 40,990 → 18,930 MiB, AUROC 동일), `num_cells_log_uniform_power`, VRAM 가드 `episode_batch_size` 누락 버그 수정, **41 tests**. **학습 완주(2차, §60)**: 데이터 단독 arm(`num_cells [1,16384]` power 1.5, rare branch 유지) 50 epochs 정상 완주 — 1차 `[1,32768]`은 CUDA OOM 크래시(epoch 0부터 324회, 21:24 SIGABRT, best 0.3574 @ ep6), 상한 16384 축소 후 재개해 **OOM 없이 완주**, best val_ce **0.3469 @ ep48**. 메모리 진단(§60): 단조 누수가 아니라 `expandable_segments:True` + 극단 ragged shape. val plateau는 v34와 동일 정상 수렴. **공식 50-fold 평가 2개 완료(§60)**: LUAD EGFR **pooled 0.7819**(macro 0.7889±0.092) / BRCA PIK3CA **pooled 0.5668**(macro 0.5743±0.109) — **SEAL 비교: 지도 ABMIL에 근접(EGFR −0.041 / PIK3CA −0.021), 지도 MeanMIL과 동급~우위(EGFR +0.012 / PIK3CA +0.030)**.
+* **다음 Action**: ① **v35 공식 50-fold 평가**(§60, EGFR·PIK3CA 완료 → 잔여 15개 + v34 재실행으로 공정 비교, §59.5), ② **P0 게이트(무료, 학습 0)** — query 크기 스윕 + `rare_logits=0` ablation; 전자가 +0.005 미달이면 대형화 노선 폐기(rev.2 §4), ③ 공식 50-fold **잔여 8개**(스트리밍으로 workers 2 → 8+ 가능), ④ v30 vs v34 공정 비교용 **PCA-per-fold CV**(미지원), ⑤ **v34-512 학습**, ⑥ rev.2 §3의 **chunk 단위**(bag 내부) 스트리밍 — 현재는 bag 단위까지만, ⑦ rev.2 §8 zero-init chunk-attention(ABMIL 격차 대응).
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
@@ -14,7 +14,7 @@
 
 **Read first if you are picking this up**: **§60 (v35-16384 완주 + 메모리/val 진단 + LUAD EGFR 50-fold 평가 진행 중)**, **§59 (v35 rev.2 개정 + 스트리밍 구현 + 학습 시작 + 50-fold stale 경고)**, **§58 (v35 rev.1 설계 — §59가 상당 부분 정정하므로 §59와 함께 읽을 것)**, **§57 (50-fold case leakage 진단)**, **§53 (v34 확정 + 공식 50-fold 표 — §59.5에 따라 재실행 필요)**,
 
-**열린 과제**: ① **v35 공식 50-fold 평가**(§60, LUAD EGFR 진행 중 → 잔여 task), ② **P0 게이트**(query 크기 스윕 / rare ablation, 무료), ③ **§53 표 9개 재실행**(`5869535` 이후 stale, §59.5) + 공식 50-fold 잔여 8개 → 17개 최종 표 + SEAL 재비교, ④ v30 vs v34 CV 공정 비교(PCA-per-fold), ⑤ v34-512 학습, ⑥ **chunk 단위(bag 내부) 스트리밍** 미구현(rev.2 §3), ⑦ v30 six-task / B2b cardinality 효과 분리, ⑧ frozen-v30 multi-resolution headroom, ⑨ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
+**열린 과제**: ① **v35 공식 50-fold 평가**(§60, EGFR·PIK3CA 완료 → 잔여 15개 + SEAL 최종 재비교), ② **P0 게이트**(query 크기 스윕 / rare ablation, 무료), ③ **§53 표 9개 재실행**(`5869535` 이후 stale, §59.5) + 공식 50-fold 잔여 8개 → 17개 최종 표 + SEAL 재비교, ④ v30 vs v34 CV 공정 비교(PCA-per-fold), ⑤ v34-512 학습, ⑥ **chunk 단위(bag 내부) 스트리밍** 미구현(rev.2 §3), ⑦ v30 six-task / B2b cardinality 효과 분리, ⑧ frozen-v30 multi-resolution headroom, ⑨ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
 
 **Branches**: `main` = v30 확정 baseline + 미채택 v31 CCER-v2 재현 코드. 참고용 branch/tag 구조는
 [`history/branch_structure.md`](history/branch_structure.md).
@@ -1651,13 +1651,13 @@ tanh(±1) sign-only로 붕괴했음). bc_therapy/er_status fold 1-3:
 
 ---
 
-## 60. 2026-08-08 — v35-16384 50ep 완주 + 메모리/val plateau 진단 + LUAD EGFR v35 공식 50-fold 평가 시작
+## 60. 2026-08-08 — v35-16384 50ep 완주 + 메모리/val plateau 진단 + v35 공식 50-fold 평가(EGFR·PIK3CA 완료) + SEAL 비교
 
 **상태**: §59의 v35 데이터 단독 arm이 **50 epochs 정상 완주**(OOM 크래시 없이).
 완주 전 메모리 급증("누수?")과 val loss plateau 의심을 진단해 **둘 다 정상/설명 가능**으로
-결론냈다. 완주 후 판정 게이트인 **LUAD EGFR v35 공식 50-fold 평가를 GPU 0·1로 시작**(진행 중).
-이번 세션에서 §41–§48(v33 arm C saga)을 `history/current_status_archive_20260808_v33_armC.md`로
-아카이브했다.
+결론냈다. 완주 후 판정 게이트인 **공식 50-fold 평가를 진행 — LUAD EGFR·BRCA PIK3CA 2개 완료**,
+SEAL(지도 ABMIL/MeanMIL)과 비교했다. 이번 세션에서 §41–§48(v33 arm C saga)을
+`history/current_status_archive_20260808_v33_armC.md`로 아카이브했다.
 
 ### 1. v35 2차 런 `[1,16384]` 완주 (commit `51b5093` 이후)
 
@@ -1693,21 +1693,41 @@ tanh(±1) sign-only로 붕괴했음). bc_therapy/er_status fold 1-3:
   ep별 ±0.005~0.01 요동이 바로 이 노이즈.
 - **판정 메트릭은 val_ce가 아님**: §59.7-1대로 **공식 50-fold AUROC**가 v35 arm의 유일한 판정 수단.
 
-### 4. LUAD EGFR v35 공식 50-fold 평가 (진행 중)
+### 4. LUAD EGFR v35 공식 50-fold 평가 (완료)
 
 - 실행: `scripts/run_official_folds_parallel.py` — ckpt `checkpoints/20260807_224559/v35_largebag/
   epoch=048-val_ce_loss=0.3469.ckpt`, config `configs/train_v34_phase0_largectx_1536.yaml`(동일 아키텍처),
-  task `cptac_luad/EGFR_mutation`(k=all.tsv 50-fold), 4 workers / GPU 0·1(워커당 ~25 GiB, GPU당 2).
-- 로그 `logs/official50/luad_egfr_v35_official50.log`, 출력
-  `predictions/pathobench_cptac_luad_EGFR_mutation_v35_official50.pt` (미생성 = 진행 중).
-- **비교 대상 존재**: `predictions/pathobench_cptac_luad_EGFR_mutation_v34_1536_official50.pt`
-  (v34 공식 50-fold, 08-07 18:09) — 단 §59.5에 따라 v34가 `5869535` 이후 stale일 수 있어
-  엄밀 비교엔 v34 재실행 필요.
+  task `cptac_luad/EGFR_mutation`(k=all.tsv 50-fold), 4 workers / GPU 0·1(워커당 ~25 GiB, GPU당 2), 2305s.
+- **결과**: pooled **0.7819** / macro(fold-mean) **0.7889 ± 0.0919**. 로그
+  `logs/official50/luad_egfr_v35_official50.log`, 출력
+  `predictions/pathobench_cptac_luad_EGFR_mutation_v35_official50.pt`.
+- **v34 비교**: `pathobench_cptac_luad_EGFR_mutation_v34_1536_official50.pt`(pooled 0.7714,
+  §59.1 "full" 실측과 일치) → v35 **+0.0105 pooled**. 단 §59.5로 v34 재실행이 엄밀.
 
-### 5. 다음
+### 5. BRCA PIK3CA v35 공식 50-fold 평가 (완료)
 
-1. **LUAD EGFR v35 50-fold 결과 확보** → pooled/fold AUROC + v34(재실행)와 비교.
-2. v35 arm 판정은 §59.7-1대로 50-fold AUROC로. 이후 잔여 task들 + v34 재실행(공정 비교).
+- 실행: 동일 ckpt/config, task `cptac_brca/PIK3CA_mutation`, **8 workers / GPU 0·1**(소형 코호트라 워커 증설),
+  287s. 로그 `logs/official50/brca_pik3ca_v35_official50.log`, 출력
+  `predictions/pathobench_cptac_brca_PIK3CA_mutation_v35_official50.pt`.
+- **결과**: pooled **0.5668** / macro **0.5743 ± 0.1086**. v34 비교
+  `pathobench_cptac_brca_PIK3CA_mutation_v34_1536_official50.pt`(pooled 0.5690) → **v35 ≈ v34**
+  (Δ −0.002, 둘 다 랜덤 수준). SEAL에서도 ABMIL 0.595로 거의 랜덤인 어려운 task.
+
+### 6. SEAL baseline 비교 (지도 ABMIL/MeanMIL, 공식 50-fold macro-AUC — §53 프로토콜·코호트 유의)
+
+| task | v35 pooled | v35 macro | v34 pooled | SEAL ABMIL | SEAL MeanMIL | v35 vs ABMIL | v35 vs MeanMIL |
+|---|---|---|---|---|---|---|---|
+| LUAD EGFR | 0.7819 | 0.7889±0.092 | 0.7714 | 0.830±0.089 | 0.777±0.099 | **−0.041** | **+0.012** |
+| BRCA PIK3CA | 0.5668 | 0.5743±0.109 | 0.5690 | 0.595±0.103 | 0.544±0.120 | **−0.021** | **+0.030** |
+
+- **판독**: zero-shot(v35)이 두 task 모두 **지도 MeanMIL과 동급~우위**, **지도 ABMIL에는 근접**(−0.02~−0.04, std 겹침). §59.7-5의 ABMIL 격차가 그대로 확인됨(rev.2 §8 zero-init chunk-attention이 이 격차를 노림).
+  EGFR은 v35가 v34보다 +0.01 우위(large-bag 노출이 이 task에선 소폭 긍정), PIK3CA는 v35 ≈ v34(둘 다 랜덤).
+- **SEAL 최약 task**: CCRCC VHL(ABMIL 0.538) / BRCA PIK3CA(0.595) — 지도 모델도 못 푸는 task. v35로 VHL 등 약한 task를 추가 돌리는 것이 강건성 테스트가 될 수 있음(제안).
+
+### 7. 다음
+
+1. v35 arm 판정은 §59.7-1대로 50-fold AUROC — **잔여 15개 task** + v34 재실행(공정 비교, §59.5).
+2. (제안) CCRCC VHL 등 SEAL 최약 task 추가 평가(강건성 테스트).
 3. **P0 게이트**(§59.7-2, 무료): query 크기 스윕 + `rare_logits=0` ablation — +0.005 미달 시 대형화 노선 폐기.
 4. 대형 bag 훈련의 `expandable_segments` A/B 검증은 다음 large-bag 런에서 (옵션).
 5. val 신호 정확화가 필요하면 `val episodes 104 → 1000`(§5 권장).
