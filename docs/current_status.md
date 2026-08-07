@@ -1,20 +1,19 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-07` (**§50 v34-1536 추가 평가: Musk 패딩 브리지(타일 0.858) + ICI(랜덤 0.512) + PathoBench 17-task 전체 CV(평균 0.843)** + **§49 아키텍처 효율화/학습 완주** + **§48 arm C 완주/v33 평가**)  
+**Last updated**: `2026-08-07` (**§56 config 시스템 리팩터링: v34 base·default 참조·재아카이빙 + 공식 50-fold 재시작(5/17→12개 진행)** + **§55 리팩터링 1단계** + **§54 아카이빙 정리**)  
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
-* **v34 확정 (§52·§53)**: **v34-1536을 PathoBench 보고용 모델로 확정**(사용자 결정). 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv fold·코호트·라벨) 기준 **50-fold**(SEAL macro-AUC와 동일 구조)로 진행 중 — 완료분(pooled): bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569. v30은 합성/Musk baseline 유지. 이전 5-fold(§50)와 수치 ±0.04 이내로 동일(평가 견고성). 로컬 ccrcc CSV 오류 정정(§51). 자세한 진행 §53.
-* **다음 Action**: ① **v34 확정됨(§53)** — 공식 **50-fold 17개 전체 완료** 후 최종 표 + **SEAL 재비교**, ② v30 vs v34 공정 비교용 **PCA-per-fold CV** (미지원), ③ **v34-512 학습** + 동일 평가, ④ Phase 0 결과 선택(사용자) — arm C의 n>34(0.849)·lscc 개선 채택 여부, ⑤ v30 medium 참조 재학습, ⑥ frozen-v30 multi-resolution probe(§39, 미검증).
+* **v34 확정 (§52·§53·§56)**: **v34-1536을 PathoBench 보고용 모델로 확정**(사용자 결정). 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv fold·코호트·라벨) 기준 **50-fold**(SEAL macro-AUC와 동일 구조) — **5/17 완료**(bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569, brca_TP53), **12개는 config 수정으로 재시작**(§56, 백그라운드). v30은 합성/Musk baseline 유지. 이전 5-fold와 수치 ±0.04 이내 동일(평가 견고성). config 시스템을 v34 base + group default 참조형으로 리팩터링(§56). 자세한 진행 §53·§56.
+* **다음 Action**: ① 공식 **50-fold 12개 완료**(백그라운드 진행, §56) → **17개 전체 최종 표** + **SEAL 재비교**, ② v30 vs v34 공정 비교용 **PCA-per-fold CV** (미지원), ③ **v34-512 학습** + 동일 평가, ④ Phase 0 결과 선택(사용자) — arm C의 n>34(0.849)·lscc 개선 채택 여부, ⑤ v30 medium 참조 재학습, ⑥ frozen-v30 multi-resolution probe(§39, 미검증).
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§53 (v34 최종 확정 + 공식 50-fold 평가)**, **§52 (실제 ccrcc 평가·SEAL 비교·공식 50-fold 계획)**, **§51 (PathoBench 원본 검증: 로컬 ccrcc CSV는 bc_therapy 복사본)**, **§50 (v34-1536 추가 평가: Musk 타일 브리지, ICI 랜덤, PathoBench 17-task 전체 CV)**, **§49 (아키텍처 효율화 MLA-slot + v34-1536 학습 완주 + PathoBench 5-fold CV)**, **§48 (arm C top-up 완주 + v33 평가: legacy gate 미달, PathoBench v30 우위)**, **§47 (e125 재평가/타일 스윕)**, **§46 (PathoBench zero-shot 평가)**, **§45 (arm C top-up 중간 Musk 신호 — 대형 bag 개선)**, **§44 (B2b 패딩 배칭, 병목 프로파일)**, **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
-**§36 (CCER-v2 평가)**, **§29 (v30 확정 baseline)**.
+**Read first if you are picking this up**: **§56 (config 리팩터링 + 공식 50-fold 재시작)**, **§53 (v34 최종 확정 + 공식 50-fold 평가)**,
 
-**열린 과제**: ① v30 vs v34 CV 공정 비교(PCA-per-fold), ② v34-512 학습, ③ v30 six-task 효과 분리, ④ B2b within-episode cardinality 효과 분리, ⑤ frozen-v30 multi-resolution headroom, ⑥ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
+**열린 과제**: ① **공식 50-fold 12개 완료**(백그라운드, §56) → 최종 표+SEAL 재비교, ② v30 vs v34 CV 공정 비교(PCA-per-fold), ③ v34-512 학습, ④ v30 six-task 효과 분리, ⑤ B2b within-episode cardinality 효과 분리, ⑥ frozen-v30 multi-resolution headroom, ⑦ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
 
 **Branches**: `main` = v30 확정 baseline + 미채택 v31 CCER-v2 재현 코드. 참고용 branch/tag 구조는
 [`history/branch_structure.md`](history/branch_structure.md).
@@ -1893,4 +1892,59 @@ Patho-Bench 프로토콜**(공식 k=all.tsv fold · 공식 코호트 · 공식 �
 
 - 폐기 아키텍처 분기(v22/v25/v31/v32/v33 등)의 **미사용 메서드/코드** 정리.
 - `baseline.py`(5.8k줄) 분리 검토, 컨벤션 정리.
-- 참고: **50-fold 배치는 5/17만 완료, 리쥼 시도 실패** — 리팩터링 후 재개 필요 (§53).
+- 참고: **50-fold 배치는 5/17만 완료였고 아카이빙 회귀로 리쥼 실패** → §56에서 config 수정 후 **12개 재시작**(백그라운드 진행).
+
+---
+
+## 56. 2026-08-07 — config 시스템 리팩터링(v34 base·default 참조·재아카이빙) + 공식 50-fold 재시작
+
+**상태**: **v34-1536 = PathoBench 보고용 확정 유지**. config 시스템을 **v34 base + group default
+참조형**으로 재구성하고, v30/v24/v22 체인을 **자체 포함형 아카이빙**으로 정리했다. 공식 50-fold
+배치는 아카이빙 회귀로 전부 실패했던 것을 config 수정으로 해결하고 **5/17 완료 → 12개 재시작**
+(백그라운드).
+
+### 1. v34 config = default 참조형 (단일 진실 공급원)
+
+- `configs/train_v34_phase0_largectx_1536.yaml`·`_512.yaml`을 `data/model/optimizer/scheduler/
+  trainer/logger/callbacks: default` 참조로 단순화. **group default를 v34-1536 해석값으로 설정**
+  (`configs/{data,model,optimizer,scheduler,trainer,callbacks,logger}/default.yaml` — optimizer/
+  scheduler/logger는 신규).
+- `src/utils/utils.py merge_train_config`에 **`logger_overrides`·`trainer_overrides` 지원 추가**
+  (experiment_name/max_epochs 등 run별·arm별 override용).
+- v34-512는 dimension(512) + arm-D 레시피(batch 1, num_cells [1,32768], episodes 256, epochs 25)만
+  override로 유지 (사용자 결정).
+- 검증: 두 v34 config 해석 결과가 이전(자체 포함형/원본)과 **딥 이퀄**. 전체 config 141개 해석 성공.
+
+### 2. 재아카이빙 + 아카이빙 정책
+
+- root = **v34 3종만** (`train_v34_1536`/`_512`/`test_v34_1536_ici`). v30 5종+eval_v30 2종 →
+  `archive/v30/`, v24 2종 → `archive/v24/`, v22_medium → `archive/v22/`. 이동 시 base_config
+  상대경로를 `../v22/`·`../v24/`·`../v30/`·`../v18_v19/`로 보정 — **아카이브 전체 자기완결**.
+- 기존 아카이브의 숨은 깨짐(ia_mil·musklike_easy_levers·v23_v24_candidates·v25·v26·v31·v32·v33,
+  19개)도 모두 수정. v18_v19의 learnability 10개는 커밋 a5dfcf8에서 의도적으로 purge된 data 모듈을
+  참조하는 **기존 결함**(역사 보존용, 활성/체인과 무관).
+- **아카이빙 정책 신설(handoff §7 규칙 3)**: 아카이빙 config는 `base_config` 없이 **전부 인라인
+  (자체 포함형)**으로 보관 → 상대경로 깨짐 원천 차단.
+
+### 3. 공식 50-fold 재시작 (config 회귀 해결)
+
+- 원인: 이전 배치(12:54~12:59)가 아카이빙된 `configs/train_v24_musklike_easy.yaml`을 참조해 17개
+  전부 rc=1 실패 → v34 config 자체 포함/default 참조화로 해결 (smoke에서 config 해석 통과 확인).
+- 배치 스크립트 신규: `scripts/run_official50_batch.sh` (17개 task, 완료분 스킵, workers
+  10→6→4→2 자동 축소, per-fold 체크포인트 리쥼). 로그 `logs/official50/batch_resume.log`.
+- **완료 5개(pooled)**: bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569,
+  cptac_brca_TP53.
+- **재시작(14:17 KST, 12개 백그라운드)**: lscc(3)·luad(4)·pda(1)·ucla_lung(1)·ccrcc(3).
+- ⚠️ **14:17 1차 재시작은 ARID1A에서 OOM 연쇄로 중단**: `run_official_folds_parallel.py`가 worker
+  실패 시 형제 worker를 종료하지 않아(고아 3개가 GPU ~166GB 점유) workers 10→6→4→2 재시도가 전부
+  즉시 OOM. **러너 수정**(worker 실패 시 전체 worker kill → GPU 해제) 후 **14:26 재실행**(nohup,
+  PID 723428) — ARID1A(304 슬라이드, worker당 ~50GB)는 깨끗한 GPU에서 workers=2로 수용. 완료 후
+  §53 표 갱신 + SEAL 재비교.
+- ARID1A 2-fold smoke는 10분 timeout으로 종료(대형 task 1-fold 평가가 10분 초과 — config 문제 아님).
+
+### 4. 다음
+
+- 50-fold 12개 완료 → §53 표 **17개 전체 갱신** + SEAL 재비교.
+- v34-512 학습 + 동일 평가(열린 과제 ③), v30 vs v34 PCA-per-fold 공정 비교.
+- 활성 스크립트 참조 정리 완료: `queue_v30_poolz.sh`·`evaluate_synthetic.py`·`test_musk.py` →
+  archive 경로.

@@ -1,4 +1,4 @@
-base_config: train_v30_cardinality_poolz_l2.yaml
+base_config: ../v30/train_v30_cardinality_poolz_l2.yaml
 
 # =============================================================================
 # v32b DR-CCER — Stage A (donor-resolved evidence expert, v30 frozen)

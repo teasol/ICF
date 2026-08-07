@@ -1,6 +1,11 @@
-base_config: train_v24_musklike_easy.yaml
+base_config: ../v24/train_v24_musklike_easy.yaml
 
-# v30 S2 = B2 (cardinality-faithful sampling) + B1 `poolz_l2`.
+# v30 S2 CONTROL = B2 (cardinality-faithful sampling) ALONE, v24 representation.
+#
+# Attribution control for train_v30_cardinality_poolz_l2.yaml: does exposure to varying
+# bag sizes help on its own? Caveat: the legacy center+L2 view maps an n=1 bag to the
+# zero vector and an n=2 bag to an antipodal pair, so the smallest episodes here train
+# on degenerate views -- that asymmetry is the point of comparing against poolz_l2.
 #
 # S1 verdict (SS28): uncentering alone is NEGATIVE on Musk -- poolz 0.776 and
 # poolz_l2 0.762 both fall below the v24 baseline 0.803, so neither passed its gate.
@@ -40,12 +45,12 @@ data_overrides:
     num_cells_log_uniform: true
 
 model_overrides:
-  bag_representation: poolz_l2
+  bag_representation: legacy
 
 logger:
   name: csv
   save_dir: logs
-  experiment_name: v30_cardinality_poolz_l2
+  experiment_name: v30_cardinality_legacy
 
 trainer:
   max_epochs: 50

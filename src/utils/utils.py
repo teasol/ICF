@@ -140,7 +140,16 @@ def merge_train_config(config_path: Path) -> dict[str, Any]:
     merged["optimizer"] = resolve_config_group("optimizer", config.get("optimizer"))
     merged["scheduler"] = resolve_config_group("scheduler", config.get("scheduler"))
     merged["trainer"] = resolve_config_group("trainer", config.get("trainer"))
+    merged["trainer"] = resolve_config_group("trainer", config.get("trainer"))
+    merged["trainer"] = deep_merge(
+        merged["trainer"], config.get("trainer_overrides", {})
+    )
+    merged.pop("trainer_overrides", None)
     merged["logger"] = resolve_config_group("logger", config.get("logger"))
+    merged["logger"] = deep_merge(
+        merged["logger"], config.get("logger_overrides", {})
+    )
+    merged.pop("logger_overrides", None)
     merged["callbacks"] = resolve_config_group("callbacks", config.get("callbacks"))
     return merged
 

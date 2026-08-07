@@ -1,4 +1,4 @@
-base_config: ../../train_v24_musklike_easy.yaml
+base_config: ../v24/train_v24_musklike_easy.yaml
 
 # Phase 1 DISCRIMINATOR — baseline (centered, no IA-MIL) on rare-response data.
 #

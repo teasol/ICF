@@ -19,7 +19,7 @@ Predictions are saved with their episode index and task label so
 Usage:
     python scripts/evaluate_synthetic.py \
         --checkpoint checkpoints/<ts>/v22_medium/last.ckpt \
-        --config configs/train_v22_medium.yaml \
+        --config configs/archive/v22/train_v22_medium.yaml \
         --output predictions/synthetic_v22_medium.pt
 """
 from __future__ import annotations

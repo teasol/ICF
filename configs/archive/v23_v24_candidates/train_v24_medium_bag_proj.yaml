@@ -1,4 +1,4 @@
-base_config: ../../train_v22_medium.yaml
+base_config: ../v22/train_v22_medium.yaml
 
 # Architecture v24: replace the exact-mean bag collapse (v23-A0) with a learned
 # linear projection.  Each bag's structured tokens -- 1 global summary + 1 slot

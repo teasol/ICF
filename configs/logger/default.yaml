@@ -1,0 +1,5 @@
+# Default logger = v34-1536 (PathoBench reporting model, 2026-08-07): CSV.
+# experiment_name is a per-run identifier -- set it in each run config
+# (build_logger falls back to "tiranos" if omitted).
+name: csv
+save_dir: logs

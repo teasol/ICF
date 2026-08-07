@@ -1,8 +1,9 @@
 model_src: src.models.baseline.BaseModel
 
-# Architecture v19: hybrid density/rare anchors, multi-statistic slots,
-# class-memory cross-attention, rare-instance evidence, and interaction fusion.
-input_dim: 512
+# Default model = v34-1536 (PathoBench reporting model, 2026-08-07):
+# v24-B1 bottleneck projection + residual mean, B1 `poolz_l2` representation,
+# B2 log-uniform cardinality, MLA-slot low-rank affinity, 1536-d input.
+input_dim: 1536
 bag_centered_representation: true
 global_summary: centered_spread
 use_raw_mean_branch: false
@@ -37,3 +38,20 @@ meta_fusion_residual_scale: 0.10
 meta_covariance_ridge_logit_scale: 2.0
 meta_covariance_residual_scale: 0.25
 num_classes: 2
+covariance_relation:
+  enabled: true
+  mode: learned_head
+  granularity: subspace
+  subspace_rank: 1
+  subspace_whiten: true
+  subspace_shrinkage: 0.25
+  diagnostic_only: false
+  residual_scale: 0.5
+  eps: 1.0e-06
+project_structured_tokens: true
+projection_bottleneck_dim: 64
+projection_residual_mean: true
+bag_representation: poolz_l2
+aggregator_slot_latent_dim: 64
+aggregator_slot_query_latent_dim: 128
+aggregator_slot_affinity_dim: 512

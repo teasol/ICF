@@ -1,4 +1,4 @@
-base_config: train_v24_medium_bag_proj_residual.yaml
+base_config: ../v24/train_v24_medium_bag_proj_residual.yaml
 
 # =============================================================================
 # v30 CONFIRMED BASELINE (2026-08-04, user promotion decision)

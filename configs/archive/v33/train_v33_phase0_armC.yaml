@@ -1,4 +1,4 @@
-base_config: train_v30_cardinality_poolz_l2.yaml
+base_config: ../v30/train_v30_cardinality_poolz_l2.yaml
 
 # v33 Phase 0 arm C = v30 + legacy five-task mix + B2b (per-bag cardinality).
 #

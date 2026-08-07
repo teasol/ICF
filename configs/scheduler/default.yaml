@@ -1,0 +1,19 @@
+# Default scheduler = v34-1536 (PathoBench reporting model, 2026-08-07).
+scheduler_src: src.utils.schedulers.WarmupReduceLROnPlateau
+scheduler_kwargs:
+  warmup_epochs: 5
+  warmup_start_factor: 0.1
+  plateau_start_epoch: 5
+  step_epoch_interval: 1
+  plateau_check_interval: 1
+  mode: min
+  factor: 0.5
+  patience: 10
+  threshold: 1.0e-05
+  threshold_mode: rel
+  cooldown: 5
+  min_lr: 1.0e-06
+
+monitor: val_ce_loss
+interval: epoch
+frequency: 1

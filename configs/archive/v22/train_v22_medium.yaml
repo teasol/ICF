@@ -1,4 +1,4 @@
-base_config: archive/v18_v19/train_medium.yaml
+base_config: ../v18_v19/train_medium.yaml
 optimizer: adamw_learnability_5e4
 data_overrides:
   dataset_kwargs:

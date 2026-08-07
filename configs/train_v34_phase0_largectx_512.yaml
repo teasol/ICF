@@ -1,6 +1,10 @@
-base_config: train_v30_cardinality_poolz_l2.yaml
-
 # v34 Phase 0 arm D — large-context training, 512-d input (Exp 1).
+#
+# Inherits the config-group defaults (data/model/optimizer/scheduler/trainer/
+# logger/callbacks = default, i.e. v34-1536 values) and overrides only what
+# distinguishes arm D: 512-d input (PathoBench 1536->512 PCA bridge) plus the
+# large-context recipe (episode_batch_size 1, num_cells [1,32768],
+# episodes_per_epoch 256, max_epochs 25).
 #
 # Gap: v30 trains on bags with num_cells ~ LogUniform[1,1024] (median ~34),
 # while PathoBench bags (slides) hold 3k-30k+ tiles and all-context episodes
@@ -20,30 +24,42 @@ base_config: train_v30_cardinality_poolz_l2.yaml
 # Eval: PathoBench all-context with the existing 1536->512 PCA bridge
 # (test_pathobench.py --config <this>, model input_dim = 512).
 #
-# Budget placeholder: episodes_per_epoch / max_epochs tuned after the smoke
-# test (large episodes are much heavier than v30's, so total episodes are
-# scaled down from v30's 204,800).
 # MLA-slot: low-rank cell->slot affinity (d_c=64) + exact variance-based
 # slot_std/slot_distance so the [cells, slots, dim] difference tensor is not
 # materialized — this is what makes large contexts trainable in memory.
 # Measured peak VRAM with slot_latent_dim=64: ~24 GiB at [1,16384]; ~2.3x for
 # the [1,32768] worst case (~55 GiB) — fits B200 180 GiB.
-model_overrides:
-  bag_representation: poolz_l2
-  aggregator_slot_latent_dim: 64
-  aggregator_slot_query_latent_dim: 128
-  aggregator_slot_affinity_dim: 512
 
+seed: 42
+ckpt_path:
+
+data: default
 data_overrides:
-  dataset_kwargs:
-    num_cells: [1, 32768]
-    episodes_per_epoch: 256
   episode_batch_size: 1
+  dataset_kwargs:
+    episodes_per_epoch: 256
+    num_cells: [1, 32768]
+    output_dim: 512
 
-logger:
-  name: csv
-  save_dir: logs
+model: default
+model_overrides:
+  input_dim: 512
+
+optimizer: default
+scheduler: default
+
+trainer: default
+trainer_overrides:
+  max_epochs: 25
+
+logger: default
+logger_overrides:
   experiment_name: v34_phase0_largectx_512
 
-trainer:
-  max_epochs: 25
+callbacks: default
+
+model_kwargs:
+  training_targets_per_episode: [5, 12]
+  ranking_loss_weight: 0.10
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0

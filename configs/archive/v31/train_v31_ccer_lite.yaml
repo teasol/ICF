@@ -1,4 +1,4 @@
-base_config: train_v30_cardinality_poolz_l2.yaml
+base_config: ../v30/train_v30_cardinality_poolz_l2.yaml
 
 # v31 CCER-Lite: label-conditioned, fully differentiable sparse/dense evidence.
 # CCTS is deliberately disabled.  Existing v30 rare evidence remains as the

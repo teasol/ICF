@@ -27,11 +27,11 @@ log() { echo "[queue $(date +%Y-%m-%d\ %H:%M:%S)] $*" | tee -a "$QUEUE_LOG"; }
 
 declare -A RUN_CONFIGS=(
   # S1 (done, both negative -- see docs/current_status.md SS28)
-  [v30_musklike_easy_poolz]=configs/train_v30_musklike_easy_poolz.yaml
-  [v30_musklike_easy_poolz_l2]=configs/train_v30_musklike_easy_poolz_l2.yaml
+  [v30_musklike_easy_poolz]=configs/archive/v30/train_v30_musklike_easy_poolz.yaml
+  [v30_musklike_easy_poolz_l2]=configs/archive/v30/train_v30_musklike_easy_poolz_l2.yaml
   # S2: B2 cardinality-faithful sampling, with and without B1
-  [v30_cardinality_poolz_l2]=configs/train_v30_cardinality_poolz_l2.yaml
-  [v30_cardinality_legacy]=configs/train_v30_cardinality_legacy.yaml
+  [v30_cardinality_poolz_l2]=configs/archive/v30/train_v30_cardinality_poolz_l2.yaml
+  [v30_cardinality_legacy]=configs/archive/v30/train_v30_cardinality_legacy.yaml
 )
 DEFAULT_ORDER=(v30_cardinality_poolz_l2 v30_cardinality_legacy)
 

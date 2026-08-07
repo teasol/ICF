@@ -1,4 +1,4 @@
-base_config: ../../train_v24_musklike_easy.yaml
+base_config: ../v24/train_v24_musklike_easy.yaml
 
 # Phase 1 IA-MIL (Instance-Attention MIL) — nonlinear, task-adaptive instance
 # aggregation added as a residual channel (user proposal, 2026-08-03).

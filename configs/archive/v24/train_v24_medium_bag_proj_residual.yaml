@@ -1,4 +1,4 @@
-base_config: train_v22_medium.yaml
+base_config: ../v22/train_v22_medium.yaml
 
 # Architecture v24-B1: Per-token bottleneck projection with a residual mean shortcut.
 # Keeps all 12 slots -> 1 global + 36 slot statistics + 3 tails = 40 tokens.

@@ -118,6 +118,20 @@ def main() -> None:
             print(f"  worker {i} FAILED (exit {p.returncode}); tail of log:")
             lines = worker_log.read_text().splitlines()
             print("\n".join(lines[-20:]))
+            # Kill any still-running sibling workers so they release the GPU:
+            # an OOM'd worker leaves its siblings alive holding device memory,
+            # which would make a lower-worker retry OOM instantly (cascade).
+            for _, _, _, pj, _, _ in procs:
+                if pj.poll() is None:
+                    try:
+                        pj.kill()
+                    except Exception:
+                        pass
+            for _, _, _, pj, _, _ in procs:
+                try:
+                    pj.wait(timeout=10)
+                except Exception:
+                    pass
             sys.exit(1)
         print(f"  worker {i} done (folds {s + 1}..{e}) in {time.time() - start_t:.0f}s", flush=True)
 

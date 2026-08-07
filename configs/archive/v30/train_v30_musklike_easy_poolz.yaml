@@ -1,4 +1,4 @@
-base_config: train_v24_musklike_easy.yaml
+base_config: ../v24/train_v24_musklike_easy.yaml
 
 # v30 B1 (S1) — context-pool standardization replacing per-bag centering.
 #

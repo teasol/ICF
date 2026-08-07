@@ -1,4 +1,4 @@
-base_config: train_v24_musklike_easy.yaml
+base_config: ../v24/train_v24_musklike_easy.yaml
 
 # EVAL-ONLY config: v24 musklike-easy DATA (num_cells 500..1000) with the v24 (legacy)
 # `poolz_l2` MODEL, so a B2-trained checkpoint can be measured on the ORIGINAL

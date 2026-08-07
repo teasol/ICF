@@ -1,11 +1,15 @@
-base_config: train_v30_cardinality_poolz_l2.yaml
-
 # v34 Phase 0 arm E — large-context + 1536-d input, scratch (Exp 2).
+#
+# This config references the config-group defaults (data/model/optimizer/
+# scheduler/trainer/logger/callbacks = default), which are set to the v34-1536
+# values (2026-08-07), so the group defaults are the single source of truth.
+# Only per-run bits are kept here: seed, ckpt_path, model_kwargs, and the
+# logger experiment_name (run identifier).
 #
 # Same large-context intent as arm D but trains at 1536 input dim so
 # PathoBench's raw 1536-d features are fed directly (no 1536->512 PCA):
-#   model_overrides.input_dim = 1536   (build_model reads config['model']['input_dim'])
-#   generator output_dim        = 1536 (synthetic cells are 1536-d)
+#   model.input_dim = 1536   (build_model reads config['model']['input_dim'])
+#   data dataset_kwargs.output_dim = 1536 (synthetic cells are 1536-d)
 #
 # VRAM worst-case guard: input_dim 1536 makes the estimate ~3x tighter, so the
 # cell range is capped at [1, 8192] (100 x 8192 = 0.82M cells, ~112 GiB, ~62%).
@@ -21,26 +25,22 @@ base_config: train_v30_cardinality_poolz_l2.yaml
 # smoke_train_budget.py --bf16 and is *worse* for this model (peak 110.2 GiB
 # vs 85.5 GiB fp32; mean step 669ms vs 412ms) because the aggregator has many
 # .float() casts / fallthrough ops that nullify autocast savings.
-data_overrides:
-  dataset_kwargs:
-    output_dim: 1536
-    num_cells: [1, 8192]
-    episodes_per_epoch: 1024
-  episode_batch_size: 4
 
-# MLA-slot: low-rank cell->slot affinity (d_c=64) + exact variance-based
-# slot_std/slot_distance (no [cells, slots, dim] tensor).
-model_overrides:
-  bag_representation: poolz_l2
-  input_dim: 1536
-  aggregator_slot_latent_dim: 64
-  aggregator_slot_query_latent_dim: 128
-  aggregator_slot_affinity_dim: 512
+seed: 42
+ckpt_path:
 
-logger:
-  name: csv
-  save_dir: logs
+data: default
+model: default
+optimizer: default
+scheduler: default
+trainer: default
+logger: default
+logger_overrides:
   experiment_name: v34_phase0_largectx_1536
+callbacks: default
 
-trainer:
-  max_epochs: 50
+model_kwargs:
+  training_targets_per_episode: [5, 12]
+  ranking_loss_weight: 0.10
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0

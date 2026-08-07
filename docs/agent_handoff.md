@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-07` — v34-1536 확정(PathoBench 보고용). 공식 Patho-Bench 프로토콜(공식 fold 50-fold·코호트·라벨) 평가 진행 중(§53). 로컬 ccrcc CSV 오류 정정(§51), SEAL baseline 비교(§52).
+**Last updated**: `2026-08-07` — v34-1536 확정(PathoBench 보고용). 공식 Patho-Bench 프로토콜(공식 fold 50-fold·코호트·라벨) 평가 재시작(§56, config 회귀 해결 — 5/17 완료 → 12개 백그라운드). config 시스템을 v34 base + group default 참조형으로 리팩터링 + v30/v24/v22 체인 자체 포함형 아카이빙(§56). 로컬 ccrcc CSV 오류 정정(§51), SEAL baseline 비교(§52).
 
 **Confirmed baseline**: v30 = v24 residual+bottleneck bag projection + B1
 `bag_representation: poolz_l2` + B2 log-uniform cardinality `[1,1024]`. Musk zero-shot
@@ -29,12 +29,14 @@ vs zero-pad 0.822 (v30 0.854와 동등). ③ **ICI 실세계 5-seed 0.512±0.027
 잠금 해제, `f8181be`: `ICIDataset` input_dim/pad_mode 타일 + `test_v34_phase0_largectx_1536_ici.yaml`).
 v30과 CV 직접 비교는 **PCA-per-fold 미지원으로 보류**. 상세 §49·§50.
 
-**v34 확정 (§53, 2026-08-07)**: 사용자 결정으로 **v34-1536을 PathoBench 보고용 모델로 확정**.
+**v34 확정 (§53·§56, 2026-08-07)**: 사용자 결정으로 **v34-1536을 PathoBench 보고용 모델로 확정**.
 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv의 50-fold, 공식 코호트 245장, 공식 라벨
-`config.yaml` task_col)로 진행 중 — `test_pathobench.py --official-folds` + 병렬 러너 + per-fold
-체크포인트(중단 후 리쥼). 완료분(pooled): bc_therapy er 0.672/grade 0.713/her2 0.670,
-cptac_brca_PIK3CA 0.569. v30은 합성/Musk baseline 유지. SEAL(지도 ABMIL/MeanMIL)과는
-프로토콜(지도 vs zero-shot in-context)·코호트(ccrcc 218 vs 245) 차이 명시. 상세 §52·§53.
+`config.yaml` task_col)로 진행 — **5/17 완료(pooled)**: bc_therapy er 0.672/grade 0.713/her2 0.670,
+cptac_brca_PIK3CA 0.569, brca_TP53. **12개는 §56 config 수정으로 재시작**(백그라운드,
+`scripts/run_official50_batch.sh`). 이전 배치가 아카이빙된 `train_v24_musklike_easy.yaml`을
+참조해 전부 실패했던 회귀를 v34 config 자체 포함/default 참조화로 해결. v30은 합성/Musk baseline
+유지. SEAL(지도 ABMIL/MeanMIL)과는
+프로토콜(지도 vs zero-shot in-context)·코호트(ccrcc 218 vs 245) 차이 명시. 상세 §52·§53·§56.
 
 **Rejected candidate — architecture v31 CCER-v2**: projection 전 aligned slot-center로
 support class prototype을 만들고, 기존 rare branch와 독립인 support/query encoder에서
@@ -220,15 +222,13 @@ scripts/launch_interactive_training.sh \
 
 1. **`configs/` 최상위 루트 유지 조건**:
    - 현재 활성 파이프라인에서 직접 사용하는 entry point config만 `configs/` 최상위에 유지합니다.
-   - 현재 `configs/` 최상위 유지 대상: **v30 확정(`train_v30_medium_bag_proj_residual.yaml` — 신규,
-     2026-08-04 승격, 아직 미학습)**, v24 이전 확정(`train_v24_medium_bag_proj_residual.yaml` — 보존),
-     v30 Musk 경로(`train_v30_cardinality_poolz_l2.yaml` — S2 실측 승리, Musk 0.854),
-     v30 평가 config(`eval_v30_cardinality_{poolz_l2,legacy}_on_largebags.yaml`),
-     v26 평가 중(`train_v26_medium_cls_token_pool.yaml` — CLS-token pooling, scratch 학습
-     실행/평가 중, 승격/폐기 판정 전까지 유지),
-     v22 기준선·참조용(`train_v22_medium.yaml` — `evaluate_synthetic.py` 기본 config,
-     `train_v22_medium_context300.yaml`/`train_v22_hard_context300.yaml`/`train_v22_hard_realworld.yaml` — T4,
-     `train_v22_ici_finetune.yaml`/`train_v22_ici_scratch.yaml` — ICI).
+   - 현재 `configs/` 최상위 유지 대상: **v34 전용 — `train_v34_phase0_largectx_1536.yaml`
+     (PathoBench 보고용, 자체 포함형)**, `train_v34_phase0_largectx_512.yaml` (arm D),
+     `test_v34_phase0_largectx_1536_ici.yaml` (평가). **v34 config는 `base_config` 없이 전체
+     base 체인(v30→v24→v22→v18_v19)과 named group을 인라인한 자체 포함형**이라 아카이브와
+     무관하게 단독 실행됩니다 (2026-08-07 §56).
+   - v30/v24/v22/eval_v30 체인은 `configs/archive/v30/`·`archive/v24/`·`archive/v22/`로 이관
+     (2026-08-07 §56 재아카이빙, base_config 상대경로는 `../` 로 보정해 재현 가능).
    - 폐기 확정 config 이관: v23-A0/v24-A0/v24-B0(`train_v23_medium_bag_mean.yaml`,
      `train_v24_medium_bag_proj.yaml`, `train_v24_medium_bag_proj_bottleneck.yaml`) →
      `configs/archive/v23_v24_candidates/`; v25(`train_v25_medium_typed_bag.yaml`,
@@ -237,6 +237,13 @@ scripts/launch_interactive_training.sh \
 2. **구버전 Config 아카이빙 조건**:
    - 구버전 아키텍처의 config는 `configs/archive/` 하위로 즉시 이관합니다: `archive/v18_v19/`, `archive/v20/`, `archive/v21_retrieval/`.
    - 폐기된 기능의 실행 스크립트도 같은 규칙으로 `scripts/archive/`(예: `scripts/archive/v21_retrieval/`)로 옮깁니다.
+3. **아카이빙 config는 자체 포함형(인라인)으로 보관 (2026-08-07 신설)**:
+   - 아카이빙하는 config는 `base_config`를 남기지 않고 **전부 인라인**으로 변환해 보관합니다 (v34가
+     인라인한 방식처럼 `data`/`model`/`optimizer`/`scheduler`/`trainer`/`logger`/`callbacks` 전체 값을
+     직접 기술). 이렇게 하면 아카이빙 후에도 자기 디렉터리 기준 상대경로가 깨질 일이 없고, 참조 검증
+     없이 항상 재현 가능합니다.
+   - 2026-08-07 §56 적용: v34 자체 포함형 전환 + v30/v24/v22 체인 재아카이빙(141개 config 전부 해석
+     성공). 이후 아카이빙은 base 체인 config를 root에서 인라인 후 보관.
 
    > [!IMPORTANT]
    > **아카이빙·삭제 시 참조 검증 필수 (2026-08-04 신설).** `base_config`는
@@ -258,5 +265,5 @@ scripts/launch_interactive_training.sh \
    >     except Exception as e: bad.append((p, e))
    > print('failing:', len(bad)); [print(' ', p, e) for p, e in bad]"
    > ```
-3. **모듈형 Component 설정 분리**:
+4. **모듈형 Component 설정 분리**:
    - `callbacks/`, `data/`, `logger/`, `model/`, `optimizer/`, `scheduler/`, `trainer/` 등 모듈 조각은 해당 서브폴더에 구성합니다.

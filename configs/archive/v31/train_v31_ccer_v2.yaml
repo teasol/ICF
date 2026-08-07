@@ -1,4 +1,4 @@
-base_config: train_v30_cardinality_poolz_l2.yaml
+base_config: ../v30/train_v30_cardinality_poolz_l2.yaml
 
 # Architecture-first v31: CCER-v2 warm-starts from the exact v30 optimum.
 # It keeps v30's synthetic task distribution unchanged and adds an isolated

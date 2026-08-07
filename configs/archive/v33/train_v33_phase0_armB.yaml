@@ -1,4 +1,4 @@
-base_config: train_v30_cardinality_poolz_l2.yaml
+base_config: ../v30/train_v30_cardinality_poolz_l2.yaml
 
 # v33 Phase 0 arm B = v30 + six-task mix + B2 (per-episode cardinality).
 #

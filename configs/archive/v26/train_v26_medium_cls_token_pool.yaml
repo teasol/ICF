@@ -1,4 +1,4 @@
-base_config: train_v24_medium_bag_proj_residual.yaml
+base_config: ../v24/train_v24_medium_bag_proj_residual.yaml
 
 # Architecture v26 (CLS-token pooling): this is the actual, implemented v26 --
 # not the earlier EC-MoE (Episode-Conditional Mixture-of-Experts) design in
