@@ -1698,3 +1698,58 @@ split은 지정 fold(기본 fold_0)의 train/val/test) — **31개 task 전부**
   전부 `C3L/C3N` 슬라이드.
 - 재생성: `python scripts/build_pathobench_official_csvs.py [--fold 0]`.
 - 다음: 실제 ccrcc task(BAP1/PBRM1/VHL 등) 5-fold CV 평가 + 보고 평균 재계산.
+
+---
+
+## 52. 2026-08-07 — 실제 ccrcc 평가 완료 + SEAL baseline 비교 + 공식 50-fold 평가 계획
+
+### 1. 실제 cptac_ccrcc 5-fold CV (v34-1536, all-context, 전체 타일) — 완료
+
+| task | 슬라이드 | per-fold AUROC | fold-mean | pooled |
+|---|---|---|---|---|
+| `BAP1_mutation` | 245 | 0.894 / 0.978 / 0.908 / 0.906 / 0.922 | **0.9218** | **0.9223** |
+| `PBRM1_mutation` | 245 | 0.752 / 0.806 / 0.820 / 0.648 / 0.896 | **0.7844** | **0.7782** |
+| `VHL_mutation` | 245 | 0.877 / 0.772 / 0.900 / 0.645 / 0.840 | **0.8064** | **0.8082** |
+
+- 예측: `predictions/pathobench_cptac_ccrcc_{BAP1,PBRM1,VHL}_mutation_v34_1536_cv5.pt`,
+  fold 파일 `data/pathobench/cptac_ccrcc_*_cvfold{0..4}.pt`.
+- 기존 §50의 "ccrcc_er 0.704"는 로컬 오류(BC Therapy 복사본)였고, **진짜 CCRCC 코호트는
+  유전체 변이 3종 모두 실질 신호** (BAP1 0.922 특히 강함).
+
+### 2. SEAL baseline(지도 ABMIL/MeanMIL, 50-fold macro-AUC) vs 우리 기록
+
+파일 `docs/seal_univ2_baseline_17tasks.csv` (SEAL 논문 표에서 정리). **10개 task가 SEAL에 존재**.
+우리 기록 = v34-1536 **zero-shot in-context**(학습 없음) 5-fold CV **pooled AUROC**.
+
+| task | SEAL ABMIL | SEAL MeanMIL | 우리 | 비교 |
+|---|---|---|---|---|
+| bc_therapy er_status | 0.717±.086 | 0.712±.091 | 0.704 | ≈ |
+| bc_therapy grade | 0.770±.066 | 0.751±.058 | 0.674 | ▼ |
+| bc_therapy her2_status | 0.663±.092 | 0.684±.073 | 0.673 | ≈ |
+| cptac_brca PIK3CA_mutation | 0.595±.103 | 0.544±.120 | 0.627 | ▲ |
+| cptac_brca TP53_mutation | 0.801±.093 | 0.787±.088 | 0.848 | ▲ |
+| cptac_luad EGFR_mutation | 0.830±.089 | 0.777±.099 | 0.945 | ▲▲ |
+| cptac_luad STK11_mutation | 0.908±.052 | 0.873±.072 | 0.977 | ▲ |
+| cptac_luad TP53_mutation | 0.751±.102 | 0.735±.102 | 0.944 | ▲▲ |
+| cptac_ccrcc BAP1_mutation | 0.693±.150 | 0.720±.145 | 0.922 | ▲▲ |
+| cptac_ccrcc VHL_mutation | 0.538±.128 | 0.542±.133 | 0.808 | ▲▲ |
+
+- 요약: **10개 중 우리 상회 8, 유사 1(her2), 하회 1(grade)**. 유전체 변이 task에서 특히 우위.
+- ⚠️ **프로토콜 차이 (논문 작성 시 명시 필수)**: SEAL은 지도 MIL 학습(ABMIL/MeanMIL,
+  50-fold, macro-AUC), 우리는 **zero-shot in-context(학습 없음)** all-context 5-fold pooled
+  AUROC. fold 수(50 vs 5)·컨텍스트 구성이 다르므로 "동일 프로토콜 직접 비교"는 아님.
+- ⚠️ **n 차이(ccrcc)**: SEAL ccrcc BAP1·VHL n=218 vs 우리 245 슬라이드 — SEAL이 다른
+  코호트 버전/전처리(50-fold) 사용 가능성 → 같은 데이터인지 확인 필요.
+- SEAL에 없는 7개 (우리만 평가): lscc_arid1a 0.908, lscc_histologic 0.948, lscc_keap1 0.985,
+  luad_kras 0.958, pda_smad4 0.831, ucla_lung 0.784, ccrcc_pbrm1 0.778.
+
+### 3. 공식 50-fold 평가 모드 구현 + 계획
+
+- **`test_pathobench.py --official-folds <task_dir>` 신규 구현**: 공식 `k=all.tsv`(fold_0..) +
+  `config.yaml`(task_col)을 읽어, **각 공식 fold k**에서 `fold_k=='test'` 슬라이드를 쿼리하고
+  나머지(train+val)를 all-context로 사용. per-fold AUROC + **fold-mean±std + pooled** 보고
+  (SEAL의 50-fold macro-AUC 프로토콜과 동일 구조). `--official-nfolds N`으로 부분 검증 가능.
+  raw 1536-d 필요(입력 1536). `--csv` 없이 실행 가능.
+- **검증 완료**: bc_therapy/er_status 2-fold smoke (166 슬라이드, 50 공식 fold 인식).
+- **다음 할일**: 17개 task(7개 데이터셋)에 대해 공식 fold 따라 **50-fold 평가** 실행 →
+  SEAL과 동일 프로토콜의 수치로 재비교. 예상: task당 ~50분, 17개 전체는 수 시간(GPU 백그라운드).

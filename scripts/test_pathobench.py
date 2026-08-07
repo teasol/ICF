@@ -35,6 +35,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import csv
 import random
 import sys
 from pathlib import Path
@@ -62,7 +63,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=PROJECT_ROOT / "configs/train_v33_phase0_armC_ddp8_batch2.yaml",
     )
-    parser.add_argument("--csv", type=Path, required=True, help="Task label CSV.")
+    parser.add_argument(
+        "--csv",
+        type=Path,
+        default=None,
+        help="Task label CSV (not needed with --official-folds).",
+    )
     parser.add_argument(
         "--features",
         type=Path,
@@ -122,6 +128,23 @@ def parse_args() -> argparse.Namespace:
         "union): each fold's held-out slides are queried with the other folds "
         "as context (all-context). Reports per-fold and pooled AUROC. Default "
         "None = use the CSV train/test split as-is.",
+    )
+    parser.add_argument(
+        "--official-folds",
+        type=Path,
+        default=None,
+        help="Path to an official Patho-Bench task dir containing k=all.tsv + "
+        "config.yaml. Evaluates with the OFFICIAL fold protocol (e.g. 50 folds): "
+        "for each official fold k, slides with fold_k=='test' are queried using "
+        "all other slides (train+val) as all-context. Reports per-fold AUROC, "
+        "fold mean+std and pooled AUROC (the protocol SEAL's macro-AUC baselines "
+        "follow). Requires raw features (input_dim == FEATURE_DIM).",
+    )
+    parser.add_argument(
+        "--official-nfolds",
+        type=int,
+        default=None,
+        help="Limit official folds to the first N (quick checks). Default: all.",
     )
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--output", type=Path, default=None)
@@ -437,6 +460,122 @@ def evaluate_cv(
         print(f"\nSaved CV predictions to {args.output}")
 
 
+def evaluate_official_folds(
+    *,
+    model,
+    task_dir: Path,
+    args: argparse.Namespace,
+    device: torch.device,
+) -> None:
+    """Run the official Patho-Bench k=all.tsv fold protocol (e.g. 50-fold).
+
+    Reads ``{task_dir}/k=all.tsv`` (case_id, slide_id, <task_col>, fold_0..)
+    and ``config.yaml`` (task_col). For each official fold k, slides with
+    ``fold_k == 'test'`` are queried using all other slides (train+val) as
+    in-context context (all-context, full tiles). Reports per-fold AUROC,
+    fold mean+std, and pooled AUROC -- matching how SEAL reports macro-AUC
+    over the official folds.
+    """
+    import yaml
+
+    tsv = task_dir / "k=all.tsv"
+    cfg = task_dir / "config.yaml"
+    if not (tsv.exists() and cfg.exists()):
+        raise FileNotFoundError(f"official task dir needs k=all.tsv+config.yaml: {task_dir}")
+    task_col = yaml.safe_load(cfg.read_text())["task_col"]
+
+    header = tsv.read_text().split("\n")[0].split("\t")
+    fold_cols = [c for c in header if c.startswith("fold_")]
+    with tsv.open() as fh:
+        records = list(csv.DictReader(fh, delimiter="\t"))
+    slide_ids = [str(r["slide_id"]).strip() for r in records]
+    labels_raw = {sid: int(float(r[task_col])) for sid, r in zip(slide_ids, records)}
+    n_classes = len(set(labels_raw.values()))
+    if n_classes > 2:
+        print(f"[binarized] {n_classes} classes -> 0 vs rest")
+        labels_raw = {s: int(labels_raw[s] != 0) for s in labels_raw}
+
+    h5_index = index_h5_files(args.features)
+    slide_ids = [s for s in slide_ids if s in h5_index]
+    missing = len(records) - len(slide_ids)
+    if missing:
+        print(f"WARNING: dropping {missing} slides with no feature file")
+    bags = {sid: load_slide_features(sid, h5_index) for sid in slide_ids}
+    projected = {sid: bag.to(device) for sid, bag in bags.items()}
+    print(f"Loaded {len(projected)} slides, {len(fold_cols)} official folds "
+          f"({fold_cols[0]}..{fold_cols[-1]}), raw {FEATURE_DIM}-d")
+
+    n_folds = args.official_nfolds or len(fold_cols)
+    fold_aurocs: list[float] = []
+    pooled_prob: list[torch.Tensor] = []
+    pooled_target: list[torch.Tensor] = []
+    all_records: list[dict] = []
+    index = {sid: i for i, sid in enumerate(slide_ids)}
+    for k in range(n_folds):
+        fc = fold_cols[k]
+        test_ids = [s for s in slide_ids if records[index[s]][fc].strip() == "test"]
+        context_ids = [s for s in slide_ids if records[index[s]][fc].strip() != "test"]
+        if len(test_ids) < 2:
+            print(f"  fold {k + 1}/{n_folds}: skip (only {len(test_ids)} test slides)")
+            continue
+        result = evaluate_trial(
+            model=model,
+            projected=projected,
+            train_ids=context_ids,
+            test_ids=test_ids,
+            train_y=labels_raw,
+            test_y=labels_raw,
+            context_mode="all",
+            context_per_class=args.context_per_class,
+            max_tiles=args.max_tiles,
+            context_max_tiles=args.context_max_tiles,
+            seed=args.seed + k,
+            device=device,
+        )
+        probability = result["probability"]
+        target = result["target"]
+        if len(probability) < 2 or target.unique().numel() < 2:
+            print(f"  fold {k + 1}/{n_folds}: insufficient valid predictions/classes")
+            continue
+        fa = auroc(probability, target)
+        fold_aurocs.append(fa)
+        pooled_prob.append(probability)
+        pooled_target.append(target)
+        print(f"  fold {k + 1}/{n_folds}: AUROC {fa:.4f}  n_query {len(probability)}", flush=True)
+        all_records.append(
+            {"slide_id": result["queried_ids"], "label": target, "probability": probability}
+        )
+
+    if not fold_aurocs:
+        print("No valid folds.")
+        return
+    pooled = auroc(torch.cat(pooled_prob), torch.cat(pooled_target))
+    mean = sum(fold_aurocs) / len(fold_aurocs)
+    std = (sum((x - mean) ** 2 for x in fold_aurocs) / len(fold_aurocs)) ** 0.5
+    print(f"\n=== PathoBench official {n_folds}-fold — {tsv.parent.parent.name}/"
+          f"{tsv.parent.name} — {len(slide_ids)} slides ===")
+    print(f"per-fold AUROC: {' '.join(f'{x:.4f}' for x in fold_aurocs)}")
+    print(f"fold-mean AUROC: {mean:.4f} ± {std:.4f}   pooled AUROC: {pooled:.4f}")
+
+    if args.output is not None:
+        out = args.output.expanduser().resolve()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        torch.save(
+            {
+                "task": tsv.parent.name,
+                "official_folds": n_folds,
+                "fold_aurocs": fold_aurocs,
+                "fold_auroc_mean": mean,
+                "fold_auroc_std": std,
+                "auroc_pooled": float(pooled),
+                "per_fold": all_records,
+                "n_slides": len(slide_ids),
+            },
+            out,
+        )
+        print(f"Saved official-fold predictions to {out}")
+
+
 def main() -> None:
     def _mean(values: list[float]) -> float:
         return sum(values) / len(values)
@@ -445,6 +584,39 @@ def main() -> None:
     L.seed_everything(args.seed, workers=True)
     torch.set_float32_matmul_precision("high")
     device = torch.device(args.device)
+
+    config = merge_train_config(args.config.expanduser().resolve())
+    config["seed"] = args.seed
+    input_dim = (
+        args.input_dim
+        if args.input_dim is not None
+        else int(config["model"].get("input_dim", 512))
+    )
+    pca_needed = input_dim != FEATURE_DIM
+
+    if args.official_folds is not None:
+        if pca_needed:
+            raise ValueError(
+                "--official-folds requires raw features (model input_dim == "
+                f"FEATURE_DIM {FEATURE_DIM}); PCA-per-fold is not supported."
+            )
+        model = build_model(config)
+        checkpoint = torch.load(
+            args.checkpoint.expanduser().resolve(), map_location="cpu"
+        )
+        model.on_load_checkpoint(checkpoint)
+        model.load_state_dict(checkpoint["state_dict"])
+        model.eval()
+        model.to(device)
+        print(f"Model: arch v{model.model.architecture_version}, "
+              f"checkpoint {args.checkpoint.name}")
+        evaluate_official_folds(
+            model=model, task_dir=args.official_folds, args=args, device=device
+        )
+        return
+
+    if args.csv is None:
+        raise ValueError("--csv is required unless --official-folds is given")
 
     table = pd.read_csv(args.csv)
     if not {"slide_id", "label", "split"}.issubset(table.columns):
