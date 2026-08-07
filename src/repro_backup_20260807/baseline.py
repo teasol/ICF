@@ -2418,6 +2418,12 @@ class StructuredPopulationMetaClassifier(nn.Module):
         routing_temperature: float = 0.5,
         class_memory_tokens: int = 8,
         rare_evidence_fractions: Sequence[float] = (0.01, 0.05, 0.10, 0.20),
+        ccer_temperatures: Sequence[float] = (),
+        ccer_residual_scale: float = 0.10,
+        ccer_presence_temperature: float = 0.5,
+        ccer_v2_topks: Sequence[int] = (),
+        ccer_v2_route_floor: float = 0.30,
+        ccer_v2_residual_scale: float = 0.10,
         dr_ccer_enabled: bool = False,
         dr_ccer_abs_topks: Sequence[int] = (1, 4, 16),
         dr_ccer_frac_topks: Sequence[float] = (0.01, 0.05),
@@ -2468,6 +2474,26 @@ class StructuredPopulationMetaClassifier(nn.Module):
         rare_fractions = tuple(float(value) for value in rare_evidence_fractions)
         if not rare_fractions or any(not 0 < value <= 1 for value in rare_fractions):
             raise ValueError("rare_evidence_fractions must contain values in (0, 1].")
+        ccer_temperatures = tuple(float(value) for value in ccer_temperatures)
+        if any(value <= 0 for value in ccer_temperatures):
+            raise ValueError("ccer_temperatures must contain positive values.")
+        if len(set(ccer_temperatures)) != len(ccer_temperatures):
+            raise ValueError("ccer_temperatures must not contain duplicates.")
+        if not 0 < ccer_residual_scale < 1:
+            raise ValueError("ccer_residual_scale must be in (0, 1).")
+        if ccer_presence_temperature <= 0:
+            raise ValueError("ccer_presence_temperature must be positive.")
+        ccer_v2_topks = tuple(int(value) for value in ccer_v2_topks)
+        if any(value < 1 for value in ccer_v2_topks):
+            raise ValueError("ccer_v2_topks must contain positive integers.")
+        if len(set(ccer_v2_topks)) != len(ccer_v2_topks):
+            raise ValueError("ccer_v2_topks must not contain duplicates.")
+        if ccer_v2_topks and 1 not in ccer_v2_topks:
+            raise ValueError("ccer_v2_topks must include 1 for the sparse route.")
+        if not 0 <= ccer_v2_route_floor < 1:
+            raise ValueError("ccer_v2_route_floor must be in [0, 1).")
+        if not 0 < ccer_v2_residual_scale < 1:
+            raise ValueError("ccer_v2_residual_scale must be in (0, 1).")
         dr_ccer_abs_topks = tuple(int(value) for value in dr_ccer_abs_topks)
         if any(value < 1 for value in dr_ccer_abs_topks):
             raise ValueError("dr_ccer_abs_topks must contain positive integers.")
@@ -2498,6 +2524,10 @@ class StructuredPopulationMetaClassifier(nn.Module):
         self.routing_temperature = float(routing_temperature)
         self.class_memory_tokens = int(class_memory_tokens)
         self.rare_evidence_fractions = rare_fractions
+        self.ccer_temperatures = ccer_temperatures
+        self.ccer_presence_temperature = float(ccer_presence_temperature)
+        self.ccer_v2_topks = ccer_v2_topks
+        self.ccer_v2_route_floor = float(ccer_v2_route_floor)
         self.dr_ccer_enabled = bool(dr_ccer_enabled)
         self.dr_ccer_abs_topks = dr_ccer_abs_topks
         self.dr_ccer_frac_topks = dr_ccer_frac_topks
@@ -2818,6 +2848,55 @@ class StructuredPopulationMetaClassifier(nn.Module):
             nn.GELU(),
             nn.Linear(relation_hidden_dim, 1),
         )
+        if self.ccer_temperatures:
+            # The same temperature weights are shared across classes, preserving
+            # label equivariance.  A support-class separation statistic adjusts
+            # the sparse/dense mixture per episode without looking at query labels.
+            self.ccer_route_logits = nn.Parameter(
+                torch.zeros(len(self.ccer_temperatures))
+            )
+            self.ccer_support_router = nn.Linear(1, len(self.ccer_temperatures))
+            nn.init.zeros_(self.ccer_support_router.weight)
+            nn.init.zeros_(self.ccer_support_router.bias)
+            self.ccer_null_threshold = nn.Parameter(torch.tensor(1.0))
+            ccer_logit = math.log(
+                ccer_residual_scale / (1.0 - ccer_residual_scale)
+            )
+            self.ccer_residual_logit = nn.Parameter(torch.tensor(ccer_logit))
+        if self.ccer_v2_topks:
+            # CCER-v2 deliberately owns its complete instance/prototype path.
+            # Gradients from this branch cannot weaken the v30 rare branch.
+            self.ccer_v2_instance_encoder = nn.Sequential(
+                nn.LayerNorm(token_dim),
+                nn.Linear(token_dim, hidden_dim),
+                nn.GELU(),
+                nn.Linear(hidden_dim, hidden_dim),
+            )
+            self.ccer_v2_prototype_encoder = nn.Sequential(
+                nn.LayerNorm(token_dim),
+                nn.Linear(token_dim, hidden_dim),
+                nn.GELU(),
+                nn.Linear(hidden_dim, hidden_dim),
+            )
+            self.ccer_v2_similarity_log_scale = nn.Parameter(
+                torch.tensor(math.log(5.0))
+            )
+            route_count = len(self.ccer_v2_topks) + 1  # + dense mean route
+            router_feature_dim = route_count + 2  # route gaps + support sep + log n
+            self.ccer_v2_router = nn.Sequential(
+                nn.LayerNorm(router_feature_dim),
+                nn.Linear(router_feature_dim, relation_hidden_dim),
+                nn.GELU(),
+                nn.Linear(relation_hidden_dim, route_count),
+            )
+            self.ccer_v2_output_head = nn.Linear(1, 1, bias=False)
+            nn.init.zeros_(self.ccer_v2_output_head.weight)
+            ccer_v2_logit = math.log(
+                ccer_v2_residual_scale / (1.0 - ccer_v2_residual_scale)
+            )
+            self.ccer_v2_residual_logit = nn.Parameter(
+                torch.tensor(ccer_v2_logit)
+            )
         if self.dr_ccer_enabled:
             # DR-CCER owns a complete donor-resolved evidence path.  The expert
             # is trained with its own loss (CE + ranking + donor consistency)
@@ -3594,6 +3673,293 @@ class StructuredPopulationMetaClassifier(nn.Module):
             torch.stack(query_logits),
             torch.stack(query_fraction_scores),
             torch.tensor(query_counts, device=class_memories.device),
+        )
+
+    def _ccer_pool_evidence(
+        self,
+        evidence: torch.Tensor,
+        class_memories: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Pool class-conditional instance evidence without hard rank selection.
+
+        `evidence` is either [queries, classes, instances] or
+        [episodes, queries, classes, instances].  Cardinality-normalized
+        LogMeanExp is exactly invariant to uniform duplication of all instances;
+        temperatures interpolate between sparse/max-like and dense/mean-like
+        evidence.  A class-neutral presence gate supplies the explicit null path.
+        """
+        num_instances = evidence.shape[-1]
+        route_scores = torch.stack(
+            [
+                temperature
+                * (
+                    torch.logsumexp(evidence / temperature, dim=-1)
+                    - math.log(float(num_instances))
+                )
+                for temperature in self.ccer_temperatures
+            ],
+            dim=-1,
+        )
+        # Remove evidence common to every class. Generic anomalies must not
+        # become class evidence merely because all support memories match poorly.
+        centered_routes = route_scores - route_scores.mean(dim=-2, keepdim=True)
+
+        class_prototypes = class_memories.float().mean(dim=-2)
+        support_separation = class_prototypes.var(
+            dim=-2, unbiased=False
+        ).mean(dim=-1).sqrt()
+        route_logits = self.ccer_route_logits + self.ccer_support_router(
+            torch.log1p(support_separation).unsqueeze(-1)
+        )
+        route_weights = torch.softmax(route_logits.float(), dim=-1).to(
+            centered_routes.dtype
+        )
+        if evidence.ndim == 4:
+            routed = (
+                centered_routes * route_weights[:, None, None, :]
+            ).sum(dim=-1)
+        else:
+            routed = (centered_routes * route_weights).sum(dim=-1)
+
+        centered_instance_evidence = evidence - evidence.mean(
+            dim=-2, keepdim=True
+        )
+        discriminative_strength = centered_instance_evidence.abs().amax(
+            dim=(-2, -1)
+        )
+        presence = torch.sigmoid(
+            (discriminative_strength - self.ccer_null_threshold)
+            / self.ccer_presence_temperature
+        ).to(routed.dtype)
+        return presence.unsqueeze(-1) * routed, route_scores, presence, route_weights
+
+    def _ccer_instance_logits_batched(
+        self,
+        query_instances: torch.Tensor,
+        class_memories: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        encoded = self.instance_input_projection(
+            self.instance_input_norm(query_instances)
+        )
+        encoded32 = F.normalize(encoded.float(), dim=-1)
+        memory32 = F.normalize(class_memories.float(), dim=-1)
+        scale = self.rare_similarity_log_scale.exp().clamp(0.1, 50.0)
+        similarities = scale.float() * torch.einsum(
+            "eqnd,ecmd->eqcnm", encoded32, memory32
+        )
+        evidence = torch.logsumexp(similarities, dim=-1) - math.log(
+            self.class_memory_tokens
+        )
+        return self._ccer_pool_evidence(evidence, class_memories)
+
+    def _ccer_instance_logits(
+        self,
+        query_instances: torch.Tensor | Sequence[torch.Tensor],
+        class_memories: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        if isinstance(query_instances, torch.Tensor):
+            if query_instances.ndim != 3:
+                raise ValueError(
+                    "Dense CCER query instances must be [queries, instances, token_dim]."
+                )
+            encoded = self.instance_input_projection(
+                self.instance_input_norm(query_instances)
+            )
+            encoded32 = F.normalize(encoded.float(), dim=-1)
+            memory32 = F.normalize(class_memories.float(), dim=-1)
+            scale = self.rare_similarity_log_scale.exp().clamp(0.1, 50.0)
+            similarities = scale.float() * torch.einsum(
+                "qnd,cmd->qcnm", encoded32, memory32
+            )
+            evidence = torch.logsumexp(similarities, dim=-1) - math.log(
+                self.class_memory_tokens
+            )
+            return self._ccer_pool_evidence(evidence, class_memories)
+
+        memory32 = F.normalize(class_memories.float(), dim=-1)
+        scale = self.rare_similarity_log_scale.exp().clamp(0.1, 50.0)
+        pooled = []
+        routes = []
+        presences = []
+        route_weights = None
+        for instances in query_instances:
+            encoded = self.instance_input_projection(self.instance_input_norm(instances))
+            encoded32 = F.normalize(encoded.float(), dim=-1)
+            similarities = scale.float() * torch.einsum(
+                "nd,cmd->cnm", encoded32, memory32
+            )
+            evidence = torch.logsumexp(similarities, dim=-1) - math.log(
+                self.class_memory_tokens
+            )
+            bag_logits, bag_routes, bag_presence, route_weights = (
+                self._ccer_pool_evidence(evidence.unsqueeze(0), class_memories)
+            )
+            pooled.append(bag_logits.squeeze(0))
+            routes.append(bag_routes.squeeze(0))
+            presences.append(bag_presence.squeeze(0))
+        if route_weights is None:
+            raise ValueError("CCER requires at least one query bag.")
+        return (
+            torch.stack(pooled),
+            torch.stack(routes),
+            torch.stack(presences),
+            route_weights,
+        )
+
+    def _ccer_v2_class_slot_prototypes(
+        self,
+        context: dict[str, torch.Tensor],
+        context_labels: torch.Tensor,
+    ) -> torch.Tensor:
+        """Build class prototypes from unprojected aligned slot-center tokens."""
+        slots = context["slots"]
+        if slots.ndim == 5:
+            # [episodes, context bags, slots, statistics, token_dim]
+            centers = slots[:, :, :, 0, :]
+            class_mask = F.one_hot(
+                context_labels.long(), num_classes=self.num_classes
+            ).to(centers.dtype)
+            counts = class_mask.sum(dim=1).clamp_min(1).unsqueeze(-1).unsqueeze(-1)
+            return torch.einsum("ebc,ebsd->ecsd", class_mask, centers) / counts
+        if slots.ndim != 4:
+            raise ValueError(
+                "CCER-v2 context slots must be [bags, slots, statistics, token_dim] "
+                "or their batched equivalent."
+            )
+        centers = slots[:, :, 0, :]
+        prototypes = []
+        for class_index in range(self.num_classes):
+            selected = centers[context_labels == class_index]
+            if selected.shape[0] == 0:
+                raise ValueError("CCER-v2 requires every class in the context set.")
+            prototypes.append(selected.mean(dim=0))
+        return torch.stack(prototypes)
+
+    def _ccer_v2_pool_evidence(
+        self,
+        evidence: torch.Tensor,
+        encoded_prototypes: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Route class-centered evidence through Top-K and dense paths.
+
+        Evidence is [Q,C,N] or [E,Q,C,N].  Top-1 preserves a fixed causal
+        instance when lower-scoring background is appended; Top-K and mean
+        provide micro-population and dense alternatives.
+        """
+        centered = evidence - evidence.mean(dim=-2, keepdim=True)
+        route_scores = []
+        for requested_k in self.ccer_v2_topks:
+            count = min(requested_k, centered.shape[-1])
+            route_scores.append(
+                centered.topk(count, dim=-1).values.mean(dim=-1)
+            )
+        route_scores.append(centered.mean(dim=-1))
+        routes = torch.stack(route_scores, dim=-1)
+
+        route_gaps = routes.amax(dim=-2) - routes.amin(dim=-2)
+        prototype_centers = encoded_prototypes.float().mean(dim=-2)
+        support_separation = prototype_centers.var(
+            dim=-2, unbiased=False
+        ).mean(dim=-1).sqrt()
+        log_n = math.log(float(centered.shape[-1]))
+        if evidence.ndim == 4:
+            support_feature = support_separation[:, None, None].expand(
+                -1, routes.shape[1], 1
+            )
+            cardinality_feature = routes.new_full(
+                (routes.shape[0], routes.shape[1], 1), log_n
+            )
+        else:
+            support_feature = support_separation.reshape(1, 1).expand(
+                routes.shape[0], 1
+            )
+            cardinality_feature = routes.new_full((routes.shape[0], 1), log_n)
+        router_features = torch.cat(
+            (route_gaps, support_feature.to(routes.dtype), cardinality_feature),
+            dim=-1,
+        )
+        route_logits = self.ccer_v2_router(router_features)
+        soft_weights = torch.softmax(route_logits.float(), dim=-1).to(routes.dtype)
+        route_count = routes.shape[-1]
+        route_weights = (
+            (1.0 - self.ccer_v2_route_floor) * soft_weights
+            + self.ccer_v2_route_floor / route_count
+        )
+        routed = (routes * route_weights.unsqueeze(-2)).sum(dim=-1)
+        logits = self.ccer_v2_output_head(routed.unsqueeze(-1)).squeeze(-1)
+        return logits, routes, route_weights, router_features
+
+    def _ccer_v2_logits_batched(
+        self,
+        context: dict[str, torch.Tensor],
+        context_labels: torch.Tensor,
+        query_instances: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        prototypes = self._ccer_v2_class_slot_prototypes(context, context_labels)
+        encoded_prototypes = F.normalize(
+            self.ccer_v2_prototype_encoder(prototypes).float(), dim=-1
+        )
+        encoded_instances = F.normalize(
+            self.ccer_v2_instance_encoder(query_instances).float(), dim=-1
+        )
+        scale = self.ccer_v2_similarity_log_scale.exp().clamp(0.1, 50.0)
+        similarities = scale.float() * torch.einsum(
+            "eqnd,ecsd->eqcns", encoded_instances, encoded_prototypes
+        )
+        evidence = torch.logsumexp(similarities, dim=-1) - math.log(
+            prototypes.shape[-2]
+        )
+        return self._ccer_v2_pool_evidence(evidence, encoded_prototypes)
+
+    def _ccer_v2_logits(
+        self,
+        context: dict[str, torch.Tensor],
+        context_labels: torch.Tensor,
+        query_instances: torch.Tensor | Sequence[torch.Tensor],
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        prototypes = self._ccer_v2_class_slot_prototypes(context, context_labels)
+        encoded_prototypes = F.normalize(
+            self.ccer_v2_prototype_encoder(prototypes).float(), dim=-1
+        )
+        scale = self.ccer_v2_similarity_log_scale.exp().clamp(0.1, 50.0)
+        if isinstance(query_instances, torch.Tensor):
+            encoded_instances = F.normalize(
+                self.ccer_v2_instance_encoder(query_instances).float(), dim=-1
+            )
+            similarities = scale.float() * torch.einsum(
+                "qnd,csd->qcns", encoded_instances, encoded_prototypes
+            )
+            evidence = torch.logsumexp(similarities, dim=-1) - math.log(
+                prototypes.shape[-2]
+            )
+            return self._ccer_v2_pool_evidence(evidence, encoded_prototypes)
+
+        logits = []
+        routes = []
+        weights = []
+        features = []
+        for instances in query_instances:
+            encoded_instances = F.normalize(
+                self.ccer_v2_instance_encoder(instances).float(), dim=-1
+            )
+            similarities = scale.float() * torch.einsum(
+                "nd,csd->cns", encoded_instances, encoded_prototypes
+            )
+            evidence = torch.logsumexp(similarities, dim=-1) - math.log(
+                prototypes.shape[-2]
+            )
+            result = self._ccer_v2_pool_evidence(
+                evidence.unsqueeze(0), encoded_prototypes
+            )
+            logits.append(result[0].squeeze(0))
+            routes.append(result[1].squeeze(0))
+            weights.append(result[2].squeeze(0))
+            features.append(result[3].squeeze(0))
+        return (
+            torch.stack(logits),
+            torch.stack(routes),
+            torch.stack(weights),
+            torch.stack(features),
         )
 
     def _dr_ccer_scan_routes(
@@ -4403,6 +4769,23 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 query_cell_mask=query_cell_mask,
             )
         )
+        if self.ccer_temperatures:
+            ccer_logits, ccer_route_scores, ccer_presence, ccer_route_weights = (
+                self._ccer_instance_logits_batched(query_instances, class_memories)
+            )
+            ccer_residual_scale = torch.sigmoid(self.ccer_residual_logit)
+        if self.ccer_v2_topks:
+            (
+                ccer_v2_logits,
+                ccer_v2_route_scores,
+                ccer_v2_route_weights,
+                ccer_v2_router_features,
+            ) = self._ccer_v2_logits_batched(
+                context, context_labels, query_instances
+            )
+            ccer_v2_residual_scale = torch.sigmoid(
+                self.ccer_v2_residual_logit
+            )
         population_scale = self._floored_residual_scale(
             self.population_residual_logit,
             self.minimum_population_residual_scale,
@@ -4419,6 +4802,10 @@ class StructuredPopulationMetaClassifier(nn.Module):
             tail_scale,
         )
         logits = logits + covariance_residual_scale * covariance_logits
+        if self.ccer_temperatures:
+            logits = logits + ccer_residual_scale * ccer_logits
+        if self.ccer_v2_topks:
+            logits = logits + ccer_v2_residual_scale * ccer_v2_logits
         if self.covariance_relation_enabled and not self.covariance_relation_diagnostic_only:
             logits = logits + (
                 self.covariance_relation_residual_scale * covariance_relation_logits
@@ -4475,6 +4862,30 @@ class StructuredPopulationMetaClassifier(nn.Module):
             "population_residual_scale": population_scale.expand(episodes),
             "tail_residual_scale": tail_scale.expand(episodes),
             "fusion_residual_scale": fusion_scale.expand(episodes),
+            **(
+                {
+                    "ccer_logits": ccer_logits,
+                    "ccer_route_scores": ccer_route_scores,
+                    "ccer_presence": ccer_presence,
+                    "ccer_route_weights": ccer_route_weights,
+                    "ccer_residual_scale": ccer_residual_scale.expand(episodes),
+                }
+                if self.ccer_temperatures
+                else {}
+            ),
+            **(
+                {
+                    "ccer_v2_logits": ccer_v2_logits,
+                    "ccer_v2_route_scores": ccer_v2_route_scores,
+                    "ccer_v2_route_weights": ccer_v2_route_weights,
+                    "ccer_v2_router_features": ccer_v2_router_features,
+                    "ccer_v2_residual_scale": ccer_v2_residual_scale.expand(
+                        episodes
+                    ),
+                }
+                if self.ccer_v2_topks
+                else {}
+            ),
             **(
                 {
                     "typed_bag_logits": typed_bag_logits,
@@ -4618,6 +5029,23 @@ class StructuredPopulationMetaClassifier(nn.Module):
         tail_logits, rare_fraction_scores, rare_counts = self._rare_instance_logits(
             query_instances, class_memories
         )
+        if self.ccer_temperatures:
+            ccer_logits, ccer_route_scores, ccer_presence, ccer_route_weights = (
+                self._ccer_instance_logits(query_instances, class_memories)
+            )
+            ccer_residual_scale = torch.sigmoid(self.ccer_residual_logit)
+        if self.ccer_v2_topks:
+            (
+                ccer_v2_logits,
+                ccer_v2_route_scores,
+                ccer_v2_route_weights,
+                ccer_v2_router_features,
+            ) = self._ccer_v2_logits(
+                context, context_labels, query_instances
+            )
+            ccer_v2_residual_scale = torch.sigmoid(
+                self.ccer_v2_residual_logit
+            )
         population_scale = self._floored_residual_scale(
             self.population_residual_logit,
             self.minimum_population_residual_scale,
@@ -4634,6 +5062,10 @@ class StructuredPopulationMetaClassifier(nn.Module):
             tail_scale,
         )
         logits = logits + covariance_residual_scale * covariance_logits
+        if self.ccer_temperatures:
+            logits = logits + ccer_residual_scale * ccer_logits
+        if self.ccer_v2_topks:
+            logits = logits + ccer_v2_residual_scale * ccer_v2_logits
         if self.covariance_relation_enabled and not self.covariance_relation_diagnostic_only:
             logits = logits + (
                 self.covariance_relation_residual_scale * covariance_relation_logits
@@ -4684,6 +5116,28 @@ class StructuredPopulationMetaClassifier(nn.Module):
             "population_residual_scale": population_scale,
             "tail_residual_scale": tail_scale,
             "fusion_residual_scale": fusion_scale,
+            **(
+                {
+                    "ccer_logits": ccer_logits,
+                    "ccer_route_scores": ccer_route_scores,
+                    "ccer_presence": ccer_presence,
+                    "ccer_route_weights": ccer_route_weights,
+                    "ccer_residual_scale": ccer_residual_scale,
+                }
+                if self.ccer_temperatures
+                else {}
+            ),
+            **(
+                {
+                    "ccer_v2_logits": ccer_v2_logits,
+                    "ccer_v2_route_scores": ccer_v2_route_scores,
+                    "ccer_v2_route_weights": ccer_v2_route_weights,
+                    "ccer_v2_router_features": ccer_v2_router_features,
+                    "ccer_v2_residual_scale": ccer_v2_residual_scale,
+                }
+                if self.ccer_v2_topks
+                else {}
+            ),
             **(
                 {
                     "typed_bag_logits": typed_bag_logits,
@@ -4742,6 +5196,12 @@ class BaseModel(nn.Module):
         meta_routing_temperature: float = 0.5,
         meta_class_memory_tokens: int = 8,
         meta_rare_evidence_fractions: Sequence[float] = (0.01, 0.05, 0.10, 0.20),
+        meta_ccer_temperatures: Sequence[float] = (),
+        meta_ccer_residual_scale: float = 0.10,
+        meta_ccer_presence_temperature: float = 0.5,
+        meta_ccer_v2_topks: Sequence[int] = (),
+        meta_ccer_v2_route_floor: float = 0.30,
+        meta_ccer_v2_residual_scale: float = 0.10,
         meta_dr_ccer_enabled: bool = False,
         meta_dr_ccer_abs_topks: Sequence[int] = (1, 4, 16),
         meta_dr_ccer_frac_topks: Sequence[float] = (0.01, 0.05),
@@ -4840,6 +5300,12 @@ class BaseModel(nn.Module):
             routing_temperature=meta_routing_temperature,
             class_memory_tokens=meta_class_memory_tokens,
             rare_evidence_fractions=meta_rare_evidence_fractions,
+            ccer_temperatures=meta_ccer_temperatures,
+            ccer_residual_scale=meta_ccer_residual_scale,
+            ccer_presence_temperature=meta_ccer_presence_temperature,
+            ccer_v2_topks=meta_ccer_v2_topks,
+            ccer_v2_route_floor=meta_ccer_v2_route_floor,
+            ccer_v2_residual_scale=meta_ccer_v2_residual_scale,
             dr_ccer_enabled=meta_dr_ccer_enabled,
             dr_ccer_abs_topks=meta_dr_ccer_abs_topks,
             dr_ccer_frac_topks=meta_dr_ccer_frac_topks,
@@ -4877,6 +5343,7 @@ class BaseModel(nn.Module):
         # fusion (docs/architecture_v28_proposal.md SS6.1).
         self.architecture_version = (
             32 if meta_dr_ccer_enabled
+            else 31 if tuple(meta_ccer_v2_topks)
             else 26 if cls_token_pooling
             else 25 if typed_bag_preserving_branch
             else 24 if project_structured_tokens
