@@ -3,15 +3,15 @@
 **Last updated**: `2026-08-07` (**§50 v34-1536 추가 평가: Musk 패딩 브리지(타일 0.858) + ICI(랜덤 0.512) + PathoBench 17-task 전체 CV(평균 0.843)** + **§49 아키텍처 효율화/학습 완주** + **§48 arm C 완주/v33 평가**)  
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
-* **v34 (신규, §49·§50)**: 아키텍처 효율화(MLA-slot 저랭크 affinity, slot_std 분산 트릭, 배치 population candidates, 정규화 통합)로 대규모 컨텍스트 학습이 가능해졌다. **v34-1536(1024ep×50, batch=4, fp32) 완주** — best val_ce **0.4419**. 전체 평가 완료: ① PathoBench **14개 유효 task** 5-fold CV 평균 **pooled 0.843** ⚠️(§51: 로컬 `cptac_ccrcc_*`가 `bc_therapy` 복사본 — 실제 CCRCC 코호트 미평가, 실측 6개 데이터셋), ② Musk **tile 브리지 0.858** (zero-pad 0.822 대비 +0.036, v30 0.854와 동등), ③ **ICI 실세계 5-seed AUROC 0.512±0.027 = 랜덤** (기존과 일관, 명시적 잠금 해제로 평가). v30과의 직접 CV 비교는 **PCA-per-fold 미지원으로 보류**.
-* **다음 Action**: ① **v34-1536 종합 판정(사용자)** — PathoBench·Musk 실질 신호 vs ICI 랜덤, ② v30 vs v34 공정 비교용 **PCA-per-fold CV** (여전히 미지원), ③ **v34-512 학습** + 동일 평가, ④ Phase 0 결과 선택(사용자) — arm C의 n>34(0.849)·lscc 개선 채택 여부, ⑤ v30 medium 참조 재학습, ⑥ frozen-v30 multi-resolution probe(§39, 아키텍처 가설 여전히 미검증).
+* **v34 확정 (§52·§53)**: **v34-1536을 PathoBench 보고용 모델로 확정**(사용자 결정). 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv fold·코호트·라벨) 기준 **50-fold**(SEAL macro-AUC와 동일 구조)로 진행 중 — 완료분(pooled): bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569. v30은 합성/Musk baseline 유지. 이전 5-fold(§50)와 수치 ±0.04 이내로 동일(평가 견고성). 로컬 ccrcc CSV 오류 정정(§51). 자세한 진행 §53.
+* **다음 Action**: ① **v34 확정됨(§53)** — 공식 **50-fold 17개 전체 완료** 후 최종 표 + **SEAL 재비교**, ② v30 vs v34 공정 비교용 **PCA-per-fold CV** (미지원), ③ **v34-512 학습** + 동일 평가, ④ Phase 0 결과 선택(사용자) — arm C의 n>34(0.849)·lscc 개선 채택 여부, ⑤ v30 medium 참조 재학습, ⑥ frozen-v30 multi-resolution probe(§39, 미검증).
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§52 (실제 ccrcc 평가·SEAL 비교·공식 50-fold 계획)**, **§51 (PathoBench 원본 검증: 로컬 ccrcc CSV는 bc_therapy 복사본)**, **§50 (v34-1536 추가 평가: Musk 타일 브리지, ICI 랜덤, PathoBench 17-task 전체 CV)**, **§49 (아키텍처 효율화 MLA-slot + v34-1536 학습 완주 + PathoBench 5-fold CV)**, **§48 (arm C top-up 완주 + v33 평가: legacy gate 미달, PathoBench v30 우위)**, **§47 (e125 재평가/타일 스윕)**, **§46 (PathoBench zero-shot 평가)**, **§45 (arm C top-up 중간 Musk 신호 — 대형 bag 개선)**, **§44 (B2b 패딩 배칭, 병목 프로파일)**, **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
+**Read first if you are picking this up**: **§53 (v34 최종 확정 + 공식 50-fold 평가)**, **§52 (실제 ccrcc 평가·SEAL 비교·공식 50-fold 계획)**, **§51 (PathoBench 원본 검증: 로컬 ccrcc CSV는 bc_therapy 복사본)**, **§50 (v34-1536 추가 평가: Musk 타일 브리지, ICI 랜덤, PathoBench 17-task 전체 CV)**, **§49 (아키텍처 효율화 MLA-slot + v34-1536 학습 완주 + PathoBench 5-fold CV)**, **§48 (arm C top-up 완주 + v33 평가: legacy gate 미달, PathoBench v30 우위)**, **§47 (e125 재평가/타일 스윕)**, **§46 (PathoBench zero-shot 평가)**, **§45 (arm C top-up 중간 Musk 신호 — 대형 bag 개선)**, **§44 (B2b 패딩 배칭, 병목 프로파일)**, **§42 (Phase 0 arm B/C gate 평가)**, **§41 (Phase 0 실행 상태)**, **§40 (compact tests)**, **§39 (v33 proposal)**, **§38 (v32b 결과/CCER 폐기)**,
 **§36 (CCER-v2 평가)**, **§29 (v30 확정 baseline)**.
 
 **열린 과제**: ① v30 vs v34 CV 공정 비교(PCA-per-fold), ② v34-512 학습, ③ v30 six-task 효과 분리, ④ B2b within-episode cardinality 효과 분리, ⑤ frozen-v30 multi-resolution headroom, ⑥ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
@@ -1767,3 +1767,55 @@ split은 지정 fold(기본 fold_0)의 train/val/test) — **31개 task 전부**
   ① 공식 `k=all.tsv`의 **공식 fold**(50-fold 등), ② **공식 코호트**(ccrcc 변이 = 103 case/245장,
   SEAL의 218장 subset 미채택), ③ **공식 라벨**(`config.yaml`의 `task_col`). SEAL과 비교 시에는
   코호트 차이(245 vs 218)를 명시하고, 필요하면 218장 subset 병행 보고로 투명화한다.
+
+---
+
+## 53. 2026-08-07 — v34 최종 확정 + 공식 50-fold 평가(SEAL 동일 프로토콜) 진행
+
+**상태**: 사용자 결정으로 **v34-1536을 PathoBench 보고용 모델로 확정**. 평가는 **공식
+Patho-Bench 프로토콜**(공식 k=all.tsv fold · 공식 코호트 · 공식 라벨 task_col)로 **50-fold**를
+돌리고 있다(SEAL의 macro-AUC 프로토콜과 동일 구조). 17개 task 중 일부 완료, 배치 진행 중
+(`logs/official50/batch.log`).
+
+### 1. v34 확정 사항
+
+- **모델**: v34-1536 (slot MLA 저랭크 affinity + slot_std 분산 트릭 + 배치 population
+  candidates + 정규화 통합, scratch). best `val_ce 0.4419`
+  (`checkpoints/20260806_215800/v34_phase0_largectx_1536/epoch=048-val_ce_loss=0.4419.ckpt`).
+- **평가 프로토콜(확정)**: 공식 Patho-Bench — 공식 `k=all.tsv`의 공식 fold(50-fold), 공식
+  코호트(ccrcc 변이 245장/103 case, SEAL의 218장 subset 미채택), 공식 라벨(`config.yaml` task_col).
+  all-context, 전체 타일, raw 1536-d, **zero-shot in-context(학습 없음)**.
+- **도구**: `test_pathobench.py --official-folds <task_dir>` + 병렬 러너
+  `scripts/run_official_folds_parallel.py` (워커 분할 10→6→4→2 자동 축소 + **per-fold
+  체크포인트** → 중단 후 리쥼, fold는 정적·결정적이라 재계산 불필요). h5는 워커별 직접 로드.
+
+### 2. 공식 50-fold 결과 (완료분, fold-mean±std / pooled)
+
+| task | 50-fold mean±std | pooled |
+|---|---|---|
+| bc_therapy/er_status | 0.6741 ± 0.101 | 0.6721 |
+| bc_therapy/grade | 0.7148 ± 0.072 | 0.7126 |
+| bc_therapy/her2_status | 0.6715 ± 0.076 | 0.6696 |
+| cptac_brca/PIK3CA_mutation | 0.5748 ± 0.106 | 0.5690 |
+
+- 나머지 13개 task 배치 실행 중 (`logs/official50/batch.log`) — 완료 후 이 표 갱신.
+- bc_therapy 3개: 5-fold pooled(0.704/0.674/0.673) vs 50-fold pooled(0.672/0.713/0.670)는
+  **±0.03~0.04 이내로 동일**(fold std 안) → 평가 견고성 확인.
+- workers=10 병렬로 소형 task ~11분/개; 큰 task는 OOM 시 자동 축소(10→6→4→2), 결과 동일.
+
+### 3. SEAL baseline과 50-fold 비교 (완료분)
+
+| task | SEAL ABMIL | SEAL MeanMIL | 우리 50-fold(pooled) |
+|---|---|---|---|
+| bc_therapy/er_status | 0.717 | 0.712 | 0.672 |
+| bc_therapy/grade | 0.770 | 0.751 | 0.713 |
+| bc_therapy/her2_status | 0.663 | 0.684 | 0.670 |
+| cptac_brca/PIK3CA_mutation | 0.595 | 0.544 | 0.569 |
+
+- bc_therapy 계열은 SEAL과 비슷~소폭 하회, PIK3CA는 SEAL 사이. 나머지 task는 배치 완료 후 갱신.
+
+### 4. 열린 과제
+
+- 공식 50-fold 17개 전체 완료 → 최종 표 + SEAL 재비교 (§53 갱신).
+- **v34-512 학습** (미실행). **PCA-per-fold CV** (v30 vs v34 공정 비교, 미지원).
+- v30 medium 참조 재학습, frozen-v30 multi-resolution probe(§39) 등은 기존 열린 과제 유지.

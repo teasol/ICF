@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-07` — v34-1536 전체 평가: Musk 타일 브리지(0.858), ICI(랜덤 0.512), PathoBench 17-task CV(평균 0.843).
+**Last updated**: `2026-08-07` — v34-1536 확정(PathoBench 보고용). 공식 Patho-Bench 프로토콜(공식 fold 50-fold·코호트·라벨) 평가 진행 중(§53). 로컬 ccrcc CSV 오류 정정(§51), SEAL baseline 비교(§52).
 
 **Confirmed baseline**: v30 = v24 residual+bottleneck bag projection + B1
 `bag_representation: poolz_l2` + B2 log-uniform cardinality `[1,1024]`. Musk zero-shot
@@ -8,7 +8,7 @@
 §29·§28이다. 코드 기본 `bag_representation`은 checkpoint/config의 조용한 의미 변경을 막기
 위해 계속 `legacy`다.
 
-**Active — v34 large-context + 아키텍처 효율화 (2026-08-07)**: PathoBench 규모(3k~30k+ 타일)
+**확정 — v34 large-context + 아키텍처 효율화 (2026-08-07)**: PathoBench 규모(3k~30k+ 타일)
 컨텍스트 학습을 위한 MLA 계열 효율화를 커밋·적용했다. ① `src/models/mla.py` standalone
 MLA(`bfaee6a`), ② aggregator **slot MLA 저랭크 affinity** (`aggregator_slot_latent_dim`/
 `slot_query_latent_dim`/`slot_affinity_dim` + `slot_w_dq/dkv/uq/uk`, `e98b3e2` — None이면
@@ -28,6 +28,13 @@ input_dim 동적 패딩 + `--pad-mode`(zero/tile, `4aca7f1`/`6d4c5bc`): **tile(1
 vs zero-pad 0.822 (v30 0.854와 동등). ③ **ICI 실세계 5-seed 0.512±0.027 = 랜덤** (명시적
 잠금 해제, `f8181be`: `ICIDataset` input_dim/pad_mode 타일 + `test_v34_phase0_largectx_1536_ici.yaml`).
 v30과 CV 직접 비교는 **PCA-per-fold 미지원으로 보류**. 상세 §49·§50.
+
+**v34 확정 (§53, 2026-08-07)**: 사용자 결정으로 **v34-1536을 PathoBench 보고용 모델로 확정**.
+평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv의 50-fold, 공식 코호트 245장, 공식 라벨
+`config.yaml` task_col)로 진행 중 — `test_pathobench.py --official-folds` + 병렬 러너 + per-fold
+체크포인트(중단 후 리쥼). 완료분(pooled): bc_therapy er 0.672/grade 0.713/her2 0.670,
+cptac_brca_PIK3CA 0.569. v30은 합성/Musk baseline 유지. SEAL(지도 ABMIL/MeanMIL)과는
+프로토콜(지도 vs zero-shot in-context)·코호트(ccrcc 218 vs 245) 차이 명시. 상세 §52·§53.
 
 **Rejected candidate — architecture v31 CCER-v2**: projection 전 aligned slot-center로
 support class prototype을 만들고, 기존 rare branch와 독립인 support/query encoder에서
