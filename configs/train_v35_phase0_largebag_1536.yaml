@@ -1,12 +1,12 @@
 # v35 Phase 0 — large-bag cardinality arm (docs/history/architecture_v35_*.md §5).
 #
 # SINGLE-FACTOR arm: only the synthetic cell-count distribution changes. The
-# architecture is v34-1536 untouched -- the rare-evidence branch is KEPT (rev.2
-# §2.10/§4.2: it is the only selective mechanism in the model, and its
-# contribution has not been measured yet), no context/query size split (rev.2
-# §2.6: not implementable, `_sample_training_queries` picks the query bags at
-# train time), and cardinality stays one draw per EPISODE (rev.2 §2.5: per-bag
-# cardinality is v33 arm C / B2b, already rejected at -0.0412 AUROC).
+# architecture is v34-1536 except the rare-evidence branch is REMOVED
+# (meta_enable_rare_evidence: false) -- P0-b gate passed (|Δpooled| 0.0009 <
+# 0.003 on PIK3CA 50-fold), so removal is safe per rev.2 step 5 / §4.2. No
+# context/query size split (rev.2 §2.6: not implementable, `_sample_training_queries`
+# picks the query bags at train time), and cardinality stays one draw per EPISODE
+# (rev.2 §2.5: per-bag cardinality is v33 arm C / B2b, already rejected at -0.0412 AUROC).
 #
 # Data change (rev.2 §5):
 #   num_cells [1, 8192] -> [1, 16384] with num_cells_log_uniform_power 1.5.
@@ -74,3 +74,7 @@ model_kwargs:
   ranking_loss_weight: 0.10
   routing_sparsity_weight: 0.0
   routing_balance_weight: 0.0
+  # Rare-removed arm (rev.2 step 5): P0-b gate passed (|Δpooled| 0.0009 on
+  # PIK3CA 50-fold, < 0.003). rare_logits forced to 0 -- numerically identical
+  # to deletion; checkpoint-compatible and reversible.
+  meta_enable_rare_evidence: false

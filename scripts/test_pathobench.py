@@ -175,6 +175,13 @@ def parse_args() -> argparse.Namespace:
         "unvalidated protocol; default False matches every previously "
         "reported number.",
     )
+    parser.add_argument(
+        "--rare-logits-zero",
+        action="store_true",
+        help="P0-b gate (rev.2 §4.2): force rare_logits = 0 during eval (no "
+        "parameter change) to measure the rare branch's contribution to the "
+        "final logits. Default False = exact existing behavior.",
+    )
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--output", type=Path, default=None)
     return parser.parse_args()
@@ -713,6 +720,8 @@ def main() -> None:
         )
         model.on_load_checkpoint(checkpoint)
         model.load_state_dict(checkpoint["state_dict"])
+        if args.rare_logits_zero:
+            model.model.meta_classifier.force_rare_logits_zero = True
         model.eval()
         model.to(device)
         print(f"Model: arch v{model.model.architecture_version}, "
@@ -788,6 +797,8 @@ def main() -> None:
         )
         model.on_load_checkpoint(checkpoint)
         model.load_state_dict(checkpoint["state_dict"])
+        if args.rare_logits_zero:
+            model.model.meta_classifier.force_rare_logits_zero = True
         model.eval()
         model.to(device)
         print(f"Model: arch v{model.model.architecture_version}, "
@@ -879,6 +890,8 @@ def main() -> None:
     checkpoint = torch.load(args.checkpoint.expanduser().resolve(), map_location="cpu")
     model.on_load_checkpoint(checkpoint)
     model.load_state_dict(checkpoint["state_dict"])
+    if args.rare_logits_zero:
+        model.model.meta_classifier.force_rare_logits_zero = True
     model.eval()
     model.to(device)
     if not use_cache:

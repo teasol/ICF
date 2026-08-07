@@ -63,6 +63,11 @@ def parse_args() -> argparse.Namespace:
         help="Forwarded to test_pathobench.py --batch-queries (NOT "
         "bit-identical to the default protocol -- see its help text).",
     )
+    parser.add_argument(
+        "--rare-logits-zero", action="store_true",
+        help="Forwarded to test_pathobench.py --rare-logits-zero (P0-b gate, "
+        "rev.2 §4.2: force rare_logits=0 during eval).",
+    )
     parser.add_argument("--keep-tmp", action="store_true")
     return parser.parse_args()
 
@@ -113,6 +118,8 @@ def main() -> None:
             cmd += ["--context-max-tiles", str(args.context_max_tiles)]
         if args.batch_queries:
             cmd += ["--batch-queries"]
+        if args.rare_logits_zero:
+            cmd += ["--rare-logits-zero"]
         with worker_log.open("w") as lf:
             p = subprocess.Popen(cmd, env=env, stdout=lf, stderr=subprocess.STDOUT)
         procs.append((i, s, e, p, worker_out, worker_log))

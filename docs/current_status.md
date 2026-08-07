@@ -1,20 +1,20 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-08` (**§60 v35 공식 50-fold 2개 완료 — LUAD EGFR 0.7819 / BRCA PIK3CA 0.5668(pooled) + SEAL baseline 비교(지도 ABMIL·MeanMIL과 근접/동급) + v35-16384 50ep 완주(best val_ce 0.3469 @ ep48) + 메모리/val plateau 진단** + §59 v35 rev.2 + **§41–§48 v33 arm C saga 아카이브 → history/current_status_archive_20260808_v33_armC.md**)  
+**Last updated**: `2026-08-08` (**§61 P0-b 게이트 통과(|Δpooled| 0.0009) + rare branch 제거(`meta_enable_rare_evidence: false`, rev.2 step 5) + §60 v35 공식 50-fold 2개 완료(EGFR 0.7819 / PIK3CA 0.5668) + SEAL 비교 + v35-16384 50ep 완주** + §59 v35 rev.2 + **§41–§48 v33 arm C saga 아카이브**)  
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **v34 확정 (§52·§53·§56)**: **v34-1536을 PathoBench 보고용 모델로 확정**(사용자 결정). 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv fold·코호트·라벨) 기준 **50-fold**(SEAL macro-AUC와 동일 구조) — **5/17 완료**(bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569, brca_TP53), **12개는 config 수정으로 재시작**(§56, 백그라운드). v30은 합성/Musk baseline 유지. 이전 5-fold와 수치 ±0.04 이내 동일(평가 견고성). config 시스템을 v34 base + group default 참조형으로 리팩터링(§56). 자세한 진행 §53·§56.
-* **v35 (§58 rev.1 설계 → §59 rev.2 개정 + 학습 시작)**: rev.1의 3개 결정 중 **①rare 제거·③context/query 대형화 분리는 폐기 권고**(§59.1: anchor 오염, 집계 수학 오류, Musk 소형 bag 파괴 = 확정 목표 위반, query 위치를 dataset이 알 수 없어 구현 불가, 그리고 동기 자체에 직접 반증 — context 2k cap Δpooled **−0.0019**). ②chunk는 **근사 평균이 아닌 정확 충분통계 축약**으로 재설계. 구현·검증 완료분: **bag 단위 정확 스트리밍**(peak VRAM 40,990 → 18,930 MiB, AUROC 동일), `num_cells_log_uniform_power`, VRAM 가드 `episode_batch_size` 누락 버그 수정, **41 tests**. **학습 완주(2차, §60)**: 데이터 단독 arm(`num_cells [1,16384]` power 1.5, rare branch 유지) 50 epochs 정상 완주 — 1차 `[1,32768]`은 CUDA OOM 크래시(epoch 0부터 324회, 21:24 SIGABRT, best 0.3574 @ ep6), 상한 16384 축소 후 재개해 **OOM 없이 완주**, best val_ce **0.3469 @ ep48**. 메모리 진단(§60): 단조 누수가 아니라 `expandable_segments:True` + 극단 ragged shape. val plateau는 v34와 동일 정상 수렴. **공식 50-fold 평가 2개 완료(§60)**: LUAD EGFR **pooled 0.7819**(macro 0.7889±0.092) / BRCA PIK3CA **pooled 0.5668**(macro 0.5743±0.109) — **SEAL 비교: 지도 ABMIL에 근접(EGFR −0.041 / PIK3CA −0.021), 지도 MeanMIL과 동급~우위(EGFR +0.012 / PIK3CA +0.030)**.
-* **다음 Action**: ① **v35 공식 50-fold 평가**(§60, EGFR·PIK3CA 완료 → 잔여 15개 + v34 재실행으로 공정 비교, §59.5), ② **P0 게이트(무료, 학습 0)** — query 크기 스윕 + `rare_logits=0` ablation; 전자가 +0.005 미달이면 대형화 노선 폐기(rev.2 §4), ③ 공식 50-fold **잔여 8개**(스트리밍으로 workers 2 → 8+ 가능), ④ v30 vs v34 공정 비교용 **PCA-per-fold CV**(미지원), ⑤ **v34-512 학습**, ⑥ rev.2 §3의 **chunk 단위**(bag 내부) 스트리밍 — 현재는 bag 단위까지만, ⑦ rev.2 §8 zero-init chunk-attention(ABMIL 격차 대응).
+* **v35 (§58 rev.1 설계 → §59 rev.2 개정 + 학습 시작)**: rev.1의 3개 결정 중 **①rare 제거·③context/query 대형화 분리는 폐기 권고**(§59.1: anchor 오염, 집계 수학 오류, Musk 소형 bag 파괴 = 확정 목표 위반, query 위치를 dataset이 알 수 없어 구현 불가, 그리고 동기 자체에 직접 반증 — context 2k cap Δpooled **−0.0019**). ②chunk는 **근사 평균이 아닌 정확 충분통계 축약**으로 재설계. 구현·검증 완료분: **bag 단위 정확 스트리밍**(peak VRAM 40,990 → 18,930 MiB, AUROC 동일), `num_cells_log_uniform_power`, VRAM 가드 `episode_batch_size` 누락 버그 수정, **41 tests**. **학습 완주(2차, §60)**: 데이터 단독 arm(`num_cells [1,16384]` power 1.5, rare branch 유지) 50 epochs 정상 완주 — 1차 `[1,32768]`은 CUDA OOM 크래시(epoch 0부터 324회, 21:24 SIGABRT, best 0.3574 @ ep6), 상한 16384 축소 후 재개해 **OOM 없이 완주**, best val_ce **0.3469 @ ep48**. 메모리 진단(§60): 단조 누수가 아니라 `expandable_segments:True` + 극단 ragged shape. val plateau는 v34와 동일 정상 수렴. **공식 50-fold 평가 2개 완료(§60)**: LUAD EGFR **pooled 0.7819**(macro 0.7889±0.092) / BRCA PIK3CA **pooled 0.5668**(macro 0.5743±0.109) — **SEAL 비교: 지도 ABMIL에 근접(EGFR −0.041 / PIK3CA −0.021), 지도 MeanMIL과 동급~우위(EGFR +0.012 / PIK3CA +0.030)**. **P0-b(§61)**: `rare_logits=0` ablation |Δpooled| **0.0009 < 0.003** → **rare branch 제거 결정** — config `meta_enable_rare_evidence: false`로 v35가 rare-free arm으로 전환(가역·ckpt 호환, 41 tests 통과).
+* **다음 Action**: ① **v35 공식 50-fold 평가**(§60, EGFR·PIK3CA 완료 → 잔여 15개 + v34 재실행으로 공정 비교, §59.5), ② **P0 게이트**: `rare_logits=0` ablation(P0-b) **완료 → rare 제거 진행(§61)**; **query 스윕(P0-a)은 사용자 판단으로 폐기**(이미 large-bag 실측 + context 민감도 없음, §2.8), ③ 공식 50-fold **잔여 8개**(스트리밍으로 workers 2 → 8+ 가능), ④ v30 vs v34 공정 비교용 **PCA-per-fold CV**(미지원), ⑤ **v34-512 학습**, ⑥ rev.2 §3의 **chunk 단위**(bag 내부) 스트리밍 — 현재는 bag 단위까지만, ⑦ rev.2 §8 zero-init chunk-attention(ABMIL 격차 대응).
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§60 (v35-16384 완주 + 메모리/val 진단 + LUAD EGFR 50-fold 평가 진행 중)**, **§59 (v35 rev.2 개정 + 스트리밍 구현 + 학습 시작 + 50-fold stale 경고)**, **§58 (v35 rev.1 설계 — §59가 상당 부분 정정하므로 §59와 함께 읽을 것)**, **§57 (50-fold case leakage 진단)**, **§53 (v34 확정 + 공식 50-fold 표 — §59.5에 따라 재실행 필요)**,
+**Read first if you are picking this up**: **§61 (P0-b 통과 + rare branch 제거)**, **§60 (v35-16384 완주 + 메모리/val 진단 + v35 공식 50-fold EGFR·PIK3CA + SEAL 비교)**, **§59 (v35 rev.2 개정 + 스트리밍 구현 + 학습 시작 + 50-fold stale 경고)**, **§58 (v35 rev.1 설계 — §59가 상당 부분 정정하므로 §59와 함께 읽을 것)**, **§57 (50-fold case leakage 진단)**, **§53 (v34 확정 + 공식 50-fold 표 — §59.5에 따라 재실행 필요)**,
 
-**열린 과제**: ① **v35 공식 50-fold 평가**(§60, EGFR·PIK3CA 완료 → 잔여 15개 + SEAL 최종 재비교), ② **P0 게이트**(query 크기 스윕 / rare ablation, 무료), ③ **§53 표 9개 재실행**(`5869535` 이후 stale, §59.5) + 공식 50-fold 잔여 8개 → 17개 최종 표 + SEAL 재비교, ④ v30 vs v34 CV 공정 비교(PCA-per-fold), ⑤ v34-512 학습, ⑥ **chunk 단위(bag 내부) 스트리밍** 미구현(rev.2 §3), ⑦ v30 six-task / B2b cardinality 효과 분리, ⑧ frozen-v30 multi-resolution headroom, ⑨ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
+**열린 과제**: ① **v35 공식 50-fold 평가**(§60, EGFR·PIK3CA 완료 → 잔여 15개 + SEAL 최종 재비교), ② **rare-free v35 arm 학습 + 50-fold 평가**(§61, Musk 재확인 포함), ③ **§53 표 9개 재실행**(`5869535` 이후 stale, §59.5) + 공식 50-fold 잔여 8개 → 17개 최종 표 + SEAL 재비교, ④ v30 vs v34 CV 공정 비교(PCA-per-fold), ⑤ v34-512 학습, ⑥ **chunk 단위(bag 내부) 스트리밍** 미구현(rev.2 §3), ⑦ v30 six-task / B2b cardinality 효과 분리, ⑧ frozen-v30 multi-resolution headroom, ⑨ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
 
 **Branches**: `main` = v30 확정 baseline + 미채택 v31 CCER-v2 재현 코드. 참고용 branch/tag 구조는
 [`history/branch_structure.md`](history/branch_structure.md).
@@ -1731,3 +1731,54 @@ SEAL(지도 ABMIL/MeanMIL)과 비교했다. 이번 세션에서 §41–§48(v33 
 3. **P0 게이트**(§59.7-2, 무료): query 크기 스윕 + `rare_logits=0` ablation — +0.005 미달 시 대형화 노선 폐기.
 4. 대형 bag 훈련의 `expandable_segments` A/B 검증은 다음 large-bag 런에서 (옵션).
 5. val 신호 정확화가 필요하면 `val episodes 104 → 1000`(§5 권장).
+
+---
+
+## 61. 2026-08-08 — P0-b 게이트 통과 + rare branch 제거 (rev.2 step 5)
+
+**상태**: §4.2 P0-b(`rare_logits=0` ablation)를 구현·실행해 **rare branch 기여가 PIK3CA에서
+≈ 0(|Δpooled| 0.0009 < 0.003)임을 확인** → 사용자 결정으로 **rare branch 제거를 진행**했다.
+rev.2 step 5 규율대로 config `meta_enable_rare_evidence: false`로 **rare-free arm**을 구성했다
+(코드 삭제가 아니라 가역·ckpt 안전 방식 — P0-b와 수치 동일). 추가 확인(EGFR 등)은 사용자 판단으로
+**낭비라 생략**했다.
+
+### 1. P0-b 구현 (`--rare-logits-zero`)
+
+- `baseline.py` `StructuredPopulationMetaClassifier`에 `force_rare_logits_zero` 추가 →
+  `_fuse_evidence`에서 `rare_logits` zeroing(파라미터 변경 없음). `test_pathobench.py` +
+  `run_official_folds_parallel.py`에 `--rare-logits-zero` 플래그 전달.
+- ⚠️ **초기 와이어링 오류**: rare 로직이 `BaseModel`이 아니라 하위 `meta_classifier`에 있어서
+  `model.model.meta_classifier.force_rare_logits_zero`로 수정 필요했다. `_fuse_evidence` 단위
+  검증(flag on/off 시 출력 변화 확인) + 41 tests 통과.
+
+### 2. P0-b 결과 (PIK3CA 공식 50-fold, 8 worker, ~4분)
+
+| 변형 | pooled | macro |
+|---|---|---|
+| v35 plain | 0.5668 | 0.5743±0.109 |
+| `rare_logits=0` | 0.5659 | 0.5732±0.108 |
+| **Δ** | **0.0009** | 0.0011 |
+
+- **|Δpooled| 0.0009 < 0.003 → 게이트 통과 = rare 제거 안전** (fold별로 ±0.02 흔들리지만 pooled에서 상쇄).
+- **시사점**: rare branch는 ABMIL과 우리를 가르는 요소가 아님(기여 ≈ 0). ABMIL 격차(§8)는
+  기존 rare 보존이 아니라 **chunk-attention 같은 새로운 선택적 집계 추가**가 정답.
+
+### 3. rare branch 제거 (`meta_enable_rare_evidence`)
+
+- `StructuredPopulationMetaClassifier`/`BaseModel`에 `meta_enable_rare_evidence`(기본 **True**) 추가.
+  **False면 `force_rare_logits_zero=True` → rare_logits=0** (수치 동일, 기존 ckpt strict 로드 호환, 가역).
+- **v35 config**: `model_kwargs.meta_enable_rare_evidence: false` → v35가 **rare-free arm config**로 전환.
+  (top 주석도 rare KEEP → REMOVED로 갱신)
+- **검증**: v35 빌드 시 `force_rare_logits_zero=True`, v34 기본은 False(불변), 기존 v35 ckpt
+  strict `load_state_dict` OK, **41 tests 통과**.
+- ⚠️ **유의**: P0-b는 PathoBench 50-fold만 측정. **Musk(소형 bag)에 대한 rare 영향은 미측정** —
+  Musk 0.95 목표와 충돌 시 재검토 필요(rare는 raw cell을 소비하는 유일한 선택적 기제, §59.1).
+
+### 4. 다음
+
+1. **rare-free v35 arm 학습** (이 config 그대로 scratch) → 50-fold 평가(EGFR/PIK3CA 등)로
+   v35(rare 유지, §60 결과)와 비교.
+2. **Musk zero-shot 재확인** (rare 제거가 소형 bag에 영향 없는지).
+3. P0-a(query 크기 스윕)는 **사용자 판단으로 폐기** — 이미 large-bag 실측(marginal) + context
+   민감도 없음(§2.8).
+4. ABMIL 격차(§8): chunk-attention 추가(단독 arm + 동일 게이트) — rare 제거와 독립.

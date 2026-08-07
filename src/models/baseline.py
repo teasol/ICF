@@ -2536,6 +2536,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
         raw_stat_tokens: Sequence[str] = (),
         use_instance_attention_mil: bool = False,
         mil_hidden_dim: int | None = None,
+        meta_enable_rare_evidence: bool = True,
         num_classes: int = 2,
     ) -> None:
         super().__init__()
@@ -2584,6 +2585,12 @@ class StructuredPopulationMetaClassifier(nn.Module):
         self.include_cls_token = bool(include_cls_token)
         self.raw_stat_tokens = tuple(raw_stat_tokens)
         self.use_instance_attention_mil = bool(use_instance_attention_mil)
+        # P0-b gate (rev.2 §4.2): eval-time forcing of rare_logits = 0 to
+        # measure the rare branch's contribution. Non-persistent; default
+        # keeps exact existing behavior. meta_enable_rare_evidence=False is
+        # the "rare-removed" arm (rev.2 step 5) -- numerically identical to
+        # deletion (P0-b verified |Δpooled| 0.0009 < 0.003 on PIK3CA).
+        self.force_rare_logits_zero = not meta_enable_rare_evidence
         if self.include_cls_token and typed_bag_preserving_branch:
             raise NotImplementedError(
                 "include_cls_token with typed_bag_preserving_branch is not "
@@ -3632,6 +3639,8 @@ class StructuredPopulationMetaClassifier(nn.Module):
         population_scale: torch.Tensor,
         rare_scale: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        if getattr(self, "force_rare_logits_zero", False):
+            rare_logits = rare_logits.new_zeros(rare_logits.shape)
         evidence = torch.stack(
             (global_shape_logits, population_logits, rare_logits), dim=-1
         )
@@ -4509,6 +4518,7 @@ class BaseModel(nn.Module):
         meta_routing_temperature: float = 0.5,
         meta_class_memory_tokens: int = 8,
         meta_rare_evidence_fractions: Sequence[float] = (0.01, 0.05, 0.10, 0.20),
+        meta_enable_rare_evidence: bool = True,
         meta_fusion_residual_scale: float = 0.10,
         meta_covariance_ridge_logit_scale: float = 2.0,
         meta_covariance_residual_scale: float = 0.25,
@@ -4617,6 +4627,7 @@ class BaseModel(nn.Module):
             raw_stat_tokens=raw_stat_tokens,
             use_instance_attention_mil=use_instance_attention_mil,
             mil_hidden_dim=mil_hidden_dim,
+            meta_enable_rare_evidence=meta_enable_rare_evidence,
             num_classes=self.num_classes,
         )
         # v26 = cls_token_pooling (CLS cross-attention over raw cells, see
