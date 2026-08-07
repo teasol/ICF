@@ -144,7 +144,21 @@ def parse_args() -> argparse.Namespace:
         "--official-nfolds",
         type=int,
         default=None,
-        help="Limit official folds to the first N (quick checks). Default: all.",
+        help="Number of official folds to evaluate from --official-fold-start "
+        "(quick checks / parallel fold splitting). Default: all.",
+    )
+    parser.add_argument(
+        "--official-fold-start",
+        type=int,
+        default=0,
+        help="First official fold index to evaluate (for parallel fold "
+        "splitting across worker processes).",
+    )
+    parser.add_argument(
+        "--cache-only",
+        action="store_true",
+        help="With --official-folds: only build the raw 1536-d feature cache "
+        "for the task, then exit (no evaluation).",
     )
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--output", type=Path, default=None)
@@ -495,28 +509,46 @@ def evaluate_official_folds(
         print(f"[binarized] {n_classes} classes -> 0 vs rest")
         labels_raw = {s: int(labels_raw[s] != 0) for s in labels_raw}
 
-    h5_index = index_h5_files(args.features)
-    slide_ids = [s for s in slide_ids if s in h5_index]
-    missing = len(records) - len(slide_ids)
-    if missing:
-        print(f"WARNING: dropping {missing} slides with no feature file")
-    bags = {sid: load_slide_features(sid, h5_index) for sid in slide_ids}
-    projected = {sid: bag.to(device) for sid, bag in bags.items()}
+    h5_index = None
+    cache_path = args.data_dir.expanduser().resolve() / f"{tsv.parent.name}_raw1536.pt"
+    if cache_path.exists():
+        cache = torch.load(cache_path, map_location="cpu", weights_only=False)
+        slide_ids = list(cache["slide_id"])
+        bag_list = list(cache["bag"])
+        print(f"Loaded raw {FEATURE_DIM}-d cache {cache_path.name} ({len(slide_ids)} slides)")
+    else:
+        h5_index = index_h5_files(args.features)
+        slide_ids = [s for s in slide_ids if s in h5_index]
+        missing = len(records) - len(slide_ids)
+        if missing:
+            print(f"WARNING: dropping {missing} slides with no feature file")
+        bag_list = [load_slide_features(s, h5_index) for s in slide_ids]
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        torch.save({"slide_id": slide_ids, "bag": bag_list}, cache_path)
+        print(f"Built raw {FEATURE_DIM}-d cache {cache_path.name} ({len(slide_ids)} slides)")
+    if args.cache_only:
+        print("Cache ready (--cache-only, skipping evaluation).")
+        return
+    projected = {sid: bag.to(device) for sid, bag in zip(slide_ids, bag_list)}
     print(f"Loaded {len(projected)} slides, {len(fold_cols)} official folds "
           f"({fold_cols[0]}..{fold_cols[-1]}), raw {FEATURE_DIM}-d")
 
-    n_folds = args.official_nfolds or len(fold_cols)
+    start = args.official_fold_start
+    total_folds = len(fold_cols)
+    n_folds = args.official_nfolds or (total_folds - start)
+    end = start + n_folds
     fold_aurocs: list[float] = []
+    fold_indices: list[int] = []
     pooled_prob: list[torch.Tensor] = []
     pooled_target: list[torch.Tensor] = []
     all_records: list[dict] = []
     index = {sid: i for i, sid in enumerate(slide_ids)}
-    for k in range(n_folds):
+    for k in range(start, min(end, total_folds)):
         fc = fold_cols[k]
         test_ids = [s for s in slide_ids if records[index[s]][fc].strip() == "test"]
         context_ids = [s for s in slide_ids if records[index[s]][fc].strip() != "test"]
         if len(test_ids) < 2:
-            print(f"  fold {k + 1}/{n_folds}: skip (only {len(test_ids)} test slides)")
+            print(f"  fold {k + 1}/{total_folds}: skip (only {len(test_ids)} test slides)")
             continue
         result = evaluate_trial(
             model=model,
@@ -535,13 +567,14 @@ def evaluate_official_folds(
         probability = result["probability"]
         target = result["target"]
         if len(probability) < 2 or target.unique().numel() < 2:
-            print(f"  fold {k + 1}/{n_folds}: insufficient valid predictions/classes")
+            print(f"  fold {k + 1}/{total_folds}: insufficient valid predictions/classes")
             continue
         fa = auroc(probability, target)
         fold_aurocs.append(fa)
+        fold_indices.append(k)
         pooled_prob.append(probability)
         pooled_target.append(target)
-        print(f"  fold {k + 1}/{n_folds}: AUROC {fa:.4f}  n_query {len(probability)}", flush=True)
+        print(f"  fold {k + 1}/{total_folds}: AUROC {fa:.4f}  n_query {len(probability)}", flush=True)
         all_records.append(
             {"slide_id": result["queried_ids"], "label": target, "probability": probability}
         )
@@ -553,7 +586,7 @@ def evaluate_official_folds(
     mean = sum(fold_aurocs) / len(fold_aurocs)
     std = (sum((x - mean) ** 2 for x in fold_aurocs) / len(fold_aurocs)) ** 0.5
     print(f"\n=== PathoBench official {n_folds}-fold — {tsv.parent.parent.name}/"
-          f"{tsv.parent.name} — {len(slide_ids)} slides ===")
+          f"{tsv.parent.name} — {len(slide_ids)} slides (folds {start + 1}..{end}) ===")
     print(f"per-fold AUROC: {' '.join(f'{x:.4f}' for x in fold_aurocs)}")
     print(f"fold-mean AUROC: {mean:.4f} ± {std:.4f}   pooled AUROC: {pooled:.4f}")
 
@@ -564,6 +597,8 @@ def evaluate_official_folds(
             {
                 "task": tsv.parent.name,
                 "official_folds": n_folds,
+                "fold_start": start,
+                "fold_indices": fold_indices,
                 "fold_aurocs": fold_aurocs,
                 "fold_auroc_mean": mean,
                 "fold_auroc_std": std,
