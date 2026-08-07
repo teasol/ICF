@@ -1,17 +1,18 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-07` (**§57 50-fold 재개 전 진단: 5-fold CV case leakage로 lscc_arid1a 0.908 부풀려짐 → 공식 50-fold 0.462가 정직한 값, 재개 안전** + **§56 config 리팩터링 + 공식 50-fold 6/17(배치 일시정지) + 폐기 분기 최신화(CCER·DR-CCER 제거, 검증 완료)** + **§55 리팩터링 1단계**)  
+**Last updated**: `2026-08-07` (**§58 v35 설계 확정: rare-instance branch 제거 + context/query 공통 chunk-as-pseudo-bag + context·query 대형화 — 제안서 문서화, 구현 전** + **§57 50-fold 재개 전 진단: 5-fold CV case leakage로 lscc_arid1a 0.908 부풀려짐 → 공식 50-fold 0.462가 정직한 값, 재개 안전** + **§56 config 리팩터링 + 공식 50-fold 6/17(배치 일시정지) + 폐기 분기 최신화(CCER·DR-CCER 제거, 검증 완료)** + **§55 리팩터링 1단계**)  
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **v34 확정 (§52·§53·§56)**: **v34-1536을 PathoBench 보고용 모델로 확정**(사용자 결정). 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv fold·코호트·라벨) 기준 **50-fold**(SEAL macro-AUC와 동일 구조) — **5/17 완료**(bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569, brca_TP53), **12개는 config 수정으로 재시작**(§56, 백그라운드). v30은 합성/Musk baseline 유지. 이전 5-fold와 수치 ±0.04 이내 동일(평가 견고성). config 시스템을 v34 base + group default 참조형으로 리팩터링(§56). 자세한 진행 §53·§56.
-* **다음 Action**: ① 공식 **50-fold 잔여 11개 재개**(§57 진단 완료, 재개 안전 — `nohup bash scripts/run_official50_batch.sh`) → **17개 전체 최종 표** + **SEAL 재비교**(단, §57: 5-fold 결과는 case leakage로 multi-slide task 부풀려짐 → 50-fold 수치로 갱신), ② v30 vs v34 공정 비교용 **PCA-per-fold CV** (미지원), ③ **v34-512 학습** + 동일 평가, ④ Phase 0 결과 선택(사용자) — arm C의 n>34(0.849)·lscc 개선 채택 여부, ⑤ v30 medium 참조 재학습, ⑥ frozen-v30 multi-resolution probe(§39, 미검증).
+* **v35 설계 (§58, 신규)**: PathoBench 보고 모델 v34-1536 재학습용 v35 설계 확정 — **코드 변경 없음, 구현 전**. 핵심: ① raw cell을 쓰는 유일한 branch `_rare_instance_logits` 제거(분류 헤드는 고정 token만 사용, query token 수는 구조적 제약이 아님), ② 모든 bag을 ≤2048 chunk로 분할 후 원본 bag 단위 token 집계(meta-classifier 1회, context·query 공통 경로), ③ context·query 모두 실제 slide 크기로 대형화(context `[1,30000]`, query `[3000,50000]`, log-power 1.5~2.0). 제안서: `history/architecture_v35_tokenonly_chunked_query_proposal.md`.
+* **다음 Action**: ① **v35 오픈 문제 확정 + 구현**(rare 제거 → chunk 공통 경로 → config, 2 GPU 0·1·100ep — §58), ② 공식 **50-fold 잔여 11개 재개**(§57 진단 완료, 재개 안전 — `nohup bash scripts/run_official50_batch.sh`) → **17개 전체 최종 표** + **SEAL 재비교**(단, §57: 5-fold 결과는 case leakage로 multi-slide task 부풀려짐 → 50-fold 수치로 갱신), ③ v30 vs v34 공정 비교용 **PCA-per-fold CV** (미지원), ④ **v34-512 학습** + 동일 평가, ⑤ Phase 0 결과 선택(사용자), ⑥ v30 medium 참조 재학습, ⑦ frozen-v30 multi-resolution probe(§39, 미검증).
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§56 (config 리팩터링 + 공식 50-fold 재시작)**, **§53 (v34 최종 확정 + 공식 50-fold 평가)**,
+**Read first if you are picking this up**: **§58 (v35 설계 확정 — rare 제거 + chunk 공통 경로 + 대형화)**, **§57 (50-fold case leakage 진단)**, **§56 (config 리팩터링 + 공식 50-fold 재시작)**, **§53 (v34 최종 확정 + 공식 50-fold 평가)**, **§52 (v34 확정·50-fold 계획)**,
 
 **열린 과제**: ① **공식 50-fold 12개 완료**(백그라운드, §56) → 최종 표+SEAL 재비교, ② v30 vs v34 CV 공정 비교(PCA-per-fold), ③ v34-512 학습, ④ v30 six-task 효과 분리, ⑤ B2b within-episode cardinality 효과 분리, ⑥ frozen-v30 multi-resolution headroom, ⑦ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
 
@@ -2012,3 +2013,64 @@ leakage가 없으면 ARID1A는 zero-shot in-context로 실질 랜덤 (공식 50-
 - 폐기 분기 최신화(§56.5)는 우선순위 낮음.
 - 활성 스크립트 참조 정리 완료: `queue_v30_poolz.sh`·`evaluate_synthetic.py`·`test_musk.py` →
   archive 경로.
+
+---
+
+## 58. 2026-08-07 — v35 설계 확정: rare-instance 제거 + context/query 공통 chunk + 대형화
+
+**상태**: PathoBench 보고 모델 v34-1536의 재학습(v35) 설계를 확정하고 제안서를 문서화했다. **코드 변경
+없음, 학습·평가 미시작.** 이 세션 산출물: ① 모델 구조 정독 기반 아키텍처 분석, ② v35 설계 결정 3건, ③ 제안서
+작성 (`docs/history/architecture_v35_tokenonly_chunked_query_proposal.md`).
+
+### 1. 아키텍처 분석 (코드로 확인)
+
+- **분류 헤드는 가변 길이 query sequence를 보지 않는다.** 모든 bag(context/query)은 aggregator
+  (`StructuredEpisodePopulationAggregator`)에서 고정 token set(`global_summary` 1 + `slots` 12 +
+  `tails` + covariance sketch)으로 압축되고, meta-classifier(`StructuredPopulationMetaClassifier`)는
+  그 token을 class memory(8/class)와만 비교한다.
+- **raw cell을 소비하는 유일한 branch는 `_rare_instance_logits`(~3438, batched ~3792)다.**
+  v34는 `use_instance_attention_mil` off → query cell을 쓰는 곳은 이 branch뿐.
+- query token 수가 실제로 중요한 곳은 ① per-cell compute/memory, ② mean/cov/slot 추정 품질(통계적),
+  ③ rare/tail `topk(fraction)` 극단값(구조적) — ③이 rare branch 제거로 사라짐.
+- **context `num_cells [1,8192]` 상한은 VRAM 가드일 뿐**(config 주석 확인) 구조적 제약이 아니다.
+  실제 PathoBench slide는 context·query 모두 15k~30k → **train/eval 불일치는 query뿐 아니라
+  context에도 동일하게 존재**했다.
+
+### 2. v35 설계 결정 (3건)
+
+1. **Rare-instance branch 제거**: `query_instances`/`query_cell_mask` 인자, `instance_input_norm`/
+   `instance_input_projection`/`rare_evidence_head`/`rare_similarity_log_scale`/`tail_residual_logit`/
+   `minimum_tail_residual_scale`/`rare_evidence_fractions` 제거, `_fuse_evidence`(~3527) 3→2증거 단순화.
+   **aggregator의 `tails` token과 `aggregator_slot_rare_fraction`은 유지** (고정 per-bag 요약).
+   ablation knob(`meta_enable_rare_evidence`, default off) 검토 중 — 회귀 시 원복용.
+2. **Chunk-as-pseudo-bag (context/query 공통)**: 데이터 경계에서 ≤2048 결정적 분할 → pseudo-bag dense
+   배치(**padding ≤2048로 VRAM 상한 제어**) → 원본 bag 단위 token 집계(count 가중 평균;
+   `covariance_matrix`는 between-chunk 보정 `Σn_c(Σ_c+δ_cδ_cᵀ)/N`으로 **원본 공분산과 수학적으로 동일**) →
+   meta-classifier 1회. 별도 query 전용 코드 불필요 → 오히려 설계 단순화.
+3. **데이터 대형화**: `num_cells_log_uniform_power` 1.5~2.0, context `[1,30000]`, query `[3000,50000]`
+   (**query ≥ context 유지 근거**: context는 40~80 bag 평균으로 per-bag 오차 상쇄, query는 단일 bag이
+   결정적 증거), `num_bags [40,80]`, `episode_batch_size 2`.
+
+### 3. 제안서 내용
+
+- **구현 6단계**: rare 제거 → dataset(log-power + role별 범위 + query 위치 정렬) → chunk-as-pseudo-bag →
+  model token 집계 → eval chunk 일관성 → `train_v35_*.yaml`(100ep, 2 GPU DDP).
+- **검증**: ① 1-chunk direct == 집계 결과(불변성), ② 결정성, ③ rare 제거(aux 키 부재), ④ 50k query
+  smoke(peak VRAM/step), ⑤ 공식 50-fold v34(fixed) vs v35.
+- **오픈 문제**: ablation knob 여부, slot/tail 집계(평균 vs attention), LR 스케줄러(patience 10→5·
+  cooldown 5→3 vs cosine), dataset query 위치와 `model_interface._sample_training_queries` mask 정렬.
+
+### 4. 세션 진행 상황 (현재)
+
+- model fix `5869535`(tanh margin, query-count-invariant) 커밋됨 — v35가 전제하는 chunk/multi-query
+  동일성의 기반.
+- bc_therapy/er_status 재실행 **bit-identical** (fold-mean 0.6741±0.1006, pooled 0.6721) — 재현성 확인.
+- STK11 partial 25/50 fold (pooled 0.8300) — `predictions/pathobench_cptac_luad_STK11_mutation_v34_1536_official50_PARTIAL.pt`.
+- GPU 0·1 여유, ICF 실행 프로세스 없음. **공식 50-fold 잔여 11개 미재개**.
+
+### 5. 다음
+
+- ① v35 오픈 문제 확정: ablation knob, slot/tail 집계, LR 스케줄러.
+- ② 결정 1(rare 제거) 구현 + 32 tests 갱신.
+- ③ v35 재학습 config 작성(100ep, 2 GPU 0·1 DDP) + 학습.
+- ④ (병행 가능) 공식 50-fold 잔여 11개 재개 → 17개 최종 표 + SEAL 재비교.
