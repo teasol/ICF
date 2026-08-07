@@ -48,11 +48,6 @@ class SyntheticEpisode:
     # exposes this field in training or evaluation batches.
     responsive_instance_mask: torch.Tensor | None = None
 
-    @property
-    def flipped_y(self) -> torch.Tensor:
-        """Return the opposite label assignment for the same bags."""
-        return 1 - self.y
-
 
 class SyntheticManifoldGenerator:
     """Generate binary episodes from low-dimensional distribution mixtures.
@@ -777,17 +772,6 @@ class SyntheticManifoldGenerator:
         span = math.log(float(high)) - math.log(float(low))
         value = math.exp(math.log(float(low)) + float(fraction) * span)
         return int(min(high, max(low, round(value))))
-
-    def sample_num_cells_per_bag(
-        self,
-        num_bags: int,
-        generator: torch.Generator | None = None,
-        device: torch.device | str = "cpu",
-    ) -> list[int]:
-        """Sample one independent cell count per bag (B2b)."""
-        return [
-            self.sample_num_cells(generator, device) for _ in range(num_bags)
-        ]
 
     @staticmethod
     def _bag_population_features(

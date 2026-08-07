@@ -1863,3 +1863,34 @@ Patho-Bench 프로토콜**(공식 k=all.tsv fold · 공식 코호트 · 공식 �
 
 - 50-fold 배치 리쥼 → 완료 후 §53 표 갱신.
 - configs/scripts 아카이브의 `base_config` 참조는 §26/§27 규칙대로 향후 로드 검증 권장.
+
+---
+
+## 55. 2026-08-07 — 코드 리팩터링 1단계: 미사용 함수 제거
+
+**상태**: 전체 코드 리팩터링 시작. 첫 단계로 **미사용 함수 탐지·제거**를 AST 정적 분석으로
+수행했다.
+
+### 1. 미사용 함수 탐지 (AST 정적 분석)
+
+- src/ 전체(모듈 함수 24, 메서드 175)를 AST로 파싱해 Name/Attribute/Import 참조를 전수 집계.
+- 판정 기준: 모듈 함수는 **Name 참조 0건**, 메서드는 **attr·Name 참조 0건** (dunder·Lightning 훅 제외).
+- 결과: **모듈 함수 미사용 0개**, 메서드 미사용 2개. (`validation_step`/`test_step`/`predict_step`는
+  Lightning 훅이라 제외, `build_logger`/`build_callbacks`/`_collate_ragged_batch`는 사용 확인.)
+
+### 2. 제거 (참조 0 확정)
+
+- `SyntheticEpisode.flipped_y` (synthetic_data.py:52) — `1-self.y` property, 참조 0.
+- `SyntheticManifoldGenerator.sample_num_cells_per_bag` (synthetic_data.py:781) — B2b per-bag
+  셀 수 샘플링 헬퍼(B2b 폐기), 참조 0.
+- repo 전체(문서·config·notebook 포함) 검색으로 동적/문자열 참조 없음 확인 후 삭제.
+
+### 3. 검증
+
+- 기본 테스트 **32 tests / 149s 통과** (회귀 없음).
+
+### 4. 다음 (리팩터링 계속)
+
+- 폐기 아키텍처 분기(v22/v25/v31/v32/v33 등)의 **미사용 메서드/코드** 정리.
+- `baseline.py`(5.8k줄) 분리 검토, 컨벤션 정리.
+- 참고: **50-fold 배치는 5/17만 완료, 리쥼 시도 실패** — 리팩터링 후 재개 필요 (§53).
