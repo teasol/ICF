@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-07` — v34-1536 확정(PathoBench 보고용). 공식 Patho-Bench 프로토콜(공식 fold 50-fold·코호트·라벨) 평가 재시작(§56, config 회귀 해결 — 5/17 완료 → 12개 백그라운드). config 시스템을 v34 base + group default 참조형으로 리팩터링 + v30/v24/v22 체인 자체 포함형 아카이빙(§56). 로컬 ccrcc CSV 오류 정정(§51), SEAL baseline 비교(§52).
+**Last updated**: `2026-08-07` — v34-1536 확정(PathoBench 보고용). 공식 50-fold **6/17 완료**(ARID1A 포함, 배치 일시정지됨 — 잔여 11개). config 시스템 v34 base + group default 참조형 + 재아카이빙(§56). **폐기 분기 최신화**: CCER(v31)·DR-CCER(v32) 제거(검증 완료, 32 tests 통과), 백업 태그 `repro-pre-deprecated-cleanup-20260807` + `src/repro_backup_20260807/`. 로컬 ccrcc CSV 오류 정정(§51), SEAL baseline 비교(§52).
 
 **Confirmed baseline**: v30 = v24 residual+bottleneck bag projection + B1
 `bag_representation: poolz_l2` + B2 log-uniform cardinality `[1,1024]`. Musk zero-shot
@@ -31,12 +31,15 @@ v30과 CV 직접 비교는 **PCA-per-fold 미지원으로 보류**. 상세 §49�
 
 **v34 확정 (§53·§56, 2026-08-07)**: 사용자 결정으로 **v34-1536을 PathoBench 보고용 모델로 확정**.
 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv의 50-fold, 공식 코호트 245장, 공식 라벨
-`config.yaml` task_col)로 진행 — **5/17 완료(pooled)**: bc_therapy er 0.672/grade 0.713/her2 0.670,
-cptac_brca_PIK3CA 0.569, brca_TP53. **12개는 §56 config 수정으로 재시작**(백그라운드,
-`scripts/run_official50_batch.sh`). 이전 배치가 아카이빙된 `train_v24_musklike_easy.yaml`을
-참조해 전부 실패했던 회귀를 v34 config 자체 포함/default 참조화로 해결. v30은 합성/Musk baseline
+`config.yaml` task_col)로 진행 — **6/17 완료(pooled)**: bc_therapy er 0.672/grade 0.713/her2 0.670,
+cptac_brca_PIK3CA 0.569, brca_TP53, **cptac_lscc_ARID1A 0.462**. **잔여 11개는 배치 일시정지
+상태** (사용자 요청, `scripts/run_official50_batch.sh`로 재개). 이전 배치가 아카이빙된
+`train_v24_musklike_easy.yaml`을 참조해 전부 실패했던 회귀를 v34 config 자체 포함/default
+참조화로 해결. **폐기 분기 최신화**: CCER(v31)+DR-CCER(v32) 제거, 검증(파라미터·forward·
+checkpoint·32 tests) 완료. v30은 합성/Musk baseline
 유지. SEAL(지도 ABMIL/MeanMIL)과는
-프로토콜(지도 vs zero-shot in-context)·코호트(ccrcc 218 vs 245) 차이 명시. 상세 §52·§53·§56.
+프로토콜(지도 vs zero-shot in-context)·코호트(ccrcc 218 vs 245) 차이 명시. 상세
+§52·§53·§56.
 
 **Rejected candidate — architecture v31 CCER-v2**: projection 전 aligned slot-center로
 support class prototype을 만들고, 기존 rare branch와 독립인 support/query encoder에서

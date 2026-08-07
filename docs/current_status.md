@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-07` (**§56 config 시스템 리팩터링: v34 base·default 참조·재아카이빙 + 공식 50-fold 재시작(5/17→12개 진행)** + **§55 리팩터링 1단계** + **§54 아카이빙 정리**)  
+**Last updated**: `2026-08-07` (**§56 config 리팩터링 + 공식 50-fold 6/17(ARID1A 완료, 배치 일시정지) + 폐기 분기 최신화(CCER·DR-CCER 제거, 검증 완료)** + **§55 리팩터링 1단계**)  
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **v34 확정 (§52·§53·§56)**: **v34-1536을 PathoBench 보고용 모델로 확정**(사용자 결정). 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv fold·코호트·라벨) 기준 **50-fold**(SEAL macro-AUC와 동일 구조) — **5/17 완료**(bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569, brca_TP53), **12개는 config 수정으로 재시작**(§56, 백그라운드). v30은 합성/Musk baseline 유지. 이전 5-fold와 수치 ±0.04 이내 동일(평가 견고성). config 시스템을 v34 base + group default 참조형으로 리팩터링(§56). 자세한 진행 §53·§56.
@@ -1942,9 +1942,24 @@ Patho-Bench 프로토콜**(공식 k=all.tsv fold · 공식 코호트 · 공식 �
   §53 표 갱신 + SEAL 재비교.
 - ARID1A 2-fold smoke는 10분 timeout으로 종료(대형 task 1-fold 평가가 10분 초과 — config 문제 아님).
 
-### 4. 다음
+### 4. 공식 50-fold 진행 (6/17 완료) + 리팩터링 최신화
 
-- 50-fold 12개 완료 → §53 표 **17개 전체 갱신** + SEAL 재비교.
+- **ARID1A 완료 (6/17, 15:37)**: 50-fold mean **0.4693 ± 0.1093**, pooled **0.4616**
+  (`predictions/pathobench_cptac_lscc_ARID1A_mutation_v34_1536_official50.pt`).
+  이전 5-fold(§50 lscc_arid1a 0.908)와 큰 차이 — **공식 fold/코호트 프로토콜 차이**로 기록.
+- **배치 일시정지 (사용자 요청)**: ARID1A 완료 직후 감시 스크립트(`/tmp/pause_after_arid1a.sh`)
+  가 배치 스크립트+워커 종료. **잔여 11개**: lscc(2)·luad(4)·pda(1)·ucla_lung(1)·ccrcc(3).
+  재개: `nohup bash scripts/run_official50_batch.sh` (완료분 스킵).
+- **리팩터링 (폐기 분기 최신화, §56.8-9)**: 백업(태그 `repro-pre-deprecated-cleanup-20260807` +
+  `src/repro_backup_20260807/`) 후 ① 죽은 메서드 3개(§56.8), ② **CCER(v31) ~570줄**, ③
+  **DR-CCER(v32) ~800줄** 제거 — 각각 파라미터 시그니처 동일(220그룹/41.67M)·forward 동치
+  (dense/ragged diff 0)·checkpoint strict 로드(0/0) 검증, **전체 테스트 32개 통과(148.5s)**.
+  남은 폐기 분기: typed_bag(v25)·cls_token(v26)·IA-MIL·CCTS/absolute_tail·mean_pool(v23).
+
+### 5. 다음
+
+- 50-fold 잔여 11개 재개 → §53 표 **17개 전체 갱신** + SEAL 재비교.
+- 폐기 분기 최신화 계속(typed_bag→cls_token→MIL→CCTS→mean_pool) 또는 여기서 종료.
 - v34-512 학습 + 동일 평가(열린 과제 ③), v30 vs v34 PCA-per-fold 공정 비교.
 - 활성 스크립트 참조 정리 완료: `queue_v30_poolz.sh`·`evaluate_synthetic.py`·`test_musk.py` →
   archive 경로.
