@@ -1,20 +1,20 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-08` (**§61 P0-b 게이트 통과(|Δpooled| 0.0009) + rare branch 제거(`meta_enable_rare_evidence: false`, rev.2 step 5) + §60 v35 공식 50-fold 2개 완료(EGFR 0.7819 / PIK3CA 0.5668) + SEAL 비교 + v35-16384 50ep 완주** + §59 v35 rev.2 + **§41–§48 v33 arm C saga 아카이브**)  
+**Last updated**: `2026-08-08` (**§62 v36 chunk-attention 제안서 반증 + P0-slots 무료 probe — Q1(40→1 압축 해제) paired +0.16 확정 / Q2(num_slots 증설) 부호 불일치로 보류** + §61 P0-b 게이트 통과(|Δpooled| 0.0009) + rare branch 제거 + §60 v35 공식 50-fold 2개(EGFR 0.7819 / PIK3CA 0.5668) + SEAL 비교 + §59 v35 rev.2 + **§41–§48 v33 arm C saga 아카이브**)  
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **v34 확정 (§52·§53·§56)**: **v34-1536을 PathoBench 보고용 모델로 확정**(사용자 결정). 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv fold·코호트·라벨) 기준 **50-fold**(SEAL macro-AUC와 동일 구조) — **5/17 완료**(bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569, brca_TP53), **12개는 config 수정으로 재시작**(§56, 백그라운드). v30은 합성/Musk baseline 유지. 이전 5-fold와 수치 ±0.04 이내 동일(평가 견고성). config 시스템을 v34 base + group default 참조형으로 리팩터링(§56). 자세한 진행 §53·§56.
 * **v35 (§58 rev.1 설계 → §59 rev.2 개정 + 학습 시작)**: rev.1의 3개 결정 중 **①rare 제거·③context/query 대형화 분리는 폐기 권고**(§59.1: anchor 오염, 집계 수학 오류, Musk 소형 bag 파괴 = 확정 목표 위반, query 위치를 dataset이 알 수 없어 구현 불가, 그리고 동기 자체에 직접 반증 — context 2k cap Δpooled **−0.0019**). ②chunk는 **근사 평균이 아닌 정확 충분통계 축약**으로 재설계. 구현·검증 완료분: **bag 단위 정확 스트리밍**(peak VRAM 40,990 → 18,930 MiB, AUROC 동일), `num_cells_log_uniform_power`, VRAM 가드 `episode_batch_size` 누락 버그 수정, **41 tests**. **학습 완주(2차, §60)**: 데이터 단독 arm(`num_cells [1,16384]` power 1.5, rare branch 유지) 50 epochs 정상 완주 — 1차 `[1,32768]`은 CUDA OOM 크래시(epoch 0부터 324회, 21:24 SIGABRT, best 0.3574 @ ep6), 상한 16384 축소 후 재개해 **OOM 없이 완주**, best val_ce **0.3469 @ ep48**. 메모리 진단(§60): 단조 누수가 아니라 `expandable_segments:True` + 극단 ragged shape. val plateau는 v34와 동일 정상 수렴. **공식 50-fold 평가 2개 완료(§60)**: LUAD EGFR **pooled 0.7819**(macro 0.7889±0.092) / BRCA PIK3CA **pooled 0.5668**(macro 0.5743±0.109) — **SEAL 비교: 지도 ABMIL에 근접(EGFR −0.041 / PIK3CA −0.021), 지도 MeanMIL과 동급~우위(EGFR +0.012 / PIK3CA +0.030)**. **P0-b(§61)**: `rare_logits=0` ablation |Δpooled| **0.0009 < 0.003** → **rare branch 제거 결정** — config `meta_enable_rare_evidence: false`로 v35가 rare-free arm으로 전환(가역·ckpt 호환, 41 tests 통과).
-* **다음 Action**: ① **v35 공식 50-fold 평가**(§60, EGFR·PIK3CA 완료 → 잔여 15개 + v34 재실행으로 공정 비교, §59.5), ② **P0 게이트**: `rare_logits=0` ablation(P0-b) **완료 → rare 제거 진행(§61)**; **query 스윕(P0-a)은 사용자 판단으로 폐기**(이미 large-bag 실측 + context 민감도 없음, §2.8), ③ 공식 50-fold **잔여 8개**(스트리밍으로 workers 2 → 8+ 가능), ④ v30 vs v34 공정 비교용 **PCA-per-fold CV**(미지원), ⑤ **v34-512 학습**, ⑥ rev.2 §3의 **chunk 단위**(bag 내부) 스트리밍 미구현 — v36 선행, ⑦ **v36 아키텍처**(§8 zero-init region chunk attention, `docs/architecture_v36_region_chunk_attention_proposal.md`) — ABMIL 격차(§60) 대응, 아키텍처 구현 우선(사용자 결정).
+* **다음 Action**: ① **v35 공식 50-fold 평가**(§60, EGFR·PIK3CA 완료 → 잔여 15개 + v34 재실행으로 공정 비교, §59.5), ② **P0 게이트**: `rare_logits=0` ablation(P0-b) **완료 → rare 제거 진행(§61)**; **query 스윕(P0-a)은 사용자 판단으로 폐기**(이미 large-bag 실측 + context 민감도 없음, §2.8), ③ 공식 50-fold **잔여 8개**(스트리밍으로 workers 2 → 8+ 가능), ④ v30 vs v34 공정 비교용 **PCA-per-fold CV**(미지원), ⑤ **v34-512 학습**, ⑥ rev.2 §3의 **chunk 단위**(bag 내부) 스트리밍 미구현 — **v36 선행 요건에서 해제**(§62-1: chunk-region 노선 폐기, 좌표 미사용 결정), ⑦ **v36 = Q1 단독 arm으로 재정의**(§62: zero-init region chunk attention → **40→1 압축 해제 + slot routing 복원**, zero-init gate 없이 config 플래그. 제안서 `docs/architecture_v36_region_chunk_attention_proposal.md`는 §62-1로 반증된 상태 — 개정 또는 history 이관 필요).
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§61 (P0-b 통과 + rare branch 제거)**, **§60 (v35-16384 완주 + 메모리/val 진단 + v35 공식 50-fold EGFR·PIK3CA + SEAL 비교)**, **§59 (v35 rev.2 개정 + 스트리밍 구현 + 학습 시작 + 50-fold stale 경고)**, **§58 (v35 rev.1 설계 — §59가 상당 부분 정정하므로 §59와 함께 읽을 것)**, **§57 (50-fold case leakage 진단)**, **§53 (v34 확정 + 공식 50-fold 표 — §59.5에 따라 재실행 필요)**,
+**Read first if you are picking this up**: **§62 (v36 chunk-attention 반증 → slot 재정의 + P0-slots probe: Q1 +0.16 확정 / Q2 보류 + 사용자 결정 4건)**, **§61 (P0-b 통과 + rare branch 제거)**, **§60 (v35-16384 완주 + 메모리/val 진단 + v35 공식 50-fold EGFR·PIK3CA + SEAL 비교)**, **§59 (v35 rev.2 개정 + 스트리밍 구현 + 학습 시작 + 50-fold stale 경고)**, **§58 (v35 rev.1 설계 — §59가 상당 부분 정정하므로 §59와 함께 읽을 것)**, **§57 (50-fold case leakage 진단)**, **§53 (v34 확정 + 공식 50-fold 표 — §59.5에 따라 재실행 필요)**,
 
-**열린 과제**: ① **v35 공식 50-fold 평가**(§60, EGFR·PIK3CA 완료 → 잔여 15개 + SEAL 최종 재비교), ② **rare-free v35 arm 학습 + 50-fold 평가**(§61, Musk 재확인 포함), ③ **§53 표 9개 재실행**(`5869535` 이후 stale, §59.5) + 공식 50-fold 잔여 8개 → 17개 최종 표 + SEAL 재비교, ④ v30 vs v34 CV 공정 비교(PCA-per-fold), ⑤ v34-512 학습, ⑥ **chunk 단위(bag 내부) 스트리밍** 미구현(rev.2 §3), ⑦ v30 six-task / B2b cardinality 효과 분리, ⑧ frozen-v30 multi-resolution headroom, ⑨ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
+**열린 과제**: ⓪ **Q1 단독 arm**(§62-7: `meta_population_token_mode` 플래그 두 경로 구현 + routing entropy 진단 → scratch 학습), ⓪′ (판단 필요) **폴드 단위 representation 캐싱 eval**(§62-7.4, bit-identical ~50× 가속), ① **v35 공식 50-fold 평가**(§60, EGFR·PIK3CA 완료 → 잔여 15개 + SEAL 최종 재비교), ② **rare-free v35 arm 학습 + 50-fold 평가**(§61, Musk 재확인 포함), ③ **§53 표 9개 재실행**(`5869535` 이후 stale, §59.5) + 공식 50-fold 잔여 8개 → 17개 최종 표 + SEAL 재비교, ④ v30 vs v34 CV 공정 비교(PCA-per-fold), ⑤ v34-512 학습, ⑥ **chunk 단위(bag 내부) 스트리밍** 미구현(rev.2 §3), ⑦ v30 six-task / B2b cardinality 효과 분리, ⑧ frozen-v30 multi-resolution headroom, ⑨ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
 
 **Branches**: `main` = v30 확정 baseline + 미채택 v31 CCER-v2 재현 코드. 참고용 branch/tag 구조는
 [`history/branch_structure.md`](history/branch_structure.md).
@@ -1784,3 +1784,146 @@ rev.2 step 5 규율대로 config `meta_enable_rare_evidence: false`로 **rare-fr
 4. **v36 아키텍처**(§8 chunk-attention): `docs/architecture_v36_region_chunk_attention_proposal.md` 작성 —
    zero-init region-level attention으로 ABMIL 격차(§60)를 메우는 단독 arm. 게이트: v35 대비 +0.005(평균),
    ABMIL 격차 절반 축소. **§3 chunk 단위 스트리밍(수치 무변화) 선행 필요.** 아키텍처 구현 우선(사용자 결정).
+
+---
+
+## 62. 2026-08-08 — v36 제안서 비판적 재검토 + P0-slots 무료 probe (Q1 확정 / Q2 보류)
+
+**상태**: `docs/architecture_v36_region_chunk_attention_proposal.md`(zero-init region **chunk**
+attention)를 코드로 검증하며 비판적으로 재검토한 결과 **핵심 전제 3건이 반증**됐고, 대안으로
+**좌표 없는 slot 기반**으로 문제를 재정의했다. 이어서 **학습 0의 P0-slots probe**를 구현·실행해
+3개 task × 4 config × 공식 50-fold를 측정했다. 결론: **Q1(40→1 압축 해제)은 +0.16으로 확정 진행,
+Q2(num_slots 증설)는 task별 부호 불일치로 보류.**
+
+### 1. v36 제안서(chunk-attention)의 반증된 전제
+
+1. **합성 훈련 분포에 region 구조가 없다.** `synthetic_data.py:322` docstring이 명시한다 —
+   "Dense cells are exchangeable within a bag". sequential chunk 15개는 같은 분포의 iid 표본이라
+   region 간 차이가 전부 샘플링 노이즈다. 훈련 분포에서 region attention의 최적해는 **정확히 균등
+   평균**(= zero-init 상태)이고, 실제 WSI에서는 분포 외 사용이 된다. §31 측정 4(합성에 신호가
+   구조적으로 부재해 채널이 무시당해도 게이트 통과) · §23 raw-stat 음성과 동일한 실패 모드.
+2. **"선택 기제가 없다"는 사실이 아니다.** `_instance_attention_mil_logits`(baseline.py:3980)가
+   존재한다 — nonlinear task-adaptive relevance MLP + attention pooling + max-instance. §24에서
+   기각됐으나 **§31 측정 6이 그 게이트를 무효로 선언**했다. 제안서는 이를 언급하지 않는다.
+3. **region 수 실측이 제안서의 1/4이다.** feature h5 60장 표본: tiles median **6,942**
+   (mean 10,206 / p75 15,312 / max 38,305) → chunk 2048에서 region **median 3.4개**,
+   슬라이드의 **57%가 ≤4개**, **18%가 1개(헤드가 항등)**. 제안서의 "N/2048 ≈ 15"는 N≈30k 가정.
+   또 h5 파일 순서는 lexicographic 정렬(60/60)이라 chunk는 "인접 region"이 아니라 수직 슬랩이다
+   (첫 chunk의 bbox가 슬라이드 bbox의 median 14%).
+
+기타: §6-2의 chunk 경계 불변성 테스트는 §3.1의 region 의미와 **모순**(작동하는 v36을 버그로 판정),
+§5-1ⓑ region 셔플 ablation은 permutation-invariant 헤드에 대해 **공허**, §7의 "stage 0 선행이 기준선
+오염을 막는다"는 논거는 stage 0이 수치 무변화라 **성립하지 않음**. 동기인 ABMIL 격차도
+EGFR −0.041(t −2.27) / PIK3CA −0.021(t −0.98)로, fold가 같은 코호트의 반복 랜덤 분할이라
+`sd/√50`은 낙관적 — **게이트("격차 절반 축소")가 격차 추정치의 SE(0.018)보다 작은 변화를 요구**한다.
+
+**사용자 결정**: 좌표(coords)는 쓰지 않는다 — 위치를 모른다고 가정하고 접근한다.
+
+### 2. 재정의 — 좌표 없는 "region"은 slot, 그리고 선택 기제는 **죽어 있다**
+
+- slot anchor는 에피소드 단위로 뽑히고 **에피소드 내 모든 bag이 공유**하며, assignment가 slot축
+  softmax라 **cell 순서에 불변**. 좌표·chunk 경계 하이퍼파라미터가 불필요하다.
+- 진짜 병목: **bag 내부 구조 40 token**(global_summary 1 + slot 12×3 + tail 3)을 **라벨 정보가
+  들어오기 전에** 고정·라벨 무관 선형사상 `_projected_bag_tokens`로 **1개 token으로 압축**한다.
+  구조는 위치별 `Linear(1536→64)` 40개 + concat(2560) + exact mean residual(1536) →
+  `Linear(4096→1536)`. mean pooling이 아니라 **위치별 병목 + concat**이다.
+- 그 결과 `_population_memory_logits`(baseline.py:3509)의 routing softmax가 **길이 1 축에 걸린다**.
+  v35 config로 실측: `population_slot_weights` shape **(2,1), 값 전부 1.0** →
+  **selection 기제가 구현돼 있으나 무력화**. v35 config의 `routing_sparsity_weight: 0.0` /
+  `routing_balance_weight: 0.0`(둘 다 off)도 같은 정황.
+- 즉 MeanMIL↔ABMIL 차이를 좌표 없이 정확히 기술하면: **어떤 region 정의를 쓰든 원리적으로
+  task 적응적 within-bag 선택이 불가능**하다.
+
+### 3. P0-slots probe 구현 (학습 0)
+
+- 신규 `scripts/probe_slot_headroom.py` / `scripts/summarize_slot_headroom.py`.
+- **aggregator에는 `num_slots`에 의존하는 파라미터가 하나도 없다** (실측: 12 vs 24에서 29개 텐서
+  shape 완전 동일). 전체 모델에서 shape 불일치는 **`meta_classifier.bag_token_projection.weight`
+  단 1개**. → frozen ckpt로 임의의 slot 수에서 구조 token을 뽑을 수 있다.
+- 방법: 폴드마다 aggregator **1회** 실행(context_mask로 context 지정) → bag별 구조 token →
+  context bag으로 ridge 적합(λ는 context 내부 inner-CV, 표준화도 context 통계만) → query AUROC.
+- **정확성 검증(통과)**: pool 통계·anchor가 context 전용이라 합동 패스와 쿼리별 패스가 같아야
+  하는데, 실측 **bit-identical (‖Δ‖∞ = 0.000e+00, 3개 쿼리)**.
+- **비용**: 폴드당 aggregator 1회 = 배포 eval(쿼리당 1회)의 **약 1/50**. EGFR config당 573s 단일 GPU
+  vs 전체 모델 공식 50-fold 2,305s×4 worker(≈2.6 GPU-시간).
+- ckpt `checkpoints/20260807_224559/v35_largebag/epoch=048-val_ce_loss=0.3469.ckpt`,
+  config `configs/train_v34_phase0_largectx_1536.yaml`, GPU 0·1.
+- 산출물(gitignore): `predictions/probe_slots_{luad_egfr,luad_stk11,brca_pik3ca}.pt`,
+  로그 `logs/probe_slots/*.log`.
+- ⚠️ `num_slots ≠ 12`에서는 `bag_token_projection`이 랜덤 초기화이므로 그 변형은
+  **`projected_random`**(랜덤 사영 대조군)으로 따로 라벨링했다 — 배포 bag token이 아니다.
+- ⚠️ slot encoder는 12 slot으로 학습된 가중치라 24/48 실행은 그 인코더에게 **분포 외**다.
+  이 sweep은 재학습 모델 헤드룸의 **방향성 있는 하한**이지 증명이 아니다.
+
+### 4. 결과 — Q1: 40→1 압축이 버리는 정보 (fold-paired, 공식 50-fold)
+
+| task | `all@12` (40 token) | `projected@12` (배포 bag token) | paired Δ | 95% CI |
+|---|---:|---:|---:|---|
+| LUAD EGFR | **0.7486** ± 0.097 | 0.5889 ± 0.097 | **+0.1597** | [+0.1357, +0.1840] ✅ |
+| LUAD STK11 | **0.8379** ± 0.073 | 0.6802 ± 0.103 | **+0.1577** | [+0.1313, +0.1841] ✅ |
+| BRCA PIK3CA | 0.5039 ± 0.110 | 0.4978 ± 0.129 | +0.0061 | [−0.0249, +0.0357] |
+
+- 신호가 있는 두 task에서 **+0.16**, 리포 게이트(+0.005~+0.01)를 자릿수 단위로 상회.
+  PIK3CA는 전 구간이 랜덤(0.50)이라 버릴 정보가 없어 판정 불가 — 예상된 결과.
+- 압축기의 **품질 문제가 아니다**: STK11에서 랜덤 초기화 압축(`projected_random@8`) 0.6496 vs
+  학습된 압축 0.6802 — 둘 다 token 집합보다 0.15~0.19 낮다. 원인은 **40→1 압축 자체**.
+- 참고: STK11의 ridge probe 0.8379는 v34 전체 모델의 공식 50-fold 0.828(rev.2 §2.10)보다 높다
+  (ckpt가 v35라 엄밀한 대응은 아니나, token 집합에 신호가 이미 있다는 뜻).
+- 해석 주의: `all`은 61,440차원, `projected`는 1,536차원 ridge라 용량 차이가 섞인다. projection이
+  선형이라 40-token ridge가 projected-token ridge를 포함하므로, 정확한 진술은 **"고정 선형 압축이
+  선형 판독기 기준 정보 보존적이지 않고, 그 손실이 0.15~0.19"**다.
+
+### 5. 결과 — Q2: num_slots 증설은 **task별 부호가 갈린다**
+
+| task | all@8 − all@12 | all@24 − all@12 | all@48 − all@12 |
+|---|---|---|---|
+| LUAD EGFR | −0.0035 [−0.0129, +0.0064] | −0.0081 [−0.0212, +0.0045] | **−0.0105** [−0.0231, +0.0015] |
+| LUAD STK11 | +0.0034 [−0.0059, +0.0132] | **+0.0163** [+0.0067, +0.0261] ✅ | **+0.0204** [+0.0120, +0.0288] ✅ |
+| BRCA PIK3CA | +0.0123 [−0.0067, +0.0321] | +0.0181 [−0.0024, +0.0392] | **+0.0370** [+0.0128, +0.0614] ✅ |
+
+- STK11·PIK3CA는 오르고 **EGFR은 내려간다** → **게이트 미달, 보류**. PIK3CA만 봤다면 잘못된
+  결론으로 갔을 것이므로 3 task 전체 실행이 옳았다.
+- 차원 교란은 상당 부분 해소된다 — 차원 증가만으로 ridge가 유리하다면 EGFR도 올라야 하는데
+  내려간다. slot 해상도 효과는 실재하되 **task 의존적**.
+- 미해결: EGFR의 음수가 "해상도가 해롭다"인지 "12-slot 인코더에 분포 외라서 깨진다"인지
+  이 실험은 **구분하지 못한다**. 재학습으로만 답이 나오므로 더더욱 Q1이 먼저다.
+
+### 6. 결정 사항 (사용자)
+
+1. **좌표 미사용** — 위치를 모른다고 가정. chunk-region 노선 폐기.
+2. **num_slots 증설을 먼저 보자** → P0-slots probe로 검증한 결과 **부호 불일치로 보류**.
+   (재학습 비용도 확인: ckpt 비호환 1개 텐서 + aggregator O(N×num_slots) + VRAM 재추정 필요.
+   단 shape 불일치가 1개뿐이라 scratch가 아닌 **weight-only warm start**가 가능하다 —
+   aggregator 29개 텐서를 승계하고 `bag_token_projection` 스택만 재초기화. 단 위치별 bottleneck은
+   토큰 배치가 밀려 1:1 승계는 안 된다(global index 0만 동일).)
+3. **zero-init gate는 쓰지 않는다** — 아예 변경한다. 근거:
+   ⓐ population 분기의 모든 파라미터가 token 개수가 아니라 `token_dim`/`hidden_dim`으로만 크기가
+   정해져 **이 변경은 shape 보존 = ckpt strict 로드 + 신규 파라미터 0개**인데, 게이트가 그 성질을
+   깨고 유일한 신규 파라미터가 된다. ⓑ 이 리포의 zero-init 게이트 전력이 나쁘다 — v31은 v30과
+   예측 상관 0.99928(사실상 미기여), rare는 floor 0.05를 강제하고도 §61에서 |Δ| 0.0009.
+   Δ≈0이 나오면 "가설이 틀림"과 "게이트가 안 열림"을 **구분할 수 없다** → 게이트가 가설과 교란.
+   ⓒ 어차피 재학습해 끝점을 비교하므로 초기 동일성은 보고하지 않는 값.
+   → 대신 **학습되는 게이트가 아니라 config 플래그**로 가역성만 확보한다.
+4. **공식 50-fold 재채점은 공짜가 아니다**(EGFR ≈2.6 GPU-시간) → 학습 전 진단은
+   **1~2 fold routing entropy 확인**으로 축소한다.
+
+### 7. 다음
+
+1. **Q1 단독 arm 구현**: config 플래그 `meta_population_token_mode: projected | structured`
+   (기본 `projected` = 현행). **반드시 두 경로** — `_population_memory_logits`(eval/ragged)와
+   `_population_memory_logits_batched`(**훈련/dense**, 로직이 인라인 복제됨; 파일 주석이
+   "drifting one copy ... is exactly how the cls token was first missed here"로 경고) + 두 경로
+   동치 테스트.
+2. **1~2 fold routing entropy·선택성 진단**: softmax가 비퇴화가 되는지, 40 token에 어떻게
+   분포하는지. ⚠️ `routing_temperature: 0.5` + sparsity/balance 항이 둘 다 0이라 **한 token으로
+   붕괴하면 40→1 병목을 다른 경로로 재현**하는 셈 — 붕괴 조짐이면 temperature/balance를 후속
+   단독 arm으로.
+3. 통과 시 **scratch 학습**(warm start 아님 — T=1에서 학습된 분기를 T=40 입력에 넣는 변화이고
+   `_fuse_evidence` 스케일까지 흔들리며, 이제 초기 동일성 보호가 없다) + **episode-matched** 비교.
+4. (별건, 판단 필요) **폴드 단위 representation 캐싱 eval**: pool 통계·anchor가 context 전용이고
+   §62-3에서 bit-identical이 실측됐으므로, 캐시한 표현을 쿼리별로 잘라 meta-classifier를 쿼리당
+   1회 호출하면 **bit-identical하게 ~50× 가속**된다(EGFR 폴드당 16,306 → 324 bag-인코딩).
+   §53 stale 9개 + 잔여 8개 = 20~40 GPU-시간이 걸린 상황이라 상시 이득이 크다.
+5. 후속 단독 arm 후보(한 번에 하나): ⓐ `routing_sparsity_weight`/`balance_weight` 복원,
+   ⓑ `slot_importance`를 class_memory 조건부로(현재 가중치는 task 무관, relation만 task 의존 —
+   ABMIL과의 진짜 차이가 여기 남아 있다), ⓒ num_slots(§62-5 재검토), ⓓ IA-MIL(§31 측정 6).

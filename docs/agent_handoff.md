@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-07` — v34-1536 확정(PathoBench 보고용). 공식 50-fold **9/17 완료**(잔여 8개; 배치 스트림 2개가 원인 로그 없이 종료된 이력 있음 — §59.7).
+**Last updated**: `2026-08-08` — **§62 v36 chunk-attention 반증 → 40→1 압축 해제(Q1)로 재정의**(P0-slots probe: EGFR/STK11 paired **+0.16**, num_slots는 부호 불일치로 보류). v34-1536 확정(PathoBench 보고용). 공식 50-fold **9/17 완료**(잔여 8개; 배치 스트림 2개가 원인 로그 없이 종료된 이력 있음 — §59.7).
 > [!WARNING]
 > **완료된 공식 50-fold 9개 수치는 `5869535`(tanh margin fix) 이후 stale하다** (§59.5). 같은 ckpt·같은 폴드로 bc_therapy/er_status fold 1-3이 `0.43913/0.78696/0.69130` → `0.4348/0.7565/0.7217`로 바뀐다. HEAD를 별도 worktree에서 돌려 **내 변경이 원인이 아님**을 확인했다. §53 표는 재실행 후 갱신할 것.
 >
@@ -65,6 +65,48 @@ query 위치는 `_sample_training_queries`가 훈련 스텝에서 뽑으므로 d
 v34와 **동일 cell envelope**(3.28M cells/step), 51,200 episodes로 **에피소드 매칭**.
 `logs/20260807_203606/`, 2×B200(GPU 0·1). **P0 게이트(무료)** 미실행: query 크기 스윕이 +0.005
 미달이면 대형화 노선을 접는다(rev.2 §4).
+
+**Active — v36 재정의: 40→1 압축 해제 (2026-08-08, §62)**: 원안
+[`architecture_v36_region_chunk_attention_proposal.md`](architecture_v36_region_chunk_attention_proposal.md)
+(zero-init region **chunk** attention)는 **핵심 전제 3건이 코드·실측으로 반증**됐다 —
+① 합성 bag의 cell은 exchangeable(`synthetic_data.py:322`)이라 sequential chunk에 **학습 신호가
+구조적으로 없다**, ② "선택 기제 부재"는 사실이 아님(`_instance_attention_mil_logits`가 이미
+존재, §24 기각은 §31 측정 6이 무효 선언), ③ region 수는 15가 아니라 **median 3.4개**
+(슬라이드 57%가 ≤4, 18%가 1개). **사용자 결정: 좌표(coords) 미사용** → chunk-region 노선 폐기.
+재정의된 문제는 **좌표 없는 slot 기반**이다. 상세 §62.
+
+> [!IMPORTANT]
+> **아키텍처 계약 — routing softmax 무력화 (§62-2, 실측)**: `project_structured_tokens: true`
+> (v34/v35 기본)에서 `_projected_bag_tokens`가 bag의 **구조 token 40개**(global_summary 1 +
+> slot 12×3 + tail 3)를 **라벨 정보가 들어오기 전에** 고정·라벨 무관 선형사상으로 **1개로 압축**한다
+> (위치별 `Linear(1536→64)` 40개 + concat 2560 + exact mean residual 1536 → `Linear(4096→1536)`;
+> mean pooling이 아니다). 그 결과 `_population_memory_logits`(baseline.py:3509)의 routing
+> softmax가 **길이 1 축**에 걸려 `population_slot_weights`가 **shape (Q,1), 값 전부 1.0**이 된다 —
+> ABMIL형 선택 기제가 구현돼 있으나 **무력**하다. `routing_sparsity_weight`/`routing_balance_weight`가
+> 둘 다 `0.0`인 것도 같은 정황. **P0-slots probe 실측: 이 압축이 버리는 정보는 EGFR +0.1597 /
+> STK11 +0.1577 (fold-paired, 95% CI가 0에서 멀리 떨어짐)**.
+>
+> **slot 수 계약 (§62-3, 실측)**: **aggregator에는 `num_slots`에 의존하는 파라미터가 없다**
+> (12 vs 24에서 29개 텐서 shape 완전 동일; anchor는 데이터 유래, slot encoder는 공유).
+> 전체 모델에서 shape 불일치는 **`meta_classifier.bag_token_projection.weight` 단 1개**
+> (+ `bag_token_bottlenecks` 개수). 따라서 ⓐ frozen ckpt로 임의 slot 수의 구조 token을 뽑을 수 있고,
+> ⓑ num_slots 변경은 ckpt 비호환이지만 **weight-only warm start**가 가능하다.
+>
+> **eval 캐싱 계약 (§62-3, bit-identical 실측)**: pool 통계(`_context_pool_stats`)와 anchor
+> (`_context_anchors`)는 **context bag 전용**이고 `_bag_view`/slot 통계는 per-bag이므로, 한 폴드의
+> 표현을 **1회 패스로 전부 계산**해도 쿼리별 패스와 **‖Δ‖∞ = 0.000e+00**이다. 배포 eval은
+> 쿼리마다 context 전체를 재인코딩하므로 **약 50× 낭비**한다(EGFR 폴드당 16,306 → 324 bag-인코딩).
+> `--batch-queries`가 깨뜨렸던 `_covariance_relation_scores` 결합은 meta-classifier를 쿼리당
+> 1회 호출하면 유지된다.
+
+**진행 방침 (사용자 결정, §62-6)**: **zero-init gate를 쓰지 않고 아예 변경**한다 — population 분기의
+모든 파라미터가 token 개수가 아니라 `token_dim`/`hidden_dim`으로만 크기가 정해져 이 변경은
+**shape 보존(ckpt strict 로드, 신규 파라미터 0개)**인데 게이트가 그 성질을 깨고, 이 리포의 zero-init
+게이트는 열리지 않은 전력이 있어(v31 예측 상관 0.99928, rare는 floor 강제에도 |Δ| 0.0009)
+Δ≈0이 나오면 가설 기각과 게이트 미개방을 **구분할 수 없다**. 대신 config 플래그
+`meta_population_token_mode: projected | structured`(기본 `projected` = 현행)로 가역성만 확보하고,
+**`_population_memory_logits`(eval/ragged)와 `_population_memory_logits_batched`(훈련/dense) 두 경로를
+모두** 바꾼 뒤 동치 테스트를 붙인다. **num_slots 증설은 §62-5 부호 불일치로 보류**.
 
 **Rejected candidate — architecture v31 CCER-v2**: projection 전 aligned slot-center로
 support class prototype을 만들고, 기존 rare branch와 독립인 support/query encoder에서
