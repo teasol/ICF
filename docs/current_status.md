@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-08` (**§63 current_architecture v34 개편 검토(수치 오류 3건·서술 2건 수정) + bf16-mixed 계약 실제 강제(44 tests)** + **§62 v36 chunk-attention 제안서 반증 + P0-slots 무료 probe — Q1(40→1 압축 해제) paired +0.16 확정 / Q2(num_slots 증설) 부호 불일치로 보류** + §61 P0-b 게이트 통과(|Δpooled| 0.0009) + rare branch 제거 + §60 v35 공식 50-fold 2개(EGFR 0.7819 / PIK3CA 0.5668) + SEAL 비교 + §59 v35 rev.2 + **§41–§48 v33 arm C saga 아카이브**)  
+**Last updated**: `2026-08-08` (**§63 current_architecture v34 개편 검토(수치 오류 3건·서술 2건 수정) + bf16-mixed 계약 예외 없이 강제(45 tests)** + **§62 v36 chunk-attention 제안서 반증 + P0-slots 무료 probe — Q1(40→1 압축 해제) paired +0.16 확정 / Q2(num_slots 증설) 부호 불일치로 보류** + §61 P0-b 게이트 통과(|Δpooled| 0.0009) + rare branch 제거 + §60 v35 공식 50-fold 2개(EGFR 0.7819 / PIK3CA 0.5668) + SEAL 비교 + §59 v35 rev.2 + **§41–§48 v33 arm C saga 아카이브**)  
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **v34 확정 (§52·§53·§56)**: **v34-1536을 PathoBench 보고용 모델로 확정**(사용자 결정). 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv fold·코호트·라벨) 기준 **50-fold**(SEAL macro-AUC와 동일 구조) — **5/17 완료**(bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569, brca_TP53), **12개는 config 수정으로 재시작**(§56, 백그라운드). v30은 합성/Musk baseline 유지. 이전 5-fold와 수치 ±0.04 이내 동일(평가 견고성). config 시스템을 v34 base + group default 참조형으로 리팩터링(§56). 자세한 진행 §53·§56.
@@ -1979,11 +1979,21 @@ assignment temp 0.1, routing temp 0.5, sparsity·balance 0.0, `1024×50=51,200`,
 - **조치 (사용자 결정 — "앞으로 제약 조건을 걸자")**:
   ① `configs/trainer/default.yaml`에 `precision: bf16-mixed` 고정 + 재현성 주석.
   ② 신규 `tests/test_precision_contract.py` — `configs/train_*.yaml` **전부**가 bf16-mixed로
-     해석되는지 + group default가 고정돼 있는지 검사. 기본 스위트 **41 → 44 tests**.
+     해석되는지 + group default가 고정돼 있는지 검사 (범위는 아래에서 확장).
   ③ 검증: 세 활성 config 전부 `precision='bf16-mixed'`로 해석,
-     `base_config` 참조 config 전체 해석 성공(failing 0), **44 tests OK**.
-- **남은 위반**: `configs/trainer/ddp5.yaml`·`ddp8.yaml`이 `16-mixed`(fp16)다. 비활성 group이라
-  방치했으며 사용 전 교체 필요(§3.4에 명시).
+     `base_config` 참조 config 전체 해석 성공(failing 0), **45 tests OK**.
+- **범위 확장 (사용자 결정: "앞으로 항상 bf16-mixed 강제")**: 초판은 `configs/train_*.yaml`만
+  검사해서 **다른 trainer group을 고르면 우회**가 가능했다. 이를 닫았다 —
+  ⓐ `configs/trainer/ddp5.yaml`·`ddp8.yaml`의 `16-mixed`(fp16) 위반을 **bf16-mixed로 교체**
+     (ddp8 주석의 "RTX A5000은 FP16 경로" 근거는 Ampere가 bf16을 지원하므로 무효.
+     이를 참조하던 아카이브 config는 `archive/v18_v19/train_synthetic.yaml` 1개뿐 — 폐기된
+     v18/v19 아키텍처이고 원본 값은 git 이력에 있다),
+  ⓑ 테스트에 **선택 가능한 trainer group 전부** 검사를 추가 → 기본 스위트 **45 tests**.
+- **적용 범위는 학습으로 한정**한다(의도적):
+  **평가는 fp32**다 — `scripts/test_pathobench.py`는 Lightning trainer 없이 모델을 직접 빌드하므로
+  trainer precision이 적용되지 않는다. 보고된 공식 50-fold AUROC가 전부 이 경로에서 나왔으므로
+  여기에 bf16을 강제하면 **모든 수치가 이동**한다. `configs/test_*.yaml`과 `configs/archive/`
+  (폐기 아키텍처의 재현 기록)는 검사 대상에서 제외하며, 제외 근거는 테스트 docstring에 있다.
 
 ### 5. 문서에 추가한 계약
 
@@ -2017,5 +2027,11 @@ assignment temp 0.1, routing temp 0.5, sparsity·balance 0.0, `1024×50=51,200`,
 ### 7. 다음
 
 §62-7과 동일 — Q1 단독 arm(`meta_population_token_mode` 두 경로 + 동치 테스트) → 1~2 fold
-routing entropy 진단 → scratch·episode-matched 학습. **새 학습 run부터는 bf16-mixed**이므로,
-v35(fp32)와의 비교는 정밀도가 바뀐 점을 교란 요인으로 명시해야 한다.
+routing entropy 진단 → scratch·episode-matched 학습.
+
+⚠️ **Q1 arm 비교 시 교란 요인 1건이 확정됐다**: 사용자 결정으로 bf16-mixed를 예외 없이 강제하므로
+**새 학습 run은 전부 bf16-mixed**인 반면, 비교 대상 v35 ckpt는 **fp32**로 학습됐다. 즉 Q1 arm은
+엄밀히는 (population token mode) + (precision) **2인자 변경**이다. arm C 교훈(§42-43)상 원인 분리가
+필요해지면 v35를 bf16-mixed로 재학습해 기준선을 맞추는 것이 정공법이나, 비용이 크므로 우선은
+**교란 요인으로 명시하고 진행**한다. Q1 효과 크기(probe +0.16)가 정밀도 차이의 통상 규모보다
+훨씬 크므로 판정이 뒤집힐 가능성은 낮다고 본다.

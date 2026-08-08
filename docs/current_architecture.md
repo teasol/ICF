@@ -296,14 +296,18 @@ Aggregation                    : 40→1 (position bottleneck 64 + residual exact
 Ridge Dimension (R)            : 64
 Attention Heads                : 8
 Set Layers                     : 1
-Precision                      : **bf16-mixed (필수 계약, 2026-08-08 강제 적용)** — ridge/relation
-                                 solve 내부는 fp32로 승격. `configs/trainer/default.yaml`에 고정,
-                                 `tests/test_precision_contract.py`가 활성 train config 전부를 검사.
+Precision (학습)                : **bf16-mixed — 예외 없는 필수 계약 (2026-08-08 강제)**.
+                                 ridge/relation solve 내부는 fp32로 승격.
+                                 `configs/trainer/` **모든 group**에 고정되어 있고
+                                 `tests/test_precision_contract.py`가 활성 train config 전부 +
+                                 trainer group 전부를 검사한다 (group을 바꿔 우회 불가).
                                  ⚠️ 아래 "확정 수치"의 v34/v35 ckpt는 이 강제 이전에 **fp32 폴백**
                                  (해당 group에 precision 미설정 → Lightning 32-true)으로 학습됐다.
-                                 재실행은 bf16-mixed로 돌아가며 그 ckpt를 재현하지 않는다.
-                                 ※ `configs/trainer/ddp5.yaml`·`ddp8.yaml`은 `16-mixed`(fp16)라
-                                   이 계약 위반 — 비활성 group이며 사용 전 교체 필요.
+                                 재실행은 bf16-mixed로 돌아가며 그 ckpt를 재현하지 않는다
+                                 (역사적 재현은 `trainer_overrides.precision: 32-true`).
+Precision (평가)                : **fp32**. `scripts/test_pathobench.py`는 Lightning trainer 없이
+                                 모델을 직접 빌드하므로 위 계약이 적용되지 않는다. 보고된 AUROC가
+                                 전부 이 경로에서 나왔으므로 **바꾸면 모든 수치가 이동**한다.
 Bag Representation             : poolz_l2
 Routing Temperature            : 0.5 (sparsity/balance = 0.0)
 Covariance relation            : enabled / learned_head / subspace / rank 1 / whiten / shrinkage 0.25 / residual 0.5

@@ -230,14 +230,15 @@ multi-resolution combiner의 paired AUROC `+0.01` headroom 확인 후에만 구�
 4. **수치 안전성 계약 (2026-08-08 실제 강제)**:
    - 공분산 스케치 역행렬 연산 시 FP16 계수 오버플로우 및 NaN 발생 방지를 위해 **`bf16-mixed` 정밀도를 필수 적용**한다.
    - ⚠️ 이 계약은 §56(v34 group default 신설) 이후 **선언만 되어 있고 강제되지 않았다** — `configs/trainer/default.yaml`이 precision을 아예 설정하지 않아 v34/v35 entry point가 Lightning 기본값 **32-true(fp32)**로 조용히 해석됐다. **확정 v34-1536 ckpt와 v35-16384 ckpt는 fp32로 학습된 것**이며, 지금 재실행하면 bf16-mixed로 돌아가 그 ckpt를 재현하지 않는다(정확한 역사적 재현이 필요하면 `trainer_overrides.precision: 32-true`).
-   - 2026-08-08부터 `configs/trainer/default.yaml`에 `precision: bf16-mixed`를 고정하고 **`tests/test_precision_contract.py`가 `configs/train_*.yaml` 전부를 검사**한다. 새 학습 config는 이 테스트를 통과해야 한다.
-   - `configs/trainer/ddp5.yaml`·`ddp8.yaml`은 `16-mixed`(fp16)라 **계약 위반 상태**다. 비활성 group이므로 방치 중이며, 사용 전 `bf16-mixed`로 교체할 것.
+   - **2026-08-08부터 예외 없이 강제**한다 (사용자 결정: "앞으로 항상 bf16-mixed"). `tests/test_precision_contract.py`가 ⓐ 활성 entry point `configs/train_*.yaml` 전부와 ⓑ **선택 가능한 `configs/trainer/*.yaml` group 전부**를 검사하므로, 다른 group을 골라 계약을 우회할 수 없다. 새 학습 config·새 trainer group은 이 테스트를 통과해야 한다.
+   - `configs/trainer/ddp5.yaml`·`ddp8.yaml`의 `16-mixed`(fp16) 위반은 **해소 완료** (bf16-mixed로 교체). ddp8 주석의 "RTX A5000은 FP16 경로" 근거는 Ampere가 bf16을 지원하므로 무효다. 이를 참조하던 아카이브 config는 `configs/archive/v18_v19/train_synthetic.yaml` 1개뿐이며 폐기된 v18/v19 아키텍처다(원본 값은 git 이력에 보존).
+   - **적용 범위는 학습**이다. 평가는 `scripts/test_pathobench.py`가 Lightning trainer 없이 모델을 직접 빌드해 **fp32로 돌며**, 여기에 bf16을 강제하면 보고된 AUROC가 전부 이동한다. 따라서 `configs/test_*.yaml`과 `configs/archive/`는 검사 대상에서 **의도적으로 제외**한다(제외 근거는 테스트 docstring에 기재).
 5. **테스트 검증 필수**:
    - 코드를 변경한 뒤에는 아래 unittest 수트를 통과해야 완결로 인정한다:
      ```bash
      timeout 300s /home/aibio_3/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
      ```
-   - 기본 스위트는 현재 **44 tests, 약 50초**다 (§59: streaming 7개 + vram 2개, §62: precision 계약 3개 추가). 폐기 architecture/연구 진단 175개는
+   - 기본 스위트는 현재 **45 tests, 약 50초**다 (§59: streaming 7개 + vram 2개, §63: precision 계약 4개 추가). 폐기 architecture/연구 진단 175개는
      `tests/history/legacy_*.py`로 이관되어 기본 discovery에서 실행되지 않는다. archive suite는
      수정 대상이 해당 보존 경로일 때만 개별 실행한다.
 

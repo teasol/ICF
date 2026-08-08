@@ -7,6 +7,19 @@ enforced anywhere -- `configs/trainer/default.yaml` set no precision at all
 between SS56 (v34 group defaults) and 2026-08-08, so the v34/v35 entry points
 silently resolved to Lightning's 32-true default. This test makes the contract
 executable.
+
+SCOPE (deliberate, SS63):
+
+* **Training only.** Every active `configs/train_*.yaml` entry point AND every
+  selectable `configs/trainer/*.yaml` group must resolve to bf16-mixed, so the
+  contract cannot be dodged by picking a different trainer group.
+* **Eval is NOT covered.** `scripts/test_pathobench.py` builds the model
+  directly (no Lightning trainer precision) and runs fp32; forcing bf16 there
+  would silently move every reported AUROC. `configs/test_*.yaml` is therefore
+  excluded on purpose.
+* **`configs/archive/` is NOT covered.** Those are historical reproducibility
+  records for dead architectures; rewriting their precision would falsify what
+  was actually run.
 """
 
 from __future__ import annotations
@@ -57,6 +70,26 @@ class TestPrecisionContract(unittest.TestCase):
             (REPO_ROOT / "configs" / "trainer" / "default.yaml").read_text()
         )
         self.assertEqual(group.get("precision"), REQUIRED_PRECISION)
+
+    def test_every_selectable_trainer_group_uses_bf16_mixed(self) -> None:
+        """No trainer group may opt out -- selecting one must not dodge SS3.4.
+
+        `configs/trainer/ddp5.yaml` and `ddp8.yaml` carried `16-mixed` (fp16)
+        until 2026-08-08; that is exactly the overflow path SS3.4 forbids.
+        """
+        import yaml
+
+        groups = sorted((REPO_ROOT / "configs" / "trainer").glob("*.yaml"))
+        self.assertTrue(groups, "configs/trainer/ has no group to check.")
+        for path in groups:
+            with self.subTest(group=path.name):
+                precision = yaml.safe_load(path.read_text()).get("precision")
+                self.assertEqual(
+                    precision,
+                    REQUIRED_PRECISION,
+                    f"trainer group {path.name} sets precision={precision!r}; "
+                    f"{REQUIRED_PRECISION!r} is required (agent_handoff SS3.4).",
+                )
 
 
 if __name__ == "__main__":

@@ -3,8 +3,10 @@ accelerator: gpu
 # Must match torchrun's WORLD_SIZE for Lightning's TorchElastic environment.
 devices: 8
 strategy: ddp_find_unused_parameters_false
-# RTX A5000 GPUs use the FP16 path for training.
-precision: 16-mixed
+# RTX A5000 GPUs used the FP16 path for training; bf16-mixed enforced
+# 2026-08-08 (agent_handoff SS3.4) because fp16 coefficients overflow the
+# covariance-sketch inverse / ridge solves to NaN. Ampere supports bf16.
+precision: bf16-mixed
 log_every_n_steps: 100
 check_val_every_n_epoch: 1
 num_sanity_val_steps: 0
