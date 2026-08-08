@@ -2261,6 +2261,7 @@ class RidgeResidualMetaClassifier(SetCrossAttentionMetaClassifier):
         ridge_logit_scale: float = 5.0,
         attention_residual_scale: float = 0.1,
         num_classes: int = 2,
+        enable_ridge: bool = True,
     ) -> None:
         super().__init__(
             token_dim=token_dim,
@@ -2286,6 +2287,13 @@ class RidgeResidualMetaClassifier(SetCrossAttentionMetaClassifier):
             attention_residual_scale / (1.0 - attention_residual_scale)
         )
         self.attention_residual_logit = nn.Parameter(torch.tensor(residual_logit))
+        # Ridge ablation (docs SS65). enable_ridge=False forces ridge_logits = 0
+        # so only the attention residual survives in this branch. Shape-preserving
+        # and parameter-preserving (ridge_projection/log_lambda/log_scale stay in
+        # the state dict) so checkpoints load strict either way; the ridge solve
+        # is skipped outright, so those parameters receive no gradient and stay
+        # at their initial values. Evaluate such a checkpoint with the SAME flag.
+        self.force_ridge_logits_zero = not bool(enable_ridge)
 
     @staticmethod
     def _solve_ridge_system(
@@ -2334,6 +2342,10 @@ class RidgeResidualMetaClassifier(SetCrossAttentionMetaClassifier):
         query_tokens: torch.Tensor,
         class_counts: torch.Tensor,
     ) -> torch.Tensor:
+        if self.force_ridge_logits_zero:
+            return query_tokens.new_zeros(
+                (*query_tokens.shape[:-1], self.num_classes)
+            )
         # Center and globally scale each episode before the learned projection.
         # A scalar scale preserves the geometry between feature dimensions.
         output_dtype = query_tokens.dtype
@@ -2388,6 +2400,10 @@ class RidgeResidualMetaClassifier(SetCrossAttentionMetaClassifier):
         query_tokens: torch.Tensor,
         class_counts: torch.Tensor,
     ) -> torch.Tensor:
+        if self.force_ridge_logits_zero:
+            return query_tokens.new_zeros(
+                (*query_tokens.shape[:-1], self.num_classes)
+            )
         output_dtype = query_tokens.dtype
         context_tokens = context_tokens.float()
         query_tokens = query_tokens.float()
@@ -2537,6 +2553,9 @@ class StructuredPopulationMetaClassifier(nn.Module):
         use_instance_attention_mil: bool = False,
         mil_hidden_dim: int | None = None,
         meta_enable_rare_evidence: bool = True,
+        meta_enable_global_ridge: bool = True,
+        meta_enable_abundance_ridge: bool = True,
+        meta_enable_covariance_ridge: bool = True,
         population_token_mode: str = "projected",
         bag_aggregation: str = "projected",
         bag_aggregation_heads: int = 8,
@@ -2597,6 +2616,16 @@ class StructuredPopulationMetaClassifier(nn.Module):
         # the "rare-removed" arm (rev.2 step 5) -- numerically identical to
         # deletion (P0-b verified |Δpooled| 0.0009 < 0.003 on PIK3CA).
         self.force_rare_logits_zero = not meta_enable_rare_evidence
+        # Ridge ablation (docs SS65). The three closed-form ridge solves are
+        # independently removable to test whether they crowd out the learned
+        # branches. Each flag zeroes ONLY its own ridge term, leaving that
+        # branch's learned residual intact:
+        #   global      (G-2) -> global_shape keeps its attention residual
+        #   abundance   (P-2) -> population keeps population_attention
+        #   covariance  (CV-1) -> the CV-2 relation branch is untouched
+        # Parameter-preserving (strict ckpt load both ways), no new parameters.
+        self.force_abundance_ridge_zero = not bool(meta_enable_abundance_ridge)
+        self.force_covariance_ridge_zero = not bool(meta_enable_covariance_ridge)
         if self.include_cls_token and typed_bag_preserving_branch:
             raise NotImplementedError(
                 "include_cls_token with typed_bag_preserving_branch is not "
@@ -2915,6 +2944,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
             ridge_logit_scale=ridge_logit_scale,
             attention_residual_scale=attention_residual_scale,
             num_classes=num_classes,
+            enable_ridge=meta_enable_global_ridge,
         )
         if self.typed_bag_preserving_branch:
             self.typed_bag_classifier = RidgeResidualMetaClassifier(
@@ -4369,6 +4399,10 @@ class StructuredPopulationMetaClassifier(nn.Module):
             context_labels,
             query["slot_metadata"],
         )
+        if self.force_abundance_ridge_zero:
+            abundance_ridge_logits = abundance_ridge_logits.new_zeros(
+                abundance_ridge_logits.shape
+            )
         abundance_ridge_scale = self.abundance_ridge_log_scale.exp().clamp(
             0.1, 100.0
         )
@@ -4379,6 +4413,10 @@ class StructuredPopulationMetaClassifier(nn.Module):
             ridge_lambda=self.covariance_ridge_log_lambda,
             dual=True,
         )
+        if self.force_covariance_ridge_zero:
+            covariance_ridge_logits = covariance_ridge_logits.new_zeros(
+                covariance_ridge_logits.shape
+            )
         covariance_ridge_scale = self.covariance_ridge_log_scale.exp().clamp(
             0.1, 100.0
         )
@@ -4596,6 +4634,10 @@ class StructuredPopulationMetaClassifier(nn.Module):
             context_labels,
             query["slot_metadata"],
         )
+        if self.force_abundance_ridge_zero:
+            abundance_ridge_logits = abundance_ridge_logits.new_zeros(
+                abundance_ridge_logits.shape
+            )
         abundance_ridge_scale = self.abundance_ridge_log_scale.exp().clamp(
             0.1, 100.0
         )
@@ -4606,6 +4648,10 @@ class StructuredPopulationMetaClassifier(nn.Module):
             ridge_lambda=self.covariance_ridge_log_lambda,
             dual=True,
         )
+        if self.force_covariance_ridge_zero:
+            covariance_ridge_logits = covariance_ridge_logits.new_zeros(
+                covariance_ridge_logits.shape
+            )
         covariance_ridge_scale = self.covariance_ridge_log_scale.exp().clamp(
             0.1, 100.0
         )
@@ -4783,6 +4829,9 @@ class BaseModel(nn.Module):
         meta_class_memory_tokens: int = 8,
         meta_rare_evidence_fractions: Sequence[float] = (0.01, 0.05, 0.10, 0.20),
         meta_enable_rare_evidence: bool = True,
+        meta_enable_global_ridge: bool = True,
+        meta_enable_abundance_ridge: bool = True,
+        meta_enable_covariance_ridge: bool = True,
         meta_population_token_mode: str = "projected",
         meta_bag_aggregation: str = "projected",
         meta_fusion_residual_scale: float = 0.10,
@@ -4894,6 +4943,9 @@ class BaseModel(nn.Module):
             use_instance_attention_mil=use_instance_attention_mil,
             mil_hidden_dim=mil_hidden_dim,
             meta_enable_rare_evidence=meta_enable_rare_evidence,
+            meta_enable_global_ridge=meta_enable_global_ridge,
+            meta_enable_abundance_ridge=meta_enable_abundance_ridge,
+            meta_enable_covariance_ridge=meta_enable_covariance_ridge,
             population_token_mode=meta_population_token_mode,
             bag_aggregation=meta_bag_aggregation,
             bag_aggregation_num_slots=self.aggregator.num_slots,

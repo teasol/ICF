@@ -42,6 +42,16 @@ meta_covariance_residual_scale: 0.25
 # 40->1 collapse leaves the routing softmax on a length-1 axis, weights == 1.0);
 # `structured` feeds the full token set and restores the routing.
 meta_population_token_mode: projected
+# Ridge ablation (docs SS65): the three closed-form ridge solves, independently
+# removable. Each flag zeroes only its own ridge term and leaves that branch's
+# learned residual in place (global -> attention residual, abundance ->
+# population attention, covariance -> the CV-2 relation branch is untouched).
+# All true = historical behaviour. A checkpoint trained with a flag off must be
+# EVALUATED with the same flag off -- the ablated ridge parameters never receive
+# gradient and stay at init, so re-enabling them injects an untrained branch.
+meta_enable_global_ridge: true
+meta_enable_abundance_ridge: true
+meta_enable_covariance_ridge: true
 num_classes: 2
 covariance_relation:
   enabled: true
