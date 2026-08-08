@@ -1,233 +1,235 @@
 # Current architecture
 
-**Last updated**: `2026-08-04`  
-**Code baseline**: Architecture Version `30` 확정 (2026-08-04) — v24 + B1 `poolz_l2` 표현 + B2 cardinality-faithful 샘플링
+**Last updated**: `2026-08-08`
+**Code baseline**: Architecture Version `34` — **v34-1536 (PathoBench 보고용 확정 모델, 2026-08-07)**.
+v30 = 확정 baseline (합성/Musk), v34 = v30 B1(`poolz_l2`)·B2(cardinality) 계승 + large-context(1536-d) +
+MLA 효율화. v35 = 데이터 단독 arm(rare-free, §61). 활성 개선안: **Q1 structured population**(§62, 별도 proposal).
 
-이 문서는 현재 확정 config(`configs/train_v30_medium_bag_proj_residual.yaml` — 아직 미학습)와 그 기반이 된
-v24(`configs/train_v24_medium_bag_proj_residual.yaml`)가 사용하는 모델 구조와 수학적 계약을 설명합니다.
-v30은 v24 아키텍처에 **①의 입력 표현을 context-pool 대각 표준화(`poolz_l2`)로 교체**하는 B1과
-**학습 분포의 bag 크기를 log-uniform[1,1024]로 만드는** B2를 더한 버전입니다(§2 ①·② 및 §2.1).
-v24는 이전 확정 baseline으로 보존되며, `bag_representation` 코드 기본값은 `legacy`(v24 동작)입니다 —
-v30은 명시 플래그로 선택합니다. 최신 개발 상태는 [`current_status.md`](current_status.md) §29·§28.
+> [!IMPORTANT] 차원 표기 — 차원은 대문자, 실제 토큰은 소문자
+>
+| 기호 | 의미 | 값 |
+|---|---|---|
+| `E` | number of episodes in one batch | 합성 8 / 추론 1 |
+| `B` | number of bags in one episode | |
+| `N` | number of instances in one bag (inference에서 bag마다 상이) | |
+| `I` | dimension of one instance | **1536** (UNIv2) |
+| `C` | number of context bags in one episode, C+Q=B | |
+| `Q` | number of query bags in one episode, C+Q=B | |
+| `C0`, `C1` | number of context bags labeled 0 / 1, C0+C1=C | |
+| `M` | number of memory tokens per class (총 2M) | 8 |
+| `D` | dimension of hidden layers | 256 |
+| `R` | ridge dimension | 64 |
+| `T` | number of structured tokens per bag | 40 |
+| `K` | number of tail fractions | 3 ([0.01, 0.05, 0.15]) |
+| `F` | number of rare fractions | 4 ([0.01, 0.05, 0.10, 0.20]) |
 
-> [!IMPORTANT]
-> **v24는 label 기반 class-memory 압축을 바꾸지 않았습니다.** `_class_memories`는 여전히 context bag을 `context_labels`로 나눠 class당 8개 memory token으로 pooling합니다 (§4, `src/models/baseline.py:2446`). v24가 바꾼 것은 그 이전 단계, 즉 **bag 하나를 몇 개의 토큰으로 요약하는지**(§3.5)뿐입니다.
+v24/v30 문서는 [`history/`](history/) 및 git 기록에 보존. 최신 개발 상태는 [`current_status.md`](current_status.md) §59~§62.
 
 ---
 
 ## 1. 입출력 텐서 계약 (Input / Output Specification)
 
-한 episode는 해당 에피소드의 **전체 context bags**와 query bags로 구성됩니다. v22에는 context를 K개로 줄이는 retrieval 계층이 없습니다. 각 instance (단일 세포)의 특징 차원은 $D = 512$입니다.
+에피소드 = 해당 에피소드의 **전체 context bags + query bags**. v22부터 context를 K개로 줄이는 retrieval 계층은 없음. instance = 단일 세포, 특징 차원 $I = 1536$.
 
 ```text
 input:
-  outer episodes E        (합성 학습 시 E=8, 추론 시 E=1)
-  context instances       [E, context_bags, instances, 512]
-                          합성: context_bags = num_bags - queries (num_bags 60~100)
-                          ICI : context_bags ~= 69 (fold train cohort 전체)
-  context labels          [E, context_bags] (Y \in {0, 1})
-  query instances         [E, query_bags, instances, 512]
-
+  context instances  [E, C, N, I]     (합성 학습 E=8, 추론 E=1; inference에서 N은 bag마다 상이)
+  context labels     [E, C]           (Y \in {0, 1})
+  query instances    [E, Q, N, I]
 output:
-  query logits            [E, query_bags, num_classes=2]
+  query logits       [E, Q, 2]
 ```
 
-Query label은 representation, normalization, class memory, ridge 또는 covariance subspace fitting 경로에 절대로 흐르지 않습니다.
+query label은 representation / normalization / class memory / ridge / covariance 경로에 절대 흐르지 않는다.
 
 ---
 
-## 2. 4대 수학적 핵심 기술 명세 (v19부터 유지)
+## 2. 전처리 & 표현 (v30 B1/B2 계승)
 
-### ① Bag Centering + Per-Cell L2 Projection (구 "Z-Score Bag Studentization")
+### ① Context-Pool Standardized Representation (`poolz_l2`, v30 B1)
 
-> [!IMPORTANT]
-> **2026-08-04 코드 대조로 정정됨.** 이 절은 오래도록 per-feature 스튜던트화
-> ($\tilde{x} = (x-\mu_i)/(S_i+10^{-5})$)라고 기술해 왔으나, **코드는 $S_i$로 나누지 않습니다.**
-> 실제 구현(`_bag_view`, `src/models/baseline.py:618-644`)은 per-bag centering 후 **per-cell L2**로
-> 사영합니다. $S_i$는 나눗셈에 쓰이지 않고 `global_summary` 토큰으로 **출력**됩니다.
-> 참고로 문서가 기술했던 그 공식(진단 프로브의 `zscore` 변형)은 실측에서 **최하위**였습니다
-> (합성 Medium 0.5054, [`history/archive.md`](history/archive.md) §19). 상세: `current_status.md` §26.
-
-각 Donor Bag $i$의 세포 표현 $x_{i, j} \in \mathbb{R}^{512}$에 대해 Donor Centroid $\mu_i$와
-per-feature Standard Deviation $S_i$를 구합니다:
-
-$$\mu_i = \frac{1}{N_i} \sum_{j=1}^{N_i} x_{i, j}, \quad S_i = \sqrt{\frac{1}{N_i} \sum_{j=1}^{N_i} (x_{i, j} - \mu_i)^2 + 1e-6}$$
-
-실제 적용되는 변환은 **centering + per-cell L2**입니다 (`bag_centered_representation=True`,
-`bag_centered_l2_normalize=True`가 기본):
-
-$$\delta_{i,j} = x_{i,j} - \mu_i, \qquad \tilde{x}_{i, j} = \frac{\delta_{i,j}}{\|\delta_{i,j}\|_2 + 10^{-6}}$$
-
-$S_i$는 **`global_summary` 토큰**으로 aggregator에 전달되며(나눗셈에 사용되지 않음), centering 전
-편차 $\delta_{i,j}$는 공분산 스케치 경로(`_covariance_sketch`, `_slot_covariance_sketch`)의 입력으로
-그대로 쓰입니다 — 즉 크기(magnitude) 정보는 L2로 지워지지 않고 이 두 경로로 공급됩니다.
-
-> **알려진 한계 (2026-08-04)**: per-bag centering은 $d$차원 공간을 **rank $(N_i-1)$** 부분공간으로
-> 사영합니다. $N_i$가 작으면 파괴적입니다 — $N_i = 1$이면 $\delta = 0$이므로 bag 전체가 0벡터가
-> 됩니다. 실데이터(Musk median 12 instances)에서 이것이 주 병목으로 측정되었습니다:
-> `current_status.md` §26 및 [`history/musk_transfer_diagnosis_v30_proposal.md`](history/musk_transfer_diagnosis_v30_proposal.md).
-
-### ①-2 (v30 B1) Context-Pool Standardized Representation (`poolz` / `poolz_l2`)
-
-**v30 확정 (2026-08-04)** — per-bag centering(①)을 **context-pool 대각 표준화**로 대체합니다
-(`bag_representation`: `"legacy"`(기본=v24) | `"poolz"` | `"poolz_l2"`):
+per-bag centering(legacy, v24)을 **context-pool 대각 표준화**로 대체 (`bag_representation: poolz_l2`):
 
 $$\mu_{ctx} = \frac{\sum_{i \in ctx} \sum_{j} x_{i,j}}{\sum_{i \in ctx} N_i}, \qquad
 \sigma_{ctx} = \sqrt{\frac{\sum_{i \in ctx, j} (x_{i,j} - \mu_{ctx})^2}{\sum_{i \in ctx} N_i}}$$
 
-$$\text{poolz:}\; \tilde{x}_{i,j} = \frac{x_{i,j} - \mu_{ctx}}{\sigma_{ctx}}, \qquad
-\text{poolz\_l2:}\; \tilde{x}_{i,j} = \frac{(x_{i,j} - \mu_{ctx})/\sigma_{ctx}}{\|(x_{i,j} - \mu_{ctx})/\sigma_{ctx}\|_2}$$
+$$\tilde{x}_{i,j} = \frac{(x_{i,j} - \mu_{ctx})/\sigma_{ctx}}{\|(x_{i,j} - \mu_{ctx})/\sigma_{ctx}\|_2}$$
 
-- pool 통계는 **context bag의 모든 세포**에서 cell-count 가중으로 계산(실 bag 크기 1~1044 최대 1000배 차이
-  → per-bag 평균의 평균은 오가중). **query 누출 없음** (`_context_pool_stats`, `baseline.py`).
-- **`classification_instances`만 바뀝니다.** `global_summary`(per-bag centered spread)와 `centered_delta`는
-  여전히 per-bag으로 반환되므로 **공분산 스케치/spread 분기는 v24와 동일**합니다.
-- `poolz_l2`는 확정 선택: per-cell L2로 magnitude를 유계화해 bag 크기 편향을 줄입니다(corr(prob,log n)
-  +0.327→+0.100→+0.059). `poolz`(L2 없음)는 magnitude를 보존하지만 크기 교란이 커 음성(§28 결과 (1)).
+- pool 통계는 **context bag 전체 세포**에서 cell-count 가중으로 계산 (실 bag 크기 편차 최대 1000배 → per-bag 평균의 평균은 오가중). **query 누출 없음** (`_context_pool_stats`).
+- `poolz_l2`는 magnitude를 유계화해 bag 크기 편향을 줄인다 (corr(prob, log n) +0.327→+0.059). `poolz`(L2 없음)는 크기 교란이 커 음성 (§28).
+- legacy per-bag centering은 rank $(N_i-1)$ 사영이라 소형 bag에서 파괴적 ($N_i=1$ → 0벡터) — Musk(median 12) 병목의 실체 (§26).
 
-### ② (v30 B2) Cardinality-faithful 에피소드 샘플링
+### ② Cardinality-faithful 에피소드 샘플링 (v30 B2)
 
-B2는 아키텍처가 아니라 **데이터 분포** 변경입니다: `num_cells: [1,1024]` + `num_cells_log_uniform: true`로
-bag 크기를 log-uniform하게 뽑습니다(median 34, frac n≤12 0.36 — Musk 실제 12/0.50에 근사).
-**B1·B2는 상호 필수**: B2만 적용하면(legacy 뷰) n=1 bag이 0벡터가 되어 NaN 그라디언트로 학습 불가,
-B1만 적용하면(S1) 구간 교환으로 음성. 모델이 크기 불변성을 학습하려면 학습 분포에 크기 변동이 필요합니다.
-제약: 4D batched 경로와 `shape_group_size` 때문에 **에피소드 간** 변동만 가능(에피소드 내 혼합은 B2b).
+| 버전 | num_cells | 비고 |
+|---|---|---|
+| v30 | [1, 1024] log-uniform | Musk 밴드 보존 (median 34) |
+| v34-1536 | [1, 8192] log-uniform | PathoBench 보고용 |
+| v35 | [1, 16384] + power 1.5 | 데이터 단독 arm (rare-free) |
 
-### ② Top-k Sparse Evidence Tokenization (Sub-1% 희귀세포 핀포인트 추출)
-97%+ 비반응 배경세포에 의해 0.5%~3% 희귀 세포 신호가 희석되는 현상을 방지함:
-- 상위 1% ($k = \max(1, \lceil 0.01 \cdot N_i \rceil)$) 세포 인스턴스 $X_i^{sparse} \in \mathbb{R}^{k \times 512}$ 선별.
-- Class Memories $M_c \in \mathbb{R}^{8 \times 512}$ ($c \in \{0, 1\}$)와 Direct Cross-Attention 수행 후 residual logit 결합.
-
-> [!IMPORTANT]
-> **2026-08-04 정정**: 이 절은 선별 기준을 "Bag 중심 $\mu_i$로부터의 이상 거리
-> $d_{i,j} = \|\tilde{x}_{i,j}\|_2$"라고 기술해 왔으나, ①의 per-cell L2 때문에 코드에서
-> $\|\tilde{x}_{i,j}\|_2$는 **모든 세포에 대해 항등적으로 1.0**이며 순위를 만들 수 없습니다.
-> 실제 코드는 context anchor에 대한 **novelty**(`novelty = 1 - nearest_similarity`,
-> `baseline.py:1074-1075`, `1289-1290`)로 tail을 정렬합니다.
+B1·B2는 상호 필수 — B2만(legacy 뷰) 적용 시 n=1 bag이 0벡터 → NaN, B1만(S1) 적용 시 구간 교환으로 음성. 4D batched 경로 때문에 **에피소드 간** 크기 변동만 가능.
 
 ### ③ Covariance Subspace Shrinkage (노이즈 방어)
-- SNR-Adaptive Covariance Subspace Fitting의 Shrinkage 파라미터를 **`subspace_shrinkage: 0.25`**로 정밀화.
-- Whitening 연산 시 NaN 발생 시 안전하게 Identity Fallback 구동.
-- 백색화 변환 거리 vector $[d_0, d_1, d_0 - d_1, \text{sep}]$를 2-layer MLP Learned Head로 연결.
+- SNR-adaptive covariance subspace fitting, `subspace_shrinkage: 0.25`. whitening NaN 시 Identity fallback.
+- 거리 벡터 $[d_0, d_1, d_0 - d_1, \text{sep}]$ → 2-layer MLP learned head.
 
 ### ④ Auxiliary Pairwise Ranking Loss (`weight: 0.10`)
-- Cross-Entropy 0.685 부근 Gradient 소멸 극복:
 
-$$\mathcal{L}_{total} = \mathcal{L}_{CE} + 0.10 \cdot \mathcal{L}_{Ranking}$$
-
-$$\mathcal{L}_{Ranking} = \max(0, \gamma - (P_1(Q^+) - P_1(Q^-)))$$
+$$\mathcal{L}_{total} = \mathcal{L}_{CE} + 0.10 \cdot \mathcal{L}_{Ranking}, \quad
+\mathcal{L}_{Ranking} = \max(0, \gamma - (P_1(Q^+) - P_1(Q^-)))$$
 
 ---
 
-## 3. Context 구성: retrieval 없음 (v22)
-
-v22는 에피소드의 모든 context bag을 그대로 aggregator에 통과시킵니다. v21에 있던 `extract_bag_features` / `retrieve_context_indices` (40-token Signal-Aware Retrieval)와 외부 retrieval collator 3종은 모두 삭제되었습니다.
-
-**제거 근거 요약** (상세: [`current_status.md`](current_status.md) §4):
-- ICI 실데이터에서 retrieval을 켠 구성과 끈 구성의 AUROC가 동일했고(0.5481 vs 0.5454), calibration과 accuracy는 끈 쪽이 더 좋았음.
-- ICI는 fold당 context가 ~69명뿐이라 K=24 선별은 가용 labeled context의 65%를 버리는 것.
-- 무엇보다 n=87에서 이 차이들의 95% CI가 전부 겹치고 0.5를 포함해 **통계적으로 구분 불가능**했음.
-
-aggregator가 각 bag을 40개 토큰(1 global + 12 slots × 3 통계 + 3 tail)으로 요약하는 구조 자체는 **분류기 입력으로 그대로 유지**됩니다 (`StructuredPopulationMetaClassifier._all_structured_tokens`). v21에서 이 40-token 요약을 retrieval 점수 계산에 재사용하던 경로만 사라졌습니다.
-
-**Batched Multi-Episode Forward는 유지**: `BaseModel.forward_episode_batch`와 `forward`의 4D 분기가 `[episodes, bags, cells, dim]`을 한 optimizer step에 처리합니다. 검증: `tests/test_batched_episode_forward.py`.
-
-**복구 지점**: retrieval 최종 구현은 git tag `v21-retrieval-final`에 보존되어 있습니다.
-
----
-
-## 3.5. Bag Structured-Token Projection (v24, residual + bottleneck)
-
-v22/v23은 각 bag을 40개 structured token(1 global + 12 slots×3 + 3 tail)째로 분류기에 전달하거나(v22), 40개를 단순 arithmetic mean해 1개 token으로 줄였습니다(v23-A0, `mean_pool_structured_tokens: true`). **v24는 이 40개를 학습된 linear projection으로 압축해 1개 token으로 만듭니다** (`project_structured_tokens: true`). 확정된 v24는 아래 두 옵션을 모두 켠 residual + bottleneck variant(구 v24-B1)입니다.
-
-1. **Position-specific bottleneck** (`projection_bottleneck_dim: 64`): 40개 token 각각에 **전용** `Linear(512 → 64)`를 적용합니다(토큰 위치마다 별도 가중치, 총 40개). 그 결과를 concat하면 `40 × 64 = 2560`차원.
-2. **Residual exact-mean shortcut** (`projection_residual_mean: true`): 같은 40개 token의 정확한 arithmetic mean(512차원, v23-A0과 동일한 신호)을 위 2560차원 뒤에 concat합니다 → `2560 + 512 = 3072`차원.
-3. 최종 `Linear(3072 → 512)` 하나로 bag당 512차원 token 1개를 만듭니다.
+## 3. Tokenization (bag → T=40 tokens, 전부 I-dim)
 
 ```text
-40 structured tokens (40 x 512)
-  -> [40개 위치별 전용 Linear(512, 64)]   (v24-B0에서 도입)
-  -> concat                                (40 x 64 = 2560)
-  -> concat with exact mean(40 tokens)     (2560 + 512 = 3072)   <- residual shortcut (v24-B1)
-  -> Linear(3072, 512)
-  -> 1 token (512-d) per bag
+1 global_summary : per-bag spread (표준편차) — bag mean이 아님 (mean은 centering에만 사용)
+36 slot tokens   : 12 slots × (center, spread, rare)
+                   anchor 12개 = 에피소드 context cell의 spherical k-means, 에피소드 내 모든 bag 공유
+                   assignment = softmax(sim(cell, anchor)/temp), temp=0.1 (slot 축 softmax → cell 순서 불변)
+                   center = slot_mean + σ·enc(cat(anchor, slot_mean−anchor, metadata))
+                   spread = slot_std  + σ·enc(cat(anchor, slot_std,      metadata))
+                   rare   = rare_state+ σ·enc(cat(anchor, rare_state−anchor, metadata))
+                   rare_state = assignment×slot-mean distance top-k softmax 가중평균 (fraction 0.05)
+                   metadata = (log proportion, dispersion) — enc 입력 특징 (token 아님)
+3 tail tokens    : fractions [0.01, 0.05, 0.15]
+                   novelty = 1 − nearest-anchor similarity로 top-k cells 선별,
+                   (cell − nearest anchor) 편차를 공유 tail encoder로 인코딩 후 mean-pool
 ```
 
-이 1-token 표현은 v22의 40-token 표현을 대체하여 `_population_tokens`(direct global/query branch)와 `_class_memories`(context bag → class-memory 압축 입력, §4)에 그대로 흘러갑니다. **`_class_memories`의 label 기반 grouping 로직 자체는 바뀌지 않습니다** — 압축되는 대상이 40 token에서 1 token으로 줄었을 뿐입니다.
+- slot index는 에피소드 단위 k-means cluster id라 bag 간 안정적 의미 없음 → slot-index embedding 없음 (위치별 bottleneck이 대체).
+- v34/v35는 `bag_representation: poolz_l2` 뷰에서 이 40 token을 생성 (aggregator는 per-bag, slot/tail 통계).
 
-구현: `StructuredPopulationMetaClassifier._projected_bag_tokens` (`src/models/baseline.py:2395`), 생성자 분기 (`src/models/baseline.py:1751-1782`).
+## 4. Aggregation — 40→1 Projection (v24-B1 계승)
 
-`architecture_version`은 `project_structured_tokens=true`일 때 무조건 `24`입니다 (`mean_pool_structured_tokens`이면 `23`, 둘 다 false면 `22`; `src/models/baseline.py:3386`). bottleneck/residual 유무는 `architecture_version`에 반영되지 않고 **state_dict 형태**로만 구분됩니다 — v24-A0/B0/B1 체크포인트를 서로 다른 config로 로드하면 shape mismatch로 실패합니다. 확정된 production config는 `configs/train_v24_medium_bag_proj_residual.yaml` (`projection_bottleneck_dim: 64` + `projection_residual_mean: true`) 하나뿐입니다.
+```text
+mean_token = arithmetic mean(40, I) -> (1, I)
+40 projection = position-specific Linear(I -> 64) × 40개   -> (64×40) = 2560
+concat [projected(2560), mean_token(I)]                     -> 2560 + I = 4096
+Linear(4096 -> I)                                          -> bag token (1, I)   [token 공간 I]
+```
+
+- 이 1-token이 `global_shape_classifier`, `_class_memories`(context), `_population_memory_logits`(query)에 흐른다.
+- **§62 Q1**: 이 40→1 압축은 라벨 정보 전에 task-무관 고정 선형 사상으로 token을 1개로 죽이고, 그 결과 population routing softmax가 길이 1 축에 걸려 무력 (probe +0.16, §62-4). Q1은 population 경로에서 40 token을 유지한다 → [`architecture_v36_q1_structured_population_proposal.md`](architecture_v36_q1_structured_population_proposal.md).
 
 ---
 
-## 4. Main Classification Branches & Logit Fusion
-
-실제 코드(`StructuredPopulationMetaClassifier`) 기준 2단 합성입니다.
-
-**1단 — 증거 분기 융합** (`_fuse_evidence`, baseline.py:2518):
+## 5. Architecture Pipeline (E=1) — 전체 분기
 
 ```text
-logits = global_shape_logits
-       + population_scale * population_logits
-       + rare_scale     * rare_logits
-       + fusion_scale   * interaction(global, population, rare)
+1. Input: (B, N, I)
+2. Tokenization: (B, 40, I)
+3. Aggregation (projected): (B, 1, I)
+4. Split: c_bags = (C, 1, I) = (C, I), q_bags = (Q, 1, I) = (Q, I)
 ```
 
-`interaction`은 세 분기 logit의 곱·차 특징을 `fusion_scorer` MLP에 통과시킨 값입니다.
-
-**2단 — 공분산 항 가산** (baseline.py:2868~2871):
+### Global Branch (projected token)
 
 ```text
-final_logits = logits
-             + covariance_residual_scale * (covariance_ridge_scale * covariance_ridge_logits)
-             + covariance_relation_residual_scale * covariance_relation_logits
+G-1. Encoding: c = MLP_R(Norm(c_bags)) = (C, R=64),  q = MLP_R(Norm(q_bags)) = (Q, R)
+G-2. Ridge: class-balanced closed-form ridge (center/rms → gram + λI → solve),
+            c 라벨로 계수 fit → q logits (Q, 2), ridge_scale 배
+G-3. Attention residual: set-encoder + cross-attn(클래스 그룹) → (Q, 2), residual_scale 배
+G-4. global_shape_logits = ridge_scale·ridge + attn_residual_scale·attention  (Q, 2)
 ```
 
-> [!IMPORTANT]
-> **위 scale 중 상당수는 고정 상수가 아니라 학습됩니다.** `population_scale` / `rare_scale` / `fusion_scale` / `covariance_residual_scale`은 학습 파라미터의 `sigmoid`이고, `covariance_ridge_scale`은 `exp` 후 `[0.1, 100]`으로 clamp됩니다. config의 값들은 이 학습 스케일의 **하한/상한 또는 초기 기준**을 정할 뿐입니다.
+### Context Bag Line (class memories, projected token)
 
-config에서 직접 지정하는 고정값:
+```text
+C-1. Class split: c0 = c_bags[label==0] = (C0, I), c1 = (C1, I)
+C-2. Encoding I->D: c0 = Proj_D(Norm(c0)) = (C0, D), c1 = (C1, D)   [공유 projection]
+C-3. Memory attention: m = (M, D) 공유 learnable seeds
+     m0 = Attn(m, c0, c0) = (M, D),  m1 = Attn(m, c1, c1) = (M, D)
+C-4. Memory self-attention: m0 = SelfAttn(m0, m0, m0) = (M, D), m1 동일
+```
 
-| config 키 | 값 | 역할 |
-|---|---:|---|
-| `meta_population_residual_scale` | 0.25 | population 분기 scale 상한 |
-| `meta_minimum_population_residual_scale` | 0.10 | 동 하한 |
-| `meta_tail_residual_scale` | 0.10 | rare/tail 분기 scale 상한 |
-| `meta_minimum_tail_residual_scale` | 0.05 | 동 하한 |
-| `meta_fusion_residual_scale` | 0.10 | interaction 항 초기 scale |
-| `meta_covariance_residual_scale` | 0.25 | covariance ridge 잔차 기준 |
-| `covariance_relation.residual_scale` | 0.50 | CSP learned head 잔차 (고정 상수) |
+### Query Bag Line (population memory attention, projected — 현행)
 
-> [!NOTE]
-> 이전 문서는 이 식을 `base_logits + sparse_evidence_scale * sparse_memory_logits + ...`로 적고 `sparse_evidence_scale: 0.10`을 명시했으나, **`sparse_evidence_scale`이라는 파라미터는 코드베이스에 존재하지 않습니다** (2026-07-29 확인). 위 내용으로 교체했습니다.
+```text
+Q-1. q = Proj_D(Norm(q_bags)) = (Q, 1, D)
+Q-2. token_weights = softmax(slot_importance(q)/T_temp) = (Q, 1)      [축 길이 1 → 무력]
+Q-3. q0 = Attn(q, m0, m0) = (Q, 1, D), q1 = Attn(q, m1, m1) = (Q, 1, D)
+Q-4. r0 = cat[q, q0, q−q0, q⊙q0] = (Q, 4D) → Scorer → s0 (Q, 1);  r1 동일 → s1 (Q, 1)
+Q-5. population_attention_logits = [s0, s1] = (Q, 2)
+```
+
+### Abundance (population 분기의 절반)
+
+```text
+P-1. metadata = slot_metadata = (C, 24)   [12 slots × (log proportion, dispersion)]
+P-2. abundance_ridge_logits = ridge(metadata, labels, query) → (Q, 2), abundance_scale 배
+
+⇒ population_logits = abundance_scale·abundance_ridge + attention_scale·population_attention  (Q, 2)
+```
+
+### Rare Branch (raw 세포 직접)
+
+```text
+R-1. query raw instances (N_i, I) → Proj_D → (N_i, D)
+R-2. evidence_c = logsumexp(sim(cell, m_c)) − log(M)   [클래스별]
+R-3. F=4 fractions별 top-k 평균 → fraction_scores → MLP → rare_logits (Q, 2), tail_scale 배
+     ※ v34 = ON (default), v35 = OFF (meta_enable_rare_evidence: false, §61)
+```
+
+### Covariance Branch
+
+```text
+CV-1. covariance ridge: covariance_sketch (C, 64) → ridge → (Q, 2), cov_ridge_scale 배
+CV-2. covariance relation: covariance_matrix → subspace
+        (class delta + pooled whitening + top-1 eigen filter) → variance-log features (C, 1)
+        → class prototype 비교 (learned_head MLP: [d0, d1, d0−d1, sep]) → (Q, 2), residual 0.5 배
+```
+
+### Fusion (최종 logits)
+
+```text
+F-1. evidence = stack[global_shape, population, rare]              (Q, 2, 3)
+F-2. interaction = fusion_scorer(cat(evidence, pair_products, |pair_diffs|))  (Q, 2)
+F-3. final = global_shape
+           + population_scale·population_logits
+           + tail_scale·rare_logits
+           + fusion_scale·interaction
+           + cov_res_scale·covariance_logits
+           + cov_rel_res_scale·covariance_relation_logits          (Q, 2)
+     ※ population/tail/fusion/cov_res scale = 학습 파라미터의 (floored) sigmoid.
+     ※ routing의 class 조건부화는 공유 함수 f(q, m_c) 형태로만 (label-permutation equivariance 유지).
+```
 
 ---
 
-## 5. 모델 스펙 파라미터 (Model Parameter Specs)
+## 6. 학습 목적 (Loss)
+
+$$\mathcal{L} = \mathcal{L}_{CE} + 0.10 \cdot \mathcal{L}_{Ranking}
++ w_{sparsity} \cdot \text{sparsity} + w_{balance} \cdot \text{balance}$$
+
+- $w_{sparsity} = w_{balance} = 0.0$ (v34/v35), `routing_temperature = 0.5`.
+- CE 0.685 부근 gradient 소멸 탈출용 ranking loss (weight 0.10).
+
+## 7. 모델 스펙 (v34-1536)
 
 ```text
-Total Trainable Parameters : 9,450,000 (약 9.45M; v22 6.57M + residual bottleneck projection ~2.88M)
-Token Dimension           : 512
-Aggregator Output Tokens  : 1 token per bag (40 structured token을 §3.5 residual+bottleneck projection으로 압축)
-Context Retrieval         : none (v22에서 제거, v24도 유지)
-Meta Hidden Dimension     : 256
-Attention Heads           : 8
-Set Layers                : 1
-Ridge Dimension           : 64
-Precision                 : bf16-mixed
-Architecture Version      : 24
+Instance Dimension (I)         : 1536
+Hidden Dimension (D)           : 256
+Memory tokens per class (M)    : 8  (총 2M = 16)
+Structured tokens per bag (T)  : 40  (1 global + 12×3 slots + 3 tails)
+Aggregation                    : 40→1 (position bottleneck 64 + residual exact mean)
+Ridge Dimension (R)            : 64
+Attention Heads                : 8
+Set Layers                     : 1
+Precision                      : bf16-mixed (ridge/relation solve는 fp32)
+Bag Representation             : poolz_l2
+Routing Temperature            : 0.5 (sparsity/balance = 0.0)
+Covariance relation            : enabled / learned_head / subspace / rank 1 / whiten / shrinkage 0.25 / residual 0.5
+Rare branch                    : v34 ON (default) / v35 OFF (meta_enable_rare_evidence: false)
+학습 예산                       : 1024 ep/epoch × 50 epoch = 51,200 episodes (v34), batch 4, fp32
+확정 수치                       : best val_ce 0.4419 (checkpoints/20260806_215800/.../epoch=048-...)
 ```
 
-v22 파라미터 수(6,566,811, 2026-07-29 실측)는 `configs/train_v22_medium.yaml` 기준이며 현재는 폐기된 참고값입니다. v24 파라미터 수(9.45M)는 [`current_status.md`](current_status.md) §3 v24-B1 완료 기록의 실측값입니다.
+## 8. Source of Truth 파일
 
----
-
-## 6. Source of Truth 파일
-
-- Backbone & Version: `src/models/baseline.py` (`architecture_version = 24`)
+- Backbone & Version: `src/models/baseline.py` (코드 `architecture_version`는 projection 경로에서 24 유지; v34/v35는 config/실험 단위)
+- Resolved Production Entry: `configs/train_v34_phase0_largectx_1536.yaml` (자체 포함형, PathoBench 보고용)
 - Data Interface & Collators: `src/modules/data_interface.py`
 - Multi-task Loss & Metrics: `src/modules/model_interface.py`
-- Resolved Production Entry: `configs/train_v24_medium_bag_proj_residual.yaml`
-- Architecture Verification Suites: `tests/test_base_model.py`, `tests/test_batched_episode_forward.py`, `tests/test_model_interface.py::test_bottleneck_projection_with_residual_mean`
-- 폐기된 v22 production entry(참조용): `configs/train_v22_medium.yaml`, `configs/train_v22_hard_realworld.yaml` 등 (ICI 파이프라인이 아직 참조 — §7 미완 항목)
+- Architecture Verification Suites: `tests/` (41 tests)
+- 활성 개선안: `docs/architecture_v36_q1_structured_population_proposal.md`

@@ -67,13 +67,12 @@ v34와 **동일 cell envelope**(3.28M cells/step), 51,200 episodes로 **에피�
 미달이면 대형화 노선을 접는다(rev.2 §4).
 
 **Active — v36 재정의: 40→1 압축 해제 (2026-08-08, §62)**: 원안
-[`architecture_v36_region_chunk_attention_proposal.md`](architecture_v36_region_chunk_attention_proposal.md)
-(zero-init region **chunk** attention)는 **핵심 전제 3건이 코드·실측으로 반증**됐다 —
+region **chunk** attention 제안서(폐기·삭제 2026-08-08, git 기록 보존)는 **핵심 전제 3건이 코드·실측으로 반증**됐다 —
 ① 합성 bag의 cell은 exchangeable(`synthetic_data.py:322`)이라 sequential chunk에 **학습 신호가
 구조적으로 없다**, ② "선택 기제 부재"는 사실이 아님(`_instance_attention_mil_logits`가 이미
 존재, §24 기각은 §31 측정 6이 무효 선언), ③ region 수는 15가 아니라 **median 3.4개**
 (슬라이드 57%가 ≤4, 18%가 1개). **사용자 결정: 좌표(coords) 미사용** → chunk-region 노선 폐기.
-재정의된 문제는 **좌표 없는 slot 기반**이다. 상세 §62.
+재정의된 문제는 **좌표 없는 slot 기반**이다. 상세 §62. → [새 Q1 proposal](architecture_v36_q1_structured_population_proposal.md).
 
 > [!IMPORTANT]
 > **아키텍처 계약 — routing softmax 무력화 (§62-2, 실측)**: `project_structured_tokens: true`
