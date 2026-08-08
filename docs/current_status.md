@@ -1,20 +1,29 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-08` (**§64 평가도 bf16-mixed 강제(과거 50-fold 수치는 참고용) + 폴드 단위 context 캐싱 bit-identical 356s→50s + bc_therapy/er_status 기본 평가 확정(macro 0.6975)** + **§63 current_architecture v34 개편 검토 + bf16-mixed 계약 강제(51 tests)** + **§62 v36 chunk-attention 제안서 반증 + P0-slots 무료 probe — Q1(40→1 압축 해제) paired +0.16 확정 / Q2(num_slots 증설) 부호 불일치로 보류** + §61 P0-b 게이트 통과(|Δpooled| 0.0009) + rare branch 제거 + §60 v35 공식 50-fold 2개(EGFR 0.7819 / PIK3CA 0.5668) + SEAL 비교 + §59 v35 rev.2 + **§41–§48 v33 arm C saga 아카이브**)  
+**Last updated**: `2026-08-09` (**§66 ridge ablation(v38) — G-2 global ridge 무기여 확정(Δ −0.0004, CI가 0 포함) / P-2·CV-1은 제거 시 학습 붕괴(발산·크래시, 참고용) → "ridge가 정보를 뺏는다" 가설 기각 방향** + **§65 v36 Q1·v37 두 arm 평가 완료 — 둘 다 게이트 미달(Δ −0.0024 / −0.0001), P0-slots probe의 +0.16은 라우팅 가능성이 아니었음 + val_ce와 50-fold AUROC 불일치 발견** + §64 평가 bf16 강제 + context 캐싱(356s→50s) + er_status 기본 평가 확정 + §62 P0-slots probe + §60 v35 공식 50-fold 2개 + **§61·§63 아카이브**)  
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **v34 확정 (§52·§53·§56)**: **v34-1536을 PathoBench 보고용 모델로 확정**(사용자 결정). 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv fold·코호트·라벨) 기준 **50-fold**(SEAL macro-AUC와 동일 구조) — **5/17 완료**(bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569, brca_TP53), **12개는 config 수정으로 재시작**(§56, 백그라운드). v30은 합성/Musk baseline 유지. 이전 5-fold와 수치 ±0.04 이내 동일(평가 견고성). config 시스템을 v34 base + group default 참조형으로 리팩터링(§56). 자세한 진행 §53·§56.
 * **v35 (§58 rev.1 설계 → §59 rev.2 개정 + 학습 시작)**: rev.1의 3개 결정 중 **①rare 제거·③context/query 대형화 분리는 폐기 권고**(§59.1: anchor 오염, 집계 수학 오류, Musk 소형 bag 파괴 = 확정 목표 위반, query 위치를 dataset이 알 수 없어 구현 불가, 그리고 동기 자체에 직접 반증 — context 2k cap Δpooled **−0.0019**). ②chunk는 **근사 평균이 아닌 정확 충분통계 축약**으로 재설계. 구현·검증 완료분: **bag 단위 정확 스트리밍**(peak VRAM 40,990 → 18,930 MiB, AUROC 동일), `num_cells_log_uniform_power`, VRAM 가드 `episode_batch_size` 누락 버그 수정, **41 tests**. **학습 완주(2차, §60)**: 데이터 단독 arm(`num_cells [1,16384]` power 1.5, rare branch 유지) 50 epochs 정상 완주 — 1차 `[1,32768]`은 CUDA OOM 크래시(epoch 0부터 324회, 21:24 SIGABRT, best 0.3574 @ ep6), 상한 16384 축소 후 재개해 **OOM 없이 완주**, best val_ce **0.3469 @ ep48**. 메모리 진단(§60): 단조 누수가 아니라 `expandable_segments:True` + 극단 ragged shape. val plateau는 v34와 동일 정상 수렴. **공식 50-fold 평가 2개 완료(§60)**: LUAD EGFR **pooled 0.7819**(macro 0.7889±0.092) / BRCA PIK3CA **pooled 0.5668**(macro 0.5743±0.109) — **SEAL 비교: 지도 ABMIL에 근접(EGFR −0.041 / PIK3CA −0.021), 지도 MeanMIL과 동급~우위(EGFR +0.012 / PIK3CA +0.030)**. **P0-b(§61)**: `rare_logits=0` ablation |Δpooled| **0.0009 < 0.003** → **rare branch 제거 결정** — config `meta_enable_rare_evidence: false`로 v35가 rare-free arm으로 전환(가역·ckpt 호환, 41 tests 통과).
-* **다음 Action**: ① **v35 공식 50-fold 평가**(§60, EGFR·PIK3CA 완료 → 잔여 15개 + v34 재실행으로 공정 비교, §59.5), ② **P0 게이트**: `rare_logits=0` ablation(P0-b) **완료 → rare 제거 진행(§61)**; **query 스윕(P0-a)은 사용자 판단으로 폐기**(이미 large-bag 실측 + context 민감도 없음, §2.8), ③ 공식 50-fold **잔여 8개**(스트리밍으로 workers 2 → 8+ 가능), ④ v30 vs v34 공정 비교용 **PCA-per-fold CV**(미지원), ⑤ **v34-512 학습**, ⑥ rev.2 §3의 **chunk 단위**(bag 내부) 스트리밍 미구현 — **v36 선행 요건에서 해제**(§62-1: chunk-region 노선 폐기, 좌표 미사용 결정), ⑦ **v36 = Q1 단독 arm으로 재정의**(§62: zero-init region chunk attention → **40→1 압축 해제 + slot routing 복원**, zero-init gate 없이 config 플래그. 제안서(region chunk-attention)는 §62-1로 반증되어 **2026-08-08 삭제** — [`architecture_v36_q1_structured_population_proposal.md`](architecture_v36_q1_structured_population_proposal.md)로 대체).
+* **v36 / v37 (§65, 2026-08-09) — 둘 다 기각**: §62-4 P0-slots probe(+0.16)를 근거로 만든 두 arm이 er_status 50-fold에서 **fold-paired Δ −0.0024(Q1) / −0.0001(v37)** 로 게이트 미달. probe의 +0.16은 **"token에 정보가 있다"**였지 **"학습된 모델이 그 정보로 라우팅할 수 있다"**가 아니었다. 네 arm 전부 **0.694–0.701의 0.007 밴드** 안. v37은 label-free라 §62-2 진단의 절반만 답한 상태로 남는다.
+* **v38 ridge ablation (§66, 2026-08-09) — 사용자 가설 기각 방향**: 세 closed-form ridge를 개별 제거하는 플래그를 구현(74 tests)하고 v37 backbone 위 4 arm(50ep·rare-free·bf16)으로 검정. **G-2 global ridge는 무기여 확정**(Δ **−0.0004**, CI [−0.0043, +0.0034], 22/50 — control·arm 둘 다 50ep 정상 완주라 교란 없음). **P-2·CV-1은 제거 시 학습이 붕괴**(abundance ep13 non-finite gradient 크래시, covariance 발산·best=ep0)하나 **학습 길이가 달라 공정 비교가 아니며 참고용**이다. 붕괴 양상은 정보량이 아니라 **수치 안정성**을 가리킨다 — ridge는 라벨 신호를 선점한 게 아니라 학습 초기 **안정적 gradient 앵커**였던 쪽에 가깝다.
+* **다음 Action**: ① **G-2 제거 확정**(task 1~2개 추가 확인 후 코드 삭제), ② **P-2/CV-1 재판정**(안정화 후 50ep 완주 — control도 동일 조치로 재학습), ③ **v37 label 조건화** 검정, ④ 공식 50-fold 전면 재산출(§64, fp32 수치 전부 참고용), ⑤ v35 잔여 15개 + SEAL 최종 재비교, ⑥ v30 vs v34 PCA-per-fold 공정 비교, ⑦ v34-512 학습.
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§64 (평가 bf16 강제 + context 캐싱 + er_status 기본 평가 — 과거 수치는 참고용)**, **§63 (아키텍처 명세 검토 + bf16-mixed 강제 — 확정 ckpt는 fp32로 학습됨)**, **§62 (v36 chunk-attention 반증 → slot 재정의 + P0-slots probe: Q1 +0.16 확정 / Q2 보류 + 사용자 결정 4건)**, **§61 (P0-b 통과 + rare branch 제거)**, **§60 (v35-16384 완주 + 메모리/val 진단 + v35 공식 50-fold EGFR·PIK3CA + SEAL 비교)**, **§59 (v35 rev.2 개정 + 스트리밍 구현 + 학습 시작 + 50-fold stale 경고)**, **§58 (v35 rev.1 설계 — §59가 상당 부분 정정하므로 §59와 함께 읽을 것)**, **§57 (50-fold case leakage 진단)**, **§53 (v34 확정 + 공식 50-fold 표 — §59.5에 따라 재실행 필요)**,
+**Read first if you are picking this up**: **§66 (ridge ablation — G-2 무기여 확정 / P-2·CV-1 붕괴는 참고용 + 운영 함정 2건)**, **§65 (v36 Q1·v37 평가 실패 + val_ce↔AUROC 불일치 — 아키텍처 판단의 전제가 바뀌었다)**, **§64 (평가 bf16 강제 + context 캐싱 + er_status 기본 평가 — 과거 수치는 참고용)**, **§62 (P0-slots probe +0.16 — §65가 "정보 존재 ≠ 라우팅 가능"으로 정정)**, **§60 (v35-16384 완주 + v35 공식 50-fold EGFR·PIK3CA + SEAL 비교)**, **§59 (v35 rev.2 + 스트리밍 구현 + 50-fold stale 경고)**, **§57 (50-fold case leakage 진단)**, **§53 (v34 확정 + 공식 50-fold 표 — §59.5에 따라 재실행 필요)**.
 
-**열린 과제**: ⓪ **Q1 단독 arm**(§62-7: `meta_population_token_mode` 플래그 두 경로 구현 + routing entropy 진단 → scratch 학습), ⓪′ **공식 50-fold 전면 재산출**(§64: fp32 수치 전부 참고용 → §53 표 9개 + 잔여 8개; 캐싱으로 task당 ~50초, 실행 전 `/tmp/pathobench_official_workers/` fp32 캐시 정리 필수), ① **v35 공식 50-fold 평가**(§60, EGFR·PIK3CA 완료 → 잔여 15개 + SEAL 최종 재비교), ② **rare-free v35 arm 학습 + 50-fold 평가**(§61, Musk 재확인 포함), ③ **§53 표 9개 재실행**(`5869535` 이후 stale, §59.5) + 공식 50-fold 잔여 8개 → 17개 최종 표 + SEAL 재비교, ④ v30 vs v34 CV 공정 비교(PCA-per-fold), ⑤ v34-512 학습, ⑥ **chunk 단위(bag 내부) 스트리밍** 미구현(rev.2 §3), ⑦ v30 six-task / B2b cardinality 효과 분리, ⑧ frozen-v30 multi-resolution headroom, ⑨ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
+> [!IMPORTANT]
+> **§65에서 확인된 방법론 경고 2건 — 다음 arm 설계 전에 읽을 것**:
+> 1. **val_ce로 arm을 고르지 말 것.** v37 쌍은 val_ce가 확실히 좋았으나(0.3354 vs 0.3402) 50-fold는
+>    **−0.0068로 나빴다**(CI가 0 제외). 200 epoch은 합성 생성기에 과적합한다.
+> 2. **학습 길이가 다른 arm 간 비교는 그 자체로 교란이다** (§42-43 arm C 교훈의 재확인).
+>    control은 항상 같은 epoch 수로 새로 학습할 것.
+
+**열린 과제**: ⓪ **G-2 global ridge 제거 확정**(§66-6: er_status 단일 task·단일 seed이므로 task 1~2개 추가 확인 후 코드에서 실제 삭제), ⓪′ **P-2 / CV-1 재판정**(§66-6: gradient clipping 등 안정화 후 50 epoch 완주 — **control도 같은 조치로 재학습해야 공정**), ⓪″ **v37 label 조건화**(§65-3: v37은 label-free라 §62-2 진단의 절반만 답했다 — 미검정 레버), ① **공식 50-fold 전면 재산출**(§64: fp32 수치 전부 참고용 → §53 표 9개 + 잔여 8개; 캐싱으로 task당 ~50초, 실행 전 `/tmp/pathobench_official_workers/` fp32 캐시 정리 필수), ② **v35 공식 50-fold 잔여 15개** + SEAL 최종 재비교(§60), ③ v30 vs v34 CV 공정 비교(PCA-per-fold), ④ v34-512 학습, ⑤ **chunk 단위(bag 내부) 스트리밍** 미구현(rev.2 §3), ⑥ v30 six-task / B2b cardinality 효과 분리, ⑦ frozen-v30 multi-resolution headroom, ⑧ v30 medium 참조 재학습. **해결·폐기**: v36 Q1(§65 기각), v37 context-adaptive(§65 기각), rare branch 제거(§61 완료). 상세 기록은 [`history/archive.md`](history/archive.md).
 
 **Branches**: `main` = v30 확정 baseline + 미채택 v31 CCER-v2 재현 코드. 참고용 branch/tag 구조는
 [`history/branch_structure.md`](history/branch_structure.md).
@@ -1673,58 +1682,11 @@ SEAL(지도 ABMIL/MeanMIL)과 비교했다. 이번 세션에서 §41–§48(v33 
 
 ---
 
-## 61. 2026-08-08 — P0-b 게이트 통과 + rare branch 제거 (rev.2 step 5)
+## 61. 2026-08-08 — P0-b 게이트 통과 + rare branch 제거 (rev.2 step 5) — **아카이브됨**
 
-**상태**: §4.2 P0-b(`rare_logits=0` ablation)를 구현·실행해 **rare branch 기여가 PIK3CA에서
-≈ 0(|Δpooled| 0.0009 < 0.003)임을 확인** → 사용자 결정으로 **rare branch 제거를 진행**했다.
-rev.2 step 5 규율대로 config `meta_enable_rare_evidence: false`로 **rare-free arm**을 구성했다
-(코드 삭제가 아니라 가역·ckpt 안전 방식 — P0-b와 수치 동일). 추가 확인(EGFR 등)은 사용자 판단으로
-**낭비라 생략**했다.
-
-### 1. P0-b 구현 (`--rare-logits-zero`)
-
-- `baseline.py` `StructuredPopulationMetaClassifier`에 `force_rare_logits_zero` 추가 →
-  `_fuse_evidence`에서 `rare_logits` zeroing(파라미터 변경 없음). `test_pathobench.py` +
-  `run_official_folds_parallel.py`에 `--rare-logits-zero` 플래그 전달.
-- ⚠️ **초기 와이어링 오류**: rare 로직이 `BaseModel`이 아니라 하위 `meta_classifier`에 있어서
-  `model.model.meta_classifier.force_rare_logits_zero`로 수정 필요했다. `_fuse_evidence` 단위
-  검증(flag on/off 시 출력 변화 확인) + 41 tests 통과.
-
-### 2. P0-b 결과 (PIK3CA 공식 50-fold, 8 worker, ~4분)
-
-| 변형 | pooled | macro |
-|---|---|---|
-| v35 plain | 0.5668 | 0.5743±0.109 |
-| `rare_logits=0` | 0.5659 | 0.5732±0.108 |
-| **Δ** | **0.0009** | 0.0011 |
-
-- **|Δpooled| 0.0009 < 0.003 → 게이트 통과 = rare 제거 안전** (fold별로 ±0.02 흔들리지만 pooled에서 상쇄).
-- **시사점**: rare branch는 ABMIL과 우리를 가르는 요소가 아님(기여 ≈ 0). ABMIL 격차(§8)는
-  기존 rare 보존이 아니라 **chunk-attention 같은 새로운 선택적 집계 추가**가 정답.
-
-### 3. rare branch 제거 (`meta_enable_rare_evidence`)
-
-- `StructuredPopulationMetaClassifier`/`BaseModel`에 `meta_enable_rare_evidence`(기본 **True**) 추가.
-  **False면 `force_rare_logits_zero=True` → rare_logits=0** (수치 동일, 기존 ckpt strict 로드 호환, 가역).
-- **v35 config**: `model_kwargs.meta_enable_rare_evidence: false` → v35가 **rare-free arm config**로 전환.
-  (top 주석도 rare KEEP → REMOVED로 갱신)
-- **검증**: v35 빌드 시 `force_rare_logits_zero=True`, v34 기본은 False(불변), 기존 v35 ckpt
-  strict `load_state_dict` OK, **41 tests 통과**.
-- ⚠️ **유의**: P0-b는 PathoBench 50-fold만 측정. **Musk(소형 bag)에 대한 rare 영향은 미측정** —
-  Musk 0.95 목표와 충돌 시 재검토 필요(rare는 raw cell을 소비하는 유일한 선택적 기제, §59.1).
-
-### 4. 다음
-
-1. **rare-free v35 arm 학습** (이 config 그대로 scratch) → 50-fold 평가(EGFR/PIK3CA 등)로
-   v35(rare 유지, §60 결과)와 비교.
-2. **Musk zero-shot 재확인** (rare 제거가 소형 bag에 영향 없는지).
-3. P0-a(query 크기 스윕)는 **사용자 판단으로 폐기** — 이미 large-bag 실측(marginal) + context
-   민감도 없음(§2.8).
-4. **v36 아키텍처**(§8 chunk-attention): `docs/architecture_v36_region_chunk_attention_proposal.md` 작성 —
-   zero-init region-level attention으로 ABMIL 격차(§60)를 메우는 단독 arm. 게이트: v35 대비 +0.005(평균),
-   ABMIL 격차 절반 축소. **§3 chunk 단위 스트리밍(수치 무변화) 선행 필요.** 아키텍처 구현 우선(사용자 결정).
-
----
+`rare_logits=0` ablation이 |Δpooled| **0.0009 < 0.003**으로 게이트를 통과해 rare 분기를 제거했다
+(`meta_enable_rare_evidence: false`, 코드 삭제가 아니라 강제 0 — ckpt 호환·가역). 이후 모든 arm이
+rare-free이므로 **평가는 반드시 그 arm의 훈련 config로** 해야 한다. 전문: [`history/archive.md`](history/archive.md).
 
 ## 62. 2026-08-08 — v36 제안서 비판적 재검토 + P0-slots 무료 probe (Q1 확정 / Q2 보류)
 
@@ -1869,113 +1831,11 @@ EGFR −0.041(t −2.27) / PIK3CA −0.021(t −0.98)로, fold가 같은 코호�
 
 ---
 
-## 63. 2026-08-08 — current_architecture v34 개편 검토 + bf16-mixed 계약 실제 강제
+## 63. 2026-08-08 — current_architecture v34 개편 검토 + bf16-mixed 계약 실제 강제 — **아카이브됨**
 
-**상태**: 커밋 `9123938`에서 `current_architecture.md`가 v22 → **v34로 전면 개편**된 것을 코드와
-대조 검토했다. 대부분 정확했고 **수치 오류 3건 + 서술 부정확 2건**을 찾아 수정했으며, 누락돼 있던
-계약 4건을 추가했다. 검토 중 **선언만 되고 강제되지 않던 bf16-mixed 계약**을 발견해 실제로 걸었다.
-
-### 1. 코드 대조로 확인된 부분 (수정 불필요)
-
-경험적 shape 덤프: `slots (B,12,3,I)` / `tails (B,3,I)` / `global_summary (B,I)` /
-`slot_metadata (B,12,2)` / `T=40` / `D=256` / density 8·rare 4.
-40→1 사영 산식(`40×Linear(I→64)=2560` + mean 1536 → 4096 → `Linear(4096→I)`),
-`_fuse_evidence` 스택 순서 `(global_shape, population, rare)`와 합산식, M=8/R=64/K=3/F=4,
-assignment temp 0.1, routing temp 0.5, sparsity·balance 0.0, `1024×50=51,200`,
-`architecture_version=24` — 전부 코드와 일치.
-
-### 2. 수정한 수치 오류
-
-| 항목 | 문서(오) | 실제 | 근거 |
-|---|---|---|---|
-| `E` (episode batch) | 합성 8 | **v34 4** / v35 1 | `configs/data/default.yaml:7 episode_batch_size: 4`; v35 config 주석의 "4 × 100 × 8192 = 3.28M cells"와도 일치 |
-| covariance_sketch 길이 | (C, 64) | **(C, 2080)** | `d(d+1)/2`, d=64. sketch는 상관행렬의 **상삼각 벡터화**이고 64는 사영 차원. 실측 d=16 → 136 = 16·17/2 |
-| Precision | bf16-mixed (224행은 fp32 — 자체 모순) | 실제는 **fp32 폴백**이었음 → 이제 bf16-mixed 강제 | 아래 §63-4 |
-
-### 3. 수정한 서술 부정확
-
-1. **slot index 안정성**: "bag 간 안정적 의미 없음" → **"에피소드 간(cross-episode) 안정적 의미 없음"**.
-   anchor는 에피소드마다 1회 계산돼 **context·query 모든 bag이 공유**하므로, 한 에피소드 안에서
-   slot `i`는 전 bag에 대해 동일한 anchor다(= bag 간 정렬은 성립). class memory·population routing이
-   slot 수준 비교를 할 수 있는 근거가 이것이므로 Q1에 직결된다.
-   ※ `_typed_bag_tokens` 코드 주석의 "no stable cross-bag identity"도 같은 부정확함을 갖고 있다
-   (문서가 이를 물려받았음). 코드 주석은 이번에 손대지 않았다 — 수정 시 별도 커밋.
-2. **anchor 구성**: "anchor 12개 = 에피소드 context cell의 spherical k-means" → 두 가지가 틀렸다.
-   ⓐ **12개 중 8개(density)만** k-means 계열 — centrality 상위 85% 구간 균등 분위수 시드 +
-   soft assignment 4회 정제(temp 0.15). **rare 4개는 `residual × diversity` greedy farthest-point**.
-   ⓑ k-means는 "context cell 전체"가 아니라 **후보 풀** 위에서 돈다.
-   `current_architecture.md` §3에 의사코드로 3단계(후보 풀 → density → rare)를 전부 명시했다.
-
-### 4. bf16-mixed 계약 — 선언만 되고 강제되지 않고 있었음 (수정 완료)
-
-- **발견**: `agent_handoff.md` §3.4가 "공분산 역행렬 FP16 오버플로/NaN 방지를 위해 bf16-mixed 필수"를
-  선언하지만, `configs/trainer/default.yaml`은 **`max_epochs: 50` 한 줄뿐**이었다 → Lightning 기본값
-  **32-true(fp32)**로 조용히 해석. §56에서 v34 group default를 만들면서 계약이 사문화된 것으로 보인다
-  (아카이브된 v33 config들은 `precision: bf16-mixed`를 갖고 있다).
-- **⚠️ 확정 ckpt의 정밀도**: **v34-1536(val_ce 0.4419)과 v35-16384(val_ce 0.3469)는 fp32로 학습된
-  것**이다. 지금 재실행하면 bf16-mixed로 돌아가 **그 ckpt를 재현하지 않는다**. 정확한 역사적 재현이
-  필요하면 `trainer_overrides.precision: 32-true`.
-- **조치 (사용자 결정 — "앞으로 제약 조건을 걸자")**:
-  ① `configs/trainer/default.yaml`에 `precision: bf16-mixed` 고정 + 재현성 주석.
-  ② 신규 `tests/test_precision_contract.py` — `configs/train_*.yaml` **전부**가 bf16-mixed로
-     해석되는지 + group default가 고정돼 있는지 검사 (범위는 아래에서 확장).
-  ③ 검증: 세 활성 config 전부 `precision='bf16-mixed'`로 해석,
-     `base_config` 참조 config 전체 해석 성공(failing 0), **45 tests OK**.
-- **범위 확장 (사용자 결정: "앞으로 항상 bf16-mixed 강제")**: 초판은 `configs/train_*.yaml`만
-  검사해서 **다른 trainer group을 고르면 우회**가 가능했다. 이를 닫았다 —
-  ⓐ `configs/trainer/ddp5.yaml`·`ddp8.yaml`의 `16-mixed`(fp16) 위반을 **bf16-mixed로 교체**
-     (ddp8 주석의 "RTX A5000은 FP16 경로" 근거는 Ampere가 bf16을 지원하므로 무효.
-     이를 참조하던 아카이브 config는 `archive/v18_v19/train_synthetic.yaml` 1개뿐 — 폐기된
-     v18/v19 아키텍처이고 원본 값은 git 이력에 있다),
-  ⓑ 테스트에 **선택 가능한 trainer group 전부** 검사를 추가 → 기본 스위트 **45 tests**.
-- **적용 범위는 학습으로 한정**한다(의도적):
-  **평가는 fp32**다 — `scripts/test_pathobench.py`는 Lightning trainer 없이 모델을 직접 빌드하므로
-  trainer precision이 적용되지 않는다. 보고된 공식 50-fold AUROC가 전부 이 경로에서 나왔으므로
-  여기에 bf16을 강제하면 **모든 수치가 이동**한다. `configs/test_*.yaml`과 `configs/archive/`
-  (폐기 아키텍처의 재현 기록)는 검사 대상에서 제외하며, 제외 근거는 테스트 docstring에 있다.
-
-### 5. 문서에 추가한 계약
-
-1. **bag 크기 불변 anchor 후보** (활성): `_population_candidates`가 bag 크기와 무관하게
-   **bag당 정확히 32개**(`context_samples_per_bag`) soft 후보를 반환한다 — 고정 random 방향에
-   temp-10 softmax를 **cell 축**으로 걸어 얻는 가중평균이라 cell 순서에도 불변.
-   대형 bag이 후보 풀을 지배하지 못하는 장치이며, ⓐ §59.1 anchor 오염 진단과
-   ⓑ 스트리밍이 anchor를 bit-identical하게 유지하는 근거가 모두 여기서 나온다.
-   **단 `N_i < 32`면 후보가 `N_i`개로 줄어든다** — Musk(median 12)가 해당.
-2. **`B` = `num_bags [60,100]`** (에피소드마다 추첨) — 차원 표에 비어 있던 항목. VRAM 불변식
-   `peak ∝ batch × bags × cells`의 구성요소.
-3. **rare 분기(R-2) 정확한 산식**: L2 정규화된 `ĥ`·`m̂_c`에 **학습되는 온도**
-   `τ = exp(rare_similarity_log_scale).clamp(0.1,50)`(init 5)를 곱한 뒤
-   `logsumexp_m(τ⟨ĥ_n, m̂_{c,m}⟩) − log M`. 이후 F=4 fraction별 **cell 축 top-k 평균**.
-   이 분기만 유일하게 **raw cell을 직접** 소비한다.
-4. **§5b 신설 — train과 eval은 서로 다른 코드 경로**: 진입점(`forward_episode_batch`/`_forward_dense`
-   vs `BaseModel.forward` ragged), anchor 후보(batched vs per-bag), population 분기(`_batched` 여부),
-   스트리밍(eval만), query view 범위를 표로 대비. **경로 선택은 `self.training`이 결정**하며
-   batched 경로는 full-tile 슬라이드에서 OOM이라 **eval은 항상 per-bag**이다. 수치 계약
-   (batched 후보는 모든 bag ≥32 cell일 때 정확, 아니면 자동 폴백 / 스트리밍 `‖Δ‖∞<1e-4`,
-   anchors bit-identical), `_context_pool_stats`의 `unbiased=False`(train/eval 0.25% 불일치 방지),
-   `--batch-queries` 미검증 프로토콜, §62 폴드 캐싱 bit-identical까지 함께 명시.
-
-### 6. 문서 정합성
-
-- `agent_handoff.md` §6.1과 `README.md`의 "Architecture **v22** 명세" 표기를 **v34**로 갱신
-  (개편 후 stale이었음).
-- `current_architecture.md` 8행 `> [!IMPORTANT]` callout 문법 수정(제목 뒤 내용이 다음 줄에 와야
-  렌더링됨).
-
-### 7. 다음
-
-§62-7과 동일 — Q1 단독 arm(`meta_population_token_mode` 두 경로 + 동치 테스트) → 1~2 fold
-routing entropy 진단 → scratch·episode-matched 학습.
-
-⚠️ **Q1 arm 비교 시 교란 요인 1건이 확정됐다**: 사용자 결정으로 bf16-mixed를 예외 없이 강제하므로
-**새 학습 run은 전부 bf16-mixed**인 반면, 비교 대상 v35 ckpt는 **fp32**로 학습됐다. 즉 Q1 arm은
-엄밀히는 (population token mode) + (precision) **2인자 변경**이다. arm C 교훈(§42-43)상 원인 분리가
-필요해지면 v35를 bf16-mixed로 재학습해 기준선을 맞추는 것이 정공법이나, 비용이 크므로 우선은
-**교란 요인으로 명시하고 진행**한다. Q1 효과 크기(probe +0.16)가 정밀도 차이의 통상 규모보다
-훨씬 크므로 판정이 뒤집힐 가능성은 낮다고 본다.
-
----
+`configs/trainer/default.yaml`이 precision을 설정하지 않아 v34/v35가 fp32로 조용히 학습됐던 것을
+확인하고 bf16-mixed를 예외 없이 강제했다(`tests/test_precision_contract.py`). 계약 본문은
+[`agent_handoff.md`](agent_handoff.md) §3.4에 있다. 전문: [`history/archive.md`](history/archive.md).
 
 ## 64. 2026-08-08 — 평가도 bf16-mixed 강제 + 폴드 단위 context 캐싱(bit-identical, 7.1×) + bc_therapy/er_status 기본 평가 확정
 
@@ -2087,3 +1947,152 @@ fold-mean(macro) AUROC: 0.6975 ± 0.0895    pooled AUROC: 0.6925    (50 folds, 1
 3. (선택) 공식 50-fold 재실행이 필요한 나머지 task들: §53 표 9개 + 잔여 8개. 캐싱으로 task당
    비용이 ~1/14로 줄었으니 전체 재산출이 현실적이다. **실행 전 `/tmp/pathobench_official_workers/`
    fp32 캐시 정리 필수**(§64-3).
+
+---
+
+## 65. 2026-08-09 — v36 Q1 / v37 두 arm 평가 완료: **둘 다 게이트 미달**, 40→1 압축은 원인이 아니었다
+
+**상태**: §62-4의 P0-slots probe(구조 token이 압축 token보다 EGFR **+0.1597** / STK11 **+0.1577**
+더 많은 라벨 정보를 담음)를 근거로 만든 두 아키텍처 arm이 **모두 실패**했다. 학습은 2026-08-08에
+끝났으나 평가가 기록되지 않은 채 세션이 끊겨 있었다(§64 이후 커밋 `5241cc2`·`ce54f07`이
+current_status에 미반영). 이 절이 그 공백을 메운다.
+
+### 1. 평가 프로토콜
+
+bc_therapy/er_status 공식 50-fold, **bf16-mixed + 폴드 단위 context 캐싱**(§64), arm당 약 45초.
+**각 arm을 자기 훈련 config로 채점**했다 — 네 arm 모두 rare-free라 `train_v34_phase0_largectx_1536.yaml`
+로 채점하면 미학습 rare 분기가 주입된다. 러너는 `scripts/eval_v36_v37_arms.sh`.
+
+### 2. 결과
+
+| arm | epochs | best val_ce | macro AUROC | pooled |
+|---|---|---|---|---|
+| v36 q1_baseline (projected, control) | 50 | 0.3402 | **0.7007 ± 0.087** | 0.6953 |
+| v36 q1_structured (Q1) | 50 | 0.3405 | 0.6983 ± 0.087 | 0.6937 |
+| v37 baseline (projected, control) | **171/200** | **0.3354** | 0.6939 ± 0.086 | 0.6921 |
+| v37 context_adaptive | 200 | 0.3372 | 0.6938 ± 0.084 | 0.6911 |
+| (참고) v35, §64 기준선 | 50 | 0.3469 | 0.6975 ± 0.089 | 0.6925 |
+
+fold-paired Δ (20k bootstrap, 50 folds):
+
+| 비교 | Δmacro | 95% CI | 이긴 fold |
+|---|---|---|---|
+| **Q1 structured − projected control** | **−0.0024** | [−0.0058, +0.0006] | 18/50 |
+| **context_adaptive − v37 control** | **−0.0001** | [−0.0040, +0.0039] | 24/50 |
+| v37 control − v36 control | −0.0068 | [−0.0124, −0.0011] | 16/50 |
+
+### 3. 판정
+
+- **v36 Q1 기각.** population 분기에 40 token을 전부 통과시켜도 **−0.0024**로, +0.005 게이트에
+  미달일 뿐 아니라 부호가 음수 쪽이다. §62-4 probe가 측정한 **+0.16은 "token 안에 정보가 있다"**는
+  뜻이었지 **"학습된 모델이 그 정보로 라우팅할 수 있다"**는 뜻이 아니었다. §62-7의 routing 진단이
+  이미 예고했다 — entropy가 uniform의 **99.0%**였고 `slot_importance`는 softmax가 길이 1 축에
+  걸린 탓에 선택성 gradient를 받은 적이 없었다. 50 epoch으로는 그 선택성이 생기지 않았다.
+- **v37 기각.** **−0.0001**, 24/50 — 완벽한 null이다. 압축 가중치를 에피소드 의존으로 만든 것이
+  측정 가능한 변화를 낳지 못했다. ⚠️ 단, 이 arm은 **사용자 결정으로 label-free**라 §62-2 진단의
+  **절반만** 답한다. **라벨 조건화는 미검정 레버로 남는다.**
+- ⚠️ **v37 control은 171/200 epoch에서 크래시**했다 — `PermissionError: [Errno 13]`로
+  `logs/v37_baseline/version_0/metrics.csv` 기록 실패(CSVLogger, 2026-08-09 00:46). 파일은
+  `kimds:kimds` 644로 지금은 쓰기 가능하므로 일시적 NFS 문제로 보인다. best는 ep132이라
+  ckpt 자체는 유효하지만 **쌍의 학습 길이가 171 vs 200으로 어긋나 있다.**
+
+### 4. 부산물 — **val_ce와 50-fold AUROC가 어긋난다**
+
+v37 쌍은 4× 긴 학습으로 val_ce를 확실히 개선했으나(0.3354 vs v36의 0.3402) 50-fold는 **오히려
+나쁘다**(−0.0068, CI가 0 제외). **200 epoch은 합성 생성기에 과적합**한다. 결론 2개:
+① **val_ce로 arm을 고르지 말 것**, ② 학습 길이가 다른 arm 간 비교는 그 자체로 교란이다.
+
+네 arm 전부 **0.694–0.701의 0.007 밴드** 안에 있다. 지도학습 SEAL은 ABMIL 0.717 / MeanMIL 0.712.
+
+**산출물**: `predictions/pathobench_bc_therapy_er_status_{v36,v37}_*_official50_bf16.pt`,
+로그 `logs/official50/er_status_v3{6,7}_*.log`.
+
+---
+
+## 66. 2026-08-09 — ridge ablation (v38): **G-2 global ridge는 무기여 / P-2·CV-1은 제거 시 학습 붕괴**
+
+**상태**: 사용자 가설 — "**closed-form ridge가 라벨 정보를 너무 많이 가져가 학습 분기가 gradient를
+받지 못한다**". §65의 두 실패가 모두 "학습된 선택 기제를 살리려는" 시도였다는 공통점에서 나왔다.
+ridge를 하나씩 제거하는 ablation으로 검정했다. **결과는 가설과 반대 방향이다.**
+
+### 1. 구현 (`73cd3dd`)
+
+세 closed-form ridge solve를 **독립적으로** 제거하는 플래그(기본 전부 true = 현행 동작):
+
+| flag | site | 제거해도 남는 것 |
+|---|---|---|
+| `meta_enable_global_ridge` | G-2 global_shape | set/cross-attention residual (G-3) |
+| `meta_enable_abundance_ridge` | P-2 population | `population_attention` (Q-5) |
+| `meta_enable_covariance_ridge` | CV-1 covariance | CV-2 relation 분기는 무관 |
+
+각 플래그는 **자기 ridge 항만** 0으로 만들고 그 분기의 학습 residual은 남긴다 — 분기 전체가 아니라
+**ridge 하나를 격리**한다. dense/ragged **두 경로 전부**에 배선했고, global은 solve 자체를 건너뛴다.
+신규 파라미터 0개, shape 보존 → ckpt strict 로드 양방향.
+
+> [!WARNING]
+> **ablation된 ridge 파라미터는 gradient를 받지 않아 init 상태로 남는다.** 그 ckpt는 **반드시 같은
+> 플래그로 평가**해야 한다 — ridge를 다시 켜면 미학습 분기가 logits에 주입된다. rare-free와 정확히
+> 같은 함정(§61)이며 `tests/test_ridge_ablation.py::test_ablated_ridge_parameters_get_no_gradient`가 고정한다.
+
+테스트 **66 → 74** (217s). `tests/test_ridge_ablation.py` 8개 — 기본값 퇴화 고정, 플래그 명시 True가
+no-op, 각 플래그가 logits를 실제로 이동, 해당 항이 정확히 0, global 제거 시 attention residual 생존,
+**dense/ragged 동치(‖Δ‖∞<1e-4)**, ckpt strict 로드, ablation된 `ridge_projection`의 grad=None.
+
+### 2. arm 설계 (`75f3f00`)
+
+**backbone은 v37 context_adaptive로 고정**(사용자 결정 2026-08-09: "v37 위에서만"). 최초에는 v36
+계보(projected) 위에 올렸다가 재구성했다. 4 arm 전부 50 epoch·rare-free·bf16·seed 42·devices 1이며
+**ridge 플래그 하나만 다르다**. **50 epoch control을 새로 학습**했다 — 기존 v37 ckpt는 200 epoch이라
+그대로 쓰면 ridge 플래그와 학습 길이가 교란되고(§42-43 arm C 교훈), v36 q1_baseline은 projected
+backbone이라 대체 불가다. VRAM이 arm당 ~98 GB(183 GB)라 **2 wave × 2 arm**으로 돌렸다.
+
+### 3. 결과 — er_status 50-fold (bf16 + 캐싱, arm당 ~45초)
+
+| arm | 제거 | val_ce | macro AUROC | pooled | 학습 상태 |
+|---|---|---|---|---|---|
+| control | 없음 | 0.3411 | **0.6994 ± 0.087** | 0.6946 | 50ep 정상 |
+| global | G-2 | 0.3417 | 0.6990 ± 0.087 | 0.6942 | 50ep 정상 |
+| abundance | P-2 | 0.3593 | 0.6670 ± 0.097 | 0.6637 | **ep13 크래시** |
+| covariance | CV-1 | 0.4765 | 0.6049 ± 0.103 | 0.6000 | **발산, best=ep0** |
+
+fold-paired Δ vs control (20k bootstrap, 50 folds):
+
+| arm | Δmacro | 95% CI | 이긴 fold |
+|---|---|---|---|
+| **global** | **−0.0004** | [−0.0043, +0.0034] | 22/50 |
+| abundance | −0.0323 | [−0.0443, −0.0207] | 12/50 ** |
+| covariance | −0.0945 | [−0.1177, −0.0716] | 6/50 ** |
+
+### 4. 판정
+
+- ✅ **G-2 global ridge는 무기여 — 이번 실험의 유일한 깨끗한 결론이다.** 통째로 삭제해도
+  Δ **−0.0004**, CI가 0을 정확히 감싸고 fold 승패 22/50. **control과 arm 둘 다 50 epoch 정상
+  완주라 교란이 없다.** 파라미터를 죽여도 성능이 그대로다.
+- ⚠️ **P-2 / CV-1 수치는 공정 비교가 아니다 — 참고용이다.** abundance는 **13 epoch**, covariance는
+  사실상 **0 epoch** 모델이다. AUROC 하락이 "ridge 없이는 성능이 안 나온다"인지 "학습이 안 끝났다"인지
+  **이 숫자만으로 분리되지 않는다.**
+- **하락의 원인은 정보량이 아니라 수치 안정성 쪽을 가리킨다.** abundance는
+  `RuntimeError: Non-finite gradients at epoch=13, optimizer step=13806`으로 죽었고, 터진 파라미터가
+  aggregator 전반이다(`slot_w_dq/dkv/uq/uk`, `center/spread_slot_encoder`, `slot_residual_logit`).
+  covariance는 50 epoch을 다 돌았으나 top-3 ckpt가 전부 **epoch 0·1·5**이고 val_loss가 0.545에서
+  평평하다(control 0.366). → closed-form ridge는 라벨 신호를 **선점**하는 게 아니라 학습 초기에
+  **안정적 gradient를 공급하는 앵커**로 동작하고 있었고, 사라지자 attention 분기가 혼자 떠맡으며
+  발산했다는 그림에 가깝다. **사용자 가설은 기각 방향이다.**
+- **§65와 달리 val_ce와 AUROC의 순위가 일치했다.**
+
+### 5. 이번 세션에서 드러난 운영 함정 2건
+
+1. **launcher wrapper가 torchrun child보다 먼저 종료한다.** wrapper PID만 kill하면 **GPU가 계속
+   잡혀 있다**(실측 153 GB 잔존). 프로세스 그룹(`kill -TERM -$pgid`)으로 죽여야 한다.
+2. **`while pgrep -f "scripts/train.py"` 대기 루프는 자기 자신에 매칭된다** — 그 bash 프로세스의
+   커맨드라인에 패턴 문자열이 들어 있어 **영원히 끝나지 않는다.** wave 2는 끝났는데 후속 eval이
+   실행되지 않은 원인이 이것이다. `scripts/queue_v38_wave2.sh`처럼 **launcher 로그 + 프로세스 부재를
+   함께** 확인하거나, 패턴을 자기 자신과 겹치지 않게 쓸 것.
+
+### 6. 다음
+
+1. **G-2 제거 확정 전 task 1~2개 추가 확인** — er_status 단일 task·단일 seed다. 확인되면 코드에서
+   실제 삭제 가능(파라미터 감소).
+2. **P-2 / CV-1 재판정**: gradient clipping 등으로 안정화 후 50 epoch 완주. ⚠️ 안정화 조치가
+   control과의 **두 번째 차이**가 되므로 **control도 같은 조치로 재학습**해야 공정하다 (2 wave, ~3시간).
+3. **v37 label 조건화** — §65-3이 남긴 미검정 레버.

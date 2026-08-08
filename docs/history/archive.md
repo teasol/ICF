@@ -1934,3 +1934,170 @@ v24 표현으로는 원리적으로 학습 불가**입니다.
 - 참고: **50-fold 배치는 5/17만 완료였고 아카이빙 회귀로 리쥼 실패** → §56에서 config 수정 후 **12개 재시작**(백그라운드 진행).
 
 ---
+
+---
+
+<!-- archived 2026-08-09 from current_status.md: fully resolved, superseded by SS65/SS66 -->
+
+## 61. 2026-08-08 — P0-b 게이트 통과 + rare branch 제거 (rev.2 step 5)
+
+**상태**: §4.2 P0-b(`rare_logits=0` ablation)를 구현·실행해 **rare branch 기여가 PIK3CA에서
+≈ 0(|Δpooled| 0.0009 < 0.003)임을 확인** → 사용자 결정으로 **rare branch 제거를 진행**했다.
+rev.2 step 5 규율대로 config `meta_enable_rare_evidence: false`로 **rare-free arm**을 구성했다
+(코드 삭제가 아니라 가역·ckpt 안전 방식 — P0-b와 수치 동일). 추가 확인(EGFR 등)은 사용자 판단으로
+**낭비라 생략**했다.
+
+### 1. P0-b 구현 (`--rare-logits-zero`)
+
+- `baseline.py` `StructuredPopulationMetaClassifier`에 `force_rare_logits_zero` 추가 →
+  `_fuse_evidence`에서 `rare_logits` zeroing(파라미터 변경 없음). `test_pathobench.py` +
+  `run_official_folds_parallel.py`에 `--rare-logits-zero` 플래그 전달.
+- ⚠️ **초기 와이어링 오류**: rare 로직이 `BaseModel`이 아니라 하위 `meta_classifier`에 있어서
+  `model.model.meta_classifier.force_rare_logits_zero`로 수정 필요했다. `_fuse_evidence` 단위
+  검증(flag on/off 시 출력 변화 확인) + 41 tests 통과.
+
+### 2. P0-b 결과 (PIK3CA 공식 50-fold, 8 worker, ~4분)
+
+| 변형 | pooled | macro |
+|---|---|---|
+| v35 plain | 0.5668 | 0.5743±0.109 |
+| `rare_logits=0` | 0.5659 | 0.5732±0.108 |
+| **Δ** | **0.0009** | 0.0011 |
+
+- **|Δpooled| 0.0009 < 0.003 → 게이트 통과 = rare 제거 안전** (fold별로 ±0.02 흔들리지만 pooled에서 상쇄).
+- **시사점**: rare branch는 ABMIL과 우리를 가르는 요소가 아님(기여 ≈ 0). ABMIL 격차(§8)는
+  기존 rare 보존이 아니라 **chunk-attention 같은 새로운 선택적 집계 추가**가 정답.
+
+### 3. rare branch 제거 (`meta_enable_rare_evidence`)
+
+- `StructuredPopulationMetaClassifier`/`BaseModel`에 `meta_enable_rare_evidence`(기본 **True**) 추가.
+  **False면 `force_rare_logits_zero=True` → rare_logits=0** (수치 동일, 기존 ckpt strict 로드 호환, 가역).
+- **v35 config**: `model_kwargs.meta_enable_rare_evidence: false` → v35가 **rare-free arm config**로 전환.
+  (top 주석도 rare KEEP → REMOVED로 갱신)
+- **검증**: v35 빌드 시 `force_rare_logits_zero=True`, v34 기본은 False(불변), 기존 v35 ckpt
+  strict `load_state_dict` OK, **41 tests 통과**.
+- ⚠️ **유의**: P0-b는 PathoBench 50-fold만 측정. **Musk(소형 bag)에 대한 rare 영향은 미측정** —
+  Musk 0.95 목표와 충돌 시 재검토 필요(rare는 raw cell을 소비하는 유일한 선택적 기제, §59.1).
+
+### 4. 다음
+
+1. **rare-free v35 arm 학습** (이 config 그대로 scratch) → 50-fold 평가(EGFR/PIK3CA 등)로
+   v35(rare 유지, §60 결과)와 비교.
+2. **Musk zero-shot 재확인** (rare 제거가 소형 bag에 영향 없는지).
+3. P0-a(query 크기 스윕)는 **사용자 판단으로 폐기** — 이미 large-bag 실측(marginal) + context
+   민감도 없음(§2.8).
+4. **v36 아키텍처**(§8 chunk-attention): `docs/architecture_v36_region_chunk_attention_proposal.md` 작성 —
+   zero-init region-level attention으로 ABMIL 격차(§60)를 메우는 단독 arm. 게이트: v35 대비 +0.005(평균),
+   ABMIL 격차 절반 축소. **§3 chunk 단위 스트리밍(수치 무변화) 선행 필요.** 아키텍처 구현 우선(사용자 결정).
+
+---
+
+---
+
+## 63. 2026-08-08 — current_architecture v34 개편 검토 + bf16-mixed 계약 실제 강제
+
+**상태**: 커밋 `9123938`에서 `current_architecture.md`가 v22 → **v34로 전면 개편**된 것을 코드와
+대조 검토했다. 대부분 정확했고 **수치 오류 3건 + 서술 부정확 2건**을 찾아 수정했으며, 누락돼 있던
+계약 4건을 추가했다. 검토 중 **선언만 되고 강제되지 않던 bf16-mixed 계약**을 발견해 실제로 걸었다.
+
+### 1. 코드 대조로 확인된 부분 (수정 불필요)
+
+경험적 shape 덤프: `slots (B,12,3,I)` / `tails (B,3,I)` / `global_summary (B,I)` /
+`slot_metadata (B,12,2)` / `T=40` / `D=256` / density 8·rare 4.
+40→1 사영 산식(`40×Linear(I→64)=2560` + mean 1536 → 4096 → `Linear(4096→I)`),
+`_fuse_evidence` 스택 순서 `(global_shape, population, rare)`와 합산식, M=8/R=64/K=3/F=4,
+assignment temp 0.1, routing temp 0.5, sparsity·balance 0.0, `1024×50=51,200`,
+`architecture_version=24` — 전부 코드와 일치.
+
+### 2. 수정한 수치 오류
+
+| 항목 | 문서(오) | 실제 | 근거 |
+|---|---|---|---|
+| `E` (episode batch) | 합성 8 | **v34 4** / v35 1 | `configs/data/default.yaml:7 episode_batch_size: 4`; v35 config 주석의 "4 × 100 × 8192 = 3.28M cells"와도 일치 |
+| covariance_sketch 길이 | (C, 64) | **(C, 2080)** | `d(d+1)/2`, d=64. sketch는 상관행렬의 **상삼각 벡터화**이고 64는 사영 차원. 실측 d=16 → 136 = 16·17/2 |
+| Precision | bf16-mixed (224행은 fp32 — 자체 모순) | 실제는 **fp32 폴백**이었음 → 이제 bf16-mixed 강제 | 아래 §63-4 |
+
+### 3. 수정한 서술 부정확
+
+1. **slot index 안정성**: "bag 간 안정적 의미 없음" → **"에피소드 간(cross-episode) 안정적 의미 없음"**.
+   anchor는 에피소드마다 1회 계산돼 **context·query 모든 bag이 공유**하므로, 한 에피소드 안에서
+   slot `i`는 전 bag에 대해 동일한 anchor다(= bag 간 정렬은 성립). class memory·population routing이
+   slot 수준 비교를 할 수 있는 근거가 이것이므로 Q1에 직결된다.
+   ※ `_typed_bag_tokens` 코드 주석의 "no stable cross-bag identity"도 같은 부정확함을 갖고 있다
+   (문서가 이를 물려받았음). 코드 주석은 이번에 손대지 않았다 — 수정 시 별도 커밋.
+2. **anchor 구성**: "anchor 12개 = 에피소드 context cell의 spherical k-means" → 두 가지가 틀렸다.
+   ⓐ **12개 중 8개(density)만** k-means 계열 — centrality 상위 85% 구간 균등 분위수 시드 +
+   soft assignment 4회 정제(temp 0.15). **rare 4개는 `residual × diversity` greedy farthest-point**.
+   ⓑ k-means는 "context cell 전체"가 아니라 **후보 풀** 위에서 돈다.
+   `current_architecture.md` §3에 의사코드로 3단계(후보 풀 → density → rare)를 전부 명시했다.
+
+### 4. bf16-mixed 계약 — 선언만 되고 강제되지 않고 있었음 (수정 완료)
+
+- **발견**: `agent_handoff.md` §3.4가 "공분산 역행렬 FP16 오버플로/NaN 방지를 위해 bf16-mixed 필수"를
+  선언하지만, `configs/trainer/default.yaml`은 **`max_epochs: 50` 한 줄뿐**이었다 → Lightning 기본값
+  **32-true(fp32)**로 조용히 해석. §56에서 v34 group default를 만들면서 계약이 사문화된 것으로 보인다
+  (아카이브된 v33 config들은 `precision: bf16-mixed`를 갖고 있다).
+- **⚠️ 확정 ckpt의 정밀도**: **v34-1536(val_ce 0.4419)과 v35-16384(val_ce 0.3469)는 fp32로 학습된
+  것**이다. 지금 재실행하면 bf16-mixed로 돌아가 **그 ckpt를 재현하지 않는다**. 정확한 역사적 재현이
+  필요하면 `trainer_overrides.precision: 32-true`.
+- **조치 (사용자 결정 — "앞으로 제약 조건을 걸자")**:
+  ① `configs/trainer/default.yaml`에 `precision: bf16-mixed` 고정 + 재현성 주석.
+  ② 신규 `tests/test_precision_contract.py` — `configs/train_*.yaml` **전부**가 bf16-mixed로
+     해석되는지 + group default가 고정돼 있는지 검사 (범위는 아래에서 확장).
+  ③ 검증: 세 활성 config 전부 `precision='bf16-mixed'`로 해석,
+     `base_config` 참조 config 전체 해석 성공(failing 0), **45 tests OK**.
+- **범위 확장 (사용자 결정: "앞으로 항상 bf16-mixed 강제")**: 초판은 `configs/train_*.yaml`만
+  검사해서 **다른 trainer group을 고르면 우회**가 가능했다. 이를 닫았다 —
+  ⓐ `configs/trainer/ddp5.yaml`·`ddp8.yaml`의 `16-mixed`(fp16) 위반을 **bf16-mixed로 교체**
+     (ddp8 주석의 "RTX A5000은 FP16 경로" 근거는 Ampere가 bf16을 지원하므로 무효.
+     이를 참조하던 아카이브 config는 `archive/v18_v19/train_synthetic.yaml` 1개뿐 — 폐기된
+     v18/v19 아키텍처이고 원본 값은 git 이력에 있다),
+  ⓑ 테스트에 **선택 가능한 trainer group 전부** 검사를 추가 → 기본 스위트 **45 tests**.
+- **적용 범위는 학습으로 한정**한다(의도적):
+  **평가는 fp32**다 — `scripts/test_pathobench.py`는 Lightning trainer 없이 모델을 직접 빌드하므로
+  trainer precision이 적용되지 않는다. 보고된 공식 50-fold AUROC가 전부 이 경로에서 나왔으므로
+  여기에 bf16을 강제하면 **모든 수치가 이동**한다. `configs/test_*.yaml`과 `configs/archive/`
+  (폐기 아키텍처의 재현 기록)는 검사 대상에서 제외하며, 제외 근거는 테스트 docstring에 있다.
+
+### 5. 문서에 추가한 계약
+
+1. **bag 크기 불변 anchor 후보** (활성): `_population_candidates`가 bag 크기와 무관하게
+   **bag당 정확히 32개**(`context_samples_per_bag`) soft 후보를 반환한다 — 고정 random 방향에
+   temp-10 softmax를 **cell 축**으로 걸어 얻는 가중평균이라 cell 순서에도 불변.
+   대형 bag이 후보 풀을 지배하지 못하는 장치이며, ⓐ §59.1 anchor 오염 진단과
+   ⓑ 스트리밍이 anchor를 bit-identical하게 유지하는 근거가 모두 여기서 나온다.
+   **단 `N_i < 32`면 후보가 `N_i`개로 줄어든다** — Musk(median 12)가 해당.
+2. **`B` = `num_bags [60,100]`** (에피소드마다 추첨) — 차원 표에 비어 있던 항목. VRAM 불변식
+   `peak ∝ batch × bags × cells`의 구성요소.
+3. **rare 분기(R-2) 정확한 산식**: L2 정규화된 `ĥ`·`m̂_c`에 **학습되는 온도**
+   `τ = exp(rare_similarity_log_scale).clamp(0.1,50)`(init 5)를 곱한 뒤
+   `logsumexp_m(τ⟨ĥ_n, m̂_{c,m}⟩) − log M`. 이후 F=4 fraction별 **cell 축 top-k 평균**.
+   이 분기만 유일하게 **raw cell을 직접** 소비한다.
+4. **§5b 신설 — train과 eval은 서로 다른 코드 경로**: 진입점(`forward_episode_batch`/`_forward_dense`
+   vs `BaseModel.forward` ragged), anchor 후보(batched vs per-bag), population 분기(`_batched` 여부),
+   스트리밍(eval만), query view 범위를 표로 대비. **경로 선택은 `self.training`이 결정**하며
+   batched 경로는 full-tile 슬라이드에서 OOM이라 **eval은 항상 per-bag**이다. 수치 계약
+   (batched 후보는 모든 bag ≥32 cell일 때 정확, 아니면 자동 폴백 / 스트리밍 `‖Δ‖∞<1e-4`,
+   anchors bit-identical), `_context_pool_stats`의 `unbiased=False`(train/eval 0.25% 불일치 방지),
+   `--batch-queries` 미검증 프로토콜, §62 폴드 캐싱 bit-identical까지 함께 명시.
+
+### 6. 문서 정합성
+
+- `agent_handoff.md` §6.1과 `README.md`의 "Architecture **v22** 명세" 표기를 **v34**로 갱신
+  (개편 후 stale이었음).
+- `current_architecture.md` 8행 `> [!IMPORTANT]` callout 문법 수정(제목 뒤 내용이 다음 줄에 와야
+  렌더링됨).
+
+### 7. 다음
+
+§62-7과 동일 — Q1 단독 arm(`meta_population_token_mode` 두 경로 + 동치 테스트) → 1~2 fold
+routing entropy 진단 → scratch·episode-matched 학습.
+
+⚠️ **Q1 arm 비교 시 교란 요인 1건이 확정됐다**: 사용자 결정으로 bf16-mixed를 예외 없이 강제하므로
+**새 학습 run은 전부 bf16-mixed**인 반면, 비교 대상 v35 ckpt는 **fp32**로 학습됐다. 즉 Q1 arm은
+엄밀히는 (population token mode) + (precision) **2인자 변경**이다. arm C 교훈(§42-43)상 원인 분리가
+필요해지면 v35를 bf16-mixed로 재학습해 기준선을 맞추는 것이 정공법이나, 비용이 크므로 우선은
+**교란 요인으로 명시하고 진행**한다. Q1 효과 크기(probe +0.16)가 정밀도 차이의 통상 규모보다
+훨씬 크므로 판정이 뒤집힐 가능성은 낮다고 본다.
+
+---

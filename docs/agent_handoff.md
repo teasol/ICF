@@ -1,6 +1,15 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-08` — **§64 평가도 bf16-mixed 강제(2026-08-08 이전 50-fold 수치는 전부 참고용) + 폴드 단위 context 캐싱(bit-identical, 356s→50s) + bc_therapy/er_status 기본 평가 확정(macro 0.6975 ± 0.090)**. **§62 v36 chunk-attention 반증 → 40→1 압축 해제(Q1)로 재정의**(P0-slots probe: EGFR/STK11 paired **+0.16**, num_slots는 부호 불일치로 보류). v34-1536 확정(PathoBench 보고용). 공식 50-fold **9/17 완료**(잔여 8개; 배치 스트림 2개가 원인 로그 없이 종료된 이력 있음 — §59.7).
+**Last updated**: `2026-08-09` — **§66 ridge ablation: G-2 global ridge 무기여 확정(Δ −0.0004) / P-2·CV-1은 제거 시 학습 붕괴** + **§65 v36 Q1·v37 두 arm 모두 게이트 미달(Δ −0.0024 / −0.0001)**. §64 평가도 bf16-mixed 강제(2026-08-08 이전 50-fold 수치는 전부 참고용) + 폴드 단위 context 캐싱(bit-identical, 356s→50s) + bc_therapy/er_status 기본 평가 확정. v34-1536 확정(PathoBench 보고용). 공식 50-fold **9/17 완료**(잔여 8개).
+
+> [!IMPORTANT]
+> **아키텍처 판단의 전제 2건 (§65 실측, 다음 arm 설계 전 필독)**:
+> 1. **val_ce로 arm을 고르지 말 것** — v37 쌍은 val_ce가 더 좋았으나(0.3354 vs 0.3402) 50-fold는
+>    **−0.0068**로 나빴다(CI가 0 제외). 200 epoch은 합성 생성기에 과적합한다.
+> 2. **학습 길이가 다른 arm 간 비교는 그 자체로 교란** — control은 항상 같은 epoch 수로 새로 학습한다.
+>
+> **probe 해석 주의**: §62-4의 P0-slots probe(+0.16)는 **"token에 정보가 존재한다"**는 측정이지
+> **"학습된 모델이 그 정보로 라우팅할 수 있다"**가 아니다. §65가 실증적으로 분리했다.
 > [!WARNING]
 > **완료된 공식 50-fold 9개 수치는 `5869535`(tanh margin fix) 이후 stale하다** (§59.5). 같은 ckpt·같은 폴드로 bc_therapy/er_status fold 1-3이 `0.43913/0.78696/0.69130` → `0.4348/0.7565/0.7217`로 바뀐다. HEAD를 별도 worktree에서 돌려 **내 변경이 원인이 아님**을 확인했다. §53 표는 재실행 후 갱신할 것.
 >
@@ -108,6 +117,32 @@ region **chunk** attention 제안서(폐기·삭제 2026-08-08, git 기록 보�
 > 러너는 `--workers 26`을 줘도 `chunk=ceil(50/26)=2` 때문에 **25 워커**를 띄운다.
 > ⚠️ 워커들이 `{tmp_dir}/{task}_official_folds.ckpt` **하나를 공유**하고 완료 fold를 건너뛰므로,
 > fp32 시절 캐시가 남아 있으면 **정밀도가 조용히 섞인다** — 재실행 시 새 `--tmp-dir`을 쓸 것.
+
+**결과 — v36 Q1 / v37 모두 기각 (§65, 2026-08-09)**: Q1(40→1 압축 해제)은 er_status 50-fold
+fold-paired **−0.0024** [−0.0058, +0.0006], v37(context-adaptive 압축)은 **−0.0001**
+[−0.0040, +0.0039]로 둘 다 +0.005 게이트 미달이며 부호도 음수 쪽이다. 아래 §62 관련 서술은
+**진단으로서는 유효하나 처방으로서는 반증**됐다. v37은 **label-free**라 §62-2 진단의 절반만
+답했고, **라벨 조건화는 미검정 레버**로 남는다.
+
+> [!IMPORTANT]
+> **ridge ablation 계약 (§66, 2026-08-09)**: 세 closed-form ridge solve를 독립 제거하는 config
+> 플래그가 있다 — `meta_enable_global_ridge`(G-2) / `meta_enable_abundance_ridge`(P-2) /
+> `meta_enable_covariance_ridge`(CV-1), **기본 전부 `true` = 현행 동작**. 각 플래그는 자기 ridge
+> 항만 0으로 만들고 그 분기의 학습 residual은 남긴다(분기 전체가 아니라 **ridge 하나를 격리**).
+> dense/ragged **두 경로 전부**에 배선, 신규 파라미터 0개, shape 보존 → ckpt strict 로드 양방향.
+> ⚠️ **ablation된 ridge 파라미터는 gradient를 받지 않아 init 상태로 남는다** — 그 ckpt는 **반드시
+> 같은 플래그로 평가**할 것(rare-free와 같은 함정). `tests/test_ridge_ablation.py` 8개가 고정한다.
+>
+> **실측**: **G-2는 무기여**(Δ −0.0004, CI가 0 포함, 22/50 — control·arm 둘 다 50ep 정상 완주).
+> **P-2·CV-1은 제거 시 학습 붕괴**(P-2 ep13 non-finite gradient 크래시, CV-1 발산·best=ep0) —
+> 다만 학습 길이가 달라 **그 AUROC 수치는 공정 비교가 아니라 참고용**이다.
+
+**운영 함정 2건 (§66-5, 이번 세션 실측)**:
+1. **launcher wrapper가 torchrun child보다 먼저 종료한다** — wrapper PID만 kill하면 GPU가 계속
+   잡혀 있다(실측 153 GB 잔존). **프로세스 그룹**(`kill -TERM -$pgid`)으로 죽일 것.
+2. **`while pgrep -f "scripts/train.py"` 대기 루프는 자기 자신에 매칭돼 영원히 끝나지 않는다** —
+   그 bash 프로세스의 커맨드라인에 패턴이 들어 있다. launcher 로그 + 프로세스 부재를 **함께**
+   확인하거나(`scripts/queue_v38_wave2.sh`) 패턴이 자기 자신과 겹치지 않게 쓸 것.
 
 **진행 방침 (사용자 결정, §62-6)**: **zero-init gate를 쓰지 않고 아예 변경**한다 — population 분기의
 모든 파라미터가 token 개수가 아니라 `token_dim`/`hidden_dim`으로만 크기가 정해져 이 변경은
@@ -251,7 +286,7 @@ multi-resolution combiner의 paired AUROC `+0.01` headroom 확인 후에만 구�
      ```bash
      timeout 300s /home/aibio_3/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
      ```
-   - 기본 스위트는 현재 **51 tests, 약 65초**다 (§59: streaming 7개 + vram 2개, §63: precision 계약 4개, §64: precision-eval 2개 + context 캐싱 등가성 4개 추가). 폐기 architecture/연구 진단 175개는
+   - 기본 스위트는 현재 **74 tests, 약 217초**다 (§59: streaming 7개 + vram 2개, §63: precision 계약 4개, §64: precision-eval 2개 + context 캐싱 등가성 4개, §65: v36 population token mode 6개 + v37 context-adaptive 9개, §66: ridge ablation 8개). 폐기 architecture/연구 진단 175개는
      `tests/history/legacy_*.py`로 이관되어 기본 discovery에서 실행되지 않는다. archive suite는
      수정 대상이 해당 보존 경로일 때만 개별 실행한다.
 
