@@ -37,6 +37,11 @@ meta_rare_evidence_fractions: [0.01, 0.05, 0.10, 0.20]
 meta_fusion_residual_scale: 0.10
 meta_covariance_ridge_logit_scale: 2.0
 meta_covariance_residual_scale: 0.25
+# v36 Q1 (docs/architecture_v36_q1_structured_population_proposal.md): which bag
+# tokens the population branch consumes. `projected` = historical behaviour (the
+# 40->1 collapse leaves the routing softmax on a length-1 axis, weights == 1.0);
+# `structured` feeds the full token set and restores the routing.
+meta_population_token_mode: projected
 num_classes: 2
 covariance_relation:
   enabled: true

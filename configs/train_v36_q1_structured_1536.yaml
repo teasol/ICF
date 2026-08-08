@@ -1,0 +1,74 @@
+# v36 Q1 arm — Q1 (structured, 40->1 collapse bypassed)
+#
+# docs/architecture_v36_q1_structured_population_proposal.md, current_status.md §62/§65.
+#
+# SINGLE-FACTOR pair: this config and its partner differ ONLY in
+# `meta_population_token_mode`. Everything else -- data, rare setting, episode
+# budget, precision, devices, seed -- is identical, so a difference between the
+# two runs is attributable to that flag alone (arm C lesson, §42-43).
+#
+#   train_v36_q1_baseline_1536.yaml    meta_population_token_mode: projected   (control)
+#   train_v36_q1_structured_1536.yaml  meta_population_token_mode: structured  (Q1)
+#
+# Q1: the population branch consumes all structured tokens (1 global +
+# 3*num_slots + tails = 40), restoring the routing softmax. Parameter count and
+# every tensor shape are unchanged, so this is not a capacity change.
+#
+# Why a fresh control instead of comparing against the v35 checkpoint (§4 of the
+# proposal):
+#   * the v35 ckpt was trained with the rare branch ON, while this config is
+#     rare-free (§61). Comparing against it would be a TWO-factor change.
+#   * the v35 ckpt was trained under the old fp32 fallback; training is now
+#     bf16-mixed (§63/§64), which would be a second confound.
+#   * rare-free training leaves the rare parameters at initialization (
+#     `_fuse_evidence` replaces rare_logits with new_zeros, so no gradient
+#     reaches them). EVALUATE THIS ARM WITH THIS CONFIG, never with
+#     train_v34_phase0_largectx_1536.yaml -- that one has rare ON and would
+#     inject an untrained branch into the logits.
+#
+# Cost (measured from logs/20260807_224559): ~79 s/epoch on 2xB200 at 512
+# steps/epoch, so 50 epochs is roughly an hour. Both arms run concurrently on
+# one GPU each (devices: 1), which keeps them identical to each other.
+#
+# Launch:
+#   CUDA_DEVICES=<gpu> NPROC_PER_NODE=1 \
+#   TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun \
+#   NETRC=/NHNHOME/BASE/kimds/.netrc \
+#   scripts/launch_interactive_training.sh v36_q1_structured configs/train_v36_q1_structured_1536.yaml
+
+seed: 42
+ckpt_path:
+
+data: default
+data_overrides:
+  episode_batch_size: 1
+  dataset_kwargs:
+    num_cells: [1, 16384]
+    num_cells_log_uniform_power: 1.5
+
+model: default
+
+optimizer: default
+scheduler: default
+
+trainer: default
+trainer_overrides:
+  devices: 1
+  max_epochs: 50
+
+logger: default
+logger_overrides:
+  experiment_name: v36_q1_structured
+
+callbacks: default
+
+model_kwargs:
+  training_targets_per_episode: [5, 12]
+  ranking_loss_weight: 0.10
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0
+  # Rare-removed arm (rev.2 step 5): P0-b gate passed (|Δpooled| 0.0009 on
+  # PIK3CA 50-fold, < 0.003). rare_logits forced to 0 -- numerically identical
+  # to deletion; checkpoint-compatible and reversible.
+  meta_enable_rare_evidence: false
+  meta_population_token_mode: structured

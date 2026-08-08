@@ -2537,6 +2537,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
         use_instance_attention_mil: bool = False,
         mil_hidden_dim: int | None = None,
         meta_enable_rare_evidence: bool = True,
+        population_token_mode: str = "projected",
         num_classes: int = 2,
     ) -> None:
         super().__init__()
@@ -2601,6 +2602,24 @@ class StructuredPopulationMetaClassifier(nn.Module):
         self.structured_tokens_per_bag = (
             None if structured_tokens_per_bag is None else int(structured_tokens_per_bag)
         )
+        # v36 Q1 (docs/architecture_v36_q1_structured_population_proposal.md):
+        # which bag tokens the POPULATION branch consumes. `projected` (default)
+        # is the historical behaviour -- `_projected_bag_tokens` collapses the
+        # structured tokens to one, which makes the routing softmax in
+        # `_population_memory_logits` a length-1 axis (weights identically 1.0),
+        # i.e. the ABMIL-style selection mechanism is present but inert.
+        # `structured` feeds the full token set instead, restoring it.
+        # Only the population branch changes: `global_shape_classifier` and
+        # `_class_memories` keep the projected token (single-factor arm).
+        # No parameter is added or resized -- every parameter in that branch is
+        # sized by token_dim/hidden_dim, never by the token count -- so
+        # checkpoints load strictly in either mode.
+        if population_token_mode not in ("projected", "structured"):
+            raise ValueError(
+                "population_token_mode must be 'projected' or 'structured', "
+                f"got {population_token_mode!r}."
+            )
+        self.population_token_mode = str(population_token_mode)
         self.projection_bottleneck_dim = (
             None
             if projection_bottleneck_dim is None
@@ -3471,6 +3490,11 @@ class StructuredPopulationMetaClassifier(nn.Module):
     ) -> torch.Tensor:
         """Return either all structured tokens, one exact mean token, or one
         learned projection token per bag."""
+        if self.population_token_mode == "structured":
+            # v36 Q1: bypass the 40->1 collapse for this branch only. NOTE this
+            # is NOT the legacy `else` path below, which returns the slot tokens
+            # alone (3 * num_slots) and drops global_summary and the tails.
+            return self._all_structured_tokens(representation)
         if self.project_structured_tokens:
             tokens = self._all_structured_tokens(representation)
             return self._projected_bag_tokens(tokens).unsqueeze(-2)
@@ -3860,7 +3884,13 @@ class StructuredPopulationMetaClassifier(nn.Module):
         class_memories: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         raw_slots = query["slots"]
-        if self.project_structured_tokens:
+        if self.population_token_mode == "structured":
+            # v36 Q1 -- must mirror `_population_tokens`. This block duplicates
+            # the token-selection logic on purpose (4D path); the file comment on
+            # `_all_structured_tokens_batched` warns that drifting one copy and
+            # not the other is exactly how the cls token was first missed.
+            query_tokens = self._all_structured_tokens_batched(query)
+        elif self.project_structured_tokens:
             all_tokens = self._all_structured_tokens_batched(query)
             query_tokens = self._projected_bag_tokens(all_tokens).unsqueeze(2)
         elif self.mean_pool_structured_tokens:
@@ -4519,6 +4549,7 @@ class BaseModel(nn.Module):
         meta_class_memory_tokens: int = 8,
         meta_rare_evidence_fractions: Sequence[float] = (0.01, 0.05, 0.10, 0.20),
         meta_enable_rare_evidence: bool = True,
+        meta_population_token_mode: str = "projected",
         meta_fusion_residual_scale: float = 0.10,
         meta_covariance_ridge_logit_scale: float = 2.0,
         meta_covariance_residual_scale: float = 0.25,
@@ -4628,6 +4659,7 @@ class BaseModel(nn.Module):
             use_instance_attention_mil=use_instance_attention_mil,
             mil_hidden_dim=mil_hidden_dim,
             meta_enable_rare_evidence=meta_enable_rare_evidence,
+            population_token_mode=meta_population_token_mode,
             num_classes=self.num_classes,
         )
         # v26 = cls_token_pooling (CLS cross-attention over raw cells, see
