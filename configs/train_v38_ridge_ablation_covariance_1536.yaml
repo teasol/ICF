@@ -1,0 +1,80 @@
+# v38 ridge ablation on the v37 backbone — CV-1
+#
+# docs/current_status.md §65.
+#
+# HYPOTHESIS (user, 2026-08-09): the closed-form ridge solves take too much of
+# the label signal, so the learned branches never get the gradient to develop.
+# Each arm removes exactly ONE ridge and leaves that branch's learned residual
+# in place, isolating one ridge rather than one whole branch:
+#   the CV-2 covariance *relation* branch is untouched.
+#
+# BACKBONE: v37 context-adaptive aggregation (`meta_bag_aggregation:
+# context_adaptive`, user decision 2026-08-09 — run the ablation on v37 only).
+# All four arms share it, so the backbone is held constant and the only varying
+# factor across the set is which ridge is removed.
+#
+# FOUR-ARM SET (identical except the ridge flag; all 50 epochs, rare-free, bf16,
+# seed 42, devices 1):
+#   train_v38_ridge_ablation_control_1536.yaml     all ridge on   (CONTROL)
+#   train_v38_ridge_ablation_global_1536.yaml      G-2 removed
+#   train_v38_ridge_ablation_abundance_1536.yaml   P-2 removed
+#   train_v38_ridge_ablation_covariance_1536.yaml  CV-1 removed
+#
+# ⚠️ The 50-epoch control is REQUIRED and cannot be substituted:
+#   * the existing v37 checkpoints are 200-epoch, so comparing against them
+#     would confound the ridge flag with training length (§42-43 arm C lesson);
+#   * the v36 q1_baseline control is a `projected` backbone, not v37.
+#
+# ⚠️ EVALUATE EACH ARM WITH ITS OWN CONFIG. An ablated ridge's parameters
+# receive no gradient and stay at initialization (pinned by
+# tests/test_ridge_ablation.py::test_ablated_ridge_parameters_get_no_gradient),
+# so scoring the checkpoint with the ridge re-enabled injects an untrained
+# branch. Same for rare (these arms are rare-free, §61) — never score them with
+# train_v34_phase0_largectx_1536.yaml.
+#
+# Cost (measured, v36/v37 arms): ~146 s/epoch on 1xB200 at 1024 steps/epoch →
+# ~2h for 50 epochs. Only two arms fit at once (~98 GB each of 183 GB), so the
+# set runs as two waves of two.
+#
+# Launch:
+#   CUDA_DEVICES=<gpu> NPROC_PER_NODE=1 \
+#   TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun \
+#   NETRC=/NHNHOME/BASE/kimds/.netrc \
+#   scripts/launch_interactive_training.sh v38_covariance configs/train_v38_ridge_ablation_covariance_1536.yaml
+
+seed: 42
+ckpt_path:
+
+data: default
+data_overrides:
+  episode_batch_size: 1
+  dataset_kwargs:
+    num_cells: [1, 16384]
+    num_cells_log_uniform_power: 1.5
+
+model: default
+
+optimizer: default
+scheduler: default
+
+trainer: default
+trainer_overrides:
+  devices: 1
+  max_epochs: 50
+
+logger: default
+logger_overrides:
+  experiment_name: v38_covariance
+
+callbacks: default
+
+model_kwargs:
+  training_targets_per_episode: [5, 12]
+  ranking_loss_weight: 0.10
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0
+  # Rare-removed (§61), matching the v37 arms.
+  meta_enable_rare_evidence: false
+  # v37 backbone — held constant across all four arms.
+  meta_bag_aggregation: context_adaptive
+  meta_enable_covariance_ridge: false
