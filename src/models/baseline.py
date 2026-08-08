@@ -2538,6 +2538,11 @@ class StructuredPopulationMetaClassifier(nn.Module):
         mil_hidden_dim: int | None = None,
         meta_enable_rare_evidence: bool = True,
         population_token_mode: str = "projected",
+        bag_aggregation: str = "projected",
+        bag_aggregation_heads: int = 8,
+        bag_aggregation_num_slots: int | None = None,
+        bag_aggregation_num_density_slots: int | None = None,
+        bag_aggregation_num_tail_fractions: int | None = None,
         num_classes: int = 2,
     ) -> None:
         super().__init__()
@@ -2620,6 +2625,88 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 f"got {population_token_mode!r}."
             )
         self.population_token_mode = str(population_token_mode)
+        # v37 (docs/architecture_v37_context_adaptive_aggregation_proposal.md):
+        # how the T structured tokens collapse to one bag token.
+        #   projected        -- `_projected_bag_tokens`, a FIXED linear map learned
+        #                       once and then frozen w.r.t. the episode.
+        #   context_adaptive -- the collapse is a convex combination whose weights
+        #                       `w` (one per token position) are produced from THIS
+        #                       episode's context bags at inference time.
+        # The weights are built in D space but applied to the original I-dim
+        # tokens, so the bag token keeps token_dim and every downstream consumer
+        # (global_shape/class memories/population) is untouched.
+        if bag_aggregation not in ("projected", "context_adaptive"):
+            raise ValueError(
+                "bag_aggregation must be 'projected' or 'context_adaptive', "
+                f"got {bag_aggregation!r}."
+            )
+        self.bag_aggregation = str(bag_aggregation)
+        if self.bag_aggregation == "context_adaptive":
+            if self.structured_tokens_per_bag is None:
+                raise ValueError(
+                    "bag_aggregation='context_adaptive' needs "
+                    "structured_tokens_per_bag."
+                )
+            if (
+                bag_aggregation_num_slots is None
+                or bag_aggregation_num_density_slots is None
+                or bag_aggregation_num_tail_fractions is None
+            ):
+                raise ValueError(
+                    "bag_aggregation='context_adaptive' needs the aggregator's "
+                    "token layout (num_slots / num_density_slots / "
+                    "num_tail_fractions) to build the type embedding."
+                )
+            n_tokens = self.structured_tokens_per_bag
+            n_slots = int(bag_aggregation_num_slots)
+            n_density = int(bag_aggregation_num_density_slots)
+            n_tails = int(bag_aggregation_num_tail_fractions)
+            self.bag_agg_input_projection = nn.Linear(token_dim, hidden_dim)
+            # Type embedding == positional encoding over the FIXED token layout
+            # [global, slot_i x (center, spread, rare), tails]. Compositional on
+            # purpose: slots share parameters (a slot INDEX has no stable meaning
+            # across episodes, but its TYPE does -- same call `_typed_bag_tokens`
+            # (v25) made when it added type/tail-fraction ids and no slot index).
+            self.bag_agg_token_type = nn.Embedding(6, hidden_dim)
+            self.bag_agg_slot_class = nn.Embedding(3, hidden_dim)
+            self.bag_agg_tail_fraction = nn.Embedding(1 + n_tails, hidden_dim)
+            type_ids, slot_class_ids, tail_ids = self._build_bag_token_type_ids(
+                n_tokens, n_slots, n_density, n_tails
+            )
+            self.register_buffer("_bag_agg_type_ids", type_ids, persistent=False)
+            self.register_buffer(
+                "_bag_agg_slot_class_ids", slot_class_ids, persistent=False
+            )
+            self.register_buffer("_bag_agg_tail_ids", tail_ids, persistent=False)
+            # One SHARED encoder over the bag axis; the type embedding is what
+            # tells it which position it is looking at. Forty separate encoders
+            # would cost 31.6M parameters instead of 0.79M.
+            self.bag_agg_encoder = nn.TransformerEncoderLayer(
+                d_model=hidden_dim,
+                nhead=int(bag_aggregation_heads),
+                dim_feedforward=4 * hidden_dim,
+                dropout=0.0,
+                batch_first=True,
+                norm_first=True,
+            )
+            # Symmetric (permutation-invariant) pooling over bags: PMA with one
+            # learned seed, mirroring `memory_seeds` in `_class_memories`.
+            self.bag_agg_seed = nn.Parameter(torch.randn(1, hidden_dim) * 0.02)
+            self.bag_agg_pool = nn.MultiheadAttention(
+                hidden_dim, int(bag_aggregation_heads), dropout=0.0, batch_first=True
+            )
+            self.bag_agg_norm = nn.LayerNorm(hidden_dim)
+            weight_head = nn.Linear(hidden_dim, n_tokens)
+            # zero-init -> w starts exactly uniform -> the bag token starts as the
+            # plain mean of the T tokens, an interpretable, non-random baseline.
+            nn.init.zeros_(weight_head.weight)
+            nn.init.zeros_(weight_head.bias)
+            self.bag_agg_weight_mlp = nn.Sequential(
+                nn.LayerNorm(hidden_dim),
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.GELU(),
+                weight_head,
+            )
         self.projection_bottleneck_dim = (
             None
             if projection_bottleneck_dim is None
@@ -3415,7 +3502,96 @@ class StructuredPopulationMetaClassifier(nn.Module):
             parts.append(representation[f"stat_{stat_name}"].unsqueeze(1))
         return torch.cat(parts, dim=1)
 
-    def _projected_bag_tokens(self, tokens: torch.Tensor) -> torch.Tensor:
+    @staticmethod
+    def _build_bag_token_type_ids(
+        n_tokens: int,
+        num_slots: int,
+        num_density_slots: int,
+        num_tails: int,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Map each structured-token position to its (type, slot class, tail id).
+
+        Layout is fixed by `_all_structured_tokens`:
+            0                       global_summary
+            1 + 3i, 2 + 3i, 3 + 3i  slot i -> (center, spread, rare)
+            then                    tails (one per tail fraction)
+            then                    optional cls / raw-stat tokens -> "other"
+        """
+        type_ids = torch.full((n_tokens,), 5, dtype=torch.long)   # 5 = other
+        slot_class_ids = torch.zeros(n_tokens, dtype=torch.long)  # 0 = not a slot
+        tail_ids = torch.zeros(n_tokens, dtype=torch.long)        # 0 = not a tail
+        type_ids[0] = 0                                           # global
+        for slot in range(num_slots):
+            base = 1 + 3 * slot
+            if base + 2 >= n_tokens:
+                break
+            type_ids[base] = 1                                    # slot center
+            type_ids[base + 1] = 2                                # slot spread
+            type_ids[base + 2] = 3                                # slot rare
+            # density vs rare slot is stable across episodes; the slot INDEX is not.
+            slot_class = 1 if slot < num_density_slots else 2
+            slot_class_ids[base : base + 3] = slot_class
+        tail_start = 1 + 3 * num_slots
+        for tail in range(num_tails):
+            position = tail_start + tail
+            if position >= n_tokens:
+                break
+            type_ids[position] = 4                                # tail
+            tail_ids[position] = tail + 1
+        return type_ids, slot_class_ids, tail_ids
+
+    def _bag_agg_type_embedding(self) -> torch.Tensor:
+        """[T, D] additive position identity for the aggregation encoder."""
+        return (
+            self.bag_agg_token_type(self._bag_agg_type_ids)
+            + self.bag_agg_slot_class(self._bag_agg_slot_class_ids)
+            + self.bag_agg_tail_fraction(self._bag_agg_tail_ids)
+        )
+
+    def _context_aggregation_weights(
+        self, context_tokens: torch.Tensor
+    ) -> torch.Tensor:
+        """Convex aggregation weights built from the CONTEXT bags only (v37).
+
+        `context_tokens` is [C, T, I] (ragged path) or [E, C, T, I] (4D path);
+        the return is [T] or [E, T]. The query never enters -- callers must pass
+        the context-only token tensor, exactly like `_context_pool_stats`.
+
+        Permutation invariance over bags is structural: the encoder gets no
+        positional encoding along the bag axis and the pooling is a single-seed
+        cross-attention (symmetric).
+        """
+        batched = context_tokens.ndim == 4
+        if not batched:
+            context_tokens = context_tokens.unsqueeze(0)
+        episodes, n_bags, n_tokens, _ = context_tokens.shape
+        if n_tokens != self.structured_tokens_per_bag:
+            raise ValueError(
+                "context_adaptive aggregation expected "
+                f"{self.structured_tokens_per_bag} tokens, got {n_tokens}."
+            )
+        hidden = self.bag_agg_input_projection(context_tokens)      # [E,C,T,D]
+        hidden = hidden + self._bag_agg_type_embedding()            # broadcast [T,D]
+        # one sequence per (episode, token position); the sequence IS the bag axis
+        sequences = hidden.permute(0, 2, 1, 3).reshape(
+            episodes * n_tokens, n_bags, -1
+        )                                                            # [E*T, C, D]
+        encoded = self.bag_agg_encoder(sequences)                    # [E*T, C, D]
+        seed = self.bag_agg_seed.unsqueeze(0).expand(
+            encoded.shape[0], -1, -1
+        )                                                            # [E*T, 1, D]
+        pooled, _ = self.bag_agg_pool(seed, encoded, encoded, need_weights=False)
+        pooled = self.bag_agg_norm(pooled.squeeze(-2))               # [E*T, D]
+        weight_maker_token = pooled.reshape(episodes, n_tokens, -1)  # [E,T,D]
+        logits = self.bag_agg_weight_mlp(weight_maker_token.mean(dim=1))  # [E,T]
+        weights = torch.softmax(logits.float(), dim=-1).to(context_tokens.dtype)
+        return weights if batched else weights.squeeze(0)
+
+    def _projected_bag_tokens(
+        self,
+        tokens: torch.Tensor,
+        weights: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         """Reduce each bag's stacked structured tokens to one projected token.
 
         v24-A0 concatenates the per-bag structured tokens along the feature axis
@@ -3429,6 +3605,27 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 "Structured token count does not match bag projection input: "
                 f"expected {self.structured_tokens_per_bag}, got {tokens.shape[-2]}."
             )
+        if self.bag_aggregation == "context_adaptive":
+            # v37: convex combination with episode-derived weights. The weights
+            # are made in D space but applied HERE, on the original token_dim
+            # tokens, so the bag token keeps its dimension and no downstream
+            # module changes.
+            if weights is None:
+                raise ValueError(
+                    "bag_aggregation='context_adaptive' requires aggregation "
+                    "weights; call `_context_aggregation_weights` on the context "
+                    "tokens and pass the result down."
+                )
+            if weights.ndim == 1:                    # [T] -> [1, T, 1]
+                shaped = weights.reshape(1, -1, 1)
+            elif weights.ndim == 2 and tokens.ndim == 4:   # [E, T] -> [E, 1, T, 1]
+                shaped = weights.reshape(weights.shape[0], 1, -1, 1)
+            else:
+                raise ValueError(
+                    f"Unsupported weight shape {tuple(weights.shape)} for tokens "
+                    f"{tuple(tokens.shape)}."
+                )
+            return (tokens * shaped.to(tokens.dtype)).sum(dim=-2)
         if self.projection_bottleneck_dim is None:
             flat = tokens.reshape(*tokens.shape[:-2], -1)
             if self.projection_residual_mean:
@@ -3486,7 +3683,9 @@ class StructuredPopulationMetaClassifier(nn.Module):
         return self.typed_bag_token_projection(flat)
 
     def _population_tokens(
-        self, representation: dict[str, torch.Tensor]
+        self,
+        representation: dict[str, torch.Tensor],
+        aggregation_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Return either all structured tokens, one exact mean token, or one
         learned projection token per bag."""
@@ -3497,7 +3696,9 @@ class StructuredPopulationMetaClassifier(nn.Module):
             return self._all_structured_tokens(representation)
         if self.project_structured_tokens:
             tokens = self._all_structured_tokens(representation)
-            return self._projected_bag_tokens(tokens).unsqueeze(-2)
+            return self._projected_bag_tokens(
+                tokens, aggregation_weights
+            ).unsqueeze(-2)
         if self.mean_pool_structured_tokens:
             return self._all_structured_tokens(representation).mean(
                 dim=-2, keepdim=True
@@ -3508,10 +3709,13 @@ class StructuredPopulationMetaClassifier(nn.Module):
         self,
         context: dict[str, torch.Tensor],
         context_labels: torch.Tensor,
+        aggregation_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
         context_tokens = self._all_structured_tokens(context)
         if self.project_structured_tokens:
-            context_tokens = self._projected_bag_tokens(context_tokens).unsqueeze(1)
+            context_tokens = self._projected_bag_tokens(
+                context_tokens, aggregation_weights
+            ).unsqueeze(1)
         elif self.mean_pool_structured_tokens:
             context_tokens = context_tokens.mean(dim=1, keepdim=True)
         memories: list[torch.Tensor] = []
@@ -3534,8 +3738,9 @@ class StructuredPopulationMetaClassifier(nn.Module):
         self,
         query: dict[str, torch.Tensor],
         class_memories: torch.Tensor,
+        aggregation_weights: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        query_tokens = self._population_tokens(query)
+        query_tokens = self._population_tokens(query, aggregation_weights)
         encoded_query = self.slot_input_projection(self.slot_input_norm(query_tokens))
         importance_logits = self.slot_importance(query_tokens).squeeze(-1)
         token_weights = F.softmax(
@@ -3847,10 +4052,13 @@ class StructuredPopulationMetaClassifier(nn.Module):
         self,
         context: dict[str, torch.Tensor],
         context_labels: torch.Tensor,
+        aggregation_weights: torch.Tensor | None = None,
     ) -> torch.Tensor:
         context_tokens = self._all_structured_tokens_batched(context)
         if self.project_structured_tokens:
-            context_tokens = self._projected_bag_tokens(context_tokens).unsqueeze(2)
+            context_tokens = self._projected_bag_tokens(
+                context_tokens, aggregation_weights
+            ).unsqueeze(2)
         elif self.mean_pool_structured_tokens:
             context_tokens = context_tokens.mean(dim=2, keepdim=True)
         episodes, context_count, tokens_per_bag, _ = context_tokens.shape
@@ -3882,6 +4090,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
         self,
         query: dict[str, torch.Tensor],
         class_memories: torch.Tensor,
+        aggregation_weights: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         raw_slots = query["slots"]
         if self.population_token_mode == "structured":
@@ -3892,7 +4101,9 @@ class StructuredPopulationMetaClassifier(nn.Module):
             query_tokens = self._all_structured_tokens_batched(query)
         elif self.project_structured_tokens:
             all_tokens = self._all_structured_tokens_batched(query)
-            query_tokens = self._projected_bag_tokens(all_tokens).unsqueeze(2)
+            query_tokens = self._projected_bag_tokens(
+                all_tokens, aggregation_weights
+            ).unsqueeze(2)
         elif self.mean_pool_structured_tokens:
             all_tokens = self._all_structured_tokens_batched(query)
             query_tokens = all_tokens.mean(dim=2, keepdim=True)
@@ -4098,12 +4309,18 @@ class StructuredPopulationMetaClassifier(nn.Module):
     ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
         context_global_tokens = context["global_summary"]
         query_global_tokens = query["global_summary"]
-        if self.project_structured_tokens:
-            context_global_tokens = self._projected_bag_tokens(
+        # v37 -- mirrors the ragged path above; see the comment there.
+        aggregation_weights = None
+        if self.bag_aggregation == "context_adaptive":
+            aggregation_weights = self._context_aggregation_weights(
                 self._all_structured_tokens_batched(context)
             )
+        if self.project_structured_tokens:
+            context_global_tokens = self._projected_bag_tokens(
+                self._all_structured_tokens_batched(context), aggregation_weights
+            )
             query_global_tokens = self._projected_bag_tokens(
-                self._all_structured_tokens_batched(query)
+                self._all_structured_tokens_batched(query), aggregation_weights
             )
         elif self.mean_pool_structured_tokens:
             context_global_tokens = self._all_structured_tokens_batched(
@@ -4139,9 +4356,13 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 )
             )
             typed_bag_residual_scale = torch.sigmoid(self.typed_bag_residual_logit)
-        class_memories = self._class_memories_batched(context, context_labels)
+        class_memories = self._class_memories_batched(
+            context, context_labels, aggregation_weights
+        )
         population_attention_logits, population_weights = (
-            self._population_memory_logits_batched(query, class_memories)
+            self._population_memory_logits_batched(
+                query, class_memories, aggregation_weights
+            )
         )
         abundance_ridge_logits = self._abundance_ridge_logits_batched(
             context["slot_metadata"],
@@ -4323,12 +4544,21 @@ class StructuredPopulationMetaClassifier(nn.Module):
 
         context_global_tokens = context["global_summary"]
         query_global_tokens = query["global_summary"]
-        if self.project_structured_tokens:
-            context_global_tokens = self._projected_bag_tokens(
+        # v37: one set of aggregation weights per episode, derived from the
+        # CONTEXT bags only, then shared by every consumer (global shape, class
+        # memories, population). Computing it here -- rather than inside each
+        # consumer -- is what keeps the query out of the weights.
+        aggregation_weights = None
+        if self.bag_aggregation == "context_adaptive":
+            aggregation_weights = self._context_aggregation_weights(
                 self._all_structured_tokens(context)
             )
+        if self.project_structured_tokens:
+            context_global_tokens = self._projected_bag_tokens(
+                self._all_structured_tokens(context), aggregation_weights
+            )
             query_global_tokens = self._projected_bag_tokens(
-                self._all_structured_tokens(query)
+                self._all_structured_tokens(query), aggregation_weights
             )
         elif self.mean_pool_structured_tokens:
             context_global_tokens = self._all_structured_tokens(context).mean(dim=1)
@@ -4353,9 +4583,13 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 return_auxiliary=True,
             )
             typed_bag_residual_scale = torch.sigmoid(self.typed_bag_residual_logit)
-        class_memories = self._class_memories(context, context_labels)
+        class_memories = self._class_memories(
+            context, context_labels, aggregation_weights
+        )
         population_attention_logits, population_weights = (
-            self._population_memory_logits(query, class_memories)
+            self._population_memory_logits(
+                query, class_memories, aggregation_weights
+            )
         )
         abundance_ridge_logits = self._abundance_ridge_logits(
             context["slot_metadata"],
@@ -4550,6 +4784,7 @@ class BaseModel(nn.Module):
         meta_rare_evidence_fractions: Sequence[float] = (0.01, 0.05, 0.10, 0.20),
         meta_enable_rare_evidence: bool = True,
         meta_population_token_mode: str = "projected",
+        meta_bag_aggregation: str = "projected",
         meta_fusion_residual_scale: float = 0.10,
         meta_covariance_ridge_logit_scale: float = 2.0,
         meta_covariance_residual_scale: float = 0.25,
@@ -4660,6 +4895,10 @@ class BaseModel(nn.Module):
             mil_hidden_dim=mil_hidden_dim,
             meta_enable_rare_evidence=meta_enable_rare_evidence,
             population_token_mode=meta_population_token_mode,
+            bag_aggregation=meta_bag_aggregation,
+            bag_aggregation_num_slots=self.aggregator.num_slots,
+            bag_aggregation_num_density_slots=self.aggregator.num_density_slots,
+            bag_aggregation_num_tail_fractions=len(self.aggregator.tail_fractions),
             num_classes=self.num_classes,
         )
         # v26 = cls_token_pooling (CLS cross-attention over raw cells, see

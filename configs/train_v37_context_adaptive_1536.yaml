@@ -1,0 +1,72 @@
+# v37 arm — v37 (context-adaptive convex aggregation)
+#
+# docs/architecture_v37_context_adaptive_aggregation_proposal.md
+#
+# SINGLE-FACTOR pair: this config and its partner differ ONLY in
+# `meta_bag_aggregation`. Data, rare setting, precision, devices, seed, and the
+# 200-epoch budget are identical, so a difference is attributable to that flag.
+#
+#   train_v37_baseline_1536.yaml          meta_bag_aggregation: projected         (control)
+#   train_v37_context_adaptive_1536.yaml  meta_bag_aggregation: context_adaptive  (v37)
+#
+# v37: the 40->1 collapse is a convex combination whose weights come from this
+# episode's context bags (shared encoder over the bag axis + compositional type
+# embedding). Weights are built in D=256 and applied to the I=1536 tokens, so the
+# bag token keeps its dimension and no downstream module changes.
+#
+# max_epochs 200 (user decision, 2026-08-08): the adaptive aggregator has to
+# learn its weight maker from scratch, so it needs longer to converge than the
+# 50-epoch v36 arms. The CONTROL runs 200 epochs too -- comparing a 200-epoch
+# arm against the 50-epoch v36 control would confound architecture with training
+# length (§42-43 arm C lesson). 1024 episodes/epoch x 200 = 204,800 episodes.
+#
+# EVALUATE THIS ARM WITH THIS CONFIG. It is rare-free, so the rare parameters
+# never receive gradient (`_fuse_evidence` replaces rare_logits with new_zeros);
+# scoring it with train_v34_phase0_largectx_1536.yaml would inject an untrained
+# branch into the logits.
+#
+# Cost: ~146 s/epoch measured on the v36 arms at 1 GPU, so 200 epochs is roughly
+# 8 hours. Both arms run concurrently, one GPU each (devices: 1).
+#
+# Launch:
+#   CUDA_DEVICES=<gpu> NPROC_PER_NODE=1 \
+#   TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun \
+#   NETRC=/NHNHOME/BASE/kimds/.netrc \
+#   scripts/launch_interactive_training.sh v37_context_adaptive configs/train_v37_context_adaptive_1536.yaml
+
+seed: 42
+ckpt_path:
+
+data: default
+data_overrides:
+  episode_batch_size: 1
+  dataset_kwargs:
+    num_cells: [1, 16384]
+    num_cells_log_uniform_power: 1.5
+
+model: default
+
+optimizer: default
+scheduler: default
+
+trainer: default
+trainer_overrides:
+  devices: 1
+  max_epochs: 200
+
+logger: default
+logger_overrides:
+  experiment_name: v37_context_adaptive
+
+callbacks: default
+
+model_kwargs:
+  training_targets_per_episode: [5, 12]
+  ranking_loss_weight: 0.10
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0
+  # Rare-removed arm (rev.2 step 5): P0-b gate passed (|Δpooled| 0.0009 on
+  # PIK3CA 50-fold, < 0.003). rare_logits forced to 0 -- numerically identical
+  # to deletion; checkpoint-compatible and reversible.
+  meta_enable_rare_evidence: false
+  meta_bag_aggregation: context_adaptive
