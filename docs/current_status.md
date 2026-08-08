@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-08` (**§63 current_architecture v34 개편 검토(수치 오류 3건·서술 2건 수정) + bf16-mixed 계약 예외 없이 강제(45 tests)** + **§62 v36 chunk-attention 제안서 반증 + P0-slots 무료 probe — Q1(40→1 압축 해제) paired +0.16 확정 / Q2(num_slots 증설) 부호 불일치로 보류** + §61 P0-b 게이트 통과(|Δpooled| 0.0009) + rare branch 제거 + §60 v35 공식 50-fold 2개(EGFR 0.7819 / PIK3CA 0.5668) + SEAL 비교 + §59 v35 rev.2 + **§41–§48 v33 arm C saga 아카이브**)  
+**Last updated**: `2026-08-08` (**§64 평가도 bf16-mixed 강제(과거 50-fold 수치는 참고용) + 폴드 단위 context 캐싱 bit-identical 356s→50s + bc_therapy/er_status 기본 평가 확정(macro 0.6975)** + **§63 current_architecture v34 개편 검토 + bf16-mixed 계약 강제(51 tests)** + **§62 v36 chunk-attention 제안서 반증 + P0-slots 무료 probe — Q1(40→1 압축 해제) paired +0.16 확정 / Q2(num_slots 증설) 부호 불일치로 보류** + §61 P0-b 게이트 통과(|Δpooled| 0.0009) + rare branch 제거 + §60 v35 공식 50-fold 2개(EGFR 0.7819 / PIK3CA 0.5668) + SEAL 비교 + §59 v35 rev.2 + **§41–§48 v33 arm C saga 아카이브**)  
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **v34 확정 (§52·§53·§56)**: **v34-1536을 PathoBench 보고용 모델로 확정**(사용자 결정). 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv fold·코호트·라벨) 기준 **50-fold**(SEAL macro-AUC와 동일 구조) — **5/17 완료**(bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569, brca_TP53), **12개는 config 수정으로 재시작**(§56, 백그라운드). v30은 합성/Musk baseline 유지. 이전 5-fold와 수치 ±0.04 이내 동일(평가 견고성). config 시스템을 v34 base + group default 참조형으로 리팩터링(§56). 자세한 진행 §53·§56.
@@ -12,9 +12,9 @@
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§63 (아키텍처 명세 검토 + bf16-mixed 강제 — 확정 ckpt는 fp32로 학습됨)**, **§62 (v36 chunk-attention 반증 → slot 재정의 + P0-slots probe: Q1 +0.16 확정 / Q2 보류 + 사용자 결정 4건)**, **§61 (P0-b 통과 + rare branch 제거)**, **§60 (v35-16384 완주 + 메모리/val 진단 + v35 공식 50-fold EGFR·PIK3CA + SEAL 비교)**, **§59 (v35 rev.2 개정 + 스트리밍 구현 + 학습 시작 + 50-fold stale 경고)**, **§58 (v35 rev.1 설계 — §59가 상당 부분 정정하므로 §59와 함께 읽을 것)**, **§57 (50-fold case leakage 진단)**, **§53 (v34 확정 + 공식 50-fold 표 — §59.5에 따라 재실행 필요)**,
+**Read first if you are picking this up**: **§64 (평가 bf16 강제 + context 캐싱 + er_status 기본 평가 — 과거 수치는 참고용)**, **§63 (아키텍처 명세 검토 + bf16-mixed 강제 — 확정 ckpt는 fp32로 학습됨)**, **§62 (v36 chunk-attention 반증 → slot 재정의 + P0-slots probe: Q1 +0.16 확정 / Q2 보류 + 사용자 결정 4건)**, **§61 (P0-b 통과 + rare branch 제거)**, **§60 (v35-16384 완주 + 메모리/val 진단 + v35 공식 50-fold EGFR·PIK3CA + SEAL 비교)**, **§59 (v35 rev.2 개정 + 스트리밍 구현 + 학습 시작 + 50-fold stale 경고)**, **§58 (v35 rev.1 설계 — §59가 상당 부분 정정하므로 §59와 함께 읽을 것)**, **§57 (50-fold case leakage 진단)**, **§53 (v34 확정 + 공식 50-fold 표 — §59.5에 따라 재실행 필요)**,
 
-**열린 과제**: ⓪ **Q1 단독 arm**(§62-7: `meta_population_token_mode` 플래그 두 경로 구현 + routing entropy 진단 → scratch 학습), ⓪′ (판단 필요) **폴드 단위 representation 캐싱 eval**(§62-7.4, bit-identical ~50× 가속), ① **v35 공식 50-fold 평가**(§60, EGFR·PIK3CA 완료 → 잔여 15개 + SEAL 최종 재비교), ② **rare-free v35 arm 학습 + 50-fold 평가**(§61, Musk 재확인 포함), ③ **§53 표 9개 재실행**(`5869535` 이후 stale, §59.5) + 공식 50-fold 잔여 8개 → 17개 최종 표 + SEAL 재비교, ④ v30 vs v34 CV 공정 비교(PCA-per-fold), ⑤ v34-512 학습, ⑥ **chunk 단위(bag 내부) 스트리밍** 미구현(rev.2 §3), ⑦ v30 six-task / B2b cardinality 효과 분리, ⑧ frozen-v30 multi-resolution headroom, ⑨ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
+**열린 과제**: ⓪ **Q1 단독 arm**(§62-7: `meta_population_token_mode` 플래그 두 경로 구현 + routing entropy 진단 → scratch 학습), ⓪′ **공식 50-fold 전면 재산출**(§64: fp32 수치 전부 참고용 → §53 표 9개 + 잔여 8개; 캐싱으로 task당 ~50초, 실행 전 `/tmp/pathobench_official_workers/` fp32 캐시 정리 필수), ① **v35 공식 50-fold 평가**(§60, EGFR·PIK3CA 완료 → 잔여 15개 + SEAL 최종 재비교), ② **rare-free v35 arm 학습 + 50-fold 평가**(§61, Musk 재확인 포함), ③ **§53 표 9개 재실행**(`5869535` 이후 stale, §59.5) + 공식 50-fold 잔여 8개 → 17개 최종 표 + SEAL 재비교, ④ v30 vs v34 CV 공정 비교(PCA-per-fold), ⑤ v34-512 학습, ⑥ **chunk 단위(bag 내부) 스트리밍** 미구현(rev.2 §3), ⑦ v30 six-task / B2b cardinality 효과 분리, ⑧ frozen-v30 multi-resolution headroom, ⑨ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
 
 **Branches**: `main` = v30 확정 baseline + 미채택 v31 CCER-v2 재현 코드. 참고용 branch/tag 구조는
 [`history/branch_structure.md`](history/branch_structure.md).
@@ -1374,73 +1374,12 @@ Patho-Bench 프로토콜**(공식 k=all.tsv fold · 공식 코호트 · 공식 �
 
 ---
 
-## 56. 2026-08-07 — config 시스템 리팩터링(v34 base·default 참조·재아카이빙) + 공식 50-fold 재시작
+## 56. 2026-08-07 — config 시스템 리팩터링(v34 base·default 참조·재아카이빙) + 공식 50-fold 재시작 — **아카이브됨**
 
-**상태**: **v34-1536 = PathoBench 보고용 확정 유지**. config 시스템을 **v34 base + group default
-참조형**으로 재구성하고, v30/v24/v22 체인을 **자체 포함형 아카이빙**으로 정리했다. 공식 50-fold
-배치는 아카이빙 회귀로 전부 실패했던 것을 config 수정으로 해결하고 **5/17 완료 → 12개 재시작**
-(백그라운드).
-
-### 1. v34 config = default 참조형 (단일 진실 공급원)
-
-- `configs/train_v34_phase0_largectx_1536.yaml`·`_512.yaml`을 `data/model/optimizer/scheduler/
-  trainer/logger/callbacks: default` 참조로 단순화. **group default를 v34-1536 해석값으로 설정**
-  (`configs/{data,model,optimizer,scheduler,trainer,callbacks,logger}/default.yaml` — optimizer/
-  scheduler/logger는 신규).
-- `src/utils/utils.py merge_train_config`에 **`logger_overrides`·`trainer_overrides` 지원 추가**
-  (experiment_name/max_epochs 등 run별·arm별 override용).
-- v34-512는 dimension(512) + arm-D 레시피(batch 1, num_cells [1,32768], episodes 256, epochs 25)만
-  override로 유지 (사용자 결정).
-- 검증: 두 v34 config 해석 결과가 이전(자체 포함형/원본)과 **딥 이퀄**. 전체 config 141개 해석 성공.
-
-### 2. 재아카이빙 + 아카이빙 정책
-
-- root = **v34 3종만** (`train_v34_1536`/`_512`/`test_v34_1536_ici`). v30 5종+eval_v30 2종 →
-  `archive/v30/`, v24 2종 → `archive/v24/`, v22_medium → `archive/v22/`. 이동 시 base_config
-  상대경로를 `../v22/`·`../v24/`·`../v30/`·`../v18_v19/`로 보정 — **아카이브 전체 자기완결**.
-- 기존 아카이브의 숨은 깨짐(ia_mil·musklike_easy_levers·v23_v24_candidates·v25·v26·v31·v32·v33,
-  19개)도 모두 수정. v18_v19의 learnability 10개는 커밋 a5dfcf8에서 의도적으로 purge된 data 모듈을
-  참조하는 **기존 결함**(역사 보존용, 활성/체인과 무관).
-- **아카이빙 정책 신설(handoff §7 규칙 3)**: 아카이빙 config는 `base_config` 없이 **전부 인라인
-  (자체 포함형)**으로 보관 → 상대경로 깨짐 원천 차단.
-
-### 3. 공식 50-fold 재시작 (config 회귀 해결)
-
-- 원인: 이전 배치(12:54~12:59)가 아카이빙된 `configs/train_v24_musklike_easy.yaml`을 참조해 17개
-  전부 rc=1 실패 → v34 config 자체 포함/default 참조화로 해결 (smoke에서 config 해석 통과 확인).
-- 배치 스크립트 신규: `scripts/run_official50_batch.sh` (17개 task, 완료분 스킵, workers
-  10→6→4→2 자동 축소, per-fold 체크포인트 리쥼). 로그 `logs/official50/batch_resume.log`.
-- **완료 5개(pooled)**: bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569,
-  cptac_brca_TP53.
-- **재시작(14:17 KST, 12개 백그라운드)**: lscc(3)·luad(4)·pda(1)·ucla_lung(1)·ccrcc(3).
-- ⚠️ **14:17 1차 재시작은 ARID1A에서 OOM 연쇄로 중단**: `run_official_folds_parallel.py`가 worker
-  실패 시 형제 worker를 종료하지 않아(고아 3개가 GPU ~166GB 점유) workers 10→6→4→2 재시도가 전부
-  즉시 OOM. **러너 수정**(worker 실패 시 전체 worker kill → GPU 해제) 후 **14:26 재실행**(nohup,
-  PID 723428) — ARID1A(304 슬라이드, worker당 ~50GB)는 깨끗한 GPU에서 workers=2로 수용. 완료 후
-  §53 표 갱신 + SEAL 재비교.
-- ARID1A 2-fold smoke는 10분 timeout으로 종료(대형 task 1-fold 평가가 10분 초과 — config 문제 아님).
-
-### 4. 공식 50-fold 진행 (6/17 완료) + 리팩터링 최신화
-
-- **ARID1A 완료 (6/17, 15:37)**: 50-fold mean **0.4693 ± 0.1093**, pooled **0.4616**
-  (`predictions/pathobench_cptac_lscc_ARID1A_mutation_v34_1536_official50.pt`).
-  이전 5-fold(§50 lscc_arid1a 0.908)와 큰 차이 — **공식 fold/코호트 프로토콜 차이**로 기록.
-- **배치 일시정지 (사용자 요청)**: ARID1A 완료 직후 감시 스크립트(`/tmp/pause_after_arid1a.sh`)
-  가 배치 스크립트+워커 종료. **잔여 11개**: lscc(2)·luad(4)·pda(1)·ucla_lung(1)·ccrcc(3).
-  재개: `nohup bash scripts/run_official50_batch.sh` (완료분 스킵).
-- **리팩터링 (폐기 분기 최신화, §56.8-9)**: 백업(태그 `repro-pre-deprecated-cleanup-20260807` +
-  `src/repro_backup_20260807/`) 후 ① 죽은 메서드 3개(§56.8), ② **CCER(v31) ~570줄**, ③
-  **DR-CCER(v32) ~800줄** 제거 — 각각 파라미터 시그니처 동일(220그룹/41.67M)·forward 동치
-  (dense/ragged diff 0)·checkpoint strict 로드(0/0) 검증, **전체 테스트 32개 통과(148.5s)**.
-  남은 폐기 분기: typed_bag(v25)·cls_token(v26)·IA-MIL·CCTS/absolute_tail·mean_pool(v23).
-
-### 5. 다음
-
-- 50-fold 잔여 11개 재개 → §53 표 **17개 전체 갱신** + SEAL 재비교.
-- 폐기 분기 최신화 계속(typed_bag→cls_token→MIL→CCTS→mean_pool) 또는 여기서 종료.
-- v34-512 학습 + 동일 평가(열린 과제 ③), v30 vs v34 PCA-per-fold 공정 비교.
-
----
+> 아카이브됨 (2026-08-08, §64 정리): config 리팩터링은 완료됐고 지속되는 규칙은
+> [`agent_handoff.md`](agent_handoff.md) §7(config 관리·자체 포함형 아카이빙·참조 검증)에 있다.
+> 여기서 재시작한 공식 50-fold는 §57(case leakage)에 이어 §64(fp32 수치는 참고용)로 대체됐다.
+> 전문: [`history/current_status_archive_20260808_v34_config_refactor.md`](history/current_status_archive_20260808_v34_config_refactor.md)
 
 ## 57. 2026-08-07 — 50-fold 재개 전 진단: 5-fold CV의 case leakage로 lscc_arid1a 0.908이 부풀려짐
 
@@ -2035,3 +1974,116 @@ routing entropy 진단 → scratch·episode-matched 학습.
 필요해지면 v35를 bf16-mixed로 재학습해 기준선을 맞추는 것이 정공법이나, 비용이 크므로 우선은
 **교란 요인으로 명시하고 진행**한다. Q1 효과 크기(probe +0.16)가 정밀도 차이의 통상 규모보다
 훨씬 크므로 판정이 뒤집힐 가능성은 낮다고 본다.
+
+---
+
+## 64. 2026-08-08 — 평가도 bf16-mixed 강제 + 폴드 단위 context 캐싱(bit-identical, 7.1×) + bc_therapy/er_status 기본 평가 확정
+
+**상태**: 사용자 결정 2건을 반영했다 — ① **평가 경로도 bf16-mixed 강제**(과거 50-fold 수치는
+전부 **참고용**으로 격하), ② **bc_therapy/er_status를 기본 평가 task로 확정**. 그 위에서
+멀티프로세싱 한계를 실측해 **워커 증설이 무의미함**을 확인했고, §62-3에서 예고한
+**폴드 단위 context 캐싱**을 구현해 bit-identical하게 **356s → 50s**를 달성했다.
+
+### 1. 평가 bf16-mixed 강제 (사용자 결정)
+
+- **발견된 3중 불일치**: 같은 ckpt가 스크립트마다 다른 정밀도로 채점되고 있었다 —
+  `evaluate_synthetic.py`는 **bf16 autocast**, `test_pathobench.py`/`test_musk.py`는 **fp32**,
+  `test.py`는 기본값 **`16-mixed`(fp16!)** — 마지막은 §3.4가 금지하는 바로 그 오버플로 경로다.
+- **조치**: `src/utils/utils.py`에 단일 정의 `eval_autocast(device, precision)` +
+  `add_eval_precision_argument(parser)` 추가. fp16은 **ValueError로 거부**하고 `32-true`만
+  탈출구로 남긴다. 배선: `test_pathobench.py`(forward 2곳 + `evaluate_trial` 3개 호출부),
+  `test_musk.py`, `probe_slot_headroom.py`, `run_official_folds_parallel.py`(워커 전달),
+  `test.py`(기본값 `16-mixed` → `bf16-mixed`, choices 제한). CPU는 autocast를 건너뛴다
+  (CPU bf16 matmul은 에뮬레이션이라 테스트만 느려지고 손실이 생김).
+- ⚠️ **과거 수치 전부 참고용**: 2026-08-08 이전 공식 50-fold AUROC는 전부 fp32 산출물이다.
+- **정밀도 효과 실측** (§59.5가 기록한 바로 그 er_status fold와 직접 대조):
+
+  | fold | fp32 (§59.5, `5869535` 이후) | bf16 (신규) | Δ |
+  |---|---|---|---|
+  | 1 | 0.4348 | 0.5130 | **+0.078** |
+  | 2 | 0.7565 | 0.7652 | +0.009 |
+  | 3 | 0.7217 | 0.7609 | +0.039 |
+
+  fold 단위로 최대 +0.08까지 이동한다 — "참고용 격하" 결정을 수치가 뒷받침한다.
+
+### 2. bc_therapy/er_status = 기본 평가 task (사용자 결정)
+
+- 코호트: **166 slides**(라벨 51/115), 50 folds, fold당 test 33 / context 133.
+- 타일: 총 453,211, **median 2,672** / mean 2,730 / p90 4,165 / max 6,487.
+  전체 feature가 fp32로 **2.6 GiB**뿐이라 LUAD(324 slides × ~7k tiles) 대비 훨씬 가볍다.
+
+### 3. 멀티프로세싱 한계 — **워커를 늘려도 안 빨라진다** (실측)
+
+| 실행 | 워커 | GPU | folds | 시간 | **GPU당 fold 처리율** | peak VRAM |
+|---|---|---|---|---|---|---|
+| 실현성 | 13 | 1 | 13 | 184s | **14.2 s/fold** | 58,775 MiB (32%) |
+| 본 실행 | 25 | 2 | 50 | 356s | **14.2 s/fold** | 59,451 / 54,459 MiB |
+
+- GPU당 처리율이 **소수점까지 동일** → 메모리는 32%만 쓰지만 **연산은 이미 포화**. 워커는
+  time-slice할 뿐이다. **워커 증설은 무효**(이전 세션의 "50 워커도 가능" 조언은 철회).
+- 두 점 분해(`S+1F=184`, `S+2F=356`): **fold당 172s**, 기동·로드 12s → 시간의 97%가 fold 자체.
+- ⚠️ **러너는 26을 요청해도 25 워커**를 띄운다: `chunk = ceil(50/26) = 2` → 25 청크.
+- ⚠️ **재개 캐시 위험**: 모든 워커가 `{tmp_dir}/{task}_official_folds.ckpt` **하나를 공유**하고
+  이미 있는 fold를 건너뛴다. fp32 시절 캐시가 남아 있으면 **정밀도가 조용히 섞인다.**
+  `/tmp/pathobench_official_workers/`에 EGFR(08-08 06:00)·Histologic_Grade·KEAP1(08-07) 잔존.
+  **재실행 시 새 `--tmp-dir`을 쓰거나 캐시를 지울 것.** (근본 해결은 캐시 키에 precision 포함.)
+
+### 4. 폴드 단위 context 캐싱 구현 (§62-3 예고분)
+
+- **원리**: all-context fold에서 모든 쿼리가 같은 context를 보고, aggregator의 에피소드 상태
+  (`_context_pool_stats`·`_context_anchors`)는 **context bag만으로** 결정된다. 따라서 폴드당
+  aggregator를 **1회**만 돌리고 쿼리별로 슬라이스한 뒤 meta-classifier를 **쿼리당 1회** 호출한다
+  (→ `--batch-queries`가 깨뜨린 `_covariance_relation_scores` 단일 쿼리 거동 유지).
+- **정확성 가드 2개** (둘 다 만족해야 캐싱 사용, 아니면 기존 경로로 폴백):
+  ⓐ `context_mode == "all"`, ⓑ **`context_limit is None`** — `--max-tiles`/`--context-max-tiles`가
+  설정되면 공유 `generator`가 쿼리마다 전진해 **context 부표본이 매번 달라지므로** 캐싱이
+  한 번 뽑은 draw를 고정해버린다. 공식 50-fold는 full-tile이라 해당 없음.
+- CLI: 기본 **ON**, `--no-cache-context`로 A/B.
+- **검증**: ⓐ 2-fold A/B 66 쿼리 `max |Δp| = 0.000e+00`, ⓑ 50-fold 1,650 쿼리를 25-worker 실행과
+  대조해 `max |Δp| = 0.000e+00`, pooled `0.692497` 완전 일치. **bit-identical.**
+
+| | 워커 | GPU | 시간 | GPU-초 |
+|---|---|---|---|---|
+| 기존 (멀티프로세싱) | 25 | 2 | 356s | 712 |
+| **캐싱 (단일)** | **1** | **1** | **50s** | **50** |
+
+  벽시계 **7.1×**, GPU 시간 **14.2×** 절감. 이론치 26.6×에 못 미치는 이유는 캐싱이 없애는 것이
+  context 재인코딩뿐이고 **meta-classifier는 여전히 쿼리마다** 돌기 때문이다(이 평가는 v34 config라
+  rare 분기가 켜져 있어 쿼리 raw cell도 소비).
+
+### 5. 신규 기준선 — bc_therapy/er_status (v35 ckpt, bf16, 캐싱)
+
+```
+fold-mean(macro) AUROC: 0.6975 ± 0.0895    pooled AUROC: 0.6925    (50 folds, 1,650 queries)
+```
+
+| | macro | pooled |
+|---|---|---|
+| **v35 (bf16, 신규 기준선)** | **0.6975 ± 0.090** | **0.6925** |
+| SEAL ABMIL (지도) | 0.717 ± 0.086 | — |
+| SEAL MeanMIL (지도) | 0.712 ± 0.091 | — |
+| §53 기록 (v34, fp32) | — | 0.672 **(참고용)** |
+
+- ABMIL 대비 **−0.020**, MeanMIL 대비 **−0.015**. EGFR/PIK3CA에서 보였던 "MeanMIL 동급~우위"와
+  달리 이 task는 **MeanMIL에도 소폭 미달**이다.
+- 산출물: `predictions/pathobench_bc_therapy_er_status_v35_official50_bf16_cached.pt`
+  (25-worker 판본 `..._bf16.pt`도 보존, 수치 동일). 로그 `logs/official50/er_status_*.log`.
+
+### 6. 테스트 (45 → **51 tests**, 약 65초)
+
+- `tests/test_precision_contract.py` +2: 평가 헬퍼 기본값이 bf16이고 fp16을 거부하는지,
+  추론 스크립트들이 **공용 헬퍼를 쓰는지**(자체 precision 하드코딩 금지).
+- **신규** `tests/test_context_cache_equivalence.py` (4): 합성 에피소드에서 ⓐ 합동 패스 == 쿼리별
+  패스, ⓑ context 표현의 쿼리 무관성, ⓒ pool 통계가 query cell을 무시, ⓓ anchor가 query cell을
+  무시. 캐싱을 무효화하는 변경(쿼리 누출)이 50-fold 실행이 아니라 **여기서** 깨지도록 고정.
+
+### 7. 다음
+
+1. **Q1 단독 arm** (§62-7): `meta_population_token_mode: projected | structured`를
+   `_population_memory_logits`와 `_population_memory_logits_batched` **두 경로**에 구현 +
+   동치 테스트 → 1~2 fold routing entropy 진단 → scratch·episode-matched 학습.
+   진단·평가는 이제 er_status 50-fold가 **50초**면 되므로 반복 비용이 사라졌다.
+2. 정밀도 교란(§63-7)은 그대로 유효 — 새 학습은 bf16, 비교 대상 v35 ckpt는 fp32 학습본이다.
+3. (선택) 공식 50-fold 재실행이 필요한 나머지 task들: §53 표 9개 + 잔여 8개. 캐싱으로 task당
+   비용이 ~1/14로 줄었으니 전체 재산출이 현실적이다. **실행 전 `/tmp/pathobench_official_workers/`
+   fp32 캐시 정리 필수**(§64-3).

@@ -49,7 +49,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.utils.metrics import auroc, log_loss  # noqa: E402
-from src.utils.utils import build_model, merge_train_config  # noqa: E402
+from src.utils.utils import (  # noqa: E402
+    add_eval_precision_argument,
+    build_model,
+    eval_autocast,
+    merge_train_config,
+)
 
 MODEL_INPUT_DIM = 512
 FEATURE_DIM = 1536
@@ -184,6 +189,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--output", type=Path, default=None)
+    parser.add_argument(
+        "--no-cache-context",
+        dest="cache_context",
+        action="store_false",
+        help="Disable per-fold context-representation caching (docs SS64). "
+        "Caching is exact for all-context full-tile folds and is what makes "
+        "the official protocol ~25x cheaper; this flag exists for A/B checks.",
+    )
+    parser.set_defaults(cache_context=True)
+    add_eval_precision_argument(parser)
     return parser.parse_args()
 
 
@@ -283,6 +298,8 @@ def evaluate_trial(
     seed: int,
     device: torch.device,
     batch_queries: bool = False,
+    precision: str = "bf16-mixed",
+    cache_context: bool = True,
 ) -> dict:
     """Run one all-context (or sample-context) inference pass.
 
@@ -359,7 +376,97 @@ def evaluate_trial(
     queried_ids: list[str] = []
     nan_count = 0
 
-    if batch_queries:
+    autocast = eval_autocast(device, precision)
+
+    # ---- context-representation caching (docs SS62-3 / SS64) --------------
+    # Every query in an all-context fold sees the SAME context set, and the
+    # aggregator's only episode-level state -- `_context_pool_stats` and
+    # `_context_anchors` -- is computed from the context bags alone. So the
+    # whole episode's representation can be built ONCE per fold and sliced per
+    # query, instead of re-encoding all context bags for every query.
+    # Measured bit-identical (||delta||_inf = 0.000e+00, SS62-3).
+    #
+    # Guards, both required for exactness:
+    #   * context_mode == "all": otherwise each query draws its own context.
+    #   * context_limit is None: with --max-tiles/--context-max-tiles the shared
+    #     `generator` advances per query, so each query's context is a DIFFERENT
+    #     random subsample. Caching would silently freeze one draw.
+    # `batch_queries` keeps its own (unvalidated) single-call path.
+    use_cache = (
+        cache_context
+        and not batch_queries
+        and context_mode == "all"
+        and context_limit is None
+    )
+
+    if use_cache:
+        context_ids = sample_context_ids()
+        episode_bags = [
+            *(subsample_context_bag(projected[s]) for s in context_ids),
+            *(subsample_bag(projected[s]) for s in test_ids),
+        ]
+        n_context = len(context_ids)
+        episode_y = torch.tensor(
+            [train_y[s] for s in context_ids] + [test_y[s] for s in test_ids],
+            dtype=torch.long,
+            device=device,
+        )
+        is_context = torch.zeros(len(episode_bags), dtype=torch.bool, device=device)
+        is_context[:n_context] = True
+
+        base = model.model
+        aggregator = base.aggregator
+        with torch.no_grad(), autocast:
+            # One pass for the whole fold. Mirrors BaseModel.forward's ragged
+            # path, hoisting everything that does not depend on the query.
+            normalized_bags = aggregator._normalize_bags(episode_bags)
+            if aggregator.bag_representation in ("poolz", "poolz_l2"):
+                pool_mean, pool_std = aggregator._context_pool_stats(
+                    normalized_bags, is_context
+                )
+            else:
+                pool_mean = pool_std = None
+            representation = aggregator(episode_bags, context_mask=is_context)
+            context_representation = {
+                name: tokens[is_context] for name, tokens in representation.items()
+            }
+            context_labels = episode_y[is_context]
+
+            for query_index, query_id in enumerate(test_ids):
+                position = n_context + query_index
+                query_representation = {
+                    name: tokens[position : position + 1]
+                    for name, tokens in representation.items()
+                }
+                # Per-query `_bag_view` is one bag and uses context-only pool
+                # statistics, so it is unchanged by the hoist.
+                query_instances = [
+                    aggregator._bag_view(
+                        normalized_bags[position], pool_mean, pool_std
+                    )[0]
+                ]
+                # One meta-classifier call PER QUERY keeps the single-query
+                # `_covariance_relation_scores` margin behaviour that
+                # --batch-queries breaks.
+                logits = base.meta_classifier(
+                    context=context_representation,
+                    context_labels=context_labels,
+                    query=query_representation,
+                    query_instances=query_instances,
+                )
+                probability = float(
+                    torch.softmax(logits.float(), dim=-1)[0, 1].item()
+                )
+                if probability != probability:
+                    nan_count += 1
+                probabilities.append(probability)
+                queried_ids.append(query_id)
+                if (query_index + 1) % 20 == 0 or query_index + 1 == len(test_ids):
+                    print(
+                        f"  ... {query_index + 1}/{len(test_ids)} queries (cached)",
+                        flush=True,
+                    )
+    elif batch_queries:
         # Single shared context (built/subsampled once), all queries masked
         # together in one forward call. See WARNING in the docstring above.
         context_ids = sample_context_ids()
@@ -375,14 +482,14 @@ def evaluate_trial(
         mask_index = torch.arange(
             n_context, n_context + len(test_ids), device=device
         )
-        with torch.no_grad():
+        with torch.no_grad(), autocast:
             logits = model.model.forward(episode_bags, episode_y, mask_index)
         probability_t = torch.softmax(logits.float(), dim=-1)[:, 1].cpu()
         probabilities = probability_t.tolist()
         queried_ids = list(test_ids)
         nan_count = int(sum(1 for p in probabilities if p != p))
     else:
-        with torch.no_grad():
+        with torch.no_grad(), autocast:
             for query_index, query_id in enumerate(test_ids):
                 context_ids = sample_context_ids()
                 context_bags = [
@@ -474,6 +581,8 @@ def evaluate_cv(
             seed=args.seed + fold_index,
             device=device,
             batch_queries=args.batch_queries,
+            precision=args.precision,
+            cache_context=args.cache_context,
         )
         if result["nan_count"]:
             print(f"WARNING: {result['nan_count']}/{len(result['queried_ids'])} "
@@ -636,6 +745,8 @@ def evaluate_official_folds(
             seed=args.seed + k,
             device=device,
             batch_queries=args.batch_queries,
+            precision=args.precision,
+            cache_context=args.cache_context,
         )
         probability = result["probability"]
         target = result["target"]
@@ -985,6 +1096,8 @@ def main() -> None:
             seed=trial_seed,
             device=device,
             batch_queries=args.batch_queries,
+            precision=args.precision,
+            cache_context=args.cache_context,
         )
         if result["nan_count"]:
             print(f"WARNING: {result['nan_count']}/{len(result['queried_ids'])} "

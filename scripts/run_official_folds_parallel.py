@@ -68,6 +68,14 @@ def parse_args() -> argparse.Namespace:
         help="Forwarded to test_pathobench.py --rare-logits-zero (P0-b gate, "
         "rev.2 §4.2: force rare_logits=0 during eval).",
     )
+    parser.add_argument(
+        "--precision",
+        type=str,
+        default="bf16-mixed",
+        choices=["bf16-mixed", "32-true"],
+        help="Forwarded to test_pathobench.py --precision "
+        "(agent_handoff SS3.4; 32-true reproduces fp32-era numbers).",
+    )
     parser.add_argument("--keep-tmp", action="store_true")
     return parser.parse_args()
 
@@ -120,6 +128,7 @@ def main() -> None:
             cmd += ["--batch-queries"]
         if args.rare_logits_zero:
             cmd += ["--rare-logits-zero"]
+        cmd += ["--precision", args.precision]
         with worker_log.open("w") as lf:
             p = subprocess.Popen(cmd, env=env, stdout=lf, stderr=subprocess.STDOUT)
         procs.append((i, s, e, p, worker_out, worker_log))

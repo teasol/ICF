@@ -67,8 +67,14 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--precision",
-        default="16-mixed",
-        help="Lightning inference precision (default: 16-mixed for RTX 2080 Ti).",
+        default="bf16-mixed",
+        choices=["bf16-mixed", "32-true"],
+        help=(
+            "Lightning inference precision. bf16-mixed is the enforced "
+            "numerical-safety contract (agent_handoff SS3.4) -- the previous "
+            "default was 16-mixed (fp16), which is exactly the overflow path "
+            "that contract forbids. 32-true reproduces fp32-era numbers."
+        ),
     )
     return parser.parse_args()
 

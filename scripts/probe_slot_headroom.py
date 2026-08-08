@@ -70,7 +70,12 @@ from scripts.test_pathobench import (  # noqa: E402
     load_slide_features,
 )
 from src.utils.metrics import auroc  # noqa: E402
-from src.utils.utils import build_model, merge_train_config  # noqa: E402
+from src.utils.utils import (  # noqa: E402
+    add_eval_precision_argument,
+    build_model,
+    eval_autocast,
+    merge_train_config,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -116,6 +121,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--inner-folds", type=int, default=5)
     parser.add_argument("--output", type=Path, default=None)
+    add_eval_precision_argument(parser)
     return parser.parse_args()
 
 
@@ -252,6 +258,7 @@ def fold_features(
     bags: list[torch.Tensor],
     context_mask: torch.Tensor,
     projection_trained: bool,
+    precision: str = "bf16-mixed",
 ) -> dict[str, torch.Tensor]:
     """Run the aggregator once and return per-bag feature matrices.
 
@@ -262,8 +269,9 @@ def fold_features(
     deployed bag token.
     """
     base = model.model
-    representation = base.aggregator(bags, context_mask=context_mask)
-    tokens = base.meta_classifier._all_structured_tokens(representation)
+    with eval_autocast(context_mask.device, precision):
+        representation = base.aggregator(bags, context_mask=context_mask)
+        tokens = base.meta_classifier._all_structured_tokens(representation)
     features = {"all": tokens.reshape(tokens.shape[0], -1).float().cpu()}
     if base.meta_classifier.project_structured_tokens:
         projected = base.meta_classifier._projected_bag_tokens(tokens)
@@ -355,7 +363,11 @@ def main() -> None:
             context_mask = torch.zeros(len(bags), dtype=torch.bool, device=device)
             context_mask[torch.tensor(context_index, device=device)] = True
             features = fold_features(
-                model, bags, context_mask, projection_trained=not skipped
+                model,
+                bags,
+                context_mask,
+                projection_trained=not skipped,
+                precision=args.precision,
             )
 
             for name, matrix in features.items():

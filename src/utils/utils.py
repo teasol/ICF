@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -193,6 +194,57 @@ def build_model(config: dict[str, Any]) -> ModelInterface:
     model_kwargs = deep_merge(model_kwargs, optimizer_config)
     model_kwargs = deep_merge(model_kwargs, scheduler_config)
     return ModelInterface(**model_kwargs)
+
+
+DEFAULT_EVAL_PRECISION = "bf16-mixed"
+SUPPORTED_EVAL_PRECISIONS = ("bf16-mixed", "32-true")
+
+
+def eval_autocast(
+    device: torch.device | str,
+    precision: str = DEFAULT_EVAL_PRECISION,
+):
+    """Autocast context for an inference pass (agent_handoff SS3.4).
+
+    The bf16-mixed contract covers evaluation as well as training (user
+    decision, 2026-08-08). `evaluate_synthetic.py` already ran eval under bf16
+    autocast while `test_pathobench.py` / `test_musk.py` ran fp32, so the same
+    checkpoint was scored under two different precisions depending on which
+    script you called; this helper is the single definition.
+
+    ``32-true`` stays available as an escape hatch for reproducing the fp32-era
+    numbers (every official 50-fold AUROC recorded before 2026-08-08). fp16 is
+    rejected outright: fp16 coefficients overflow the covariance-sketch inverse
+    and the ridge solves to NaN, which is the whole reason for SS3.4.
+
+    CPU autocast is skipped -- bf16 matmul on CPU is emulated and would make
+    unit tests both slow and needlessly lossy.
+    """
+    if precision not in SUPPORTED_EVAL_PRECISIONS:
+        raise ValueError(
+            f"Unsupported eval precision {precision!r}; expected one of "
+            f"{SUPPORTED_EVAL_PRECISIONS}. fp16 ('16-mixed') is forbidden by "
+            "the numerical-safety contract (docs/agent_handoff.md SS3.4)."
+        )
+    device = torch.device(device)
+    if precision == "32-true" or device.type != "cuda":
+        return contextlib.nullcontext()
+    return torch.autocast(device_type=device.type, dtype=torch.bfloat16)
+
+
+def add_eval_precision_argument(parser: argparse.ArgumentParser) -> None:
+    """Register the shared `--precision` flag on an evaluation script."""
+    parser.add_argument(
+        "--precision",
+        type=str,
+        default=DEFAULT_EVAL_PRECISION,
+        choices=list(SUPPORTED_EVAL_PRECISIONS),
+        help=(
+            "Inference precision (agent_handoff SS3.4). Default bf16-mixed is "
+            "the enforced contract; 32-true reproduces the fp32-era numbers "
+            "reported before 2026-08-08."
+        ),
+    )
 
 
 def estimate_training_vram_bytes(

@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-08` — **§62 v36 chunk-attention 반증 → 40→1 압축 해제(Q1)로 재정의**(P0-slots probe: EGFR/STK11 paired **+0.16**, num_slots는 부호 불일치로 보류). v34-1536 확정(PathoBench 보고용). 공식 50-fold **9/17 완료**(잔여 8개; 배치 스트림 2개가 원인 로그 없이 종료된 이력 있음 — §59.7).
+**Last updated**: `2026-08-08` — **§64 평가도 bf16-mixed 강제(2026-08-08 이전 50-fold 수치는 전부 참고용) + 폴드 단위 context 캐싱(bit-identical, 356s→50s) + bc_therapy/er_status 기본 평가 확정(macro 0.6975 ± 0.090)**. **§62 v36 chunk-attention 반증 → 40→1 압축 해제(Q1)로 재정의**(P0-slots probe: EGFR/STK11 paired **+0.16**, num_slots는 부호 불일치로 보류). v34-1536 확정(PathoBench 보고용). 공식 50-fold **9/17 완료**(잔여 8개; 배치 스트림 2개가 원인 로그 없이 종료된 이력 있음 — §59.7).
 > [!WARNING]
 > **완료된 공식 50-fold 9개 수치는 `5869535`(tanh margin fix) 이후 stale하다** (§59.5). 같은 ckpt·같은 폴드로 bc_therapy/er_status fold 1-3이 `0.43913/0.78696/0.69130` → `0.4348/0.7565/0.7217`로 바뀐다. HEAD를 별도 worktree에서 돌려 **내 변경이 원인이 아님**을 확인했다. §53 표는 재실행 후 갱신할 것.
 >
@@ -91,12 +91,23 @@ region **chunk** attention 제안서(폐기·삭제 2026-08-08, git 기록 보�
 > (+ `bag_token_bottlenecks` 개수). 따라서 ⓐ frozen ckpt로 임의 slot 수의 구조 token을 뽑을 수 있고,
 > ⓑ num_slots 변경은 ckpt 비호환이지만 **weight-only warm start**가 가능하다.
 >
-> **eval 캐싱 계약 (§62-3, bit-identical 실측)**: pool 통계(`_context_pool_stats`)와 anchor
-> (`_context_anchors`)는 **context bag 전용**이고 `_bag_view`/slot 통계는 per-bag이므로, 한 폴드의
-> 표현을 **1회 패스로 전부 계산**해도 쿼리별 패스와 **‖Δ‖∞ = 0.000e+00**이다. 배포 eval은
-> 쿼리마다 context 전체를 재인코딩하므로 **약 50× 낭비**한다(EGFR 폴드당 16,306 → 324 bag-인코딩).
-> `--batch-queries`가 깨뜨렸던 `_covariance_relation_scores` 결합은 meta-classifier를 쿼리당
-> 1회 호출하면 유지된다.
+> **eval 캐싱 계약 (§62-3 발견 → §64 구현, bit-identical)**: pool 통계(`_context_pool_stats`)와
+> anchor(`_context_anchors`)는 **context bag 전용**이고 `_bag_view`/slot 통계는 per-bag이므로,
+> 한 폴드의 표현을 **1회 패스로 전부 계산**해도 쿼리별 패스와 **‖Δ‖∞ = 0.000e+00**이다.
+> `evaluate_trial`이 **기본으로 캐싱**하며(`--no-cache-context`로 A/B) meta-classifier는 여전히
+> **쿼리당 1회** 호출해 `--batch-queries`가 깨뜨렸던 `_covariance_relation_scores` 단일 쿼리
+> 거동을 유지한다. er_status 50-fold 실측 **356s(25 worker/2 GPU) → 50s(1 worker/1 GPU)**,
+> 1,650 쿼리 `max|Δp| = 0.000e+00`. `tests/test_context_cache_equivalence.py`가 고정.
+>
+> ⚠️ **캐싱 가드 2개** (둘 다 만족해야 사용, 아니면 자동 폴백): ⓐ `context_mode == "all"`,
+> ⓑ **`context_limit is None`** — `--max-tiles`/`--context-max-tiles`를 주면 공유 `generator`가
+> 쿼리마다 전진해 **context 부표본이 쿼리마다 다르므로** 캐싱이 한 draw를 고정해버린다.
+>
+> **병렬 워커는 무효 (§64-3 실측)**: GPU당 fold 처리율이 13 worker/1 GPU와 25 worker/2 GPU에서
+> **14.2 s/fold로 동일**하다(메모리는 32%만 사용) — 이미 연산 포화이므로 워커 증설은 소용없다.
+> 러너는 `--workers 26`을 줘도 `chunk=ceil(50/26)=2` 때문에 **25 워커**를 띄운다.
+> ⚠️ 워커들이 `{tmp_dir}/{task}_official_folds.ckpt` **하나를 공유**하고 완료 fold를 건너뛰므로,
+> fp32 시절 캐시가 남아 있으면 **정밀도가 조용히 섞인다** — 재실행 시 새 `--tmp-dir`을 쓸 것.
 
 **진행 방침 (사용자 결정, §62-6)**: **zero-init gate를 쓰지 않고 아예 변경**한다 — population 분기의
 모든 파라미터가 token 개수가 아니라 `token_dim`/`hidden_dim`으로만 크기가 정해져 이 변경은
@@ -232,13 +243,15 @@ multi-resolution combiner의 paired AUROC `+0.01` headroom 확인 후에만 구�
    - ⚠️ 이 계약은 §56(v34 group default 신설) 이후 **선언만 되어 있고 강제되지 않았다** — `configs/trainer/default.yaml`이 precision을 아예 설정하지 않아 v34/v35 entry point가 Lightning 기본값 **32-true(fp32)**로 조용히 해석됐다. **확정 v34-1536 ckpt와 v35-16384 ckpt는 fp32로 학습된 것**이며, 지금 재실행하면 bf16-mixed로 돌아가 그 ckpt를 재현하지 않는다(정확한 역사적 재현이 필요하면 `trainer_overrides.precision: 32-true`).
    - **2026-08-08부터 예외 없이 강제**한다 (사용자 결정: "앞으로 항상 bf16-mixed"). `tests/test_precision_contract.py`가 ⓐ 활성 entry point `configs/train_*.yaml` 전부와 ⓑ **선택 가능한 `configs/trainer/*.yaml` group 전부**를 검사하므로, 다른 group을 골라 계약을 우회할 수 없다. 새 학습 config·새 trainer group은 이 테스트를 통과해야 한다.
    - `configs/trainer/ddp5.yaml`·`ddp8.yaml`의 `16-mixed`(fp16) 위반은 **해소 완료** (bf16-mixed로 교체). ddp8 주석의 "RTX A5000은 FP16 경로" 근거는 Ampere가 bf16을 지원하므로 무효다. 이를 참조하던 아카이브 config는 `configs/archive/v18_v19/train_synthetic.yaml` 1개뿐이며 폐기된 v18/v19 아키텍처다(원본 값은 git 이력에 보존).
-   - **적용 범위는 학습**이다. 평가는 `scripts/test_pathobench.py`가 Lightning trainer 없이 모델을 직접 빌드해 **fp32로 돌며**, 여기에 bf16을 강제하면 보고된 AUROC가 전부 이동한다. 따라서 `configs/test_*.yaml`과 `configs/archive/`는 검사 대상에서 **의도적으로 제외**한다(제외 근거는 테스트 docstring에 기재).
+   - **평가에도 강제한다 (2026-08-08 사용자 결정, §64)**. 이전에는 같은 ckpt가 스크립트마다 다르게 채점됐다 — `evaluate_synthetic.py` bf16 / `test_pathobench.py`·`test_musk.py` fp32 / `test.py` 기본값 **`16-mixed`(fp16!)**. 이제 `src/utils/utils.py`의 **`eval_autocast(device, precision)`가 단일 정의**이고 `add_eval_precision_argument(parser)`로 모든 추론 스크립트가 `--precision`(기본 `bf16-mixed`)을 갖는다. **fp16은 ValueError로 거부**되고 `32-true`만 탈출구다.
+   - ⚠️ **2026-08-08 이전에 산출된 공식 50-fold AUROC는 전부 fp32 산출물이며 참고용이다** (사용자 결정). 실측 이동폭: er_status fold 1이 `0.4348 → 0.5130`(**+0.078**), fold 3이 `0.7217 → 0.7609`(§64-1).
+   - `configs/archive/`는 폐기 아키텍처의 재현 기록이므로 검사에서 제외한다(근거는 `tests/test_precision_contract.py` docstring).
 5. **테스트 검증 필수**:
    - 코드를 변경한 뒤에는 아래 unittest 수트를 통과해야 완결로 인정한다:
      ```bash
      timeout 300s /home/aibio_3/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
      ```
-   - 기본 스위트는 현재 **45 tests, 약 50초**다 (§59: streaming 7개 + vram 2개, §63: precision 계약 4개 추가). 폐기 architecture/연구 진단 175개는
+   - 기본 스위트는 현재 **51 tests, 약 65초**다 (§59: streaming 7개 + vram 2개, §63: precision 계약 4개, §64: precision-eval 2개 + context 캐싱 등가성 4개 추가). 폐기 architecture/연구 진단 175개는
      `tests/history/legacy_*.py`로 이관되어 기본 discovery에서 실행되지 않는다. archive suite는
      수정 대상이 해당 보존 경로일 때만 개별 실행한다.
 

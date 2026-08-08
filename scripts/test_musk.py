@@ -44,7 +44,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.utils.metrics import auroc, bootstrap_auroc_interval, log_loss  # noqa: E402
-from src.utils.utils import build_model, merge_train_config  # noqa: E402
+from src.utils.utils import (  # noqa: E402
+    add_eval_precision_argument,
+    build_model,
+    eval_autocast,
+    merge_train_config,
+)
 
 DEFAULT_CHECKPOINT = (
     PROJECT_ROOT
@@ -95,6 +100,7 @@ def parse_args() -> argparse.Namespace:
         "centered_no_l2 = center only, keep magnitude "
         "               (bag_centered_l2_normalize=False).",
     )
+    add_eval_precision_argument(parser)
     return parser.parse_args()
 
 
@@ -183,7 +189,7 @@ def main() -> None:
 
     probabilities: list[float] = []
     nan_count = 0
-    with torch.no_grad():
+    with torch.no_grad(), eval_autocast(device, args.precision):
         for query in range(n_bags):
             episode_x = [bag.to(device) for bag in bags]
             episode_y = labels.to(device)

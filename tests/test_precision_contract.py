@@ -8,15 +8,19 @@ between SS56 (v34 group defaults) and 2026-08-08, so the v34/v35 entry points
 silently resolved to Lightning's 32-true default. This test makes the contract
 executable.
 
-SCOPE (deliberate, SS63):
+SCOPE (SS63, extended to evaluation on 2026-08-08 by user decision):
 
-* **Training only.** Every active `configs/train_*.yaml` entry point AND every
+* **Training.** Every active `configs/train_*.yaml` entry point AND every
   selectable `configs/trainer/*.yaml` group must resolve to bf16-mixed, so the
   contract cannot be dodged by picking a different trainer group.
-* **Eval is NOT covered.** `scripts/test_pathobench.py` builds the model
-  directly (no Lightning trainer precision) and runs fp32; forcing bf16 there
-  would silently move every reported AUROC. `configs/test_*.yaml` is therefore
-  excluded on purpose.
+* **Evaluation.** Every inference script must default to bf16-mixed via the
+  shared `eval_autocast` / `add_eval_precision_argument` helpers. Before this,
+  `evaluate_synthetic.py` ran eval under bf16 autocast while
+  `test_pathobench.py` / `test_musk.py` ran fp32 and `test.py` defaulted to
+  `16-mixed` (fp16 -- the exact overflow path SS3.4 forbids), so the same
+  checkpoint scored differently depending on which script was called.
+  Consequence, accepted by the user: **every official 50-fold AUROC recorded
+  before 2026-08-08 was produced under fp32 and is now reference-only.**
 * **`configs/archive/` is NOT covered.** Those are historical reproducibility
   records for dead architectures; rewriting their precision would falsify what
   was actually run.
@@ -70,6 +74,36 @@ class TestPrecisionContract(unittest.TestCase):
             (REPO_ROOT / "configs" / "trainer" / "default.yaml").read_text()
         )
         self.assertEqual(group.get("precision"), REQUIRED_PRECISION)
+
+    def test_eval_helper_defaults_to_bf16_mixed(self) -> None:
+        """Evaluation shares one precision definition and it defaults to bf16."""
+        from src.utils.utils import DEFAULT_EVAL_PRECISION, eval_autocast
+
+        self.assertEqual(DEFAULT_EVAL_PRECISION, REQUIRED_PRECISION)
+        # fp16 must be refused outright, not silently accepted.
+        with self.assertRaises(ValueError):
+            eval_autocast("cuda", "16-mixed")
+        # 32-true stays available for reproducing fp32-era numbers.
+        eval_autocast("cuda", "32-true")
+
+    def test_eval_scripts_use_the_shared_precision_helper(self) -> None:
+        """No inference script may hardcode its own precision.
+
+        `scripts/test.py` defaulted to `16-mixed` (fp16) until 2026-08-08 while
+        `test_pathobench.py` ran fp32 and `evaluate_synthetic.py` ran bf16, so
+        the same checkpoint scored three different ways.
+        """
+        scripts = REPO_ROOT / "scripts"
+        for name in ("test_pathobench.py", "test_musk.py", "probe_slot_headroom.py"):
+            with self.subTest(script=name):
+                source = (scripts / name).read_text()
+                self.assertIn("add_eval_precision_argument", source)
+                self.assertIn("eval_autocast", source)
+        for name in ("test.py", "run_official_folds_parallel.py"):
+            with self.subTest(script=name):
+                source = (scripts / name).read_text()
+                self.assertIn(f'"{REQUIRED_PRECISION}"', source)
+                self.assertNotIn('default="16-mixed"', source)
 
     def test_every_selectable_trainer_group_uses_bf16_mixed(self) -> None:
         """No trainer group may opt out -- selecting one must not dodge SS3.4.
