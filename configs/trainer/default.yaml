@@ -1,3 +1,20 @@
 # Default trainer = v34-1536 (PathoBench reporting model, 2026-08-07).
 # Lightning defaults cover the remaining Trainer options.
 max_epochs: 50
+
+# Numerical-safety contract (agent_handoff SS3.4, ENFORCED 2026-08-08).
+#
+# The covariance sketch inverts a d(d+1)/2 correlation feature and the ridge
+# branches solve gram systems; fp16 coefficients overflow to NaN there, so
+# bf16-mixed is mandatory. Until 2026-08-08 this group set NO precision, which
+# means Lightning fell back to 32-true -- the contract was declared in
+# agent_handoff but never actually applied to the v34/v35 entry points.
+# Pinned by tests/test_precision_contract.py.
+#
+# REPRODUCIBILITY: the CONFIRMED v34-1536 checkpoint
+# (checkpoints/20260806_215800/.../epoch=048-val_ce_loss=0.4419.ckpt) and the
+# v35-16384 run (epoch=048-val_ce_loss=0.3469.ckpt) were both trained under the
+# old fp32 fallback. Re-running these configs now trains in bf16-mixed and will
+# NOT bit-reproduce those checkpoints. Use `precision: 32-true` in
+# trainer_overrides if an exact historical re-run is needed.
+precision: bf16-mixed

@@ -227,14 +227,17 @@ multi-resolution combiner의 paired AUROC `+0.01` headroom 확인 후에만 구�
    - NVML/드라이버/쉘 블로킹으로 인한 대화창 멈춤(Hang)을 방지하기 위해 터미널 조회가 필요한 모든 명령어에는 **`timeout 3s ps aux | grep python`** 또는 `timeout 3s tail -n 20 <LOG>`와 같이 반드시 타임아웃을 강제 적용한다.
 3. **완전 이탈형 백그라운드 구동**:
    - 장시간 실행되는 훈련/평가 명령어는 **반드시 `scripts/launch_interactive_training.sh` 독립 백그라운드 스크립트**나 short `WaitMsBeforeAsync` 태스크로 띄운다.
-4. **수치 안전성 계약**:
+4. **수치 안전성 계약 (2026-08-08 실제 강제)**:
    - 공분산 스케치 역행렬 연산 시 FP16 계수 오버플로우 및 NaN 발생 방지를 위해 **`bf16-mixed` 정밀도를 필수 적용**한다.
+   - ⚠️ 이 계약은 §56(v34 group default 신설) 이후 **선언만 되어 있고 강제되지 않았다** — `configs/trainer/default.yaml`이 precision을 아예 설정하지 않아 v34/v35 entry point가 Lightning 기본값 **32-true(fp32)**로 조용히 해석됐다. **확정 v34-1536 ckpt와 v35-16384 ckpt는 fp32로 학습된 것**이며, 지금 재실행하면 bf16-mixed로 돌아가 그 ckpt를 재현하지 않는다(정확한 역사적 재현이 필요하면 `trainer_overrides.precision: 32-true`).
+   - 2026-08-08부터 `configs/trainer/default.yaml`에 `precision: bf16-mixed`를 고정하고 **`tests/test_precision_contract.py`가 `configs/train_*.yaml` 전부를 검사**한다. 새 학습 config는 이 테스트를 통과해야 한다.
+   - `configs/trainer/ddp5.yaml`·`ddp8.yaml`은 `16-mixed`(fp16)라 **계약 위반 상태**다. 비활성 group이므로 방치 중이며, 사용 전 `bf16-mixed`로 교체할 것.
 5. **테스트 검증 필수**:
    - 코드를 변경한 뒤에는 아래 unittest 수트를 통과해야 완결로 인정한다:
      ```bash
      timeout 300s /home/aibio_3/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
      ```
-   - 기본 스위트는 현재 **41 tests, 약 48초**다 (§59: streaming 7개 + vram 2개 추가). 폐기 architecture/연구 진단 175개는
+   - 기본 스위트는 현재 **44 tests, 약 50초**다 (§59: streaming 7개 + vram 2개, §62: precision 계약 3개 추가). 폐기 architecture/연구 진단 175개는
      `tests/history/legacy_*.py`로 이관되어 기본 discovery에서 실행되지 않는다. archive suite는
      수정 대상이 해당 보존 경로일 때만 개별 실행한다.
 
@@ -282,7 +285,7 @@ scripts/launch_interactive_training.sh \
    - `docs/` 최상위 루트에는 새 Agent가 즉시 정독해야 하는 **핵심 Living 문서 5개와 현행 proposal 1개만 존재**해야 합니다:
      - [`agent_handoff.md`](agent_handoff.md): 운영 규칙, 바이너리 경로, Git 수칙, Docs/Config 관리 지침
      - [`current_status.md`](current_status.md): 개발 현황, 최신 수치, Git 커밋 이력, 이슈 진단 및 Action Plan (SSOT)
-     - [`current_architecture.md`](current_architecture.md): Architecture v22 수학적 기술 명세 (retrieval 없음)
+     - [`current_architecture.md`](current_architecture.md): Architecture **v34** 수학적 기술 명세 (retrieval 없음; 40 token → 40→1 사영 → 6개 evidence 분기, train/eval 경로 차이 포함)
      - [`current_experiments.md`](current_experiments.md): 실험 전략(합성=결정 / ICI=최종 테스트), 검정력, 평가 프로토콜, Stage 1~3 실행 명령어
      - [`README.md`](README.md): 전체 문서 맵 및 갱신 규칙
      - `architecture_*_proposal.md`: 현재 활성 개선안 1개. 완료·폐기 시 `history/`로 이동

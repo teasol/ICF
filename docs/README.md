@@ -13,7 +13,7 @@
 
 1. [`agent_handoff.md`](agent_handoff.md): 새 세션 Agent 초기화 수칙, Git 기반 워크플로우, 실행 환경, 타임아웃, 테스트 검증, Docs/Config 정리 규칙
 2. [`current_status.md`](current_status.md): 개발 현황, 최신 실증 수치, v22 retrieval 제거 결정과 근거, 실험 전략(합성=결정 / ICI=최종 테스트), 평가 프로토콜, Next Action Plan (SSOT)
-3. [`current_architecture.md`](current_architecture.md): Architecture v22 모델 구조 (4대 수학 기술, retrieval 없는 context 구성), Logit Fusion 수식
+3. [`current_architecture.md`](current_architecture.md): Architecture **v34** 모델 구조 (poolz_l2 표현, 40 structured token, anchor 구성, 40→1 사영, 6개 evidence 분기와 Logit Fusion 수식, **train/eval 실행 경로 차이**)
 4. [`current_experiments.md`](current_experiments.md): 실험 전략과 검정력, 평가 프로토콜, Stage 1~3 실행 명령어 및 실증 수치
 5. [`README.md`](README.md): 문서 맵 및 갱신/아카이빙 가이드라인
 6. [`architecture_v33_multiresolution_bag_proposal.md`](architecture_v33_multiresolution_bag_proposal.md): 현재 활성 개선 proposal. 완료·폐기되면 `history/`로 이관하고 후속 proposal 하나만 루트에 유지

@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-08` (**§62 v36 chunk-attention 제안서 반증 + P0-slots 무료 probe — Q1(40→1 압축 해제) paired +0.16 확정 / Q2(num_slots 증설) 부호 불일치로 보류** + §61 P0-b 게이트 통과(|Δpooled| 0.0009) + rare branch 제거 + §60 v35 공식 50-fold 2개(EGFR 0.7819 / PIK3CA 0.5668) + SEAL 비교 + §59 v35 rev.2 + **§41–§48 v33 arm C saga 아카이브**)  
+**Last updated**: `2026-08-08` (**§63 current_architecture v34 개편 검토(수치 오류 3건·서술 2건 수정) + bf16-mixed 계약 실제 강제(44 tests)** + **§62 v36 chunk-attention 제안서 반증 + P0-slots 무료 probe — Q1(40→1 압축 해제) paired +0.16 확정 / Q2(num_slots 증설) 부호 불일치로 보류** + §61 P0-b 게이트 통과(|Δpooled| 0.0009) + rare branch 제거 + §60 v35 공식 50-fold 2개(EGFR 0.7819 / PIK3CA 0.5668) + SEAL 비교 + §59 v35 rev.2 + **§41–§48 v33 arm C saga 아카이브**)  
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **v34 확정 (§52·§53·§56)**: **v34-1536을 PathoBench 보고용 모델로 확정**(사용자 결정). 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv fold·코호트·라벨) 기준 **50-fold**(SEAL macro-AUC와 동일 구조) — **5/17 완료**(bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569, brca_TP53), **12개는 config 수정으로 재시작**(§56, 백그라운드). v30은 합성/Musk baseline 유지. 이전 5-fold와 수치 ±0.04 이내 동일(평가 견고성). config 시스템을 v34 base + group default 참조형으로 리팩터링(§56). 자세한 진행 §53·§56.
@@ -12,7 +12,7 @@
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§62 (v36 chunk-attention 반증 → slot 재정의 + P0-slots probe: Q1 +0.16 확정 / Q2 보류 + 사용자 결정 4건)**, **§61 (P0-b 통과 + rare branch 제거)**, **§60 (v35-16384 완주 + 메모리/val 진단 + v35 공식 50-fold EGFR·PIK3CA + SEAL 비교)**, **§59 (v35 rev.2 개정 + 스트리밍 구현 + 학습 시작 + 50-fold stale 경고)**, **§58 (v35 rev.1 설계 — §59가 상당 부분 정정하므로 §59와 함께 읽을 것)**, **§57 (50-fold case leakage 진단)**, **§53 (v34 확정 + 공식 50-fold 표 — §59.5에 따라 재실행 필요)**,
+**Read first if you are picking this up**: **§63 (아키텍처 명세 검토 + bf16-mixed 강제 — 확정 ckpt는 fp32로 학습됨)**, **§62 (v36 chunk-attention 반증 → slot 재정의 + P0-slots probe: Q1 +0.16 확정 / Q2 보류 + 사용자 결정 4건)**, **§61 (P0-b 통과 + rare branch 제거)**, **§60 (v35-16384 완주 + 메모리/val 진단 + v35 공식 50-fold EGFR·PIK3CA + SEAL 비교)**, **§59 (v35 rev.2 개정 + 스트리밍 구현 + 학습 시작 + 50-fold stale 경고)**, **§58 (v35 rev.1 설계 — §59가 상당 부분 정정하므로 §59와 함께 읽을 것)**, **§57 (50-fold case leakage 진단)**, **§53 (v34 확정 + 공식 50-fold 표 — §59.5에 따라 재실행 필요)**,
 
 **열린 과제**: ⓪ **Q1 단독 arm**(§62-7: `meta_population_token_mode` 플래그 두 경로 구현 + routing entropy 진단 → scratch 학습), ⓪′ (판단 필요) **폴드 단위 representation 캐싱 eval**(§62-7.4, bit-identical ~50× 가속), ① **v35 공식 50-fold 평가**(§60, EGFR·PIK3CA 완료 → 잔여 15개 + SEAL 최종 재비교), ② **rare-free v35 arm 학습 + 50-fold 평가**(§61, Musk 재확인 포함), ③ **§53 표 9개 재실행**(`5869535` 이후 stale, §59.5) + 공식 50-fold 잔여 8개 → 17개 최종 표 + SEAL 재비교, ④ v30 vs v34 CV 공정 비교(PCA-per-fold), ⑤ v34-512 학습, ⑥ **chunk 단위(bag 내부) 스트리밍** 미구현(rev.2 §3), ⑦ v30 six-task / B2b cardinality 효과 분리, ⑧ frozen-v30 multi-resolution headroom, ⑨ v30 medium 참조 재학습. 해결·폐기 기록은 [`history/archive.md`](history/archive.md).
 
@@ -1927,3 +1927,95 @@ EGFR −0.041(t −2.27) / PIK3CA −0.021(t −0.98)로, fold가 같은 코호�
 5. 후속 단독 arm 후보(한 번에 하나): ⓐ `routing_sparsity_weight`/`balance_weight` 복원,
    ⓑ `slot_importance`를 class_memory 조건부로(현재 가중치는 task 무관, relation만 task 의존 —
    ABMIL과의 진짜 차이가 여기 남아 있다), ⓒ num_slots(§62-5 재검토), ⓓ IA-MIL(§31 측정 6).
+
+---
+
+## 63. 2026-08-08 — current_architecture v34 개편 검토 + bf16-mixed 계약 실제 강제
+
+**상태**: 커밋 `9123938`에서 `current_architecture.md`가 v22 → **v34로 전면 개편**된 것을 코드와
+대조 검토했다. 대부분 정확했고 **수치 오류 3건 + 서술 부정확 2건**을 찾아 수정했으며, 누락돼 있던
+계약 4건을 추가했다. 검토 중 **선언만 되고 강제되지 않던 bf16-mixed 계약**을 발견해 실제로 걸었다.
+
+### 1. 코드 대조로 확인된 부분 (수정 불필요)
+
+경험적 shape 덤프: `slots (B,12,3,I)` / `tails (B,3,I)` / `global_summary (B,I)` /
+`slot_metadata (B,12,2)` / `T=40` / `D=256` / density 8·rare 4.
+40→1 사영 산식(`40×Linear(I→64)=2560` + mean 1536 → 4096 → `Linear(4096→I)`),
+`_fuse_evidence` 스택 순서 `(global_shape, population, rare)`와 합산식, M=8/R=64/K=3/F=4,
+assignment temp 0.1, routing temp 0.5, sparsity·balance 0.0, `1024×50=51,200`,
+`architecture_version=24` — 전부 코드와 일치.
+
+### 2. 수정한 수치 오류
+
+| 항목 | 문서(오) | 실제 | 근거 |
+|---|---|---|---|
+| `E` (episode batch) | 합성 8 | **v34 4** / v35 1 | `configs/data/default.yaml:7 episode_batch_size: 4`; v35 config 주석의 "4 × 100 × 8192 = 3.28M cells"와도 일치 |
+| covariance_sketch 길이 | (C, 64) | **(C, 2080)** | `d(d+1)/2`, d=64. sketch는 상관행렬의 **상삼각 벡터화**이고 64는 사영 차원. 실측 d=16 → 136 = 16·17/2 |
+| Precision | bf16-mixed (224행은 fp32 — 자체 모순) | 실제는 **fp32 폴백**이었음 → 이제 bf16-mixed 강제 | 아래 §63-4 |
+
+### 3. 수정한 서술 부정확
+
+1. **slot index 안정성**: "bag 간 안정적 의미 없음" → **"에피소드 간(cross-episode) 안정적 의미 없음"**.
+   anchor는 에피소드마다 1회 계산돼 **context·query 모든 bag이 공유**하므로, 한 에피소드 안에서
+   slot `i`는 전 bag에 대해 동일한 anchor다(= bag 간 정렬은 성립). class memory·population routing이
+   slot 수준 비교를 할 수 있는 근거가 이것이므로 Q1에 직결된다.
+   ※ `_typed_bag_tokens` 코드 주석의 "no stable cross-bag identity"도 같은 부정확함을 갖고 있다
+   (문서가 이를 물려받았음). 코드 주석은 이번에 손대지 않았다 — 수정 시 별도 커밋.
+2. **anchor 구성**: "anchor 12개 = 에피소드 context cell의 spherical k-means" → 두 가지가 틀렸다.
+   ⓐ **12개 중 8개(density)만** k-means 계열 — centrality 상위 85% 구간 균등 분위수 시드 +
+   soft assignment 4회 정제(temp 0.15). **rare 4개는 `residual × diversity` greedy farthest-point**.
+   ⓑ k-means는 "context cell 전체"가 아니라 **후보 풀** 위에서 돈다.
+   `current_architecture.md` §3에 의사코드로 3단계(후보 풀 → density → rare)를 전부 명시했다.
+
+### 4. bf16-mixed 계약 — 선언만 되고 강제되지 않고 있었음 (수정 완료)
+
+- **발견**: `agent_handoff.md` §3.4가 "공분산 역행렬 FP16 오버플로/NaN 방지를 위해 bf16-mixed 필수"를
+  선언하지만, `configs/trainer/default.yaml`은 **`max_epochs: 50` 한 줄뿐**이었다 → Lightning 기본값
+  **32-true(fp32)**로 조용히 해석. §56에서 v34 group default를 만들면서 계약이 사문화된 것으로 보인다
+  (아카이브된 v33 config들은 `precision: bf16-mixed`를 갖고 있다).
+- **⚠️ 확정 ckpt의 정밀도**: **v34-1536(val_ce 0.4419)과 v35-16384(val_ce 0.3469)는 fp32로 학습된
+  것**이다. 지금 재실행하면 bf16-mixed로 돌아가 **그 ckpt를 재현하지 않는다**. 정확한 역사적 재현이
+  필요하면 `trainer_overrides.precision: 32-true`.
+- **조치 (사용자 결정 — "앞으로 제약 조건을 걸자")**:
+  ① `configs/trainer/default.yaml`에 `precision: bf16-mixed` 고정 + 재현성 주석.
+  ② 신규 `tests/test_precision_contract.py` — `configs/train_*.yaml` **전부**가 bf16-mixed로
+     해석되는지 + group default가 고정돼 있는지 검사. 기본 스위트 **41 → 44 tests**.
+  ③ 검증: 세 활성 config 전부 `precision='bf16-mixed'`로 해석,
+     `base_config` 참조 config 전체 해석 성공(failing 0), **44 tests OK**.
+- **남은 위반**: `configs/trainer/ddp5.yaml`·`ddp8.yaml`이 `16-mixed`(fp16)다. 비활성 group이라
+  방치했으며 사용 전 교체 필요(§3.4에 명시).
+
+### 5. 문서에 추가한 계약
+
+1. **bag 크기 불변 anchor 후보** (활성): `_population_candidates`가 bag 크기와 무관하게
+   **bag당 정확히 32개**(`context_samples_per_bag`) soft 후보를 반환한다 — 고정 random 방향에
+   temp-10 softmax를 **cell 축**으로 걸어 얻는 가중평균이라 cell 순서에도 불변.
+   대형 bag이 후보 풀을 지배하지 못하는 장치이며, ⓐ §59.1 anchor 오염 진단과
+   ⓑ 스트리밍이 anchor를 bit-identical하게 유지하는 근거가 모두 여기서 나온다.
+   **단 `N_i < 32`면 후보가 `N_i`개로 줄어든다** — Musk(median 12)가 해당.
+2. **`B` = `num_bags [60,100]`** (에피소드마다 추첨) — 차원 표에 비어 있던 항목. VRAM 불변식
+   `peak ∝ batch × bags × cells`의 구성요소.
+3. **rare 분기(R-2) 정확한 산식**: L2 정규화된 `ĥ`·`m̂_c`에 **학습되는 온도**
+   `τ = exp(rare_similarity_log_scale).clamp(0.1,50)`(init 5)를 곱한 뒤
+   `logsumexp_m(τ⟨ĥ_n, m̂_{c,m}⟩) − log M`. 이후 F=4 fraction별 **cell 축 top-k 평균**.
+   이 분기만 유일하게 **raw cell을 직접** 소비한다.
+4. **§5b 신설 — train과 eval은 서로 다른 코드 경로**: 진입점(`forward_episode_batch`/`_forward_dense`
+   vs `BaseModel.forward` ragged), anchor 후보(batched vs per-bag), population 분기(`_batched` 여부),
+   스트리밍(eval만), query view 범위를 표로 대비. **경로 선택은 `self.training`이 결정**하며
+   batched 경로는 full-tile 슬라이드에서 OOM이라 **eval은 항상 per-bag**이다. 수치 계약
+   (batched 후보는 모든 bag ≥32 cell일 때 정확, 아니면 자동 폴백 / 스트리밍 `‖Δ‖∞<1e-4`,
+   anchors bit-identical), `_context_pool_stats`의 `unbiased=False`(train/eval 0.25% 불일치 방지),
+   `--batch-queries` 미검증 프로토콜, §62 폴드 캐싱 bit-identical까지 함께 명시.
+
+### 6. 문서 정합성
+
+- `agent_handoff.md` §6.1과 `README.md`의 "Architecture **v22** 명세" 표기를 **v34**로 갱신
+  (개편 후 stale이었음).
+- `current_architecture.md` 8행 `> [!IMPORTANT]` callout 문법 수정(제목 뒤 내용이 다음 줄에 와야
+  렌더링됨).
+
+### 7. 다음
+
+§62-7과 동일 — Q1 단독 arm(`meta_population_token_mode` 두 경로 + 동치 테스트) → 1~2 fold
+routing entropy 진단 → scratch·episode-matched 학습. **새 학습 run부터는 bf16-mixed**이므로,
+v35(fp32)와의 비교는 정밀도가 바뀐 점을 교란 요인으로 명시해야 한다.
