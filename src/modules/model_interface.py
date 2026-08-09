@@ -33,6 +33,26 @@ class ModelInterface(L.LightningModule):
             self.hparams.get("vram_peak_warn_fraction", 0.85)
         )
         self._vram_peak_checked = False
+        # Non-finite gradient policy (docs SS67). "raise" (default) is the
+        # historical fail-fast. "zero" replaces non-finite gradient entries with
+        # 0 and keeps training, counting the events -- needed for arms whose
+        # ablation destabilises training (SS66: the P-2 arm died at epoch 13 with
+        # aggregator-wide non-finite gradients).
+        #
+        # Why zeroing and not gradient clipping alone: this hook runs BEFORE
+        # Lightning's clipping, so the guard fires first; and clip_grad_norm_
+        # cannot repair a NaN anyway -- a non-finite entry makes the total norm
+        # non-finite, which poisons every gradient through the clip coefficient.
+        # Clipping is still applied (gradient_clip_val) to bound the finite-but-
+        # large gradients that precede a blow-up.
+        policy = str(self.hparams.get("nonfinite_gradient_policy", "raise")).lower()
+        if policy not in ("raise", "zero"):
+            raise ValueError(
+                "nonfinite_gradient_policy must be 'raise' or 'zero', "
+                f"got {policy!r}."
+            )
+        self._nonfinite_gradient_policy = policy
+        self._nonfinite_gradient_steps = 0
 
     def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
         """Reject checkpoints from structurally incompatible architectures."""
@@ -77,7 +97,30 @@ class ModelInterface(L.LightningModule):
         ):
             return
         bad = [name for name, gradient in named if not torch.isfinite(gradient).all()]
-        raise RuntimeError(f"Non-finite gradients at {stage}: {bad}")
+        if self._nonfinite_gradient_policy == "raise":
+            raise RuntimeError(f"Non-finite gradients at {stage}: {bad}")
+        # policy == "zero": drop the poisoned entries and keep going. Zeroing
+        # (not nan_to_num) is deliberate -- mapping inf to a huge finite value
+        # would inject that magnitude into the step instead of removing it.
+        for _, gradient in named:
+            torch.nan_to_num_(gradient, nan=0.0, posinf=0.0, neginf=0.0)
+        self._nonfinite_gradient_steps += 1
+        if self._nonfinite_gradient_steps in (1, 10, 100, 1000) or (
+            self._nonfinite_gradient_steps % 5000 == 0
+        ):
+            print(
+                f"[nonfinite-gradient] zeroed at {stage} "
+                f"(count={self._nonfinite_gradient_steps}); first offenders: "
+                f"{bad[:5]}{' ...' if len(bad) > 5 else ''}",
+                flush=True,
+            )
+        self.log(
+            "nonfinite_gradient_steps",
+            float(self._nonfinite_gradient_steps),
+            on_step=False,
+            on_epoch=True,
+            prog_bar=False,
+        )
 
     def _check_peak_vram(self) -> None:
         """Warn once if the first optimizer step's peak allocation is high.
@@ -822,6 +865,9 @@ class ModelInterface(L.LightningModule):
             "routing_sparsity_weight",
             "routing_balance_weight",
             "fixed_training_queries",
+            # Trainer-side knobs read from hparams, not model constructor args.
+            "nonfinite_gradient_policy",
+            "vram_peak_warn_fraction",
         ):
             kwargs.pop(key, None)
         module_name, class_name = model_src.rsplit(".", 1)

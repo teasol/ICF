@@ -1,0 +1,79 @@
+# v39 — G-2 + CV-1 제거
+#
+# docs/current_status.md §67.
+#
+# BASELINE 변경 (사용자 결정 2026-08-09): §66에서 **G-2 global ridge가 무기여**로 확정됐다
+# (Δ −0.0004, CI [−0.0043, +0.0034], 22/50, control·arm 둘 다 50ep 정상 완주). 따라서
+# **G-2를 제거한 버전을 새 baseline으로 삼고**, 그 위에서 P-2 / CV-1을 다시 판정한다.
+#
+# 수치 안정화 (§66-4: P-2는 ep13 non-finite gradient 크래시, CV-1은 발산·best=ep0):
+#   nonfinite_gradient_policy: zero  — non-finite gradient 항을 0으로 치환하고 계속 학습
+#   gradient_clip_val: 1.0 (norm)    — 폭발 직전의 finite-but-large gradient를 제한
+# 두 레버는 대체재가 아니라 보완재다. 가드가 Lightning의 clipping보다 **먼저** 돌기 때문에
+# raise 정책에서는 clipping이 실행될 기회조차 없고, clip_grad_norm_은 NaN을 고치지도 못한다
+# (non-finite 항 하나가 total norm을 오염시켜 clip 계수를 통해 전체 gradient를 망친다).
+#
+# ⚠️ **안정화는 세 arm 전부에 동일 적용**한다. baseline에만 빼면 안정화 자체가 두 번째
+# 인자가 되어 §42-43 arm C 교훈을 반복하게 된다. 따라서 §66의 control(0.6994)과는 직접
+# 비교하지 말 것 — 비교 대상은 이 세트 안의 v39 baseline이다.
+#
+# 세 arm은 ridge 플래그 외 완전 동일 (v37 backbone, 50 epoch, rare-free, bf16, seed 42):
+#   train_v39_baseline_1536.yaml       G-2만 제거            (BASELINE)
+#   train_v39_no_abundance_1536.yaml   G-2 + P-2 제거
+#   train_v39_no_covariance_1536.yaml  G-2 + CV-1 제거
+#
+# ⚠️ EVALUATE EACH ARM WITH ITS OWN CONFIG — ablation된 ridge 파라미터는 gradient를 받지
+# 않아 init 상태로 남는다(tests/test_ridge_ablation.py가 고정). rare도 마찬가지(§61).
+#
+# 비용: ~110 s/epoch 실측(1xB200, 1024 steps/epoch) → 50 epoch에 ~1.6시간. arm당 ~98 GB라
+# 동시 2개가 한계이므로 2 wave로 돌린다.
+#
+# Launch:
+#   CUDA_DEVICES=<gpu> NPROC_PER_NODE=1 \
+#   TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun \
+#   NETRC=/NHNHOME/BASE/kimds/.netrc \
+#   scripts/launch_interactive_training.sh v39_no_covariance configs/train_v39_no_covariance_1536.yaml
+
+seed: 42
+ckpt_path:
+
+data: default
+data_overrides:
+  episode_batch_size: 1
+  dataset_kwargs:
+    num_cells: [1, 16384]
+    num_cells_log_uniform_power: 1.5
+
+model: default
+
+optimizer: default
+scheduler: default
+
+trainer: default
+trainer_overrides:
+  devices: 1
+  max_epochs: 50
+  # 수치 안정화 — 세 arm 공통.
+  gradient_clip_val: 1.0
+  gradient_clip_algorithm: norm
+
+logger: default
+logger_overrides:
+  experiment_name: v39_no_covariance
+
+callbacks: default
+
+model_kwargs:
+  training_targets_per_episode: [5, 12]
+  ranking_loss_weight: 0.10
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0
+  # 수치 안정화 — 세 arm 공통. non-finite gradient를 0으로 치환하고 계속 진행하며
+  # 발생 횟수를 nonfinite_gradient_steps로 로깅한다(발생량 자체가 진단 정보다).
+  nonfinite_gradient_policy: zero
+  meta_enable_rare_evidence: false
+  # v37 backbone — 세 arm 공통.
+  meta_bag_aggregation: context_adaptive
+  # G-2 무기여 확정(§66) → 새 baseline에서 제거. 세 arm 공통.
+  meta_enable_global_ridge: false
+  meta_enable_covariance_ridge: false
