@@ -1,0 +1,56 @@
+# v52 — v50과 동일 구조, LR 2e-05 (v50은 5e-4)
+#
+# v50이 왜 실패했나 (실측, 7 epoch):
+#   epoch  LR       train_ce  val_ce   val_auroc
+#     0    5.0e-05   0.5886   0.5426   0.7755   <- 최고가 여기다
+#     1    1.4e-04   0.5693   0.5443   0.7685
+#     3    3.2e-04   0.5931   0.5780   0.7324
+#     5    5.0e-04   0.6154   0.5865   0.7231
+#     6    5.0e-04   0.6165   0.5978   0.7009
+#
+# **train_ce도 함께 오른다**(0.5693 -> 0.6165). 과적합이면 train은 내려가고
+# val만 올라야 하는데 둘 다 오르므로 최적화 자체가 실패한 것이다. 악화 구간이
+# warmup(5e-05 -> 5e-04)과 정확히 겹친다. nonfinite gradient 이벤트는 0이라
+# SS66식 발산은 아니다.
+#
+# LR 5e-4는 학습 파라미터가 **229개**인 CV-only에 맞춰진 값이다. 여기는
+# 2,255,874개짜리 transformer가 Cholesky solve를 통과해 학습한다.
+#
+# ⚠️ ep0(무작위 초기화 인코더 + ridge)의 val_auroc 0.7755가 v50 전체 최고였다.
+#    이 arm이 그걸 넘지 못하면 문제는 LR이 아니라 구조다.
+#
+# 비교: v41_K128 (CV-only) SEAL 10개 0.6940 / SEAL ABMIL 0.727.
+#
+seed: 42
+ckpt_path:
+
+data: default
+data_overrides:
+  episode_batch_size: 1
+  dataset_kwargs:
+    num_cells: [1, 16384]
+    num_cells_log_uniform_power: 1.5
+
+model: set_transformer_ridge
+
+optimizer: adamw_2e5
+scheduler: default
+
+trainer: default
+trainer_overrides:
+  devices: 1
+  max_epochs: 50
+
+logger: default
+logger_overrides:
+  experiment_name: v52_settransformer_lr2e-5
+
+callbacks: default
+
+model_kwargs:
+  training_targets_per_episode: [5, 12]
+  ranking_loss_weight: 0.10
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0
+  nonfinite_gradient_policy: zero
+  # 대역폭 고정: a*K = 0.85*pi

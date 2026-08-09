@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import os
 import random
 import sys
 from pathlib import Path
@@ -398,8 +399,41 @@ def evaluate_trial(
         and context_mode == "all"
         and context_limit is None
     )
-
-    if use_cache:
+    # The cached path reaches into BaseModel's internals (`aggregator`,
+    # `meta_classifier`) to hoist the context work out of the per-query loop.
+    # A model built differently -- the learned bag-token branch (docs SS75) has
+    # no aggregator at all -- cannot take it. Those models get a generic path
+    # that calls the public forward once per fold with EVERY query at once,
+    # which needs no knowledge of what is inside.
+    # ICF_FORCE_GENERIC_EVAL=1 puts a BaseModel down the generic path too. That
+    # is how the path gets validated: a model with a known score must reproduce
+    # it here, otherwise a low number on a NEW model cannot be told apart from a
+    # bug in this code.
+    generic_model = not hasattr(model.model, "aggregator") or os.environ.get(
+        "ICF_FORCE_GENERIC_EVAL"
+    ) == "1"
+    if generic_model:
+        context_ids = sample_context_ids()
+        episode_bags = [
+            *(subsample_context_bag(projected[s]) for s in context_ids),
+            *(subsample_bag(projected[s]) for s in test_ids),
+        ]
+        n_context = len(context_ids)
+        episode_y = torch.tensor(
+            [train_y[s] for s in context_ids] + [test_y[s] for s in test_ids],
+            dtype=torch.long,
+            device=device,
+        )
+        query_index = torch.arange(
+            n_context, n_context + len(test_ids), device=device
+        )
+        with torch.no_grad(), autocast:
+            logits = model.model(episode_bags, episode_y, query_index)
+        scores = torch.softmax(logits.float(), dim=-1)[:, 1]
+        nan_count = int(torch.isnan(scores).sum())
+        probabilities = [float(value) for value in scores]
+        queried_ids = list(test_ids)
+    elif use_cache:
         context_ids = sample_context_ids()
         episode_bags = [
             *(subsample_context_bag(projected[s]) for s in context_ids),
