@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-09` (**§66 ridge ablation(v38) — G-2 global ridge 무기여 확정(Δ −0.0004, CI가 0 포함) / P-2·CV-1은 제거 시 학습 붕괴(발산·크래시, 참고용) → "ridge가 정보를 뺏는다" 가설 기각 방향** + **§65 v36 Q1·v37 두 arm 평가 완료 — 둘 다 게이트 미달(Δ −0.0024 / −0.0001), P0-slots probe의 +0.16은 라우팅 가능성이 아니었음 + val_ce와 50-fold AUROC 불일치 발견** + §64 평가 bf16 강제 + context 캐싱(356s→50s) + er_status 기본 평가 확정 + §62 P0-slots probe + §60 v35 공식 50-fold 2개 + **§61·§63 아카이브**)  
+**Last updated**: `2026-08-09` (**§69 covariance sketch 기저 진단 — label-free 축 8개 전부 무효(0.68±0.03 천장) / 대역폭 고정 시 차원은 유효(K=64는 최적 아님, 128~256이 +0.016~0.019) / 합성 val 지표로 arm 고르지 말 것** + **§68 분기 기여도 진단 → CV-only 성공: 6개 분기 중 CV-1·CV-2만 남겨도 fold-paired −0.0005 동률, 훈련 forward 5.9× VRAM 3.4× 절감** + **§67 안정화 역효과(clipping −0.0317) + LR 가설 반증** + §66 ridge ablation(v38) — G-2 global ridge 무기여 확정(Δ −0.0004, CI가 0 포함) / P-2·CV-1은 제거 시 학습 붕괴(발산·크래시, 참고용) → "ridge가 정보를 뺏는다" 가설 기각 방향** + **§65 v36 Q1·v37 두 arm 평가 완료 — 둘 다 게이트 미달(Δ −0.0024 / −0.0001), P0-slots probe의 +0.16은 라우팅 가능성이 아니었음 + val_ce와 50-fold AUROC 불일치 발견** + §64 평가 bf16 강제 + context 캐싱(356s→50s) + er_status 기본 평가 확정 + §62 P0-slots probe + §60 v35 공식 50-fold 2개 + **§61·§63 아카이브**)  
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **v34 확정 (§52·§53·§56)**: **v34-1536을 PathoBench 보고용 모델로 확정**(사용자 결정). 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv fold·코호트·라벨) 기준 **50-fold**(SEAL macro-AUC와 동일 구조) — **5/17 완료**(bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569, brca_TP53), **12개는 config 수정으로 재시작**(§56, 백그라운드). v30은 합성/Musk baseline 유지. 이전 5-fold와 수치 ±0.04 이내 동일(평가 견고성). config 시스템을 v34 base + group default 참조형으로 리팩터링(§56). 자세한 진행 §53·§56.
@@ -14,16 +14,19 @@
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§66 (ridge ablation — G-2 무기여 확정 / P-2·CV-1 붕괴는 참고용 + 운영 함정 2건)**, **§65 (v36 Q1·v37 평가 실패 + val_ce↔AUROC 불일치 — 아키텍처 판단의 전제가 바뀌었다)**, **§64 (평가 bf16 강제 + context 캐싱 + er_status 기본 평가 — 과거 수치는 참고용)**, **§62 (P0-slots probe +0.16 — §65가 "정보 존재 ≠ 라우팅 가능"으로 정정)**, **§60 (v35-16384 완주 + v35 공식 50-fold EGFR·PIK3CA + SEAL 비교)**, **§59 (v35 rev.2 + 스트리밍 구현 + 50-fold stale 경고)**, **§57 (50-fold case leakage 진단)**, **§53 (v34 확정 + 공식 50-fold 표 — §59.5에 따라 재실행 필요)**.
+**Read first if you are picking this up**: **§68 (분기 기여도 진단 → CV-only가 새 baseline. Q-5는 상수를 뱉고 있었고, 그래서 v36/v37이 실패했다)**, **§69 (sketch 기저 — label-free 축 8개 무효, 차원만 유효. 합성 지표 불신)**, **§67 (clipping을 기본으로 켜지 말 것)**, **§66 (ridge ablation — G-2 무기여, CV-1 제거 불가)**, **§65 (v36 Q1·v37 기각 + val_ce↔AUROC 불일치)**, **§64 (평가 bf16 강제 + context 캐싱 45초)**, **§60 (v35 공식 50-fold + SEAL 비교)**, **§57 (case leakage 진단)**.
 
 > [!IMPORTANT]
-> **§65에서 확인된 방법론 경고 2건 — 다음 arm 설계 전에 읽을 것**:
+> **방법론 경고 3건 — 다음 arm 설계 전에 읽을 것**:
+> 0. **합성 val 지표(val_ce·val_AUROC)로 arm을 고르지 말 것 (§69-6).** CV-only의 합성 val AUROC는
+>    ep0 0.8885 = ep49 0.8882로 평평한데 er_status는 +0.037 오른다. **판정은 er_status 50-fold로만**
+>    (캐싱으로 45초). 단일 측정의 요동이 ±0.05이므로 seed 반복도 필수다.
 > 1. **val_ce로 arm을 고르지 말 것.** v37 쌍은 val_ce가 확실히 좋았으나(0.3354 vs 0.3402) 50-fold는
 >    **−0.0068로 나빴다**(CI가 0 제외). 200 epoch은 합성 생성기에 과적합한다.
 > 2. **학습 길이가 다른 arm 간 비교는 그 자체로 교란이다** (§42-43 arm C 교훈의 재확인).
 >    control은 항상 같은 epoch 수로 새로 학습할 것.
 
-**열린 과제**: ⓪ **G-2 global ridge 제거 확정**(§66-6: er_status 단일 task·단일 seed이므로 task 1~2개 추가 확인 후 코드에서 실제 삭제), ⓪′ **P-2 / CV-1 재판정**(§66-6: gradient clipping 등 안정화 후 50 epoch 완주 — **control도 같은 조치로 재학습해야 공정**), ⓪″ **v37 label 조건화**(§65-3: v37은 label-free라 §62-2 진단의 절반만 답했다 — 미검정 레버), ① **공식 50-fold 전면 재산출**(§64: fp32 수치 전부 참고용 → §53 표 9개 + 잔여 8개; 캐싱으로 task당 ~50초, 실행 전 `/tmp/pathobench_official_workers/` fp32 캐시 정리 필수), ② **v35 공식 50-fold 잔여 15개** + SEAL 최종 재비교(§60), ③ v30 vs v34 CV 공정 비교(PCA-per-fold), ④ v34-512 학습, ⑤ **chunk 단위(bag 내부) 스트리밍** 미구현(rev.2 §3), ⑥ v30 six-task / B2b cardinality 효과 분리, ⑦ frozen-v30 multi-resolution headroom, ⑧ v30 medium 참조 재학습. **해결·폐기**: v36 Q1(§65 기각), v37 context-adaptive(§65 기각), rare branch 제거(§61 완료). 상세 기록은 [`history/archive.md`](history/archive.md).
+**열린 과제**: ⓪ **CV-2의 `covariance_matrix` 경로 확인**(§69-7: `_projected_covariance_matrix`가 `dimension=32` 기본이라 P의 앞 32열만 쓴다 — K 변경 시 영향 파악 선행), ⓪′ **K=128 (a=0.85π/K) CV-only 학습 arm**(§69-4), ⓪″ **learnable 사영**(§69: label-free 축 8개가 전부 같은 천장), ① ~~G-2 제거 확정~~ → §68에서 CV-only가 G 분기 전체를 제거하고 동률이므로 **해소됨**(§66-6: er_status 단일 task·단일 seed이므로 task 1~2개 추가 확인 후 코드에서 실제 삭제), ⓪′ **P-2 / CV-1 재판정**(§66-6: gradient clipping 등 안정화 후 50 epoch 완주 — **control도 같은 조치로 재학습해야 공정**), ⓪″ **v37 label 조건화**(§65-3: v37은 label-free라 §62-2 진단의 절반만 답했다 — 미검정 레버), ① **공식 50-fold 전면 재산출**(§64: fp32 수치 전부 참고용 → §53 표 9개 + 잔여 8개; 캐싱으로 task당 ~50초, 실행 전 `/tmp/pathobench_official_workers/` fp32 캐시 정리 필수), ② **v35 공식 50-fold 잔여 15개** + SEAL 최종 재비교(§60), ③ v30 vs v34 CV 공정 비교(PCA-per-fold), ④ v34-512 학습, ⑤ **chunk 단위(bag 내부) 스트리밍** 미구현(rev.2 §3), ⑥ v30 six-task / B2b cardinality 효과 분리, ⑦ frozen-v30 multi-resolution headroom, ⑧ v30 medium 참조 재학습. **해결·폐기**: v36 Q1(§65 기각), v37 context-adaptive(§65 기각), rare branch 제거(§61 완료). 상세 기록은 [`history/archive.md`](history/archive.md).
 
 **Branches**: `main` = v30 확정 baseline + 미채택 v31 CCER-v2 재현 코드. 참고용 branch/tag 구조는
 [`history/branch_structure.md`](history/branch_structure.md).
@@ -2096,3 +2099,238 @@ fold-paired Δ vs control (20k bootstrap, 50 folds):
 2. **P-2 / CV-1 재판정**: gradient clipping 등으로 안정화 후 50 epoch 완주. ⚠️ 안정화 조치가
    control과의 **두 번째 차이**가 되므로 **control도 같은 조치로 재학습**해야 공정하다 (2 wave, ~3시간).
 3. **v37 label 조건화** — §65-3이 남긴 미검정 레버.
+
+---
+
+## 67. 2026-08-09 — v39 수치 안정화: **역효과**(clipping이 −0.0317) + LR 가설 반증
+
+**상태**: §66에서 P-2/CV-1 제거 arm이 붕괴한 것을 "수치 불안정"으로 보고 안정화 2종을 넣었는데,
+**안정화가 멀쩡하던 baseline을 망가뜨렸다.**
+
+### 1. 구현 (`7079680`)
+
+`nonfinite_gradient_policy: raise`(기본, 현행) | `zero`. clipping만으로는 안 되는 이유:
+가드가 `on_before_optimizer_step`에 있고 Lightning은 이 훅을 **clipping보다 먼저** 부르므로
+raise 정책에서는 clipping이 실행될 기회조차 없다. 게다가 `clip_grad_norm_`은 NaN을 고치지
+못한다 — non-finite 항 하나가 total norm을 오염시키면 clip 계수를 통해 **모든** gradient가
+망가진다. 두 레버는 대체재가 아니라 보완재다. 79 tests.
+
+### 2. 결과 — er_status 50-fold
+
+| arm | 안정화 | val_ce | macro AUROC |
+|---|---|---|---|
+| v38_global (G-2 제거) | ✗ | 0.3417 | **0.6990** |
+| v39_baseline (G-2 제거) | ✓ | 0.3560 (ep13) | 0.6673 |
+| v39_no_abundance (G-2+P-2) | ✓ | 0.3538 | 0.6902 |
+| v39_no_covariance (G-2+CV-1) | ✓ | 0.4888 (**ep2**) | 0.5817 |
+
+**v39_baseline vs v38_global(플래그 동일, 안정화만 상이): fold-paired −0.0317
+[−0.0450, −0.0183], 13/50.** 안정화가 필요 없던 arm에 넣어 −0.032를 잃었다.
+
+### 3. LR 가설 반증 (사용자 제기 → 실측)
+
+`lr-AdamW`와 `nonfinite_gradient_steps`를 epoch별로 대조:
+
+| epoch | v39_baseline LR | 누적 non-finite | v38_global LR |
+|---|---|---|---|
+| 0–20 | 5.0e-4 (최대) | **0** | 5.0e-4 |
+| 25 | 2.5e-4 (감소) | 406 | 5.0e-4 |
+| 44 | 1.25e-4 | 1,992 (+695/epoch) | 5.0e-4 |
+
+**LR이 가장 높은 구간에서 non-finite가 0이고, LR을 낮출수록 폭증한다** — 방향이 정반대다.
+결정적 대조: v38_global은 **완전히 같은 5e-4를 50 epoch 내내 유지**하고도 non-finite 0건이다.
+LR 감소는 원인이 아니라 **증상**이다(plateau 스케줄러가 정체를 보고 깎았고, 정체의 원인이
+그 불안정이었다). 두 run의 유일한 차이는 clipping이다.
+
+### 4. 판정
+
+- **CV-1 제거는 안정화 유무와 무관하게 붕괴**한다(0.6049 → 0.5817, best가 각각 ep0/ep2).
+  수치 불안정이 아니라 **학습 자체가 성립하지 않는다.** CV-1 제거 불가 확정.
+- P-2는 두 번 다 손상된 조건에서만 측정돼 **여전히 미결**이었으나, §68에서 무의미해졌다
+  (CV-only가 P 분기 전체를 제거하고도 동률이므로).
+- ⚠️ **clipping을 기본으로 켜지 말 것.** 이 모델에서는 순손해다.
+
+---
+
+## 68. 2026-08-09 — 분기 기여도 진단 → **CV-only 성공**: 6개 분기 중 2개만 남겨도 동률
+
+**상태**: 사용자 질문("왜 covariance ridge는 제거 불가인가, 왜 내 아키텍처만으로는 학습이
+안 되는가")에서 출발해 분기별 기여도를 측정했고, 그 결과가 **모델의 5/6을 삭제할 수 있다**는
+결론으로 이어졌다. 이번 세션 최대 성과다.
+
+### 1. 분기 기여도 진단 (신규 `scripts/diagnose_branch_contributions.py`)
+
+v38_control ckpt, 합성 200 에피소드, 각 분기의 logit 단독 AUROC:
+
+| 분기 | 종류 | AUROC | 기여 std |
+|---|---|---|---|
+| **FINAL (모델 출력)** | — | **0.9199** | 2.398 |
+| **CV-1 covariance ridge** | closed-form | **0.9052** | 0.586 |
+| CV-2 covariance relation | learned | 0.8867 | 0.804 |
+| P-2 abundance ridge | closed-form | 0.6254 | 0.356 |
+| G global_shape | mixed | 0.5949 | 0.288 |
+| **Q-5 population attention** | learned | **0.5000** | **0.0000** |
+| R rare/tail | learned | 0.5196 | 0.0008 |
+
+**Q-5는 상수를 뱉는다** — AUROC 정확히 0.5000, std 0.0000. §62-2는 "routing softmax가 길이 1
+축에 걸려 무력"이라 진단했지만 실제로는 **분기 출력 자체가 상수**였다.
+→ **v36 Q1(−0.0024)과 v37(−0.0001)이 왜 실패했는지 설명된다: 상수를 뱉는 모듈에 더 좋은
+입력을 넣은 것이라 달라질 게 없었다.** 두 아키텍처 실험 모두 죽은 모듈을 고치고 있었다.
+
+### 2. 융합이 오히려 해가 되는 경우
+
+| arm | FINAL | 최고 단일 분기 | 융합 효과 |
+|---|---|---|---|
+| v38_control | 0.9199 | CV-1 0.9052 | +0.015 |
+| v39_no_abundance | 0.9192 | CV-1 0.8960 | +0.023 |
+| **v39_no_covariance** | **0.7929** | **CV-2 0.8706** | **−0.078** |
+
+CV-1을 뺀 모델은 **자기 최고 분기보다 0.078 나쁘다.** AUROC 0.70짜리 population이 기여
+std 1.25로 CV-2(0.945)보다 크게 실려 **약한 분기가 좋은 분기를 끌어내린다.**
+(부수 확인: CV-2는 CV-1 없이도 0.8706까지 학습된다 — "CV-1이 CV-2의 발판" 가설은 반증.)
+
+### 3. CV-only arm — **전 분기 모델과 동률**
+
+`meta_covariance_only: true`로 `final = cov_res·CV-1 + cov_rel_res·CV-2`만 남긴다.
+global_shape(게이트 없는 베이스 항), population, rare, fusion interaction을 전부 제거.
+
+| arm | 남긴 분기 | val_ce | macro AUROC | pooled |
+|---|---|---|---|---|
+| v38_control | 전부 | 0.3411 | 0.6994 ± 0.087 | 0.6946 |
+| **v40_cv_only** | **CV-1 + CV-2 뿐** | **0.3401** | **0.6989 ± 0.087** | **0.6956** |
+
+**fold-paired −0.0005 [−0.0037, +0.0024], 26/50 — 완전한 무차이.** val_ce와 pooled는 오히려
+CV-only가 미세하게 낫다.
+
+### 4. 죽은 분기 연산 skip (`fb926f8`)
+
+출력만 0으로 만드는 게 아니라 **계산 자체를 건너뛴다**:
+
+| 경로 | 전 분기 | CV-only skip | |
+|---|---|---|---|
+| 훈련 `forward_episode_batch` | 16.91 ms | **2.85 ms** | 5.9× |
+| 평가 ragged forward | 19.20 ms | 9.39 ms | 2.0× |
+| peak VRAM (60bags×16384) | 50,527 MiB | **14,720 MiB** | 3.4× |
+| epoch 시간 | 98s | **60s** | 1.65× |
+
+건너뛰는 것: context pool 통계, 전 셀 poolz_l2 표준화, per-episode anchors(top-k),
+slot assignment/MLA affinity/encoder, tails, metadata, class memories, population attention, rare.
+**핵심 근거: `centered_delta`(`_bag_view`의 세 번째 반환값)는 pool 통계에 의존하지 않는다.**
+
+> [!IMPORTANT]
+> **죽은 key는 zeros가 아니라 부재다** (사용자 결정). `_validate_representation`이 CV-only
+> 전용의 더 작은 계약을 강제하고(빠지거나 남으면 ValueError), 실수로 읽으면 KeyError로 즉시
+> 터진다. zeros였다면 shape 검증이 조용히 통과하고 0이 살아있는 분기로 흘러들었을 것이다.
+> **실제로 이 설계가 소비처 3곳을 잡았다**: `BaseModel.forward`의 auxiliary 조립부,
+> `_losses_from_output`의 routing entropy(`population_slot_weights`), 그리고 E>1 dense 경로의
+> 에피소드 축 슬라이스. routing 진단은 0을 넣지 않고 건너뛴다 — "분기가 안 돌았다"와
+> "돌았는데 0"의 구분은 Q-5가 죽은 걸 발견한 바로 그 신호라 잃으면 안 된다.
+
+⚠️ **첫 skip 구현은 틀렸고 테스트가 잡았다**: `_forward_dense`에 넘어오는 `instances`는 이미
+pool 표준화된 값이고 `centered_delta`는 별도 인자로 전달되는데, `instances`에서 재계산해
+dense/ragged가 **2.4e-2** 어긋났다. 그대로 갔으면 다른 모델을 조용히 학습했을 것이다.
+`test_skip_matches_a_full_branch_model_with_the_same_weights`가 방지선이다.
+**등가성 end-to-end 확인**: 같은 config·seed로 old/skip 두 구현을 나란히 학습해 val_ce가
+epoch 0–4에서 소수 4자리까지 완전 일치(0.4924/0.4639/0.4348/0.4017/0.3771).
+
+### 5. E=4는 접었다
+
+VRAM 실측으로 CV-only는 E=4까지 가능하지만(~97 GiB), **skip끼리 비교하면 E=1 60s vs E=4 86s로
+43% 느리다.** `parallel_cuda_generation`이 켜져 생성 병목이 풀릴 것이라는 가설은 반증됐다.
+(⚠️ 중간에 E=4(skip)를 E=1(**old**)과 비교해 "12% 빠르다"고 잘못 보고했다가 사용자 지적으로
+정정. 구현 차이를 E 차이로 읽은 오류.)
+부수 수정: VRAM 가드가 CV-only를 몰라 E=4를 169%로 오판·차단 → `activation_layers=1`로 보정
+(실측비 0.291 vs (1+1)/(1+6)=0.286). `tests/test_vram_guard.py` +2.
+
+---
+
+## 69. 2026-08-09 — covariance sketch 기저 진단: **label-free 축 8개 전부 무효**, 차원만 유효
+
+**상태**: CV-only에서 성능을 만드는 것이 covariance sketch 하나이므로 그 구성을 정밀 진단했다.
+사용자 아이디어 3건(다중 주파수 / 차원 ablation / learnable 사영)에서 출발.
+
+### 1. sketch 구성 (baseline.py:687-705)
+
+```
+centered_delta (N×1536) --P--> (N×64) --> 64×64 공분산 --> 상관행렬 --> shrinkage 0.1
+                                                              --> 상삼각 2080 --> CV-1 ridge
+P[d,k] = QR( sin(a·d·k) + cos(b·(d+1)·k) ),  a=0.019, b=0.011 하드코딩, persistent=False
+```
+`d`=임베딩 채널(1..1536), `k`=사영 방향 번호 **이자 주파수 배수**(1..64), `a`,`b`=주파수 사다리 간격.
+`a=b`면 삼각합성으로 단일 주파수로 퇴화한다(실측 최하 0.6180).
+**`persistent=False`** = ckpt에 저장되지 않음 → 결정적 공식을 쓰는 **공학적** 이유(랜덤이면
+98K float를 매 ckpt에 저장하거나 DDP 랭크 간 seed를 맞춰야 한다). 통계적 이유는 문서에 없다
+(v19 커밋 `03e7923`에 주석 없이 도입).
+
+### 2. 진단 방법
+
+CV-1과 **동일한 class-balanced dual ridge**로 sketch만 바꿔 er_status 공식 50-fold 채점
+(`scripts/diagnose_covariance_sketch.py` 외 2종). 학습 없음, 설정당 수 분.
+
+### 3. label-free 축은 전부 무효 — 8개 축, 전부 0.68 ± 0.03
+
+| 축 | 결과 |
+|---|---|
+| 랜덤 vs 결정적 사인 | 차이 없음 (보존율 0.0412 vs 0.0419, 둘 다 64/1536=0.0417) |
+| **PCA (분산 15배 보존: 63% vs 4%)** | **차이 없음** (0.6806 vs 0.6801) |
+| Sobol QMC (10 seed) | **−0.016** (0.6631 vs 가우시안 0.6795) |
+| 앨리어싱 여부 | 차이 없음 (0.6864 vs 0.6848) |
+| 사다리 간격 `a` (0.019~2.5) | 요동뿐 |
+| 대역폭 균일 사용 (0.85π) | 요동뿐 (0.6666) |
+| **위상만 변경(주파수 설계 고정)** | **0.6500~0.7535, 폭 0.10** ← 요동의 크기 |
+
+**위상 seed가 결정적이다.** `a=0.0385` 하나로 고정하고 열별 위상만 바꿔도 0.10이 흔들린다 —
+`a`를 두 자릿수 범위로 바꿨을 때보다 크다. 위상만 밀어도 부분공간 겹침이 0.385로 떨어지므로
+(무관한 랜덤끼리는 0.175) 사실상 다른 실현이다. 한때 최고로 보였던 `(1.5,1.1)` 0.7632는
+재현되지 않았고(0.6882), 이 요동 분포의 위쪽 꼬리였다.
+
+⚠️ 진행 중 잘못된 중간 결론 3건을 실측으로 폐기: "앨리어싱이라 의사난수화"(나이퀴스트 오독,
+`a·k=1.216 < π`라 앨리어싱 아님), "앨리어싱될수록 좋다", "QMC 등분포라 랜덤보다 낫다".
+
+### 4. 차원은 유효하다 — **단, 대역폭을 고정해야 보인다** (사용자 제안)
+
+기존 스윕은 `a` 고정이라 K를 키우면 대역폭(`a·K`)이 0.304→4.86 rad로 함께 변해 **차원 효과와
+대역폭 효과가 교란**됐다(그래서 "64에서 포화"로 잘못 보였다). `a = 0.85π/K`로 대역폭을 고정하면:
+
+| K | feats | 사다리 (6 seed) | 가우시안 (6 seed) |
+|---|---|---|---|
+| 16 | 136 | 0.6203 ± 0.042 | 0.6455 ± 0.075 |
+| 32 | 528 | 0.6715 ± 0.026 | 0.6191 ± 0.030 |
+| **64 (현행)** | 2,080 | 0.6824 ± 0.023 | 0.6760 ± 0.021 |
+| 128 | 8,256 | **0.6979 ± 0.032** | 0.6829 ± 0.014 |
+| 256 | 32,896 | **0.7009 ± 0.011** | 0.6951 ± 0.018 |
+
+**두 가족 모두 단조 증가**(가족 무관 → 차원 자체의 효과), **std도 단조 감소**(0.042→0.011).
+K=128→256은 feature 4배에 +0.003으로 수익 체감. **현행 K=64는 최적이 아니다.**
+
+### 5. 비용은 병목이 아니다 (전제 정정)
+
+full 1536² 공분산 실측: 60 bags×16384 cells에서 **2.81 ms / 0.53 GiB**. 연산이 아니라 **통계**가
+제약이다 — 상삼각 118만 feature를 셀 2,672개로 추정해 슬라이드 133개로 ridge를 맞춘다.
+사영은 압축이 아니라 **정칙화**다. split-half 재현성이 K=16 0.983 → 256 0.935로 하락하는 것이
+성분당 표본잡음(`1/√N_cells`)의 증거이나, §4에서 보듯 그 잡음보다 신호 증가가 빠르다.
+
+### 6. epoch 사다리 — **50 epoch은 필요하다** (합성 지표가 거짓말)
+
+`configs/callbacks/save_all.yaml`(save_top_k: -1) 신설, LR 스케줄을 건드리지 않고 max_epochs만
+12로 줄여 epoch 0–11이 50-epoch run과 **동일 LR 궤적**이 되게 했다.
+
+| epoch | 0 | 3 | 7 | 11 | **49** |
+|---|---|---|---|---|---|
+| er_status macro | 0.6617 | 0.6557 | 0.6620 | 0.6702 | **0.6989** |
+
+합성 val AUROC는 ep0 0.8885 = ep49 0.8882로 **완전히 평평한데** er_status는 **+0.037 오른다**.
+⚠️ **합성 val_ce·val_AUROC로 arm을 고르지 말 것** — §65의 val_ce 불일치에 이은 세 번째 사례이고,
+이번엔 합성 AUROC조차 못 믿는다는 뜻이다. **판정은 er_status 50-fold로만**(캐싱으로 45초).
+
+### 7. 다음
+
+1. **K=128 (a=0.85π/K) CV-only 학습 arm** — ridge만으로 +0.016~0.019, 학습을 얹으면 더 갈 여지.
+   ⚠️ ckpt 비호환(P shape·triangle 변경), 비용 K².
+   **CV-2 경로 확인 완료 (2026-08-09)**: `_projected_covariance_matrix(centered_delta, dimension=32)`의
+   호출부 4곳 모두 `dimension`을 넘기지 않아 기본값 32가 쓰이고, `min(32, K)`이므로 CV-2는
+   **P의 앞 32열만** 본다(문서의 "covariance_matrix는 64×64"는 **오류**, 실제 32×32).
+   → **K를 128/256으로 키워도 CV-2는 32에 고정**되어 이득이 CV-1에만 간다. 반대로 K<32면
+   CV-2도 함께 줄어든다. K 증설 arm에서는 `dimension`을 K에 연동할지가 별도 결정 사항이다.
+2. **learnable 사영** — label-free 축 8개가 전부 같은 천장이므로 천장을 뚫는 유일한 정보원은 라벨.
+3. seed 반복 필수: 단일 측정의 요동이 ±0.05다.

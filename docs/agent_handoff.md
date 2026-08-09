@@ -1,9 +1,33 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-09` — **§66 ridge ablation: G-2 global ridge 무기여 확정(Δ −0.0004) / P-2·CV-1은 제거 시 학습 붕괴** + **§65 v36 Q1·v37 두 arm 모두 게이트 미달(Δ −0.0024 / −0.0001)**. §64 평가도 bf16-mixed 강제(2026-08-08 이전 50-fold 수치는 전부 참고용) + 폴드 단위 context 캐싱(bit-identical, 356s→50s) + bc_therapy/er_status 기본 평가 확정. v34-1536 확정(PathoBench 보고용). 공식 50-fold **9/17 완료**(잔여 8개).
+**Last updated**: `2026-08-09` — **§68 CV-only가 새 baseline: 6개 evidence 분기 중 CV-1·CV-2만 남겨도 전 분기 모델과 동률(fold-paired −0.0005), 훈련 forward 5.9×·VRAM 3.4× 절감** + **§69 sketch 기저 진단(label-free 축 8개 무효, 차원만 유효)** + §67 clipping 역효과 + §66 ridge ablation: G-2 global ridge 무기여 확정(Δ −0.0004) / P-2·CV-1은 제거 시 학습 붕괴** + **§65 v36 Q1·v37 두 arm 모두 게이트 미달(Δ −0.0024 / −0.0001)**. §64 평가도 bf16-mixed 강제(2026-08-08 이전 50-fold 수치는 전부 참고용) + 폴드 단위 context 캐싱(bit-identical, 356s→50s) + bc_therapy/er_status 기본 평가 확정. v34-1536 확정(PathoBench 보고용). 공식 50-fold **9/17 완료**(잔여 8개).
 
 > [!IMPORTANT]
-> **아키텍처 판단의 전제 2건 (§65 실측, 다음 arm 설계 전 필독)**:
+> **CV-only 계약 (§68, 2026-08-09)**: `meta_covariance_only: true`면
+> `final = cov_res·CV-1 + cov_rel_res·CV-2`만 남고 global_shape(게이트 없는 베이스 항)·
+> population·rare·fusion interaction이 **계산조차 되지 않는다**. 전 분기 모델과 er_status
+> 50-fold **동률**(−0.0005 [−0.0037,+0.0024], 26/50)이면서 훈련 forward 16.91→2.85 ms,
+> peak VRAM 50.5→14.7 GB, epoch 98→60s.
+> ⚠️ **죽은 key는 zeros가 아니라 부재다.** `_validate_representation`이 CV-only 전용의 더 작은
+> 계약을 강제한다(빠지거나 남으면 ValueError). 새 소비처를 추가할 때 이 모드에서 KeyError가
+> 나면 **그게 정상 동작**이다 — 0으로 채우지 말고 분기를 가드할 것.
+> ⚠️ `meta_bag_aggregation`(v37 계열)은 CV-only에서 **무의미**하다. bag token 소비처가 전부
+> 없어서 weight maker가 계산되지 않는다. CV-only는 v36/v37/v38/v39 계보와 무관한 모델이다.
+>
+> **죽은 분기 (§68-1 실측)**: Q-5 population attention은 **상수를 뱉는다**(AUROC 0.5000,
+> std 0.0000). v36 Q1과 v37이 겨냥한 것이 바로 이 모듈이라 둘 다 Δ≈0으로 끝났다.
+> 새 아키텍처 arm을 설계하기 전에 **그 분기가 살아 있는지부터**
+> `scripts/diagnose_branch_contributions.py`로 확인할 것.
+>
+> **clipping 금지 (§67 실측)**: `gradient_clip_val: 1.0`을 넣으면 er_status 50-fold가
+> **−0.0317** [−0.0450,−0.0183] 떨어진다(플래그 동일, clipping만 상이). non-finite가 없던 arm에
+> 없던 불안정을 만든다. `nonfinite_gradient_policy: zero`는 non-finite가 없으면 완전한 no-op이라
+> 안전하지만, clipping은 기본으로 켜지 말 것.
+>
+> **아키텍처 판단의 전제 3건 (§65·§69 실측, 다음 arm 설계 전 필독)**:
+> 0. **합성 val 지표(val_ce·val_AUROC)로 arm을 고르지 말 것.** CV-only의 합성 val AUROC는
+>    ep0 0.8885 = ep49 0.8882로 평평한데 er_status는 +0.037 오른다. **판정은 er_status
+>    50-fold로만**(45초). 단일 측정 요동이 ±0.05라 **seed 반복 필수**.
 > 1. **val_ce로 arm을 고르지 말 것** — v37 쌍은 val_ce가 더 좋았으나(0.3354 vs 0.3402) 50-fold는
 >    **−0.0068**로 나빴다(CI가 0 제외). 200 epoch은 합성 생성기에 과적합한다.
 > 2. **학습 길이가 다른 arm 간 비교는 그 자체로 교란** — control은 항상 같은 epoch 수로 새로 학습한다.
@@ -286,7 +310,7 @@ multi-resolution combiner의 paired AUROC `+0.01` headroom 확인 후에만 구�
      ```bash
      timeout 300s /home/aibio_3/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
      ```
-   - 기본 스위트는 현재 **74 tests, 약 217초**다 (§59: streaming 7개 + vram 2개, §63: precision 계약 4개, §64: precision-eval 2개 + context 캐싱 등가성 4개, §65: v36 population token mode 6개 + v37 context-adaptive 9개, §66: ridge ablation 8개). 폐기 architecture/연구 진단 175개는
+   - 기본 스위트는 현재 **86 tests, 약 225초**다 (§67 nonfinite policy 5개, §68 ridge ablation+CV-only 15개, VRAM 가드 2개 포함) (§59: streaming 7개 + vram 2개, §63: precision 계약 4개, §64: precision-eval 2개 + context 캐싱 등가성 4개, §65: v36 population token mode 6개 + v37 context-adaptive 9개, §66: ridge ablation 8개). 폐기 architecture/연구 진단 175개는
      `tests/history/legacy_*.py`로 이관되어 기본 discovery에서 실행되지 않는다. archive suite는
      수정 대상이 해당 보존 경로일 때만 개별 실행한다.
 

@@ -344,12 +344,30 @@ def validate_vram_budget(
         config.get("data", {}).get("episode_batch_size", 1) or 1
     )
 
+    # CV-only (docs SS68) skips the whole per-cell activation chain -- slot
+    # assignment/MLA affinity/encoders, tails, class memories, population
+    # attention -- and keeps ONE per-cell transform, the 1536->64 covariance
+    # projection. The 6-layer default is calibrated on the full-branch v34/v35
+    # model and over-estimates CV-only by ~3.4x, which wrongly rejected a
+    # configuration that fits comfortably.
+    #
+    # Measured peak (60 bags x 16384 cells, forward+backward):
+    #     ep_batch      1            2           4
+    #     CV-only     14,720 MiB   29,272     58,312
+    #     full        50,527 MiB  100,789        OOM
+    # ratio 14720/50527 = 0.291; (1+1)/(1+6) = 0.286 -- so activation_layers=1
+    # reproduces the measurement rather than being fitted to it.
+    covariance_only = bool(
+        config.get("model_kwargs", {}).get("meta_covariance_only", False)
+        or config.get("model", {}).get("meta_covariance_only", False)
+    )
     estimate = estimate_training_vram_bytes(
         num_bags_max=num_bags_max,
         max_cells_per_bag=num_cells_max,
         input_dim=input_dim,
         param_count=param_count,
         episode_batch_size=episode_batch_size,
+        activation_layers=1 if covariance_only else 6,
     )
     fraction = estimate / total
 

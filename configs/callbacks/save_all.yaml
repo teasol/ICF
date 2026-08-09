@@ -1,0 +1,17 @@
+# Every-epoch checkpointing for epoch-ladder diagnostics (docs SS70).
+#
+# Identical to `default` except save_top_k: -1. The default keeps only the best
+# 3, which makes "how many epochs do we actually need?" unanswerable after the
+# fact -- the early epochs are already gone.
+checkpoint:
+  enabled: true
+  dirpath: checkpoints
+  filename: "{epoch:03d}-{val_ce_loss:.4f}"
+  monitor: val_ce_loss
+  mode: min
+  save_top_k: -1
+  save_last: true
+
+lr_monitor:
+  enabled: true
+  logging_interval: epoch

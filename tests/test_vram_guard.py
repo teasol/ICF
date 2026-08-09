@@ -162,3 +162,51 @@ class ValidateVramBudgetTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCovarianceOnlyBudget(unittest.TestCase):
+    """The estimator must know CV-only skips the per-cell activation chain.
+
+    The 6-layer default is calibrated on full-branch v34/v35. Applying it to
+    CV-only over-estimates by ~3.4x, which rejected an E=4 configuration that
+    measured 58 GiB (60 bags) / ~97 GiB (100 bags worst case) -- comfortably
+    inside the budget. See docs SS68 for the measured table.
+    """
+
+    def test_covariance_only_estimate_is_about_a_third_of_full(self) -> None:
+        common = dict(
+            num_bags_max=100,
+            max_cells_per_bag=16384,
+            input_dim=1536,
+            param_count=44_000_000,
+            episode_batch_size=4,
+        )
+        full = estimate_training_vram_bytes(**common, activation_layers=6)
+        cv = estimate_training_vram_bytes(**common, activation_layers=1)
+        ratio = cv / full
+        self.assertLess(ratio, 0.40)
+        self.assertGreater(ratio, 0.20)
+
+    def test_guard_reads_the_flag_from_model_kwargs(self) -> None:
+        """A CV-only config must not be rejected for a cost it does not pay."""
+        from pathlib import Path
+
+        from src.utils.utils import merge_train_config
+
+        config = merge_train_config(
+            Path(__file__).resolve().parents[1]
+            / "configs"
+            / "train_v40_cv_only_e4_1536.yaml"
+        )
+        self.assertTrue(config["model_kwargs"]["meta_covariance_only"])
+        dataset_kwargs = config["data"]["dataset_kwargs"]
+        estimate = estimate_training_vram_bytes(
+            num_bags_max=max(dataset_kwargs["num_bags"]),
+            max_cells_per_bag=max(dataset_kwargs["num_cells"]),
+            input_dim=config["model"]["input_dim"],
+            param_count=44_000_000,
+            episode_batch_size=config["data"]["episode_batch_size"],
+            activation_layers=1,
+        )
+        # 183 GiB device, 90% hard limit.
+        self.assertLess(estimate / (183 * 2**30), 0.90)

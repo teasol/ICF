@@ -3634,19 +3634,48 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 )
         if not return_auxiliary:
             return logits
+        # In the dense path `training_step` slices every auxiliary entry per
+        # episode (`value[episode]`), so scalars must carry an episode axis --
+        # exactly what the full batched path does with `.expand(episodes)`.
+        # Returning 0-dim scalars here is what made E=4 fail with
+        # "invalid index of a 0-dim tensor".
+        if batched:
+            episodes = covariance_logits.shape[0]
+            expand = lambda t: (
+                t.expand(episodes) if t.dim() == 0 else t
+            )
+            relation_scale = torch.full(
+                (episodes,),
+                float(self.covariance_relation_residual_scale),
+                device=covariance_logits.device,
+                dtype=torch.float32,
+            )
+        else:
+            expand = lambda t: t
+            relation_scale = self.covariance_relation_residual_scale
         return logits, {
             "covariance_logits": covariance_logits,
             "covariance_ridge_logits": covariance_ridge_logits,
-            "covariance_ridge_scale": covariance_ridge_scale,
-            "covariance_residual_scale": covariance_residual_scale,
-            "covariance_relation_enabled": self.covariance_relation_enabled,
+            "covariance_ridge_scale": expand(covariance_ridge_scale),
+            "covariance_residual_scale": expand(covariance_residual_scale),
+            # Mirrors the full batched path: a tensor with an episode axis,
+            # not a bool, so `training_step`'s per-episode slice works. Keeping
+            # it preserves the CV-2 diagnostics (auroc, class separation) --
+            # which matter more here than anywhere, CV-2 being one of the two
+            # branches this arm keeps.
+            "covariance_relation_enabled": (
+                torch.tensor(
+                    self.covariance_relation_enabled,
+                    device=covariance_logits.device,
+                ).expand(covariance_logits.shape[0])
+                if batched
+                else self.covariance_relation_enabled
+            ),
             "covariance_relation_logits": covariance_relation_logits,
             "covariance_relation_class_separation": (
                 covariance_relation_class_separation
             ),
-            "covariance_relation_residual_scale": (
-                self.covariance_relation_residual_scale
-            ),
+            "covariance_relation_residual_scale": relation_scale,
         }
 
     def _validate_representation(
