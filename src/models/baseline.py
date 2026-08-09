@@ -1219,6 +1219,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
             "multiscale_rbf",
             "gated_distance",
             "learned_head",
+            "paired_head",
         }
         if self.covariance_relation_granularity not in {"bag", "slot", "subspace"}:
             raise ValueError("covariance relation granularity must be bag, slot, or subspace.")
@@ -1250,6 +1251,25 @@ class StructuredPopulationMetaClassifier(nn.Module):
                 nn.Linear(4, 32),
                 nn.GELU(),
                 nn.Linear(32, self.num_classes),
+            )
+        elif self.covariance_relation_mode == "paired_head":
+            # Runs once per subspace dimension on (e0, e1, separation) and
+            # returns one number, which the antisymmetric pairing turns into
+            # that dimension's margin. Shared across dimensions, so the shapes
+            # are independent of `subspace_rank` -- a rank sweep does not
+            # invalidate checkpoints. Binary by construction: the paired
+            # difference IS the margin, so there is no per-class output to
+            # produce and multi-class would need a different pairing.
+            if self.num_classes != 2:
+                raise ValueError(
+                    "covariance_relation.mode='paired_head' is binary; its "
+                    "antisymmetric pairing has no multi-class form."
+                )
+            hidden = int(relation_config.get("head_hidden_dim", 32))
+            self.covariance_relation_head = nn.Sequential(
+                nn.Linear(3, hidden),
+                nn.GELU(),
+                nn.Linear(hidden, 1),
             )
         self.covariance_ridge_log_lambda = nn.Parameter(
             torch.tensor(math.log(1.0))
@@ -1340,6 +1360,75 @@ class StructuredPopulationMetaClassifier(nn.Module):
                     self.covariance_relation_gate_a * (separation.unsqueeze(1) - self.covariance_relation_gate_b)
                 )
                 class_scores = gate.unsqueeze(-1) * class_scores
+        elif self.covariance_relation_mode == "paired_head":
+            # Per-subspace-dimension head (docs SS74). Two defects of
+            # `learned_head` are fixed here, and both are structural:
+            #
+            # 1. IT SEES THE WHOLE SUBSPACE. `learned_head` collapses the rank
+            #    axis with `.square().mean(dim=-1)` BEFORE the MLP, so the head
+            #    reads 4 scalars no matter how large `subspace_rank` is. Raising
+            #    the rank still moves its output -- different eigenvectors get
+            #    picked, so the averaged scalars differ -- but the head never
+            #    sees WHICH dimension carried the signal, and a discriminative
+            #    direction averaged against uninformative ones is diluted. That
+            #    is the shape of the v42 null result (rank 2 +0.0004, rank 4
+            #    -0.0008 on the SEAL 10). Here the head runs per dimension and
+            #    the pooling happens after it, so one strong dimension can
+            #    still speak.
+            #
+            # 2. IT CANNOT BREAK LABEL SYMMETRY. Renaming the classes must flip
+            #    the margin and nothing else. `learned_head` does not do that --
+            #    measured 4.4e-2 discrepancy on a swapped episode, while CV-1's
+            #    ridge is exact to 0.0. The antisymmetric construction below is
+            #    exact by construction, not by training:
+            #        g = h(e0, e1, sep) - h(e1, e0, sep)
+            #    swapping the classes swaps the two calls, so g flips sign.
+            #
+            # The head is shared across rank dimensions, so its parameter shapes
+            # do NOT depend on `subspace_rank` -- a rank sweep stays checkpoint
+            # compatible, and the pooling stays permutation invariant over the
+            # eigenvector axis (whose ordering and signs are arbitrary).
+            differences = context_z.unsqueeze(2) - prototypes.unsqueeze(1)
+            # (E, C, class, R) -- the rank axis is KEPT.
+            per_dimension = torch.stack(
+                [
+                    (
+                        differences[:, :, class_index].square()
+                        * class_masks[class_index].unsqueeze(-1)
+                    ).sum(dim=1)
+                    / class_masks[class_index].sum(dim=-1).unsqueeze(-1)
+                    for class_index in range(self.num_classes)
+                ],
+                dim=1,
+            ).clamp_min(self.covariance_relation_eps)  # (E, class, R)
+            squared = (
+                query_z.unsqueeze(2) - prototypes.unsqueeze(1)
+            ).square()  # (E, Q, class, R)
+            e0 = squared[:, :, 0] / per_dimension[:, 0].unsqueeze(1)
+            e1 = squared[:, :, 1] / per_dimension[:, 1].unsqueeze(1)
+            # Per-dimension separation, scaled by that dimension's spread so it
+            # is comparable across dimensions with different variances.
+            pooled_spread = (
+                0.5 * (per_dimension[:, 0] + per_dimension[:, 1])
+            ).clamp_min(self.covariance_relation_eps)
+            per_dimension_separation = (
+                (prototypes[:, 1] - prototypes[:, 0]).abs() / pooled_spread.sqrt()
+            ).unsqueeze(1).expand_as(e0)
+            forward_feats = torch.stack(
+                [e0, e1, per_dimension_separation], dim=-1
+            )
+            swapped_feats = torch.stack(
+                [e1, e0, per_dimension_separation], dim=-1
+            )
+            per_dimension_margin = (
+                self.covariance_relation_head(forward_feats)
+                - self.covariance_relation_head(swapped_feats)
+            ).squeeze(-1)  # (E, Q, R)
+            # Mean, not sum: the margin's scale then does not drift with rank.
+            margin_value = per_dimension_margin.mean(dim=-1)
+            class_scores = torch.stack(
+                (-0.5 * margin_value, 0.5 * margin_value), dim=-1
+            )
         elif self.covariance_relation_mode == "learned_head":
             differences = context_z.unsqueeze(2) - prototypes.unsqueeze(1)
             dispersions = torch.stack(
