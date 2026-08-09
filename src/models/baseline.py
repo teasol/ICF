@@ -1890,6 +1890,10 @@ class BaseModel(nn.Module):
     """Compose hybrid population aggregation with class-memory meta learning."""
 
     architecture_version = 22
+    # One per-cell transform survives the SS73 prune: the 1536->K covariance
+    # projection. The VRAM guard reads this instead of guessing from a config
+    # key. Measured 14,720 MiB at 60 bags x 16384 cells (ep_batch 1).
+    vram_activation_layers = 1
 
     def __init__(
         self,

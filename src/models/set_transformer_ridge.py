@@ -155,6 +155,10 @@ class SetTransformerRidgeModel(nn.Module):
     """
 
     architecture_version = 40
+    # Cells are read once by the inducing points and never attend to each
+    # other, so the per-cell chain is one transform deep. Measured 21.20 GiB at
+    # 100 bags x 16384 cells; activation_layers=1 bounds that at 29.15 GiB.
+    vram_activation_layers = 1
 
     def __init__(
         self,

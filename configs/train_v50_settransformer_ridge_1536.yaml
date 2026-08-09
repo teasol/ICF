@@ -1,0 +1,62 @@
+# v50 — 학습되는 bag 토큰 + closed-form ridge (docs SS75). 새 계보의 첫 arm.
+#
+# baseline(CV-only)과 **완전히 다른 모델**이다. 공유하는 것은 ridge 솔버뿐.
+#
+#   bag b의 셀들 -> [Set Transformer] -> bag당 토큰 1개
+#   context 토큰 + 라벨 -> 클래스 균형 closed-form ridge -> query logits
+#
+# 왜: 지금까지 탐색한 축이 전부 label-free였다. CV-only의 사영은 고정
+# (QR(sin+cos), 파라미터 없음)이고 SS69가 label-free 선택 8종을 시험해 모두
+# 0.68±0.03 천장이었다. 여기서는 기술자가 학습되고 gradient가 **ridge solve를
+# 통과해** 인코더에 도달한다 — 실제 readout에 맞춰 표현이 최적화된다.
+#
+# ⚠️ 이 브랜치의 핵심 위험은 그 gradient 경로다. SS66에서 covariance ridge를
+#    건드렸을 때 gradient가 발산한 전력이 있다. solve_ridge_system의 adaptive
+#    jitter를 그대로 쓰고, nonfinite_gradient_policy: zero도 켠다.
+#    tests/test_set_transformer_ridge.py가 인코더 파라미터 전부에 유한한
+#    gradient가 도달하는 것을 고정한다.
+#
+# 실측 (B200, bf16, fwd+bwd+step):
+#   파라미터 2,255,874
+#   bag  60 x  2,048셀   7.5 ms   peak  1.67 GiB
+#   bag 100 x 16,384셀  35.5 ms   peak 21.20 GiB   <- 최악 구성도 여유
+#
+# 하이퍼파라미터(token_dim 256, inducing 32, blocks 2)는 비용 기준으로 잡은
+# 초기값이다. 이 arm은 "이 구조가 되는가"를 보는 것이지 튜닝이 아니다.
+#
+# 비교 기준: v41_K128 (CV-only) SEAL 10개 0.6940 / SEAL ABMIL 0.727.
+# 판정은 SEAL 10개 macro 평균으로(SS71-4).
+#
+seed: 42
+ckpt_path:
+
+data: default
+data_overrides:
+  episode_batch_size: 1
+  dataset_kwargs:
+    num_cells: [1, 16384]
+    num_cells_log_uniform_power: 1.5
+
+model: set_transformer_ridge
+
+optimizer: default
+scheduler: default
+
+trainer: default
+trainer_overrides:
+  devices: 1
+  max_epochs: 50
+
+logger: default
+logger_overrides:
+  experiment_name: v50_settransformer_ridge
+
+callbacks: default
+
+model_kwargs:
+  training_targets_per_episode: [5, 12]
+  ranking_loss_weight: 0.10
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0
+  nonfinite_gradient_policy: zero
+  # 대역폭 고정: a*K = 0.85*pi

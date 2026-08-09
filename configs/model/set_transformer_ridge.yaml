@@ -1,0 +1,23 @@
+model_src: src.models.set_transformer_ridge.SetTransformerRidgeModel
+
+# 학습되는 bag 토큰 + closed-form ridge (docs SS75). baseline.py와 별개 모델이라
+# aggregator_* / covariance_* 손잡이는 여기에 존재하지 않는다.
+input_dim: 1536
+
+# bag 토큰 차원. ridge 설계행렬은 (context bag 수 x token_dim)이고, bag 수가
+# 60~133이므로 이보다 크면 dual solve가 계속 유리하다.
+token_dim: 256
+num_heads: 8
+
+# 셀을 읽는 학습 query 개수. 셀끼리는 attend하지 않으므로 비용이 O(N*M)이다.
+# 셀 3k 기준 M=32면 전면 self-attention 대비 약 97배 절감.
+num_inducing: 32
+num_blocks: 2
+feedforward_dim: 512
+dropout: 0.0
+
+# CV-1과 같은 초기값. ridge는 매 에피소드 새로 풀리고 이 둘만 학습된다.
+ridge_lambda: 1.0
+ridge_logit_scale: 2.0
+
+num_classes: 2
