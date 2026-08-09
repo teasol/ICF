@@ -50,12 +50,7 @@ def build_model(input_dim: int = 64) -> BaseModel:
         aggregator_slot_latent_dim=8,
         aggregator_slot_query_latent_dim=16,
         aggregator_slot_affinity_dim=32,
-        meta_hidden_dim=32,
-        meta_ridge_dim=16,
-        meta_class_memory_tokens=4,
-        projection_bottleneck_dim=16,
         project_structured_tokens=True,
-        projection_residual_mean=True,
         covariance_relation={
             "enabled": True,
             "mode": "learned_head",

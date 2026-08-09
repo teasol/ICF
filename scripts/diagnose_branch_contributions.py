@@ -40,14 +40,10 @@ from src.utils.metrics import auroc as _auroc  # noqa: E402
 from src.utils.utils import merge_train_config  # noqa: E402
 
 # (auxiliary key, is the branch trained end-to-end?, human label)
+# Five branches were deleted in SS73; only these two ever reached the output.
 TERMS = [
-    ("global_shape_logits", "mixed", "G  global_shape (ridge + attn residual)"),
-    ("abundance_ridge_logits", "closed", "P-2  abundance ridge"),
-    ("population_attention_logits", "learned", "Q-5  population attention"),
-    ("population_logits", "mixed", "P    population (P-2 + Q-5)"),
     ("covariance_ridge_logits", "closed", "CV-1 covariance ridge"),
     ("covariance_relation_logits", "learned", "CV-2 covariance relation"),
-    ("tail_logits", "learned", "R    rare/tail"),
 ]
 
 
@@ -90,39 +86,23 @@ def main() -> None:
     meta = model.meta_classifier
     print("=== 1. learned fusion gates (a gate at its floor = branch off) ===")
     gates = {
-        "attention_residual_scale (G-3)": torch.sigmoid(
-            meta.global_shape_classifier.attention_residual_logit
-        ),
-        "population_attention_scale (Q-5)": torch.sigmoid(
-            meta.population_attention_residual_logit
-        ),
-        "population_scale (P)": meta._floored_residual_scale(
-            meta.population_residual_logit, meta.minimum_population_residual_scale
-        ),
-        "tail_scale (R)": meta._floored_residual_scale(
-            meta.tail_residual_logit, meta.minimum_tail_residual_scale
-        ),
-        "fusion_scale (F-2)": torch.sigmoid(meta.fusion_residual_logit),
         "covariance_residual_scale (CV-1)": torch.sigmoid(
             meta.covariance_residual_logit
-        ),
-        "ridge_scale (G-2)": meta.global_shape_classifier.ridge_log_scale.exp().clamp(
-            0.1, 100.0
-        ),
-        "abundance_ridge_scale (P-2)": meta.abundance_ridge_log_scale.exp().clamp(
-            0.1, 100.0
         ),
         "covariance_ridge_scale (CV-1)": meta.covariance_ridge_log_scale.exp().clamp(
             0.1, 100.0
         ),
+        "covariance_ridge_lambda (CV-1)": meta.covariance_ridge_log_lambda.exp(),
+        "covariance_relation_scale (CV-2)": torch.tensor(
+            float(meta.covariance_relation_residual_scale)
+        ),
     }
+    if hasattr(meta, "covariance_relation_log_temperature"):
+        gates["covariance_relation_temperature (CV-2)"] = (
+            meta.covariance_relation_log_temperature.exp()
+        )
     for name, value in gates.items():
-        print(f"  {name:<36} {float(value):.4f}")
-    floors = (
-        f"  (floors: population {meta.minimum_population_residual_scale}, "
-        f"tail {meta.minimum_tail_residual_scale})"
-    )
-    print(floors)
+        print(f"  {name:<40} {float(value):.4f}")
 
     # ---- 2/3. per-branch AUROC and contribution -------------------------
     collected: dict[str, list[float]] = {key: [] for key, _, _ in TERMS}

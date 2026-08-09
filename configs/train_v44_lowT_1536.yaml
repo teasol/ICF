@@ -75,10 +75,8 @@
 #
 # 이 arm은 그래서 남는 것만 남긴다:
 #   final = cov_res_scale·CV-1 + cov_rel_res_scale·CV-2
-# `meta_covariance_only: true`가 _fuse_evidence 한 곳에서 처리하며(dense·ragged
-# 공통 진입점) global_shape(게이트 없는 베이스 항), population, rare,
-# fusion interaction을 전부 0으로 만든다. interaction은 어차피 그 셋으로
-# 만들어지므로 함께 죽이는 것이 맞다.
+# 그 분기들은 이제 **소스에서 삭제됐다**(SS73) — 예전에는 config 플래그로 0을 만들었고,
+# 지금은 존재하지 않는다. 전 분기 모델은 git `8caa96c`에 있다.
 #
 # ⚠️ 비용 주의: 파라미터는 줄지만 **epoch 시간은 별로 안 줄어든다.** 지배적 비용은
 # aggregator(최대 16,384 cell 처리)인데 covariance sketch 자체가 거기서 나오므로
@@ -129,15 +127,6 @@ model_kwargs:
   routing_sparsity_weight: 0.0
   routing_balance_weight: 0.0
   nonfinite_gradient_policy: zero
-  meta_enable_rare_evidence: false
-  # ⚠️ 이 arm에서 bag_aggregation은 **무의미**하다. 40->1 압축 결과(bag token)를
-  # 쓰는 곳이 global_shape / class memory / population 뿐인데 셋 다 0이므로,
-  # v37 context-adaptive weight maker(1.53M)는 계산되고 통째로 버려진다.
-  # v36/v37/v38/v39 계보의 튜닝 축은 CV-only에 적용되지 않는다 — 이 값은
-  # 앞선 arm들과 config diff를 최소화하려고 남겨둔 것일 뿐이다.
-  meta_bag_aggregation: context_adaptive
-  # CV-1 + CV-2 만 남긴다.
-  meta_covariance_only: true
   aggregator_covariance_sketch_dim: 128
   # CV-2도 K를 따라간다 (기존 32 고정 -> K)
   aggregator_covariance_matrix_dim: null

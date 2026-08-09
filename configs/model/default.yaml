@@ -1,58 +1,35 @@
 model_src: src.models.baseline.BaseModel
 
-# Default model = v34-1536 (PathoBench reporting model, 2026-08-07):
-# v24-B1 bottleneck projection + residual mean, B1 `poolz_l2` representation,
-# B2 log-uniform cardinality, MLA-slot low-rank affinity, 1536-d input.
+# CV-only model (docs SS73). Five of the six evidence branches were deleted from
+# the source, so the keys that configured them are gone too -- passing one now
+# raises TypeError instead of being silently ignored. Git holds the full-branch
+# model and its configs at `8caa96c`.
 input_dim: 1536
+
+# --- aggregator: centring + the fixed projection -----------------------------
 bag_centered_representation: true
+bag_representation: poolz_l2
 global_summary: centered_spread
-use_raw_mean_branch: false
+# K. sketch length = K(K+1)/2. Dimension IS effective, but only with the
+# bandwidth held fixed (SS71-5): 9/10 tasks, +0.0127 going 64 -> 128.
 aggregator_covariance_sketch_dim: 64
+# What CV-2 sees. `null` ties it to K.
+aggregator_covariance_matrix_dim: 32
+# [a, b] frequency slopes. `null` = historical (0.019, 0.011). Set
+# a = 0.85*pi/K to keep the used bandwidth constant across a K sweep --
+# otherwise changing K changes the bandwidth too and hides the dimension effect.
+aggregator_covariance_slopes: null
 aggregator_covariance_mode: correlation
 aggregator_covariance_shrinkage: 0.1
-aggregator_num_slots: 12
-aggregator_num_density_slots: 8
-aggregator_context_samples_per_bag: 32
-aggregator_assignment_temperature: 0.1
-aggregator_density_refinement_steps: 4
-aggregator_density_temperature: 0.15
-aggregator_slot_rare_fraction: 0.05
-aggregator_tail_fractions: [0.01, 0.05, 0.15]
-aggregator_min_tail_instances: 1
-meta_hidden_dim: 256
-meta_num_heads: 8
-meta_num_set_layers: 1
-meta_relation_hidden_dim: 256
-meta_ridge_dim: 64
-meta_ridge_lambda: 1.0
-meta_ridge_logit_scale: 2.0
-meta_attention_residual_scale: 0.1
-meta_population_residual_scale: 0.25
-meta_tail_residual_scale: 0.10
-meta_minimum_population_residual_scale: 0.10
-meta_minimum_tail_residual_scale: 0.05
-meta_routing_temperature: 0.5
-meta_class_memory_tokens: 8
-meta_rare_evidence_fractions: [0.01, 0.05, 0.10, 0.20]
-meta_fusion_residual_scale: 0.10
+
+# --- CV-1: closed-form dual ridge --------------------------------------------
+# Only `log_lambda` and `log_scale` are learned; the coefficients are re-solved
+# per episode. SS66: removing this collapses training (reproduced twice).
+meta_enable_covariance_ridge: true
 meta_covariance_ridge_logit_scale: 2.0
 meta_covariance_residual_scale: 0.25
-# v36 Q1 (docs/architecture_v36_q1_structured_population_proposal.md): which bag
-# tokens the population branch consumes. `projected` = historical behaviour (the
-# 40->1 collapse leaves the routing softmax on a length-1 axis, weights == 1.0);
-# `structured` feeds the full token set and restores the routing.
-meta_population_token_mode: projected
-# Ridge ablation (docs SS65): the three closed-form ridge solves, independently
-# removable. Each flag zeroes only its own ridge term and leaves that branch's
-# learned residual in place (global -> attention residual, abundance ->
-# population attention, covariance -> the CV-2 relation branch is untouched).
-# All true = historical behaviour. A checkpoint trained with a flag off must be
-# EVALUATED with the same flag off -- the ablated ridge parameters never receive
-# gradient and stay at init, so re-enabling them injects an untrained branch.
-meta_enable_global_ridge: true
-meta_enable_abundance_ridge: true
-meta_enable_covariance_ridge: true
-num_classes: 2
+
+# --- CV-2: subspace -> prototype -> MLP --------------------------------------
 covariance_relation:
   enabled: true
   mode: learned_head
@@ -61,16 +38,13 @@ covariance_relation:
   # 포화해(|tanh| > 0.9999, 국소 기울기 ~2e-4) head가 나머지에서만 배운다 — 전면 차단은
   # 아니다(실측: grad != 0 파라미터 229개). identity는 그 천장을 없앤다.
   margin_activation: tanh
+  # ⚠️ rank를 올려도 파라미터 shape은 불변이고 SEAL 10개 평균도 안 움직인다
+  # (rank2 +0.0004, rank4 -0.0008). [7]의 mean이 rank 축을 없애 MLP 입력이 항상 4개다.
   subspace_rank: 1
   subspace_whiten: true
   subspace_shrinkage: 0.25
   diagnostic_only: false
   residual_scale: 0.5
   eps: 1.0e-06
-project_structured_tokens: true
-projection_bottleneck_dim: 64
-projection_residual_mean: true
-bag_representation: poolz_l2
-aggregator_slot_latent_dim: 64
-aggregator_slot_query_latent_dim: 128
-aggregator_slot_affinity_dim: 512
+
+num_classes: 2

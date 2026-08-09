@@ -21,16 +21,9 @@ def build_v30_small(*, train: bool = False) -> BaseModel:
     torch.manual_seed(1234)
     model = BaseModel(
         input_dim=8,
-        meta_hidden_dim=16,
-        meta_num_heads=4,
-        meta_num_set_layers=1,
-        meta_relation_hidden_dim=16,
-        meta_ridge_dim=4,
         aggregator_num_slots=4,
         aggregator_num_density_slots=3,
         project_structured_tokens=True,
-        projection_bottleneck_dim=4,
-        projection_residual_mean=True,
         bag_representation="poolz_l2",
         num_classes=2,
     )
@@ -90,9 +83,11 @@ class V30ModelContractTest(unittest.TestCase):
             bags, self.y, self.query, return_auxiliary=True
         )
         self.assertEqual(logits.shape, (2, 2))
-        torch.testing.assert_close(
-            auxiliary["aggregator"]["instance_counts"], torch.arange(4, 14)
-        )
+        # The aggregator reports nothing of its own: `instance_counts` and the
+        # slot diagnostics belonged to the pipeline deleted in SS73, and the
+        # CV-only path never emitted them. Absent rather than zero-filled, by
+        # the same rule the representation contract follows.
+        self.assertEqual(auxiliary["aggregator"], {})
 
     def test_pool_statistics_ignore_query_bags(self) -> None:
         bags = list(self.x.unbind(0))
@@ -145,16 +140,9 @@ class TrainingInterfaceContractTest(unittest.TestCase):
         interface = ModelInterface(
             model_src="src.models.baseline.BaseModel",
             input_dim=8,
-            meta_hidden_dim=16,
-            meta_num_heads=4,
-            meta_num_set_layers=1,
-            meta_relation_hidden_dim=16,
-            meta_ridge_dim=4,
             aggregator_num_slots=4,
             aggregator_num_density_slots=3,
             project_structured_tokens=True,
-            projection_bottleneck_dim=4,
-            projection_residual_mean=True,
             bag_representation="poolz_l2",
         )
         interface.on_load_checkpoint(

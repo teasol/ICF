@@ -660,57 +660,12 @@ class ModelInterface(L.LightningModule):
                 "covariance_relation_class_separation"
             ].float().mean()
 
-        # CV-only (docs SS68) skips the population branch entirely, so these
-        # diagnostics have no input. Guarding on the key -- rather than emitting
-        # a zero -- keeps "the branch did not run" distinguishable from "the
-        # branch ran and produced zero" in the metrics.
-        if "population_slot_weights" not in auxiliary:
-            return total, terms
-        population_weights = auxiliary["population_slot_weights"].float()
-        routing_entropy = (
-            -(
-                population_weights.clamp_min(1e-12)
-                * population_weights.clamp_min(1e-12).log()
-            )
-            .sum(dim=-1)
-            .mean()
-        )
-        routing_sparsity_weight = float(
-            self.hparams.get("routing_sparsity_weight", 0.0)
-        )
-        total = total + routing_sparsity_weight * routing_entropy
-        terms["routing_entropy"] = routing_entropy
-
-        # Keep query-specific routing flexible while preventing one population
-        # slot from monopolizing an entire episode. KL(mean_usage || uniform)
-        # is zero only when the episode-level slot utilization is balanced.
-        routing_balance_loss = self._routing_balance_loss(population_weights)
-        routing_balance_weight = float(self.hparams.get("routing_balance_weight", 0.0))
-        total = total + routing_balance_weight * routing_balance_loss
-        terms["routing_balance_loss"] = routing_balance_loss
-        for path in ("global_shape", "covariance", "population", "tail"):
-            terms[f"{path}_logit_std"] = (
-                auxiliary[f"{path}_logits"].float().std(unbiased=False)
-            )
-        terms["abundance_ridge_logit_std"] = auxiliary[
-            "abundance_ridge_logits"
-        ].float().std(unbiased=False)
-        terms["population_attention_logit_std"] = auxiliary[
-            "population_attention_logits"
-        ].float().std(unbiased=False)
-        terms["abundance_ridge_scale"] = auxiliary["abundance_ridge_scale"]
-        terms["covariance_ridge_scale"] = auxiliary["covariance_ridge_scale"]
-        terms["covariance_residual_scale"] = auxiliary["covariance_residual_scale"]
-        terms["population_attention_residual_scale"] = auxiliary[
-            "population_attention_residual_scale"
-        ]
-        terms["population_residual_scale"] = auxiliary["population_residual_scale"]
-        terms["tail_residual_scale"] = auxiliary["tail_residual_scale"]
-        terms["fusion_residual_scale"] = auxiliary["fusion_residual_scale"]
-        rare_weights = auxiliary["tail_weights"].float().clamp_min(1e-12)
-        terms["rare_fraction_entropy"] = (
-            -(rare_weights * rare_weights.log()).sum(dim=-1).mean()
-        )
+        # Nothing below the covariance terms survives SS73: routing entropy,
+        # routing balance, the abundance/population/tail logit spreads and the
+        # rare-fraction entropy all read auxiliaries that the deleted branches
+        # produced. They were already unreachable for CV-only arms -- the guard
+        # here returned before them -- so removing them changes no metric that
+        # any current run logs.
         return total, terms
 
     @staticmethod
@@ -826,15 +781,6 @@ class ModelInterface(L.LightningModule):
             "oracle_abundance_snr": snr,
             "oracle_model_auroc_gap": oracle_auroc - model_auroc.detach().float(),
         }
-
-    @staticmethod
-    def _routing_balance_loss(weights: torch.Tensor) -> torch.Tensor:
-        if weights.ndim != 2 or weights.shape[-1] == 0:
-            raise ValueError("Routing weights must have shape [query, slot].")
-        mean_slot_usage = weights.float().mean(dim=0)
-        num_slots = mean_slot_usage.numel()
-        safe_usage = mean_slot_usage.clamp_min(1e-12)
-        return (safe_usage * (safe_usage * num_slots).log()).sum()
 
     @staticmethod
     def _pairwise_ranking_loss(
