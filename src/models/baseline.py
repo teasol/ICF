@@ -491,6 +491,8 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         use_raw_mean_branch: bool = False,
         raw_stat_tokens: Sequence[str] = (),
         covariance_sketch_dim: int | None = None,
+        covariance_matrix_dim: int | None = 32,
+        covariance_slopes: "tuple[float, float] | None" = None,
         covariance_only: bool = False,
         covariance_mode: str = "covariance",
         covariance_shrinkage: float = 0.0,
@@ -649,6 +651,15 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             )
         self.raw_stat_tokens = tuple(raw_stat_tokens)
         self.covariance_sketch_dim = int(covariance_sketch_dim)
+        # How many of P's columns CV-2 sees (docs SS69-7). Historically hardcoded
+        # to 32 via the `_projected_covariance_matrix` default, so CV-2 saw only
+        # the first 32 of 64 columns and stayed at 32 no matter how large K got.
+        # None ties it to K, which is what the K-sweep arms want.
+        self.covariance_matrix_dim = (
+            self.covariance_sketch_dim
+            if covariance_matrix_dim is None
+            else int(covariance_matrix_dim)
+        )
         # CV-only (docs SS68): emit ONLY the covariance tensors and skip the
         # slot pipeline, tails, metadata, anchors and global summary entirely.
         # Measured: 18.73 ms -> 0.40 ms floor on 8 bags x 4000 cells, i.e. ~98%
@@ -692,9 +703,21 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         covariance_index = torch.arange(
             1, self.covariance_sketch_dim + 1, dtype=torch.float32
         )[None, :]
+        # Frequency-ladder slopes (docs SS69). Default reproduces the historical
+        # hardcoded (0.019, 0.011) exactly. `a` is the ladder spacing: column k
+        # oscillates along the channel axis at a*k rad/step, so a*K is the total
+        # bandwidth used. Sweeping K with `a` FIXED changes bandwidth too, which
+        # is what hid the dimension effect (SS69-4); setting a = 0.85*pi/K holds
+        # bandwidth constant so K alone varies. 0.85 leaves a guard band -- at
+        # a*K = pi exactly, sin(pi*d) = 0 for integer d and that column's sin
+        # term vanishes identically.
+        slope_a, slope_b = (0.019, 0.011) if covariance_slopes is None else (
+            float(covariance_slopes[0]), float(covariance_slopes[1])
+        )
+        self.covariance_slopes = (slope_a, slope_b)
         covariance_directions = torch.sin(
-            0.019 * feature_index.T * covariance_index
-        ) + torch.cos(0.011 * (feature_index.T + 1) * covariance_index)
+            slope_a * feature_index.T * covariance_index
+        ) + torch.cos(slope_b * (feature_index.T + 1) * covariance_index)
         covariance_basis = torch.linalg.qr(
             covariance_directions, mode="reduced"
         ).Q
@@ -936,8 +959,10 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         return torch.cat((raw_feature, log_feature), dim=-1).to(centered_delta.dtype)
 
     def _projected_covariance_matrix(
-        self, centered_delta: torch.Tensor, dimension: int = 32
+        self, centered_delta: torch.Tensor, dimension: int | None = None
     ) -> torch.Tensor:
+        if dimension is None:
+            dimension = self.covariance_matrix_dim
         dimension = min(int(dimension), self.covariance_sketch_dim)
         projected = centered_delta.float() @ self._covariance_projection[:, :dimension].float()
         return torch.einsum("...ni,...nj->...ij", projected, projected) / projected.shape[-2]
@@ -5079,6 +5104,8 @@ class BaseModel(nn.Module):
         use_instance_attention_mil: bool = False,
         mil_hidden_dim: int | None = None,
         aggregator_covariance_sketch_dim: int | None = None,
+        aggregator_covariance_matrix_dim: int | None = 32,
+        aggregator_covariance_slopes: "Sequence[float] | None" = None,
         aggregator_covariance_mode: str = "covariance",
         aggregator_covariance_shrinkage: float = 0.0,
         meta_hidden_dim: int = 256,
@@ -5146,6 +5173,8 @@ class BaseModel(nn.Module):
             use_raw_mean_branch=use_raw_mean_branch,
             raw_stat_tokens=raw_stat_tokens,
             covariance_sketch_dim=aggregator_covariance_sketch_dim,
+            covariance_matrix_dim=aggregator_covariance_matrix_dim,
+            covariance_slopes=aggregator_covariance_slopes,
             covariance_mode=aggregator_covariance_mode,
             covariance_shrinkage=aggregator_covariance_shrinkage,
             include_cls_token=cls_token_pooling,
