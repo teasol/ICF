@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-09` — **§70 v41이 현재 최고: er_status 50-fold 0.7303으로 지도학습 SEAL ABMIL(0.717) 상회. CV-only + `a=0.85π/K` 대역폭 정규화 + CV-2 차원 K 연동(`configs/train_v41_cvonly_K{64,128}_1536.yaml`)** + **§68 CV-only가 새 baseline: 6개 evidence 분기 중 CV-1·CV-2만 남겨도 전 분기 모델과 동률(fold-paired −0.0005), 훈련 forward 5.9×·VRAM 3.4× 절감** + **§69 sketch 기저 진단(label-free 축 8개 무효, 차원만 유효)** + §67 clipping 역효과 + §66 ridge ablation: G-2 global ridge 무기여 확정(Δ −0.0004) / P-2·CV-1은 제거 시 학습 붕괴** + **§65 v36 Q1·v37 두 arm 모두 게이트 미달(Δ −0.0024 / −0.0001)**. §64 평가도 bf16-mixed 강제(2026-08-08 이전 50-fold 수치는 전부 참고용) + 폴드 단위 context 캐싱(bit-identical, 356s→50s) + bc_therapy/er_status 기본 평가 확정. v34-1536 확정(PathoBench 보고용). 공식 50-fold **9/17 완료**(잔여 8개).
+**Last updated**: `2026-08-09` — **§71 SEAL 10개 task 평균 0.6940 vs ABMIL 0.727(−0.033), 상회 3/10 — "SEAL 상회"는 er_status 단일 현상이다. 판정 기준을 10개 macro 평균으로 변경(`scripts/eval_seal_tasks.sh`, 2 GPU 20분)** + **§70 v41이 현재 최고: er_status 0.7303. CV-only + `a=0.85π/K` 대역폭 정규화 + CV-2 차원 K 연동(`configs/train_v41_cvonly_K{64,128}_1536.yaml`)** + **§68 CV-only가 새 baseline: 6개 evidence 분기 중 CV-1·CV-2만 남겨도 전 분기 모델과 동률(fold-paired −0.0005), 훈련 forward 5.9×·VRAM 3.4× 절감** + **§69 sketch 기저 진단(label-free 축 8개 무효, 차원만 유효)** + §67 clipping 역효과 + §66 ridge ablation: G-2 global ridge 무기여 확정(Δ −0.0004) / P-2·CV-1은 제거 시 학습 붕괴** + **§65 v36 Q1·v37 두 arm 모두 게이트 미달(Δ −0.0024 / −0.0001)**. §64 평가도 bf16-mixed 강제(2026-08-08 이전 50-fold 수치는 전부 참고용) + 폴드 단위 context 캐싱(bit-identical, 356s→50s) + bc_therapy/er_status 기본 평가 확정. v34-1536 확정(PathoBench 보고용). 공식 50-fold **9/17 완료**(잔여 8개).
 
 > [!IMPORTANT]
 > **CV-only 계약 (§68, 2026-08-09)**: `meta_covariance_only: true`면
@@ -31,6 +31,12 @@
 > **실측 이득은 차원이 아니라 이 두 손잡이에서 나온다**(K 고정 +0.0271, 차원 증설 +0.0043).
 > ⚠️ 두 손잡이가 아직 분리되지 않았다(§70-3).
 > ⚠️ ridge-only 진단은 학습 arm의 이득을 과대평가한다(K 64→128 예측 +0.016 vs 실제 +0.004).
+>
+> **평가 기준 (§71, 필수)**: 판정은 **SEAL 대상 10개 task macro 평균**으로 한다
+> (`seal_univ2_baseline_17tasks.csv`의 `in_seal=yes`). **er_status 단일로 판정하지 말 것** —
+> §70까지의 모든 arm 선택(CV-only, ridge ablation, v36/v37 기각, K·대역폭·CV-2)이 er_status
+> 단일 기준이었고, 10개로 넓히니 SEAL 상회 주장이 무너졌다(3/10). **er_status가 10개 중 가장
+> 유리한 task였을 가능성이 높아 과적합 위험이 실재한다.**
 >
 > **아키텍처 판단의 전제 3건 (§65·§69 실측, 다음 arm 설계 전 필독)**:
 > 0. **합성 val 지표(val_ce·val_AUROC)로 arm을 고르지 말 것.** CV-only의 합성 val AUROC는

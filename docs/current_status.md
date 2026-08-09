@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-09` (**§70 v41 — er_status 50-fold **0.7303**으로 지도학습 SEAL ABMIL(0.717)을 처음 상회. 이득의 정체는 차원이 아니라 대역폭 정규화+CV-2 연동(K 고정 arm이 +0.0271, 차원 증설 추가분은 +0.0043로 CI가 0 포함)** + **§69 covariance sketch 기저 진단 — label-free 축 8개 전부 무효(0.68±0.03 천장) / 대역폭 고정 시 차원은 유효(K=64는 최적 아님, 128~256이 +0.016~0.019) / 합성 val 지표로 arm 고르지 말 것** + **§68 분기 기여도 진단 → CV-only 성공: 6개 분기 중 CV-1·CV-2만 남겨도 fold-paired −0.0005 동률, 훈련 forward 5.9× VRAM 3.4× 절감** + **§67 안정화 역효과(clipping −0.0317) + LR 가설 반증** + §66 ridge ablation(v38) — G-2 global ridge 무기여 확정(Δ −0.0004, CI가 0 포함) / P-2·CV-1은 제거 시 학습 붕괴(발산·크래시, 참고용) → "ridge가 정보를 뺏는다" 가설 기각 방향** + **§65 v36 Q1·v37 두 arm 평가 완료 — 둘 다 게이트 미달(Δ −0.0024 / −0.0001), P0-slots probe의 +0.16은 라우팅 가능성이 아니었음 + val_ce와 50-fold AUROC 불일치 발견** + §64 평가 bf16 강제 + context 캐싱(356s→50s) + er_status 기본 평가 확정 + §62 P0-slots probe + §60 v35 공식 50-fold 2개 + **§61·§63 아카이브**)  
+**Last updated**: `2026-08-09` (**§71 SEAL 10개 task 전면 평가 — 일반화 실패: 평균 0.6940 vs ABMIL 0.727(−0.033), 상회 3/10. "SEAL 상회"는 er_status 단일 task 현상이며 지금까지의 모든 arm 선택이 그 단일 기준이었다 → 판정 기준을 10개 macro 평균으로 변경** + **§70 v41 — er_status 0.7303(+0.031). 이득의 정체는 차원이 아니라 대역폭 정규화+CV-2 연동(K 고정 arm이 +0.0271, 차원 증설 추가분은 +0.0043로 CI가 0 포함)** + **§69 covariance sketch 기저 진단 — label-free 축 8개 전부 무효(0.68±0.03 천장) / 대역폭 고정 시 차원은 유효(K=64는 최적 아님, 128~256이 +0.016~0.019) / 합성 val 지표로 arm 고르지 말 것** + **§68 분기 기여도 진단 → CV-only 성공: 6개 분기 중 CV-1·CV-2만 남겨도 fold-paired −0.0005 동률, 훈련 forward 5.9× VRAM 3.4× 절감** + **§67 안정화 역효과(clipping −0.0317) + LR 가설 반증** + §66 ridge ablation(v38) — G-2 global ridge 무기여 확정(Δ −0.0004, CI가 0 포함) / P-2·CV-1은 제거 시 학습 붕괴(발산·크래시, 참고용) → "ridge가 정보를 뺏는다" 가설 기각 방향** + **§65 v36 Q1·v37 두 arm 평가 완료 — 둘 다 게이트 미달(Δ −0.0024 / −0.0001), P0-slots probe의 +0.16은 라우팅 가능성이 아니었음 + val_ce와 50-fold AUROC 불일치 발견** + §64 평가 bf16 강제 + context 캐싱(356s→50s) + er_status 기본 평가 확정 + §62 P0-slots probe + §60 v35 공식 50-fold 2개 + **§61·§63 아카이브**)  
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **v34 확정 (§52·§53·§56)**: **v34-1536을 PathoBench 보고용 모델로 확정**(사용자 결정). 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv fold·코호트·라벨) 기준 **50-fold**(SEAL macro-AUC와 동일 구조) — **5/17 완료**(bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569, brca_TP53), **12개는 config 수정으로 재시작**(§56, 백그라운드). v30은 합성/Musk baseline 유지. 이전 5-fold와 수치 ±0.04 이내 동일(평가 견고성). config 시스템을 v34 base + group default 참조형으로 리팩터링(§56). 자세한 진행 §53·§56.
@@ -14,7 +14,7 @@
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§70 (v41 — SEAL 상회, 다만 두 손잡이가 아직 분리되지 않음)**, **§68 (분기 기여도 진단 → CV-only가 새 baseline. Q-5는 상수를 뱉고 있었고, 그래서 v36/v37이 실패했다)**, **§69 (sketch 기저 — label-free 축 8개 무효, 차원만 유효. 합성 지표 불신)**, **§67 (clipping을 기본으로 켜지 말 것)**, **§66 (ridge ablation — G-2 무기여, CV-1 제거 불가)**, **§65 (v36 Q1·v37 기각 + val_ce↔AUROC 불일치)**, **§64 (평가 bf16 강제 + context 캐싱 45초)**, **§60 (v35 공식 50-fold + SEAL 비교)**, **§57 (case leakage 진단)**.
+**Read first if you are picking this up**: **§71 (SEAL 10개 전면 평가 — er_status 과적합 위험, 판정 기준 변경)**, **§70 (v41 — SEAL 상회, 다만 두 손잡이가 아직 분리되지 않음)**, **§68 (분기 기여도 진단 → CV-only가 새 baseline. Q-5는 상수를 뱉고 있었고, 그래서 v36/v37이 실패했다)**, **§69 (sketch 기저 — label-free 축 8개 무효, 차원만 유효. 합성 지표 불신)**, **§67 (clipping을 기본으로 켜지 말 것)**, **§66 (ridge ablation — G-2 무기여, CV-1 제거 불가)**, **§65 (v36 Q1·v37 기각 + val_ce↔AUROC 불일치)**, **§64 (평가 bf16 강제 + context 캐싱 45초)**, **§60 (v35 공식 50-fold + SEAL 비교)**, **§57 (case leakage 진단)**.
 
 > [!IMPORTANT]
 > **방법론 경고 3건 — 다음 arm 설계 전에 읽을 것**:
@@ -26,7 +26,7 @@
 > 2. **학습 길이가 다른 arm 간 비교는 그 자체로 교란이다** (§42-43 arm C 교훈의 재확인).
 >    control은 항상 같은 epoch 수로 새로 학습할 것.
 
-**열린 과제**: ⓪ **v41 두 손잡이 분리**(§70-3: 대역폭 정규화만 / CV-2 연동만, arm 2개), ⓪′ **v41 seed 반복**(+0.027이 요동 ±0.02~0.03 대비 여유가 크지 않다), ⓪″ **다른 task로 일반화 확인**(§70-6: 지금까지 전부 er_status 단일 task — SEAL 우위 주장에 필수), ⓪‴ **learnable 사영**(§69: label-free 축 8개가 전부 같은 천장, 이제 P가 config 교체 가능)(§66-6: er_status 단일 task·단일 seed이므로 task 1~2개 추가 확인 후 코드에서 실제 삭제), ⓪′ **P-2 / CV-1 재판정**(§66-6: gradient clipping 등 안정화 후 50 epoch 완주 — **control도 같은 조치로 재학습해야 공정**), ⓪″ **v37 label 조건화**(§65-3: v37은 label-free라 §62-2 진단의 절반만 답했다 — 미검정 레버), ① **공식 50-fold 전면 재산출**(§64: fp32 수치 전부 참고용 → §53 표 9개 + 잔여 8개; 캐싱으로 task당 ~50초, 실행 전 `/tmp/pathobench_official_workers/` fp32 캐시 정리 필수), ② **v35 공식 50-fold 잔여 15개** + SEAL 최종 재비교(§60), ③ v30 vs v34 CV 공정 비교(PCA-per-fold), ④ v34-512 학습, ⑤ **chunk 단위(bag 내부) 스트리밍** 미구현(rev.2 §3), ⑥ v30 six-task / B2b cardinality 효과 분리, ⑦ frozen-v30 multi-resolution headroom, ⑧ v30 medium 참조 재학습. **해결·폐기**: v36 Q1(§65 기각), v37 context-adaptive(§65 기각), rare branch 제거(§61 완료). 상세 기록은 [`history/archive.md`](history/archive.md).
+**열린 과제**: ⓪ **모든 판정을 SEAL 10개 macro 평균으로**(§71-4: 지금까지 전부 er_status 단일 기준이었다), ⓪ᵃ **v41_K64 / v40_cv_only 10개 평가**(§70 결론이 er_status 특수 현상인지 판정), ⓪′ **v41 두 손잡이 분리**(§70-3: 대역폭 정규화만 / CV-2 연동만, arm 2개), ⓪′ **v41 seed 반복**(+0.027이 요동 ±0.02~0.03 대비 여유가 크지 않다), ⓪″ **다른 task로 일반화 확인**(§70-6: 지금까지 전부 er_status 단일 task — SEAL 우위 주장에 필수), ⓪‴ **learnable 사영**(§69: label-free 축 8개가 전부 같은 천장, 이제 P가 config 교체 가능)(§66-6: er_status 단일 task·단일 seed이므로 task 1~2개 추가 확인 후 코드에서 실제 삭제), ⓪′ **P-2 / CV-1 재판정**(§66-6: gradient clipping 등 안정화 후 50 epoch 완주 — **control도 같은 조치로 재학습해야 공정**), ⓪″ **v37 label 조건화**(§65-3: v37은 label-free라 §62-2 진단의 절반만 답했다 — 미검정 레버), ① **공식 50-fold 전면 재산출**(§64: fp32 수치 전부 참고용 → §53 표 9개 + 잔여 8개; 캐싱으로 task당 ~50초, 실행 전 `/tmp/pathobench_official_workers/` fp32 캐시 정리 필수), ② **v35 공식 50-fold 잔여 15개** + SEAL 최종 재비교(§60), ③ v30 vs v34 CV 공정 비교(PCA-per-fold), ④ v34-512 학습, ⑤ **chunk 단위(bag 내부) 스트리밍** 미구현(rev.2 §3), ⑥ v30 six-task / B2b cardinality 효과 분리, ⑦ frozen-v30 multi-resolution headroom, ⑧ v30 medium 참조 재학습. **해결·폐기**: v36 Q1(§65 기각), v37 context-adaptive(§65 기각), rare branch 제거(§61 완료). 상세 기록은 [`history/archive.md`](history/archive.md).
 
 **Branches**: `main` = v30 확정 baseline + 미채택 v31 CCER-v2 재현 코드. 참고용 branch/tag 구조는
 [`history/branch_structure.md`](history/branch_structure.md).
@@ -2337,11 +2337,14 @@ full 1536² 공분산 실측: 60 bags×16384 cells에서 **2.81 ms / 0.53 GiB**.
 
 ---
 
-## 70. 2026-08-09 — v41: **지도학습 SEAL을 넘었다** (0.7303) — 이득의 정체는 차원이 아니라 대역폭·CV-2
+## 70. 2026-08-09 — v41: er_status 0.7303 (**+0.031**) — 이득의 정체는 차원이 아니라 대역폭·CV-2  ⚠️ **§71이 정정: 10개 task로 넓히면 SEAL 상회 주장은 성립하지 않는다**
 
 **상태**: §69의 sketch 기하 손잡이 2개를 실제 학습 arm에 적용했다. **er_status 50-fold에서
-0.6989 → 0.7303**으로, 같은 코호트·같은 프로토콜의 **지도학습 SEAL ABMIL(0.717)을 처음으로
-앞섰다.**
+0.6989 → 0.7303**으로 이 task에서는 SEAL ABMIL(0.717)을 앞섰다.
+> [!WARNING]
+> **§71이 이 절의 주장을 정정한다.** 아래 수치는 전부 **er_status 단일 task**다. SEAL 대상
+> 10개 task로 넓히면 평균 0.6940 vs ABMIL 0.727로 **−0.033 밀리고 상회는 3/10뿐**이다.
+> "지도학습 SEAL을 넘었다"는 **er_status에만 해당**하며 일반화되지 않는다.
 
 ### 1. 결과
 
@@ -2407,3 +2410,61 @@ K128→256 이득이 +0.003이라 기대는 낮다).
    이제 P가 config로 교체 가능해졌으니 착수 비용이 낮다.
 4. **다른 task로 일반화 확인** — 지금까지 전부 er_status 단일 task다. SEAL 우위 주장을 하려면
    최소 2~3개 task가 필요하다.
+
+---
+
+## 71. 2026-08-09 — SEAL 10개 task 전면 평가: **일반화 실패**, er_status는 가장 유리한 task였다
+
+**상태**: §70이 er_status 단일 task로 "SEAL 상회"를 주장했으므로, 사용자 지시로 **SEAL 대상
+10개 task 전부**를 v41_K128로 채점했다. **주장은 성립하지 않는다.**
+
+### 1. 대상 선정
+
+`docs/seal_univ2_baseline_17tasks.csv`의 **`in_seal=yes` 10개**만이 SEAL과 **같은 코호트·같은
+50-fold**로 직접 비교 가능하다. 나머지 7개는 SEAL에 대응 수치가 없다(CPTAC-LSCC 미평가,
+PDA는 회귀 전용, ucla_lung 미사용, ccrcc PBRM1은 다른 코호트).
+러너: `scripts/eval_seal_tasks.sh`. 2 GPU 분할, 9개에 약 20분.
+
+### 2. 결과 — v41_K128
+
+| task | v41_K128 | ABMIL | MeanMIL | Δ ABMIL | Δ Mean |
+|---|---|---|---|---|---|
+| bc_therapy er_status | 0.7303 | 0.717 | 0.712 | **+0.013** | +0.018 |
+| bc_therapy grade | 0.7451 | 0.770 | 0.751 | −0.025 | −0.006 |
+| bc_therapy her2 | 0.6792 | 0.663 | 0.684 | **+0.016** | −0.005 |
+| cptac_brca PIK3CA | 0.5476 | 0.595 | 0.544 | −0.047 | +0.004 |
+| cptac_brca TP53 | 0.8188 | 0.801 | 0.787 | **+0.018** | +0.032 |
+| cptac_luad EGFR | 0.7642 | 0.830 | 0.777 | −0.066 | −0.013 |
+| cptac_luad STK11 | 0.8891 | 0.908 | 0.873 | −0.019 | +0.016 |
+| cptac_luad TP53 | 0.6846 | 0.751 | 0.735 | −0.066 | −0.050 |
+| cptac_ccrcc BAP1 | 0.6312 | 0.693 | 0.720 | −0.062 | −0.089 |
+| cptac_ccrcc VHL | 0.4503 | 0.538 | 0.542 | −0.088 | −0.092 |
+| **평균 (n=10)** | **0.6940** | **0.727** | **0.713** | **−0.033** | **−0.018** |
+
+**ABMIL 상회 3/10, MeanMIL 상회 4/10.**
+
+### 3. 판정
+
+- ⚠️ **"지도학습 SEAL을 넘었다"는 er_status 단일 task 현상이다.** 10개 평균으로는 ABMIL에
+  −0.033, MeanMIL에 −0.018 밀린다. §70의 헤더·커밋 메시지 표현은 과했다.
+- ⚠️ **er_status가 10개 중 가장 유리한 task였을 가능성이 높다.** 지금까지의 모든 arm 선택
+  (K, 대역폭 정규화, CV-2 연동, CV-only 자체, ridge ablation, v36/v37 기각)이 **전부 er_status
+  단일 기준**이었다. **er_status에 과적합된 설계일 위험이 실재한다.**
+- **ccrcc VHL 0.4503은 랜덤 이하**다(SEAL도 0.538로 낮은 task이나 우리는 −0.088).
+- **같은 유전자도 코호트에 따라 정반대**다: TP53이 brca +0.018 / luad −0.066.
+  코호트 특성(슬라이드 112 vs 324)이 작용하는 것으로 보인다.
+- **MeanMIL 대비(−0.018)가 ABMIL 대비(−0.033)보다 낫다.** ABMIL은 attention 선택을 하는데
+  우리는 §68에서 Q-5(선택 기제)를 삭제했고 covariance는 전 세포 통계다. 그 차이로 보인다.
+
+### 4. 운영 원칙 변경 (필수)
+
+**판정 기준을 er_status 단일에서 SEAL 10개 macro 평균으로 바꾼다.** 지금까지의 결론이 전부
+단일 task에서만 검증됐으므로, 10개 기준으로는 다르게 나올 수 있다. 비용은 2 GPU로 약 20분이라
+감당 가능하다.
+
+### 5. 다음
+
+1. **v41_K64 10개 평가**(진행 중) — §70의 "K=128 우위(+0.0043)"와 "대역폭·CV-2 이득(+0.0271)"이
+   10개 기준으로도 유지되는지. **이게 §70의 결론이 er_status 특수 현상인지 가리는 첫 시험이다.**
+2. v40_cv_only(이전 baseline) 10개 평가 — 이득의 절대 크기 확인.
+3. 이후 모든 arm은 10개 기준으로 판정.
