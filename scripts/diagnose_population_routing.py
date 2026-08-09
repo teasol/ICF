@@ -14,7 +14,7 @@ weight distribution is informative before training.
 
     PY=/home/aibio_3/miniconda3/envs/BagPFN/bin/python
     $PY scripts/diagnose_population_routing.py \
-      --config configs/train_v36_q1_structured_1536.yaml \
+      --config configs/archive/v35_v39_pre_cvonly/train_v36_q1_structured_1536.yaml \
       --checkpoint checkpoints/.../epoch=048-....ckpt \
       --official-folds /NHNHOME/BASE/kimds/Data/PathoBench/official/bc_therapy/er_status \
       --folds 2 --device cuda:0

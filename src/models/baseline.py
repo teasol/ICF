@@ -2983,6 +2983,51 @@ class StructuredPopulationMetaClassifier(nn.Module):
             relation_config.get("residual_scale", 0.02)
         )
         self.covariance_relation_eps = float(relation_config.get("eps", 1e-6))
+        # Margin activation (docs SS72). "tanh" is the historical default from
+        # `5869535`, which replaced a query-axis RMS with a raw tanh so that
+        # 1-query eval == multi-query == training. That invariance comes from
+        # `margin` being per-query, NOT from tanh itself, so "identity" keeps it.
+        #
+        # ⚠️ Measured (seed 42, K=128): tanh saturates PER EPISODE, not globally.
+        # On the trained v41_K128 checkpoint |tanh(margin)| > 0.9999 in 40% of
+        # episodes, where the local slope 1 - tanh² is ~2e-4; mean |margin| is
+        # 0.88. The head still trains -- 229 parameters carry a non-zero gradient
+        # at init AND at epoch 49 -- but it learns only from the unsaturated
+        # minority. "identity" removes the ceiling, at the cost of unbounded
+        # logits, hence the temperature below.
+        #
+        # An earlier note here claimed the head received gradient 0.0 and that
+        # only 3 parameters trained. That was WRONG and is retracted; the direct
+        # per-parameter gradient measurement above supersedes it.
+        margin_activation = str(
+            relation_config.get("margin_activation", "tanh")
+        ).lower()
+        if margin_activation not in ("tanh", "identity"):
+            raise ValueError(
+                "covariance_relation.margin_activation must be 'tanh' or "
+                f"'identity', got {margin_activation!r}."
+            )
+        self.covariance_relation_margin_activation = margin_activation
+        # Learnable temperature for the identity path (docs SS72). Only created
+        # in that mode: adding a parameter unconditionally would change the
+        # state_dict and break strict loading of every existing checkpoint.
+        # Init from `margin_temperature` so the arm STARTS where the tanh version
+        # sat, then learns its own scale.
+        # ⚠️ Match the margin's BODY, not its tail. v43 used T=150 to align
+        # |max| with CV-1, but |max| tracks the tail (raw margin max 12-25) while
+        # the body is mean 1.5-3.3 -- so mean |CV-2 margin| came out 0.0101 vs
+        # the tanh version's 0.594, i.e. CV-2 effectively started switched off.
+        # The parameter is learnable so it recovers (150 -> 53.4 in 8 epochs),
+        # but it spends ~30 epochs doing so. v44 uses T=2.0. See those configs.
+        # Dividing by a learned scalar keeps the query-count invariance
+        # that `5869535` established -- unlike the query-axis RMS it replaced,
+        # this does not couple queries.
+        if margin_activation == "identity":
+            self.covariance_relation_log_temperature = nn.Parameter(
+                torch.tensor(
+                    math.log(float(relation_config.get("margin_temperature", 1.0)))
+                )
+            )
         self.covariance_relation_kernel_scales = tuple(
             float(value)
             for value in relation_config.get("kernel_scales", (0.5, 1.0, 2.0))
@@ -3361,7 +3406,12 @@ class StructuredPopulationMetaClassifier(nn.Module):
         # 5-12 queries/episode. Margins are already context-dispersion-scaled
         # (d0/d1 = distance/dispersion), so tanh(margin) is per-query and
         # 1-query == multi-query == training.
-        bounded_margin = torch.tanh(margin)
+        if self.covariance_relation_margin_activation == "identity":
+            bounded_margin = margin / self.covariance_relation_log_temperature.exp().clamp(
+                1e-3, 1e4
+            )
+        else:
+            bounded_margin = torch.tanh(margin)
         logits = torch.stack((-0.5 * bounded_margin, 0.5 * bounded_margin), dim=-1)
         if not batched:
             return logits.squeeze(0), separation.squeeze(0)

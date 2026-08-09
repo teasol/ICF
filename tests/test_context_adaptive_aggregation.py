@@ -36,7 +36,7 @@ INPUT_DIM = 96
 
 def _build(aggregation: str = "context_adaptive", seed: int = 0) -> BaseModel:
     config = merge_train_config(
-        REPO_ROOT / "configs" / "train_v36_q1_baseline_1536.yaml"
+        REPO_ROOT / "configs" / "archive" / "v35_v39_pre_cvonly" / "train_v36_q1_baseline_1536.yaml"
     )
     kwargs = dict(config["model"])
     kwargs.update(config["model_kwargs"])

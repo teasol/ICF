@@ -57,6 +57,10 @@ covariance_relation:
   enabled: true
   mode: learned_head
   granularity: subspace
+  # tanh(기본, 역사적) | identity. tanh는 learned_head margin에서 **에피소드의 40%**가
+  # 포화해(|tanh| > 0.9999, 국소 기울기 ~2e-4) head가 나머지에서만 배운다 — 전면 차단은
+  # 아니다(실측: grad != 0 파라미터 229개). identity는 그 천장을 없앤다.
+  margin_activation: tanh
   subspace_rank: 1
   subspace_whiten: true
   subspace_shrinkage: 0.25

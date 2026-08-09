@@ -196,6 +196,8 @@ class TestCovarianceOnlyBudget(unittest.TestCase):
         config = merge_train_config(
             Path(__file__).resolve().parents[1]
             / "configs"
+            / "archive"
+            / "v40_cvonly_variants"
             / "train_v40_cv_only_e4_1536.yaml"
         )
         self.assertTrue(config["model_kwargs"]["meta_covariance_only"])
