@@ -1,41 +1,40 @@
-"""Learned bag tokens + closed-form ridge (docs SS75).
+"""Transformer encoder over cells -> summary tokens -> closed-form ridge (SS75).
 
-An independent second architecture, deliberately not sharing code with
-`baseline.py` beyond the ridge solver. The shape of the idea:
+An independent second architecture, sharing nothing with `baseline.py` beyond
+the ridge solver. The shape of the idea:
 
-    cells of bag b  ->  [Set Transformer]  ->  ONE token per bag
-    context tokens + labels  ->  closed-form class-balanced ridge  ->  query logits
+    cells of bag b -> [Transformer encoder] -> S summary tokens -> flatten
+    context vectors + labels -> closed-form class-balanced ridge -> query logits
 
-Why this is worth a separate branch. In the CV-only model the projection that
-turns cells into a bag descriptor is FIXED -- `QR(sin + cos)`, no parameters --
-and SS69 measured eight different label-free ways of choosing it, all landing on
-the same 0.68 +- 0.03 ceiling. Every axis explored so far has been label-free.
-Here the descriptor is learned, and the gradient reaches it THROUGH the ridge
-solve, so the encoder is optimised for exactly the readout that will be used.
+Why this is worth a separate branch. In the CV-only model the map from cells to
+a bag descriptor is FIXED -- `QR(sin + cos)`, no parameters -- and SS69 measured
+eight label-free ways of choosing it, all landing on the same 0.68 +- 0.03
+ceiling. Every axis explored so far has been label-free. Here the descriptor is
+learned, and the gradient reaches it THROUGH the ridge solve, so the encoder is
+optimised for exactly the readout that will be used.
 
-Two constraints shaped the design:
+Cells attend to each other. An earlier revision replaced that with inducing
+points on the belief that full attention was unaffordable; measurement said
+otherwise -- in-bag self-attention at 256-d costs 1.7 ms and 0.46 GiB at the
+median episode (85 bags x 2,836 cells), because flash-style kernels never
+materialise the attention matrix. The pair COUNT is large; the memory is not.
+That mistake also narrowed the bag descriptor to 256 numbers against the
+covariance sketch's 8,256, which may well have been why v51/v52 lost.
 
-1. ATTENTION COST. Bags carry up to 16,384 cells and an episode up to 100 bags,
-   so full self-attention over cells is 2.7e8 pairs per bag, 2.7e10 per episode.
-   The encoder therefore never does cell-to-cell attention: `M` learned
-   inducing points cross-attend to the cells (O(N*M)), self-attention runs
-   among the M inducing points (O(M^2)), and one pooling seed reduces them to
-   the bag token. At M=32 that is a ~97x reduction against N=3k cells, more at
-   16k.
+Attention backend: cuDNN, measured 2.7x faster than the flash backend on this
+B200 (6.5 ms vs 17.7 ms at 85 x 2,836, forward+backward, 512-d). FlashAttention-3
+is not used: it targets Hopper (sm_90) and this device is sm_100.
 
-2. PERMUTATION INVARIANCE. Cells within a bag have no order, so nothing may
-   depend on it: cross-attention with learned queries, mean/attention pooling,
-   and no positional encoding anywhere. `tests/test_set_transformer_ridge.py`
-   pins this rather than trusting it.
-
-The ridge follows the same recipe CV-1 uses -- context-only standardisation,
-class-balanced weights, weighted centring for the intercept, dual solve -- so a
-difference in results is a difference in the DESCRIPTOR, not in the readout.
+Summary tokens are CLS-like -- S learned vectors prepended to the cells, so they
+attend to every cell AND to each other, and the bag descriptor is their
+concatenation. That keeps the descriptor wide (S x token_dim) rather than
+collapsing a bag to one vector.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+import contextlib
 
 import torch
 from torch import nn
@@ -43,155 +42,211 @@ import torch.nn.functional as F
 
 from src.models.baseline import solve_ridge_system
 
+try:  # pragma: no cover - depends on the torch build
+    from torch.nn.attention import SDPBackend, sdpa_kernel
 
-class InducingPointBlock(nn.Module):
-    """Cross-attend learned inducing points to a set, then mix them.
+    _ATTENTION_BACKEND = contextlib.nullcontext
+    if torch.cuda.is_available():
+        def _ATTENTION_BACKEND():  # type: ignore[misc]
+            # CUDNN first, the rest as fallbacks: a mask or an odd shape can
+            # rule the fastest kernel out, and a hard failure there would be a
+            # worse trade than a slower kernel.
+            return sdpa_kernel(
+                [
+                    SDPBackend.CUDNN_ATTENTION,
+                    SDPBackend.FLASH_ATTENTION,
+                    SDPBackend.EFFICIENT_ATTENTION,
+                    SDPBackend.MATH,
+                ]
+            )
+except ImportError:  # pragma: no cover
+    _ATTENTION_BACKEND = contextlib.nullcontext
 
-    This is the ISAB idea from Set Transformer, kept to its cheap half: the set
-    is read by `num_inducing` queries and never attends to itself, which is
-    what keeps the cost linear in the set size.
+
+class EncoderLayer(nn.Module):
+    """Pre-norm transformer layer whose attention runs on a chosen backend.
+
+    Hand-written rather than `nn.TransformerEncoderLayer` for one reason: the
+    backend choice has to be explicit. The stock layer picks its own kernel and
+    on this device that costs 2.7x.
     """
 
     def __init__(
         self,
         token_dim: int,
         num_heads: int,
-        num_inducing: int,
         feedforward_dim: int,
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
-        self.inducing = nn.Parameter(torch.randn(num_inducing, token_dim) * 0.02)
-        self.read = nn.MultiheadAttention(
-            token_dim, num_heads, dropout=dropout, batch_first=True
-        )
-        self.read_norm = nn.LayerNorm(token_dim)
-        self.mix = nn.MultiheadAttention(
-            token_dim, num_heads, dropout=dropout, batch_first=True
-        )
-        self.mix_norm = nn.LayerNorm(token_dim)
+        if token_dim % num_heads:
+            raise ValueError("token_dim must be divisible by num_heads.")
+        self.num_heads = num_heads
+        self.head_dim = token_dim // num_heads
+        self.attention_norm = nn.LayerNorm(token_dim)
+        self.qkv = nn.Linear(token_dim, 3 * token_dim)
+        self.projection = nn.Linear(token_dim, token_dim)
+        self.feedforward_norm = nn.LayerNorm(token_dim)
         self.feedforward = nn.Sequential(
             nn.Linear(token_dim, feedforward_dim),
             nn.GELU(),
             nn.Linear(feedforward_dim, token_dim),
         )
-        self.feedforward_norm = nn.LayerNorm(token_dim)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(
-        self, cells: torch.Tensor, key_padding_mask: torch.Tensor | None = None
+        self, tokens: torch.Tensor, attention_mask: torch.Tensor | None = None
     ) -> torch.Tensor:
-        batch = cells.shape[0]
-        seeds = self.inducing.unsqueeze(0).expand(batch, -1, -1)
-        read, _ = self.read(
-            seeds, cells, cells, key_padding_mask=key_padding_mask, need_weights=False
+        batch, length, dim = tokens.shape
+        normed = self.attention_norm(tokens)
+        qkv = self.qkv(normed).reshape(
+            batch, length, 3, self.num_heads, self.head_dim
         )
-        tokens = self.read_norm(seeds + read)
-        mixed, _ = self.mix(tokens, tokens, tokens, need_weights=False)
-        tokens = self.mix_norm(tokens + mixed)
-        return self.feedforward_norm(tokens + self.feedforward(tokens))
+        query, key, value = qkv.permute(2, 0, 3, 1, 4).unbind(0)
+        with _ATTENTION_BACKEND():
+            attended = F.scaled_dot_product_attention(
+                query, key, value, attn_mask=attention_mask
+            )
+        attended = attended.transpose(1, 2).reshape(batch, length, dim)
+        tokens = tokens + self.dropout(self.projection(attended))
+        return tokens + self.dropout(
+            self.feedforward(self.feedforward_norm(tokens))
+        )
 
 
 class BagTokenEncoder(nn.Module):
-    """Cells of one bag -> a single token. Permutation invariant by design."""
+    """Cells of one bag -> `num_summary_tokens` tokens. Permutation invariant."""
 
     def __init__(
         self,
         input_dim: int,
-        token_dim: int = 256,
+        token_dim: int = 512,
         num_heads: int = 8,
-        num_inducing: int = 32,
-        num_blocks: int = 2,
-        feedforward_dim: int = 512,
+        num_layers: int = 2,
+        feedforward_dim: int = 1024,
+        num_summary_tokens: int = 32,
+        max_cells: int = 8192,
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
+        self.num_summary_tokens = int(num_summary_tokens)
+        self.max_cells = int(max_cells)
+        self.token_dim = int(token_dim)
         self.input_projection = nn.Linear(input_dim, token_dim)
         self.input_norm = nn.LayerNorm(token_dim)
-        self.blocks = nn.ModuleList(
+        # CLS-like: prepended to the cells, so they attend to every cell and to
+        # each other. No positional encoding anywhere -- cells are a set.
+        self.summary_tokens = nn.Parameter(
+            torch.randn(self.num_summary_tokens, token_dim) * 0.02
+        )
+        self.layers = nn.ModuleList(
             [
-                InducingPointBlock(
-                    token_dim, num_heads, num_inducing, feedforward_dim, dropout
-                )
-                for _ in range(num_blocks)
+                EncoderLayer(token_dim, num_heads, feedforward_dim, dropout)
+                for _ in range(num_layers)
             ]
         )
-        # Pooling by multihead attention: one learned seed reads the inducing
-        # points. A plain mean would work too; the seed lets the model weight
-        # them.
-        self.pool_seed = nn.Parameter(torch.randn(1, token_dim) * 0.02)
-        self.pool = nn.MultiheadAttention(
-            token_dim, num_heads, dropout=dropout, batch_first=True
-        )
         self.output_norm = nn.LayerNorm(token_dim)
+
+    def _subsample(
+        self, cells: torch.Tensor, cell_mask: torch.Tensor | None
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """Cap the cells per bag; attention is quadratic in what survives.
+
+        At the cap the attention alone costs 55.6 ms per layer (100 bags x 8192,
+        forward+backward); the median episode is 2,836 cells and 6.5 ms. The cap
+        therefore binds on the tail of the size distribution, not the body.
+
+        Sampling is uniform WITHOUT replacement and independent per call, so a
+        bag seen twice gives two different subsets -- deliberate, since a fixed
+        subset would freeze one draw into the descriptor.
+        """
+        if cells.shape[1] <= self.max_cells:
+            return cells, cell_mask
+        index = torch.randperm(cells.shape[1], device=cells.device)[: self.max_cells]
+        return (
+            cells.index_select(1, index),
+            None if cell_mask is None else cell_mask.index_select(1, index),
+        )
 
     def forward(
         self, cells: torch.Tensor, cell_mask: torch.Tensor | None = None
     ) -> torch.Tensor:
-        """`cells` [bags, cells, input_dim] -> [bags, token_dim]."""
+        """`cells` [bags, cells, input_dim] -> [bags, summary_tokens, token_dim]."""
+        cells, cell_mask = self._subsample(cells, cell_mask)
         tokens = self.input_norm(self.input_projection(cells))
-        # MultiheadAttention wants True where a key must be IGNORED.
-        key_padding_mask = None if cell_mask is None else ~cell_mask
-        if key_padding_mask is not None:
-            # A fully padded bag would make every key invalid and produce NaN.
-            # Such bags exist in padded ragged batches; let position 0 through
-            # and drop the token afterwards via the bag mask.
-            empty = key_padding_mask.all(dim=-1)
-            if bool(empty.any()):
-                key_padding_mask = key_padding_mask.clone()
-                key_padding_mask[empty, 0] = False
-        for block in self.blocks:
-            tokens = block(tokens, key_padding_mask=key_padding_mask)
-            key_padding_mask = None  # inducing points are dense from here on
-        seeds = self.pool_seed.unsqueeze(0).expand(tokens.shape[0], -1, -1)
-        pooled, _ = self.pool(seeds, tokens, tokens, need_weights=False)
-        return self.output_norm(pooled.squeeze(1))
+        summary = self.summary_tokens.unsqueeze(0).expand(tokens.shape[0], -1, -1)
+        tokens = torch.cat((summary, tokens), dim=1)
+
+        attention_mask = None
+        if cell_mask is not None:
+            # True = attend. Summary positions are always valid; a fully padded
+            # bag would otherwise have no valid key at all and produce NaN, so
+            # the summary tokens alone keep it well defined.
+            valid = torch.cat(
+                (
+                    torch.ones(
+                        cell_mask.shape[0],
+                        self.num_summary_tokens,
+                        dtype=torch.bool,
+                        device=cell_mask.device,
+                    ),
+                    cell_mask,
+                ),
+                dim=1,
+            )
+            attention_mask = valid[:, None, None, :]
+
+        for layer in self.layers:
+            tokens = layer(tokens, attention_mask=attention_mask)
+        return self.output_norm(tokens[:, : self.num_summary_tokens])
 
 
 class SetTransformerRidgeModel(nn.Module):
-    """Learned bag tokens read out by a closed-form ridge.
+    """Learned bag descriptors read out by a closed-form ridge.
 
     Interface-compatible with `BaseModel` where `ModelInterface` touches it:
     `forward`, `forward_episode_batch`, and the `_architecture_version` buffer.
     """
 
-    architecture_version = 40
-    # Cells are read once by the inducing points and never attend to each
-    # other, so the per-cell chain is one transform deep. Measured 21.20 GiB at
-    # 100 bags x 16384 cells; activation_layers=1 bounds that at 29.15 GiB.
-    vram_activation_layers = 1
+    architecture_version = 41
+    # Measured 44.06 GiB peak at 100 bags x 16384 cells (the input tensor is
+    # full size even though `max_cells` then subsamples it). activation_layers=3
+    # estimates 47.94 GiB and is the smallest value that covers the measurement;
+    # 1 would estimate 29.19 GiB and quietly defeat the guard.
+    vram_activation_layers = 3
 
     def __init__(
         self,
         input_dim: int = 1536,
-        token_dim: int = 256,
+        token_dim: int = 512,
         num_heads: int = 8,
-        num_inducing: int = 32,
-        num_blocks: int = 2,
-        feedforward_dim: int = 512,
+        num_layers: int = 2,
+        feedforward_dim: int = 1024,
+        num_summary_tokens: int = 32,
+        max_cells: int = 8192,
         dropout: float = 0.0,
         ridge_lambda: float = 1.0,
         ridge_logit_scale: float = 2.0,
         num_classes: int = 2,
     ) -> None:
         super().__init__()
-        if token_dim % num_heads:
-            raise ValueError("token_dim must be divisible by num_heads.")
         self.input_dim = int(input_dim)
         self.num_classes = int(num_classes)
         self.encoder = BagTokenEncoder(
             input_dim=self.input_dim,
             token_dim=token_dim,
             num_heads=num_heads,
-            num_inducing=num_inducing,
-            num_blocks=num_blocks,
+            num_layers=num_layers,
             feedforward_dim=feedforward_dim,
+            num_summary_tokens=num_summary_tokens,
+            max_cells=max_cells,
             dropout=dropout,
         )
-        self.ridge_log_lambda = nn.Parameter(
-            torch.tensor(float(torch.log(torch.tensor(ridge_lambda))))
-        )
+        # The descriptor the ridge sees: all summary tokens, flattened.
+        self.descriptor_dim = num_summary_tokens * token_dim
+        self.ridge_log_lambda = nn.Parameter(torch.tensor(float(ridge_lambda)).log())
         self.ridge_log_scale = nn.Parameter(
-            torch.tensor(float(torch.log(torch.tensor(ridge_logit_scale))))
+            torch.tensor(float(ridge_logit_scale)).log()
         )
         self.register_buffer(
             "_architecture_version",
@@ -199,26 +254,30 @@ class SetTransformerRidgeModel(nn.Module):
             persistent=True,
         )
 
-    # ---- ridge ---------------------------------------------------------
+    def _descriptors(
+        self, cells: torch.Tensor, cell_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        return self.encoder(cells, cell_mask=cell_mask).flatten(start_dim=1)
+
     def _ridge_logits(
         self,
-        context_tokens: torch.Tensor,
+        context: torch.Tensor,
         context_labels: torch.Tensor,
-        query_tokens: torch.Tensor,
+        query: torch.Tensor,
     ) -> torch.Tensor:
         """Class-balanced ridge, re-solved per episode.
 
         Same recipe as CV-1 (context-only standardisation, class-balanced
-        weights, weighted centring for the intercept, dual solve), so any
+        weights, weighted centring for the intercept, dual solve), so a
         difference against the covariance model is attributable to the
         descriptor rather than the readout.
 
-        The gradient runs back through this solve into the encoder -- that is
-        the whole point of the branch, and also its main numerical risk, which
-        is why `solve_ridge_system`'s adaptive jitter is used unchanged.
+        The gradient runs back through this solve into the encoder -- the point
+        of the branch, and its main numerical risk, which is why
+        `solve_ridge_system`'s adaptive jitter is used unchanged.
         """
-        context = context_tokens.float()
-        query = query_tokens.float()
+        context = context.float()
+        query = query.float()
         center = context.mean(dim=0, keepdim=True)
         context = context - center
         query = query - center
@@ -245,8 +304,9 @@ class SetTransformerRidgeModel(nn.Module):
         ridge_lambda = self.ridge_log_lambda.exp().clamp(1e-4, 1e4)
         with torch.autocast(device_type=context.device.type, enabled=False):
             design32 = design.float()
-            # Dual: the system is (context bags x context bags), and there are
-            # far fewer bags (60-133) than token dimensions.
+            # Dual: the system is (context bags x context bags). Bags number
+            # 60-133 against a descriptor of 16,384, so this is the cheap side
+            # by a wide margin.
             dual_coefficients = solve_ridge_system(
                 design32 @ design32.T, weighted_targets.float(), ridge_lambda.float()
             )
@@ -257,7 +317,6 @@ class SetTransformerRidgeModel(nn.Module):
             raise RuntimeError("The ridge logits contain NaN or Inf.")
         return logits * self.ridge_log_scale.exp().clamp(0.1, 100.0)
 
-    # ---- entry points --------------------------------------------------
     @staticmethod
     def _context_split(
         num_bags: int, query_index: torch.Tensor, device: torch.device
@@ -276,26 +335,30 @@ class SetTransformerRidgeModel(nn.Module):
         return_auxiliary: bool = False,
     ):
         if isinstance(instances, torch.Tensor):
-            tokens = self.encoder(instances)
+            descriptors = self._descriptors(instances)
         else:
-            # Ragged bags: encode one at a time, since they differ in length.
-            tokens = torch.stack(
-                [self.encoder(bag.unsqueeze(0)).squeeze(0) for bag in instances]
+            # Ragged bags differ in length, so they are encoded one at a time
+            # rather than padded -- padding to the longest bag would spend
+            # attention on positions that are then masked out anyway.
+            descriptors = torch.cat(
+                [self._descriptors(bag.unsqueeze(0)) for bag in instances]
             )
-        if labels.shape[0] != tokens.shape[0]:
+        if labels.shape[0] != descriptors.shape[0]:
             raise ValueError(
-                f"Got {tokens.shape[0]} bags but {labels.shape[0]} labels; "
+                f"Got {descriptors.shape[0]} bags but {labels.shape[0]} labels; "
                 "every bag needs exactly one label."
             )
         is_context = self._context_split(
-            tokens.shape[0], query_index, tokens.device
+            descriptors.shape[0], query_index, descriptors.device
         )
         logits = self._ridge_logits(
-            tokens[is_context], labels[is_context], tokens[query_index.long()]
+            descriptors[is_context],
+            labels[is_context],
+            descriptors[query_index.long()],
         )
         if not return_auxiliary:
             return logits
-        return logits, {"bag_tokens": tokens, "context_mask": is_context}
+        return logits, {"bag_descriptors": descriptors, "context_mask": is_context}
 
     def forward_episode_batch(
         self,
@@ -317,7 +380,7 @@ class SetTransformerRidgeModel(nn.Module):
             if cell_mask is None
             else cell_mask.reshape(episodes * num_bags, cell_mask.shape[-1])
         )
-        tokens = self.encoder(flat_cells, cell_mask=flat_mask).reshape(
+        descriptors = self._descriptors(flat_cells, cell_mask=flat_mask).reshape(
             episodes, num_bags, -1
         )
         outputs = []
@@ -331,12 +394,12 @@ class SetTransformerRidgeModel(nn.Module):
             is_context = self._context_split(num_bags, index, x.device) & valid
             outputs.append(
                 self._ridge_logits(
-                    tokens[episode][is_context],
+                    descriptors[episode][is_context],
                     y[episode][is_context],
-                    tokens[episode][index],
+                    descriptors[episode][index],
                 )
             )
         logits = torch.stack(outputs)
         if not return_auxiliary:
             return logits
-        return logits, {"bag_tokens": tokens}
+        return logits, {"bag_descriptors": descriptors}

@@ -38,9 +38,10 @@ def _model(seed: int = 0, **overrides) -> SetTransformerRidgeModel:
         input_dim=INPUT_DIM,
         token_dim=32,
         num_heads=4,
-        num_inducing=8,
-        num_blocks=2,
+        num_layers=2,
         feedforward_dim=48,
+        num_summary_tokens=4,
+        max_cells=64,
     )
     kwargs.update(overrides)
     return SetTransformerRidgeModel(**kwargs).eval()
@@ -191,6 +192,58 @@ class SetTransformerRidgeTest(unittest.TestCase):
         self.assertEqual(
             int(state["_architecture_version"]),
             SetTransformerRidgeModel.architecture_version,
+        )
+
+    def test_descriptor_is_all_summary_tokens_flattened(self) -> None:
+        """The ridge must see S x token_dim, not one pooled vector.
+
+        Collapsing a bag to a single token was the previous design's mistake:
+        it put a 256-number bottleneck against the covariance sketch's 8,256.
+        """
+        model = _model(num_summary_tokens=4, token_dim=32)
+        x, _, _ = _episode()
+        descriptors = model._descriptors(x)
+        self.assertEqual(descriptors.shape, (x.shape[0], 4 * 32))
+        self.assertEqual(model.descriptor_dim, 4 * 32)
+
+    def test_cells_above_the_cap_are_subsampled(self) -> None:
+        model = _model(max_cells=16)
+        torch.manual_seed(11)
+        cells = torch.randn(3, 400, INPUT_DIM)
+        kept, _ = model.encoder._subsample(cells, None)
+        self.assertEqual(kept.shape[1], 16)
+
+    def test_cells_below_the_cap_are_untouched(self) -> None:
+        """The cap must bind on the tail only, and exactly, not approximately."""
+        model = _model(max_cells=64)
+        cells = torch.randn(3, 64, INPUT_DIM)
+        kept, _ = model.encoder._subsample(cells, None)
+        self.assertTrue(torch.equal(kept, cells))
+
+    def test_summary_tokens_attend_to_each_other(self) -> None:
+        """They are prepended to the sequence, not pooled independently.
+
+        If each summary token only read the cells, perturbing one token's
+        parameters could not change another's output. It can.
+        """
+        model = _model(num_summary_tokens=4)
+        x, _, _ = _episode()
+        torch.manual_seed(13)
+        with torch.no_grad():
+            before = model.encoder(x)
+            # A NON-UNIFORM perturbation. Adding a constant to every dimension
+            # would be removed by the pre-norm LayerNorm, so that version of
+            # this test passed for the wrong reason (measured 1.8e-6).
+            model.encoder.summary_tokens[0] += torch.randn_like(
+                model.encoder.summary_tokens[0]
+            )
+            after = model.encoder(x)
+        moved = (before[:, 1:] - after[:, 1:]).abs().max()
+        self.assertGreater(
+            float(moved),
+            1e-4,
+            "changing one summary token left the others unchanged; they are "
+            "not attending to each other",
         )
 
 
