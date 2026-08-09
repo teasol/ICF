@@ -8,7 +8,7 @@
 (AUROC 0.5000, std 0.0000). v36/v37이 겨냥한 것이 바로 그 죽은 모듈이라 둘 다 Δ≈0으로 끝난
 것이 설명된다. 현행 아키텍처 명세는 [`current_architecture.md`](current_architecture.md),
 실험 절차는 [`current_experiments.md`](current_experiments.md)로 **전면 재작성**했다
-(이전 판은 `history/architecture_v34_v39_pre_cvonly.md`·`history/experiments_pre_cvonly.md`).
+(이전 판은 `history.md`·`history.md`).
 
 * **현행 최고 = v41_K128** (`configs/train_v41_cvonly_K128_1536.yaml`): CV-1+CV-2만, K=128,
   CV-2 차원 K 연동, `a = 0.85π/K` 대역폭 정규화. **SEAL 10개 macro 평균 0.6940**
@@ -68,10 +68,10 @@
 
 **해결·폐기**: 6-분기 아키텍처 전체(§68), v36 Q1·v37(§65), ridge ablation 계열(§66·§67),
 G-2 제거 확정(§68에서 분기 통째 제거로 해소), E>1 노선(§68-5), label-free 사영 축 8개(§69).
-상세 기록은 [`history/archive.md`](history/archive.md).
+상세 기록은 [`history.md`](history.md).
 
 **Branches**: `main` = v30 확정 baseline + 미채택 v31 CCER-v2 재현 코드. 참고용 branch/tag 구조는
-[`history/branch_structure.md`](history/branch_structure.md).
+[`history.md`](history.md).
 **Project**: ICF (BagPFN Single-Cell In-Context Meta-Classifier)
 **Architecture Versions**: `30` 확정 baseline; `31` CCER-v2와 `32` DR-CCER 미채택(재현용 보존);
 `33` MR-BagPFN은 proposal-only. 코드 기본 `bag_representation`은 `legacy` 유지.
@@ -169,7 +169,7 @@ G-2 제거 확정(§68에서 분기 통째 제거로 해소), E>1 노선(§68-5)
 v23-A0 exact mean `0.5912` / v24-A0 learned projection(slot 1) `0.5976` /
 v24-B0 per-token bottleneck(slot 12) `0.5923`) v24-B1이 최종 확정되며 함께
 폐기됐습니다. 전체 config/checkpoint/param-count 기록은
-[`history/v23_v24_bag_collapse_candidates.md`](history/v23_v24_bag_collapse_candidates.md)로 이관.
+[`history.md`](history.md)로 이관.
 
 ### ✅ v24-B1 residual bottleneck projection: 50-epoch 완료 (2026-07-31)
 
@@ -199,7 +199,7 @@ v24-B0 병목 구조(40×64=2560d)에 v23-A0에서 효과적이었던 **Exact Ar
 - **확정 config**: `configs/train_v24_medium_bag_proj_residual.yaml` (top-level 유지).
 - **확정 checkpoint**: `checkpoints/20260731_220100/v24_medium_bag_proj_residual/epoch=041-val_ce_loss=0.5903.ckpt`.
 - **폐기**: v22(구 기준선), v23-A0(exact mean), v24-A0(learned projection slot 1), v24-B0(bottleneck without residual). config는 `configs/archive/v23_v24_candidates/`로 이관 (v22 config는 ICI 파이프라인이 아직 참조하므로 유지, 상세는 §6).
-- **폐기된 계획**: 4종 1,000-episode pool-400 paired 비교 평가, T5-A(typed bag-preserving branch)/T5-B/T5-C — 필요 시 향후 다시 꺼낼 수 있도록 [`history/architecture_v23_candidates.md`](history/architecture_v23_candidates.md)에 보존.
+- **폐기된 계획**: 4종 1,000-episode pool-400 paired 비교 평가, T5-A(typed bag-preserving branch)/T5-B/T5-C — 필요 시 향후 다시 꺼낼 수 있도록 [`history.md`](history.md)에 보존.
 - **미완 항목**: v24용 ICI config 없음. Medium→Hard bridge attribution(T4, §6)은 이번 결정과 별개로 계속 열려 있는 질문임 — 폐기되지 않음.
 
 > [!WARNING]
@@ -353,7 +353,7 @@ task별: composition 0.8022 / combined 0.8170 / interaction 0.7453 / state 0.659
 
 ### 🔬 covariance 진단 전체 기록 (2026-07-29) — 🛑 **종료된 라인**
 
-> 🗄️ 본문 전체는 [`docs/history/covariance_tier1_diagnosis.md`](history/covariance_tier1_diagnosis.md)로 이동했습니다 (2026-07-31).
+> 🗄️ 본문 전체는 [`docs/history.md`](history.md)로 이동했습니다 (2026-07-31).
 
 ### v21 이하 과거 수치 (참고용)
 
@@ -369,7 +369,7 @@ task별: composition 0.8022 / combined 0.8170 / interaction 0.7453 / state 0.659
 | Phase 6b (v21) | ICI 5-fold, Signal-Aware retrieval | AUROC 0.5481 / LL 0.8672 | 95% CI [0.421, 0.674] |
 | **Phase 6c (v21)** | **ICI 5-fold, retrieval 없음** | **AUROC 0.5454 / LL 0.7921 / Acc 0.6092** | 95% CI [0.419, 0.674] — v22 기본 구성에 해당 |
 
-**핵심**: 위 세 ICI 구성의 **95% 신뢰구간이 전부 0.5(무작위)를 포함하고 서로 거의 완전히 겹칩니다.** paired bootstrap 승률도 0.52~0.55로 동전 던지기 수준입니다. 즉 n=87 코호트에서 이 차이들은 **검출 불가능한 노이즈**입니다. 상세 근거: [`history/v21_retrieval_investigation.md`](history/v21_retrieval_investigation.md) §4-⑧.
+**핵심**: 위 세 ICI 구성의 **95% 신뢰구간이 전부 0.5(무작위)를 포함하고 서로 거의 완전히 겹칩니다.** paired bootstrap 승률도 0.52~0.55로 동전 던지기 수준입니다. 즉 n=87 코호트에서 이 차이들은 **검출 불가능한 노이즈**입니다. 상세 근거: [`history.md`](history.md) §4-⑧.
 
 ---
 
@@ -377,7 +377,7 @@ task별: composition 0.8022 / combined 0.8170 / interaction 0.7453 / state 0.659
 
 > 아카이브됨 (2026-08-02): v22는 폐기된 구버전이라 이 결정 기록은 역사적.
 > 제거 근거(3대 가설)·제거 범위·v20 롤백 불가 사유 원문 전체:
-> [`docs/history/archive.md`](history/archive.md) §4.
+> [`docs/history.md`](history.md) §4.
 
 ---
 
@@ -408,7 +408,7 @@ task별: composition 0.8022 / combined 0.8170 / interaction 0.7453 / state 0.659
 
 ## 6. 다음 작업 세션 Action Plan — 구조적 변경 및 실험 목록 (아카이브됨)
 
-전문은 [`history/archive.md`](history/archive.md)로 이관했습니다 (T3-3 Hard 기준선, 최종 후보 동결
+전문은 [`history.md`](history.md)로 이관했습니다 (T3-3 Hard 기준선, 최종 후보 동결
 결정, T4 context-size curve — 모두 완료). Action Plan 자체는 **§21~§26(Musk 실데이터 전이)으로
 대체**됐습니다. 아래 3가지만 여전히 유효하므로 여기 남깁니다:
 
@@ -475,7 +475,7 @@ v21 조사의 결론("모든 비교가 노이즈였다")에 대응해 평가 체
 - 검증 스위트: `tests/test_base_model.py`, `tests/test_model_interface.py`, `tests/test_batched_episode_forward.py`, `tests/test_evaluation_protocol.py`
 - 평가 프로토콜: `scripts/archive/probes_smoke/power_analysis.py`, `scripts/launch_ici_protocol.sh`, `scripts/evaluate_protocol.py`, `scripts/evaluate_synthetic.py`
 - **공용 평가 지표 구현**: `src/utils/metrics.py` (rank 기반 AUROC, cluster bootstrap) — 모든 평가 스크립트가 이 하나를 사용하므로 지표가 스크립트마다 어긋날 수 없음
-- 브랜치/버전 정책: [`history/branch_structure.md`](history/branch_structure.md)
+- 브랜치/버전 정책: [`history.md`](history.md)
 
 ### 진단 도구 (Tier 1/2 조사에서 구축)
 
@@ -495,7 +495,7 @@ v21 조사의 결론("모든 비교가 노이즈였다")에 대응해 평가 체
 
 > 아카이브됨 (2026-08-02): v23-A0/v24-A0/v24-B0/v24-B1 학습 완료 기록 — v24-B1이
 > 이후 v24로 확정되어 §3 "최종 결정"에 흡수됨. 원문 전체:
-> [`docs/history/archive.md`](history/archive.md) §9.
+> [`docs/history.md`](history.md) §9.
 
 ---
 
@@ -503,19 +503,19 @@ v21 조사의 결론("모든 비교가 노이즈였다")에 대응해 평가 체
 
 > 아카이브됨 (2026-08-02): v24 확정(사용자 결정, train CE 순위) + 4종 paired 비교
 > 폐기 기록 — v24 확정 내용은 §3 "최종 결정"에 보존. 원문 전체:
-> [`docs/history/archive.md`](history/archive.md) §10.
+> [`docs/history.md`](history.md) §10.
 
 ---
 
 ## 11. 2026-08-02 세션 핸드오프 — v25 Medium 평가 완료(사실상 동률), Easy tier 실험 진행 중
 
-> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history/archive.md`](history/archive.md) 해당 섹션 참고.
+> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history.md`](history.md) 해당 섹션 참고.
 
 ## 12-14. 2026-08-02 세션 — 폴더/문서·config/src·scripts·tests 정리 3단계
 
 > 아카이브됨 (2026-08-02, 핸드오프 정리): checkpoint/log/prediction purge(53GB→3.3GB),
 > 구버전 문서·config·스크립트 삭제, src/scripts/tests 참조 무결성 점검 기록. 전문:
-> [`history/archive.md`](history/archive.md) §12-14.
+> [`history.md`](history.md) §12-14.
 >
 > **하나만 아직 열려 있음**: §13의 config 삭제가 `test_d_stages_differ_only_in_selected_nuisance`를
 > 깨뜨림 (`configs/trainer/learnability_d20.yaml` 삭제, §16에서 발견·미조치) — 상세는
@@ -525,44 +525,44 @@ v21 조사의 결론("모든 비교가 노이즈였다")에 대응해 평가 체
 
 ## 15. 2026-08-02 세션 마무리 — 정리 3단계 + v25 폐기 확정 + 브랜치 정리
 
-> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history/archive.md`](history/archive.md) 해당 섹션 참고.
+> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history.md`](history.md) 해당 섹션 참고.
 
 ## 16. 2026-08-02 세션 (이어짐) — v26/v27/v29 설계안 검토, 학습 없는 게이트 3종,
 ## CLS-token pooling(v26) 구현·학습 시작, 제안서 archive
 
-> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history/archive.md`](history/archive.md) 해당 섹션 참고.
+> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history.md`](history.md) 해당 섹션 참고.
 
 ## 17. 2026-08-03 세션 — v26 학습 완료 + CLS attention 진단 프로브 (24-CLS 제안 사전검정)
 
-> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history/archive.md`](history/archive.md) 해당 섹션 참고.
+> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history.md`](history.md) 해당 섹션 참고.
 
 ## 18. 2026-08-03 — E7 재검정: 지도 component-selection 상한 재확인 (Path B 관문)
 
-> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history/archive.md`](history/archive.md) 해당 섹션 참고.
+> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history.md`](history.md) 해당 섹션 참고.
 
 ## 19. 2026-08-03 — 정규화 천장 프로브: 고정 정규화가 천장을 제한하는가 (사용자 가설 검증)
 
-> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history/archive.md`](history/archive.md) 해당 섹션 참고.
+> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history.md`](history.md) 해당 섹션 참고.
 
 ## 20. 2026-08-03 — v24 no-L2 ablation: per-cell L2 정규화 제거 학습 (진행 중)
 
-> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history/archive.md`](history/archive.md) 해당 섹션 참고.
+> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history.md`](history.md) 해당 섹션 참고.
 
 ## 21. 2026-08-03 — Zero-shot Musk (Musk2) MIL 벤치마크 테스트
 
-> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history/archive.md`](history/archive.md) 해당 섹션 참고.
+> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history.md`](history.md) 해당 섹션 참고.
 
 ## 22. 2026-08-03 — 전략 전환: 생성기 개선 (Musk-like easy 데이터) — 가설 판정 완료
 
-> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history/archive.md`](history/archive.md) 해당 섹션 참고.
+> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history.md`](history.md) 해당 섹션 참고.
 
 ## 23. 2026-08-03 — Musk 0.95 로드맵: raw bag-stat token (mean/skew/kurt) 학습 중
 
-> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history/archive.md`](history/archive.md) 해당 섹션 참고.
+> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history.md`](history.md) 해당 섹션 참고.
 
 ## 24. 2026-08-03 — Phase 1 IA-MIL (Instance-Attention MIL) — 판정: 음성
 
-> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history/archive.md`](history/archive.md) 해당 섹션 참고.
+> 아카이브됨 (2026-08-04, IA-MIL 폐기·문서 정리): 전체 원문은 [`docs/history.md`](history.md) 해당 섹션 참고.
 
 ---
 
@@ -586,7 +586,7 @@ v21 조사의 결론("모든 비교가 노이즈였다")에 대응해 평가 체
   (닫힌 지렛대). 루트에는 활성 `train_v24_musklike_easy.yaml`만 유지.
 - scripts → `scripts/archive/ia_mil/`: `queue_phase1_rare.sh` (wait_gpu_free 레이스 버그 수정본 포함 —
   스폰 대기 + 완료 블록 + run 선택 인자).
-- docs: 해결·폐기된 §11~§24 섹션을 `docs/history/archive.md`로 이관, 스텁+링크만 남김.
+- docs: 해결·폐기된 §11~§24 섹션을 `docs/history.md`로 이관, 스텁+링크만 남김.
   Living 루트는 §0~§10 + §25 (핵심 5문서 유지).
 - 체크포인트: IA-MIL 3종(`20260803_173202`, `20260803_190843`, `20260803_212552`)은 물리 보존,
   위 평가 수치로 폐기 표기. 예측: `predictions/synthetic_*_1000ep.pt`, `predictions/musk_v24_musklike_easy_mil.pt`.
@@ -599,7 +599,7 @@ bag-stat)와 지렛대 3(IA-MIL) 모두 음성으로 종료.
 1. **Phase 2**: 166→512 읽기 브리지 (IA-MIL 제외) 진행 여부 → **§26에서 보류 권고** (근거 부재).
 2. **ICI**: 여전히 잠금 — v24/v26용 ICI config 작성 + 실행은 사용자 재확인 필요.
    **추가로 §26에서 ICI 블로킹 버그 발견** (cell-축 zero-padding 미마스킹).
-3. **Musk 0.95**: 아키텍처 개선 proposal 작성 완료 — [`history/musk095_architecture_proposal.md`](history/musk095_architecture_proposal.md):
+3. **Musk 0.95**: 아키텍처 개선 proposal 작성 완료 — [`history.md`](history.md):
    P0(5-seed 앙상블, 즉시) → P2(bag-mean 보존 채널, 합성 선검증) → P1(166→512 읽기 브리지) → P3(단순
    인스턴스 풀링, 사전 게이트). 핵심 근거: `_bag_view` center+L2가 Musk 최고 신호(bag-mean, ridge 0.829)
    를 삭제(0.554) + zero-padding OOD 브리지.
@@ -610,7 +610,7 @@ bag-stat)와 지렛대 3(IA-MIL) 모두 음성으로 종료.
 ## 26. 2026-08-04 — Musk 전이 재진단: P1/P2 기각 + v30(CFMT) 제안
 
 **상태**: 진단 완료(학습 없음, 전부 재현 가능) / 제안 미구현 — 사용자 판단 대기
-**문서**: [`history/musk_transfer_diagnosis_v30_proposal.md`](history/musk_transfer_diagnosis_v30_proposal.md)
+**문서**: [`history.md`](history.md)
 **신규 스크립트**: `scripts/archive/diagnostics/diagnose_musk_cardinality.py` (체크포인트·학습 불필요)
 
 **핵심 결론**: §25의 proposal은 "입력 표현이 병목"이라는 **방향은 맞지만 메커니즘·수정 방향·검증
@@ -753,7 +753,7 @@ S5 인스턴스 수준 채널(§22의 독립 신호원, 0.95 마진 확보). **�
   −0.019뿐이므로 B2는 선행조건이 아니라 **증폭 요인**. 실행 순서를 **B1(`poolz`) → B2**로 확정.
 
 **문서 압축 (이번 세션 신규)**:
-- **§6(다음 작업 세션 Action Plan, 284줄)을 [`history/archive.md`](history/archive.md)로 이관**하고
+- **§6(다음 작업 세션 Action Plan, 284줄)을 [`history.md`](history.md)로 이관**하고
   스텁 남김. T3-3 Hard 기준선 / 최종 후보 동결 / T4 context-size curve는 모두 완료됐고 Action Plan
   자체는 §21~§26으로 대체됐습니다. 스텁에는 여전히 유효한 3가지를 명시 보존: ① 판정 기준(overall
   +0.03 / target task +0.05), ② **미결 질문 T4 잔여 항목**(raw-cell 대 40-token audit, token budget
@@ -782,14 +782,14 @@ S5 인스턴스 수준 채널(§22의 독립 신호원, 0.95 마진 확보). **�
 **다음 Action**: 헤더 "열린 과제" 3건 — ① v30 승격 여부, ② `poolz` 단독 vs `poolz_l2` 병행 학습,
 ③ P1 보류 여부. B1 구현 시 착수점은 `_bag_view`(`baseline.py:618`)에 `bag_representation` 플래그
 (기본 OFF)를 추가하고 pool 통계를 3개 호출 지점에서 주입하는 것 — 상세는
-[`history/musk_transfer_diagnosis_v30_proposal.md`](history/musk_transfer_diagnosis_v30_proposal.md) §3.1.
+[`history.md`](history.md) §3.1.
 
 ---
 
 ## 28. 2026-08-04 — v30 S1/S2 판정 과정 (B1 `poolz_l2`·B2 cardinality) — **아카이브됨, §29로 승격 완료**
 
 v30 B1/B2 실험·판정 전체 기록(S1 `poolz`/`poolz_l2` 음성, S2 B2+B1 양성, paired bootstrap,
-B1·B2 상호 필수 근거, 교차 분포 합성 무회귀)은 [`history/archive.md`](history/archive.md) §28로
+B1·B2 상호 필수 근거, 교차 분포 합성 무회귀)은 [`history.md`](history.md) §28로
 이관되었습니다. 최종 결론 요약은 헤더 Status와 §29 참고.
 
 
@@ -847,58 +847,58 @@ B1·B2 상호 필수 근거, 교차 분포 합성 무회귀)은 [`history/archiv
 ## 30. 2026-08-04 — v31 CCTS 구현·학습 (아카이브됨)
 
 CCTS 구현과 50-epoch 학습 기록은 후속 CCER-v2로 완전히 대체되어
-[`history/archive.md`](history/archive.md#30-2026-08-04--v31-ccts-cardinality-calibrated-tail-scan-아키텍처-구현-unit-test-통과-및-훈련-구동)로 이동했다.
+[`history.md`](history.md)로 이동했다.
 
 ---
 
 ## 31. 2026-08-05 — v31 CCTS Musk 평가·진단 (아카이브됨)
 
 CCTS Musk `0.8376`, 대형 bag `0.6032` 결과와 구현 결함 재분류 기록은
-[`history/archive.md`](history/archive.md#31-2026-08-05--v31-ccts-50-epoch-완주-musk-zero-shot-평가-및-대형-bag-정체-정밀-분석)로 이동했다.
+[`history.md`](history.md)로 이동했다.
 
 ---
 
 ## 32. 2026-08-05 — v31 CCER-Lite 구현·학습 (아카이브됨)
 
 CCER-Lite 구현과 학습 기록은 contribution이 `~1.4e-4`로 사실상 비활성임을 확인한 뒤
-[`history/archive.md`](history/archive.md#32-2026-08-05--v31-ccer-lite-구현-및-1차-학습-시작)로 이동했다.
+[`history.md`](history.md)로 이동했다.
 
 ---
 
 ## 33. 2026-08-05 — v31 CCER-v2 아키텍처 구현 완료 (학습 미시작) (아카이브됨)
 
-CCER-v2 아키텍처 구현·검증 기록. §38에서 CCER 계열 폐기 판정으로 대체. 본문은 [`history/archive.md`](history/archive.md#2026-08-05-v31-ccer-v2-아키텍처-구현-완료-학습-미시작)로 이동했다.
+CCER-v2 아키텍처 구현·검증 기록. §38에서 CCER 계열 폐기 판정으로 대체. 본문은 [`history.md`](history.md)로 이동했다.
 
 ---
 
 ## 34. 2026-08-05 — v31 CCER-v2 20-epoch 학습 시작 (아카이브됨)
 
-CCER-v2 20-epoch 학습 시작 기록. §38에서 폐기 판정. 본문은 [`history/archive.md`](history/archive.md#2026-08-05-v31-ccer-v2-20-epoch-학습-시작)로 이동했다.
+CCER-v2 20-epoch 학습 시작 기록. §38에서 폐기 판정. 본문은 [`history.md`](history.md)로 이동했다.
 
 ---
 
 ## 35. 2026-08-05 — CCER-v2 구현·검증·20 epoch 학습 완료 (아카이브됨)
 
-CCER-v2 구현·20 epoch 학습 완료 기록. §38에서 폐기 판정. 본문은 [`history/archive.md`](history/archive.md#2026-08-05-ccer-v2-구현검증20-epoch-학습-완료)로 이동했다.
+CCER-v2 구현·20 epoch 학습 완료 기록. §38에서 폐기 판정. 본문은 [`history.md`](history.md)로 이동했다.
 
 ---
 
 ## 36. 2026-08-05 — v31 CCER-v2 Epoch 18 합성/Musk 평가 완료 (v30 Baseline 유지) (아카이브됨)
 
-CCER-v2 epoch 18 합성/Musk 평가(v30 미달) 기록. §38에서 폐기 판정. 본문은 [`history/archive.md`](history/archive.md#2026-08-05-v31-ccer-v2-epoch-18-합성musk-평가-완료-v30-baseline-유지)로 이동했다.
+CCER-v2 epoch 18 합성/Musk 평가(v30 미달) 기록. §38에서 폐기 판정. 본문은 [`history.md`](history.md)로 이동했다.
 
 ---
 
 ## 37. 2026-08-05 — CCER-v2 결과 기반 v32 DR-CCER proposal 작성 (아카이브됨)
 
-v32 DR-CCER proposal 작성 기록. §38에서 폐기 판정. 본문은 [`history/archive.md`](history/archive.md#2026-08-05-ccer-v2-결과-기반-v32-dr-ccer-proposal-작성)로 이동했다.
+v32 DR-CCER proposal 작성 기록. §38에서 폐기 판정. 본문은 [`history.md`](history.md)로 이동했다.
 
 ---
 
 ## 38. 2026-08-05 — v32b DR-CCER: 비판적 검토 반영 개선안 + 구현 + Stage A 학습 시작
 
 **상태**: v30 baseline 유지. v32 원안을 비판적으로 재검토한 **v32b 개선안**
-([`history/architecture_v32b_dr_ccer_proposal.md`](history/architecture_v32b_dr_ccer_proposal.md))을 작성하고,
+([`history.md`](history.md))을 작성하고,
 이를 바탕으로 **P0–P3 probe 스크립트 + DR-CCER 아키텍처 + Stage A 학습**을 구현·실행 중.
 
 ### 1. 비판적 검토 요약 (v32 원안 → v32b)
@@ -985,7 +985,7 @@ v32 DR-CCER proposal 작성 기록. §38에서 폐기 판정. 본문은 [`histor
 - **전체 unittest 178개 통과** (1534.9s) — DR-CCER 6개 포함 회귀 없음.
 - **Stage A 학습**(`20260805_182126`) 완주: donor-resolved expert standalone CE 0.693(무작위) 정체
   → Stage A 게이트 실패. **Stage-0 probe(P0–P3)**도 전 게이트 실패(P2 -0.00034, P3 +0.00000).
-- **다음 Action**: ① CCER 계열 폐기 기록(`history/archive.md`), ② Phase 1 "v30 on 6-task mix"
+- **다음 Action**: ① CCER 계열 폐기 기록(`history.md`), ② Phase 1 "v30 on 6-task mix"
   재학습으로 데이터 효과 측정(any_positive_sparse가 v30에 무엇을 더하는지), ③ 소형 bag(n≤4, 0.80)과
   n>34(0.70)가 0.95 목표의 실질 병목 — 데이터/분포 쪽 레버 우선, ④ ICI 잠금 유지.
 
@@ -995,8 +995,8 @@ v32 DR-CCER proposal 작성 기록. §38에서 폐기 판정. 본문은 [`histor
 
 **상태**: 결과 평가와 proposal 작성만 완료. v33 구현·학습은 시작하지 않았고 v30 baseline은 유지한다.
 
-- 현행 proposal: [`history/architecture_v33_multiresolution_bag_proposal.md`](history/architecture_v33_multiresolution_bag_proposal.md)
-- v32/v32b proposal은 구현·평가 종료에 따라 `history/`로 이관했다.
+- 현행 proposal: [`history.md`](history.md)
+- v32/v32b proposal은 구현·평가 종료에 따라 `history.md` §10에 요약·보존했다.
 - **평가**: P1 standalone `0.51055`, P2 fusion `-0.00034`, P3 donor fusion `+0.00000`,
   Stage-A expert CE `0.6931` 정체가 같은 결론을 지지한다. CCER/DR-CCER 표현에는 v30의 오류를
   교정할 ranking information이 없다. 100-episode probe의 검정력 한계는 존재하지만, 독립 Stage-A
@@ -1034,19 +1034,19 @@ v32 DR-CCER proposal 작성 기록. §38에서 폐기 판정. 본문은 [`histor
 ## 41. 2026-08-05 — v33 Phase 0 구현: arm B(C) 데이터 컨트롤 + 학습 런치 — **아카이브됨**
 
 B2b(per-bag cardinality) 구현·arm B/C config 런칭, 8× 에피소드 비대칭 주의 기록. 전문은
-[`history/current_status_archive_20260808_v33_armC.md`](history/current_status_archive_20260808_v33_armC.md) §41.
+[`history.md`](history.md) §41.
 
 ## 42. 2026-08-06 — v33 Phase 0 arm B/C 학습 완료 + gate 평가 — **아카이브됨**
 
 arm B(스파스 gate 미달 0.6747)·arm C(legacy 회귀 +0.0373) 50ep 완료 — **Phase 0 두
 gate 모두 미달**. 전문은
-[`history/current_status_archive_20260808_v33_armC.md`](history/current_status_archive_20260808_v33_armC.md) §42.
+[`history.md`](history.md) §42.
 
 ## 43. 2026-08-06 — arm C top-up: 8×A6000 DDP 전환 + NCCL P2P hang 수정 + 속도 기록 — **아카이브됨**
 
 arm C top-up을 8×A6000 DDP로 재개. **NCCL P2P hang 진단/수정(`NCCL_P2P_DISABLE=1`,
 런처 기본 적용)** + B200 vs A6000 8장 속도 비교(~4.3× 노드 총 처리량). 전문은
-[`history/current_status_archive_20260808_v33_armC.md`](history/current_status_archive_20260808_v33_armC.md) §43.
+[`history.md`](history.md) §43.
 
 ---
 
@@ -1054,27 +1054,27 @@ arm C top-up을 8×A6000 DDP로 재개. **NCCL P2P hang 진단/수정(`NCCL_P2P_
 
 ragged B2b 에피소드의 패딩 배칭 구현·검증(commit `568c5f8`, batch2에서 ~16 ep/s).
 전문은
-[`history/current_status_archive_20260808_v33_armC.md`](history/current_status_archive_20260808_v33_armC.md) §44.
+[`history.md`](history.md) §44.
 
 ## 45. 2026-08-06 — arm C top-up 중간 Musk zero-shot: 대형 bag 개선 + 소형 trade-off — **아카이브됨**
 
 arm C 중간(ep64) Musk: **n>34 0.698→0.825 개선**, 소형(n≤4) 0.792→0.700 희생.
 완주 checkpoint 재확인은 §48. 전문은
-[`history/current_status_archive_20260808_v33_armC.md`](history/current_status_archive_20260808_v33_armC.md) §45.
+[`history.md`](history.md) §45.
 
 ## 46. 2026-08-06 — PathoBench zero-shot 평가: per-task PCA 전처리 + 결과 — **아카이브됨**
 
 per-task PCA(1536→512) 캐시 파이프라인 구축 + sample-context 17개 task(대부분
 0.5~0.68) + all-context 5개 task(개선). **§51 정정: 로컬 ccrcc CSV는 bc_therapy
 복사본 오류**. 프로토콜은 이후 공식 50-fold(§52/§53)로 대체. 전문은
-[`history/current_status_archive_20260808_v33_armC.md`](history/current_status_archive_20260808_v33_armC.md) §46.
+[`history.md`](history.md) §46.
 
 ## 47. 2026-08-06 — 새 기준 checkpoint(e125) 재평가 + 타일 수 제한 실험 — **아카이브됨**
 
 `--context-mode all` 기본화 + `--max-tiles`/`--trials` 추가. e125(0.5142)를 새 기준으로
 채택(val_ce 개선이 test로 대체로 전이), 타일 제한 스윕은 **task 의존**(LUAD는 제한이
 개선). 전문은
-[`history/current_status_archive_20260808_v33_armC.md`](history/current_status_archive_20260808_v33_armC.md) §47.
+[`history.md`](history.md) §47.
 
 ---
 
@@ -1084,7 +1084,7 @@ arm C top-up 150ep 완주(e125). **legacy 회귀 gate 여전히 미달(+0.0412) 
 편향 가설 기각, B2b 데이터 자체가 회귀 원인. Musk n>34 개선(0.698→0.849) 유지,
 PathoBench는 v30 우위(5-task 평균 +0.039). → v30 baseline 유지, arm C 미채택.**
 전문은
-[`history/current_status_archive_20260808_v33_armC.md`](history/current_status_archive_20260808_v33_armC.md) §48.
+[`history.md`](history.md) §48.
 
 ---
 
@@ -1422,7 +1422,7 @@ Patho-Bench 프로토콜**(공식 k=all.tsv fold · 공식 코호트 · 공식 �
 
 ## 54-55. 2026-08-07 — 아카이빙 정리 + 리팩터링 1단계 (완료, 아카이브됨)
 
-두 절 모두 종료된 정리 작업이라 전문을 [`history/archive.md`](history/archive.md)로 이관했다.
+두 절 모두 종료된 정리 작업이라 전문을 [`history.md`](history.md)로 이관했다.
 요약: §54 = 구버전 문서/config/스크립트 아카이빙 + v34 태그, §55 = AST 정적 분석으로 미사용
 함수 제거. 열린 과제 없음.
 
@@ -1433,7 +1433,7 @@ Patho-Bench 프로토콜**(공식 k=all.tsv fold · 공식 코호트 · 공식 �
 > 아카이브됨 (2026-08-08, §64 정리): config 리팩터링은 완료됐고 지속되는 규칙은
 > [`agent_handoff.md`](agent_handoff.md) §7(config 관리·자체 포함형 아카이빙·참조 검증)에 있다.
 > 여기서 재시작한 공식 50-fold는 §57(case leakage)에 이어 §64(fp32 수치는 참고용)로 대체됐다.
-> 전문: [`history/current_status_archive_20260808_v34_config_refactor.md`](history/current_status_archive_20260808_v34_config_refactor.md)
+> 전문: [`history.md`](history.md)
 
 ## 57. 2026-08-07 — 50-fold 재개 전 진단: 5-fold CV의 case leakage로 lscc_arid1a 0.908이 부풀려짐
 
@@ -1488,7 +1488,7 @@ leakage가 없으면 ARID1A는 zero-shot in-context로 실질 랜덤 (공식 50-
 
 **상태**: PathoBench 보고 모델 v34-1536의 재학습(v35) 설계를 확정하고 제안서를 문서화했다. **코드 변경
 없음, 학습·평가 미시작.** 이 세션 산출물: ① 모델 구조 정독 기반 아키텍처 분석, ② v35 설계 결정 3건, ③ 제안서
-작성 (`docs/history/architecture_v35_tokenonly_chunked_query_proposal.md`).
+작성 (`docs/history.md`).
 
 ### 1. 아키텍처 분석 (코드로 확인)
 
@@ -1650,7 +1650,7 @@ tanh(±1) sign-only로 붕괴했음). bc_therapy/er_status fold 1-3:
 완주 전 메모리 급증("누수?")과 val loss plateau 의심을 진단해 **둘 다 정상/설명 가능**으로
 결론냈다. 완주 후 판정 게이트인 **공식 50-fold 평가를 진행 — LUAD EGFR·BRCA PIK3CA 2개 완료**,
 SEAL(지도 ABMIL/MeanMIL)과 비교했다. 이번 세션에서 §41–§48(v33 arm C saga)을
-`history/current_status_archive_20260808_v33_armC.md`로 아카이브했다.
+`history.md`로 아카이브했다.
 
 ### 1. v35 2차 런 `[1,16384]` 완주 (commit `51b5093` 이후)
 
@@ -1731,7 +1731,7 @@ SEAL(지도 ABMIL/MeanMIL)과 비교했다. 이번 세션에서 §41–§48(v33 
 
 `rare_logits=0` ablation이 |Δpooled| **0.0009 < 0.003**으로 게이트를 통과해 rare 분기를 제거했다
 (`meta_enable_rare_evidence: false`, 코드 삭제가 아니라 강제 0 — ckpt 호환·가역). 이후 모든 arm이
-rare-free이므로 **평가는 반드시 그 arm의 훈련 config로** 해야 한다. 전문: [`history/archive.md`](history/archive.md).
+rare-free이므로 **평가는 반드시 그 arm의 훈련 config로** 해야 한다. 전문: [`history.md`](history.md).
 
 ## 62. 2026-08-08 — v36 제안서 비판적 재검토 + P0-slots 무료 probe (Q1 확정 / Q2 보류)
 
@@ -1880,7 +1880,7 @@ EGFR −0.041(t −2.27) / PIK3CA −0.021(t −0.98)로, fold가 같은 코호�
 
 `configs/trainer/default.yaml`이 precision을 설정하지 않아 v34/v35가 fp32로 조용히 학습됐던 것을
 확인하고 bf16-mixed를 예외 없이 강제했다(`tests/test_precision_contract.py`). 계약 본문은
-[`agent_handoff.md`](agent_handoff.md) §3.4에 있다. 전문: [`history/archive.md`](history/archive.md).
+[`agent_handoff.md`](agent_handoff.md) §3.4에 있다. 전문: [`history.md`](history.md).
 
 ## 64. 2026-08-08 — 평가도 bf16-mixed 강제 + 폴드 단위 context 캐싱(bit-identical, 7.1×) + bc_therapy/er_status 기본 평가 확정
 

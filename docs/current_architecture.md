@@ -2,7 +2,7 @@
 
 **적용 범위**: `meta_covariance_only: true` 계열. 현행 최고는 **v41_K128**
 (`configs/train_v41_cvonly_K128_1536.yaml`).
-**이전 세대**(v34~v39, 6-분기)는 [`history/architecture_v34_v39_pre_cvonly.md`](history/architecture_v34_v39_pre_cvonly.md).
+**이전 세대**(v34~v39, 6-분기)는 [`history.md`](history.md).
 
 ---
 

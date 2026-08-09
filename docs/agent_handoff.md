@@ -97,7 +97,7 @@ checkpoint·32 tests) 완료. v30은 합성/Musk baseline
 §52·§53·§56.
 
 **Active — v35 데이터 단독 arm (2026-08-07, §59)**: v35 제안서는 **rev.2로 개정**됐다
-([`history/architecture_v35_tokenonly_chunked_query_proposal.md`](history/architecture_v35_tokenonly_chunked_query_proposal.md)).
+([`history.md`](history.md)).
 rev.1의 결정 3건 중 **①rare branch 제거와 ③context/query 분리 대형화는 폐기 권고**다: anchor 후보가
 bag당 32개 고정이라 chunk 분할 시 대형 bag이 anchor를 지배하고(§59.1), 집계표의 `global_summary`는
 1차 모멘트가 아니라 표준편차이며 `covariance_matrix` 보정식은 `_bag_view`가 버리는 chunk 평균을
@@ -206,11 +206,11 @@ Seed 42 20-epoch 학습 best는 epoch 18 `val_ce_loss=0.443786`이었으나 synt
 `0.99928`, Musk 상관 `0.99311`이고 Musk `n>34`가 `0.69841`로 완전히 동일했다. 따라서
 단순 slot/Top-K 확대 대신 donor-resolved support evidence와 independently supervised expert,
 reliability-gated mixture를 제안한다. 구현 전 P0–P2 checkpoint 진단이 필수다. 상세는
-[`history/architecture_v32_dr_ccer_proposal.md`](history/architecture_v32_dr_ccer_proposal.md)와
+[`history.md`](history.md)와
 [`current_status.md`](current_status.md) §37이다. 아직 구현·학습 승인 또는 활성 run은 없다.
 
 **Active — v32b DR-CCER (2026-08-05)**: v32 원안의 비판적 재검토 개선안
-([`history/architecture_v32b_dr_ccer_proposal.md`](history/architecture_v32b_dr_ccer_proposal.md))을 작성하고,
+([`history.md`](history.md))을 작성하고,
 P0–P3 probe(`scripts/archive/probes_smoke/probe_v32_headroom.py`) + DR-CCER 아키텍처(`architecture_version=32`,
 donor-resolved expert + reliability-gated convex mixture)를 구현했다. **결과: CCER 계열 실증적
 폐기** — ① Stage A 학습(`20260805_182126`, 10 epochs)에서 donor-resolved expert standalone CE가
@@ -250,13 +250,13 @@ resume한다. **gnode5 필수**: 이 머신의 NCCL P2P/CUMEM 전송이 hang을 
 만들지 않고, 검증된 v30 bag representation을 동일 bag의 full/partition/subsample view에서
 공유해 sampling resolution 정보를 보존한다. 단, Phase 0(arm B/C) 결과와 frozen-v30
 multi-resolution combiner의 paired AUROC `+0.01` headroom 확인 후에만 구현한다. 상세는
-[`history/architecture_v33_multiresolution_bag_proposal.md`](history/architecture_v33_multiresolution_bag_proposal.md)와
+[`history.md`](history.md)와
 [`current_status.md`](current_status.md) §39다.
 
 **Persistent invariants**: ICI는 사용자 지시로 잠금 상태다. 잠금 해제 시
 `src/datasets/base_data.py`의 cell-axis zero-padding이 bag mean/global spread를 오염하는 문제를
 먼저 처리한다. 이전 v24/v25/v26/IA-MIL 결정과 config 복구 기록은 §25~§29 및
-[`history/archive.md`](history/archive.md)에 보존한다.
+[`history.md`](history.md)에 보존한다.
 
 이 문서는 BagPFN 저장소를 처음 맡은 coding agent가 안전하게 작업을 시작하기 위한 운영 및 핸드오프 지침입니다. 최신 개발 및 실험 진행 상황은 [`current_status.md`](current_status.md), 현재 모델 명세는 [`current_architecture.md`](current_architecture.md), 현재 실험 프로토콜은 [`current_experiments.md`](current_experiments.md)를 참고합니다.
 
@@ -372,15 +372,20 @@ scripts/launch_interactive_training.sh \
    - `docs/` 최상위 루트에는 새 Agent가 즉시 정독해야 하는 **핵심 Living 문서 5개와 현행 proposal 1개만 존재**해야 합니다:
      - [`agent_handoff.md`](agent_handoff.md): 운영 규칙, 바이너리 경로, Git 수칙, Docs/Config 관리 지침
      - [`current_status.md`](current_status.md): 개발 현황, 최신 수치, Git 커밋 이력, 이슈 진단 및 Action Plan (SSOT)
-     - [`current_architecture.md`](current_architecture.md): **CV-only(v40~) 명세** — 공분산 sketch + closed-form ridge(CV-1) + subspace/prototype(CV-2) 2개 분기만. 이전 6-분기 판은 `history/architecture_v34_v39_pre_cvonly.md`
-     - [`current_experiments.md`](current_experiments.md): **CV-only 이후 실험 절차** — 판정은 SEAL 10개 macro 평균, 금지된 판정 방식 목록, 표준 실행 명령. 이전 판은 `history/experiments_pre_cvonly.md`
+     - [`current_architecture.md`](current_architecture.md): **CV-only(v40~) 명세** — 공분산 sketch + closed-form ridge(CV-1) + subspace/prototype(CV-2) 2개 분기만. 이전 6-분기 판은 `history.md`
+     - [`current_experiments.md`](current_experiments.md): **CV-only 이후 실험 절차** — 판정은 SEAL 10개 macro 평균, 금지된 판정 방식 목록, 표준 실행 명령. 이전 판은 `history.md`
      - [`README.md`](README.md): 전체 문서 맵 및 갱신 규칙
-     - `architecture_*_proposal.md`: 현재 활성 개선안 1개. 완료·폐기 시 `history/`로 이동
-     (**2026-08-09 현재 활성 proposal 없음** — v36 Q1·v37 모두 기각되어 history로 이동)
+     - `architecture_*_proposal.md`: 현재 활성 개선안 1개. 완료·폐기 시 핵심 결론을 `history.md`에 기록하고 원문은 git 이력에 보존
+     (**2026-08-09 현재 활성 proposal 없음** — v36 Q1·v37 모두 기각되어 history.md에 요약)
    - 최상위 Living 문서와 현행 proposal은 항상 서로 일관된 맥락을 유지합니다.
 
-2. **`docs/history/` 하위 아카이빙 규칙 (Historical & Deep-Dive Docs)**:
-   - 특정 시점의 딥다이브 분석서, 옛 버전 아키텍처 설계안, 과거 벤치마크 플랜(예: `v20_scalability_plan.md`, `retrieval_architecture_analysis.md`, `architecture_v18.md` 등)은 **모두 `docs/history/` 하위 폴더로 이동하여 보관**합니다.
+2. **`docs/history.md` 아카이빙 규칙 (Historical & Deep-Dive Docs)**:
+   - 과거 딥다이브 분석서·옛 아키텍처 설계안·폐기 proposal·과거 세션 아카이브의 **지속 관리 가치가
+     있는 결론(ADR·설계 이유·트레이드오프·레슨런)은 `docs/history.md`의 해당 시기 절에 요약해
+     추가**합니다. 개별 파일을 `docs/history/` 폴더에 두지 않습니다(2026-08-09 통합, 원문은 git 이력 보존).
+   - 아카이빙 시 기준: ① 주요 결정/설계 이유/트레이드오프 ② 현재 문서 관점에서 향후 참조가 필요한
+     맥락 ③ 중요 레슨런. 단순 변경 이력이나 현재 스펙과 중복되는 작업 정보는 제외합니다.
+   - 출처(원본 파일명·작성 시점)를 함께 기재해 git 이력에서 원문을 되짚을 수 있게 합니다.
 
 ---
 

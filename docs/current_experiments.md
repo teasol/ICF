@@ -1,7 +1,7 @@
 # Current experiments — CV-only 이후 (2026-08-09~)
 
 CV-only 이전(v22~v39, 합성 중심 판정)은
-[`history/experiments_pre_cvonly.md`](history/experiments_pre_cvonly.md).
+[`history.md`](history.md).
 **그 문서의 판정 절차는 폐기됐다** — 합성 지표로 arm을 고르는 방식이 반복적으로 실패했다.
 
 ---
