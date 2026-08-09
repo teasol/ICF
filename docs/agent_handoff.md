@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-09` — **§68 CV-only가 새 baseline: 6개 evidence 분기 중 CV-1·CV-2만 남겨도 전 분기 모델과 동률(fold-paired −0.0005), 훈련 forward 5.9×·VRAM 3.4× 절감** + **§69 sketch 기저 진단(label-free 축 8개 무효, 차원만 유효)** + §67 clipping 역효과 + §66 ridge ablation: G-2 global ridge 무기여 확정(Δ −0.0004) / P-2·CV-1은 제거 시 학습 붕괴** + **§65 v36 Q1·v37 두 arm 모두 게이트 미달(Δ −0.0024 / −0.0001)**. §64 평가도 bf16-mixed 강제(2026-08-08 이전 50-fold 수치는 전부 참고용) + 폴드 단위 context 캐싱(bit-identical, 356s→50s) + bc_therapy/er_status 기본 평가 확정. v34-1536 확정(PathoBench 보고용). 공식 50-fold **9/17 완료**(잔여 8개).
+**Last updated**: `2026-08-09` — **§70 v41이 현재 최고: er_status 50-fold 0.7303으로 지도학습 SEAL ABMIL(0.717) 상회. CV-only + `a=0.85π/K` 대역폭 정규화 + CV-2 차원 K 연동(`configs/train_v41_cvonly_K{64,128}_1536.yaml`)** + **§68 CV-only가 새 baseline: 6개 evidence 분기 중 CV-1·CV-2만 남겨도 전 분기 모델과 동률(fold-paired −0.0005), 훈련 forward 5.9×·VRAM 3.4× 절감** + **§69 sketch 기저 진단(label-free 축 8개 무효, 차원만 유효)** + §67 clipping 역효과 + §66 ridge ablation: G-2 global ridge 무기여 확정(Δ −0.0004) / P-2·CV-1은 제거 시 학습 붕괴** + **§65 v36 Q1·v37 두 arm 모두 게이트 미달(Δ −0.0024 / −0.0001)**. §64 평가도 bf16-mixed 강제(2026-08-08 이전 50-fold 수치는 전부 참고용) + 폴드 단위 context 캐싱(bit-identical, 356s→50s) + bc_therapy/er_status 기본 평가 확정. v34-1536 확정(PathoBench 보고용). 공식 50-fold **9/17 완료**(잔여 8개).
 
 > [!IMPORTANT]
 > **CV-only 계약 (§68, 2026-08-09)**: `meta_covariance_only: true`면
@@ -23,6 +23,14 @@
 > **−0.0317** [−0.0450,−0.0183] 떨어진다(플래그 동일, clipping만 상이). non-finite가 없던 arm에
 > 없던 불안정을 만든다. `nonfinite_gradient_policy: zero`는 non-finite가 없으면 완전한 no-op이라
 > 안전하지만, clipping은 기본으로 켜지 말 것.
+>
+> **sketch 기하 계약 (§69·§70)**: `aggregator_covariance_slopes`(기본 null = 하드코딩
+> (0.019, 0.011) 재현)와 `aggregator_covariance_matrix_dim`(기본 32 = 현행, null = K 연동)이
+> config 손잡이다. **`a = 0.85π/K`로 대역폭을 고정해야 K 스윕이 공정하다** — `a` 고정 시
+> 대역폭(`a·K`)이 함께 변해 차원 효과가 가려진다. 0.85는 가드밴드(`a·K = π`면 sin 항 소멸).
+> **실측 이득은 차원이 아니라 이 두 손잡이에서 나온다**(K 고정 +0.0271, 차원 증설 +0.0043).
+> ⚠️ 두 손잡이가 아직 분리되지 않았다(§70-3).
+> ⚠️ ridge-only 진단은 학습 arm의 이득을 과대평가한다(K 64→128 예측 +0.016 vs 실제 +0.004).
 >
 > **아키텍처 판단의 전제 3건 (§65·§69 실측, 다음 arm 설계 전 필독)**:
 > 0. **합성 val 지표(val_ce·val_AUROC)로 arm을 고르지 말 것.** CV-only의 합성 val AUROC는

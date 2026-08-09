@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-09` (**§69 covariance sketch 기저 진단 — label-free 축 8개 전부 무효(0.68±0.03 천장) / 대역폭 고정 시 차원은 유효(K=64는 최적 아님, 128~256이 +0.016~0.019) / 합성 val 지표로 arm 고르지 말 것** + **§68 분기 기여도 진단 → CV-only 성공: 6개 분기 중 CV-1·CV-2만 남겨도 fold-paired −0.0005 동률, 훈련 forward 5.9× VRAM 3.4× 절감** + **§67 안정화 역효과(clipping −0.0317) + LR 가설 반증** + §66 ridge ablation(v38) — G-2 global ridge 무기여 확정(Δ −0.0004, CI가 0 포함) / P-2·CV-1은 제거 시 학습 붕괴(발산·크래시, 참고용) → "ridge가 정보를 뺏는다" 가설 기각 방향** + **§65 v36 Q1·v37 두 arm 평가 완료 — 둘 다 게이트 미달(Δ −0.0024 / −0.0001), P0-slots probe의 +0.16은 라우팅 가능성이 아니었음 + val_ce와 50-fold AUROC 불일치 발견** + §64 평가 bf16 강제 + context 캐싱(356s→50s) + er_status 기본 평가 확정 + §62 P0-slots probe + §60 v35 공식 50-fold 2개 + **§61·§63 아카이브**)  
+**Last updated**: `2026-08-09` (**§70 v41 — er_status 50-fold **0.7303**으로 지도학습 SEAL ABMIL(0.717)을 처음 상회. 이득의 정체는 차원이 아니라 대역폭 정규화+CV-2 연동(K 고정 arm이 +0.0271, 차원 증설 추가분은 +0.0043로 CI가 0 포함)** + **§69 covariance sketch 기저 진단 — label-free 축 8개 전부 무효(0.68±0.03 천장) / 대역폭 고정 시 차원은 유효(K=64는 최적 아님, 128~256이 +0.016~0.019) / 합성 val 지표로 arm 고르지 말 것** + **§68 분기 기여도 진단 → CV-only 성공: 6개 분기 중 CV-1·CV-2만 남겨도 fold-paired −0.0005 동률, 훈련 forward 5.9× VRAM 3.4× 절감** + **§67 안정화 역효과(clipping −0.0317) + LR 가설 반증** + §66 ridge ablation(v38) — G-2 global ridge 무기여 확정(Δ −0.0004, CI가 0 포함) / P-2·CV-1은 제거 시 학습 붕괴(발산·크래시, 참고용) → "ridge가 정보를 뺏는다" 가설 기각 방향** + **§65 v36 Q1·v37 두 arm 평가 완료 — 둘 다 게이트 미달(Δ −0.0024 / −0.0001), P0-slots probe의 +0.16은 라우팅 가능성이 아니었음 + val_ce와 50-fold AUROC 불일치 발견** + §64 평가 bf16 강제 + context 캐싱(356s→50s) + er_status 기본 평가 확정 + §62 P0-slots probe + §60 v35 공식 50-fold 2개 + **§61·§63 아카이브**)  
 **Status**: **v30 확정 baseline 유지, CCER 계열 폐기**. arm C top-up **150 epoch 완주**(8×A6000 DDP, best `epoch=125-val_ce_loss=0.5142.ckpt`). 완주 후 §42 재평가: legacy overall **0.8100 [0.798, 0.822]** vs v30 committed 0.8512 → **회귀 +0.0412로 gate 미달** — val_ce는 0.5351→0.5142로 개선됐지만 legacy AUROC는 50ep(0.8139)와 동일 → **과소학습 편향 가설 기각, B2b 데이터 자체가 회귀 원인**. Musk는 n>34 0.698→0.849(개선 유지)·5..10 0.833→0.958, n≤4 0.800→0.725(trade-off), overall +0.008(무의미). PathoBench all-context 5-task는 **v30이 4/5 우위(평균 +0.039)**, 유일한 e125 승리 lscc_arid1a(+0.117). **Phase 0 두 주 효과 모두 gate 미달 확정 → v30 baseline 유지, arm C 미채택.**
 * **v32b 결론**: donor-resolved evidence도 v30에 보완 정보를 추가하지 못했다. Stage B 이후는 실행하지 않는다.
 * **v34 확정 (§52·§53·§56)**: **v34-1536을 PathoBench 보고용 모델로 확정**(사용자 결정). 평가는 **공식 Patho-Bench 프로토콜**(공식 k=all.tsv fold·코호트·라벨) 기준 **50-fold**(SEAL macro-AUC와 동일 구조) — **5/17 완료**(bc_therapy er 0.672 / grade 0.713 / her2 0.670, cptac_brca_PIK3CA 0.569, brca_TP53), **12개는 config 수정으로 재시작**(§56, 백그라운드). v30은 합성/Musk baseline 유지. 이전 5-fold와 수치 ±0.04 이내 동일(평가 견고성). config 시스템을 v34 base + group default 참조형으로 리팩터링(§56). 자세한 진행 §53·§56.
@@ -14,7 +14,7 @@
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§68 (분기 기여도 진단 → CV-only가 새 baseline. Q-5는 상수를 뱉고 있었고, 그래서 v36/v37이 실패했다)**, **§69 (sketch 기저 — label-free 축 8개 무효, 차원만 유효. 합성 지표 불신)**, **§67 (clipping을 기본으로 켜지 말 것)**, **§66 (ridge ablation — G-2 무기여, CV-1 제거 불가)**, **§65 (v36 Q1·v37 기각 + val_ce↔AUROC 불일치)**, **§64 (평가 bf16 강제 + context 캐싱 45초)**, **§60 (v35 공식 50-fold + SEAL 비교)**, **§57 (case leakage 진단)**.
+**Read first if you are picking this up**: **§70 (v41 — SEAL 상회, 다만 두 손잡이가 아직 분리되지 않음)**, **§68 (분기 기여도 진단 → CV-only가 새 baseline. Q-5는 상수를 뱉고 있었고, 그래서 v36/v37이 실패했다)**, **§69 (sketch 기저 — label-free 축 8개 무효, 차원만 유효. 합성 지표 불신)**, **§67 (clipping을 기본으로 켜지 말 것)**, **§66 (ridge ablation — G-2 무기여, CV-1 제거 불가)**, **§65 (v36 Q1·v37 기각 + val_ce↔AUROC 불일치)**, **§64 (평가 bf16 강제 + context 캐싱 45초)**, **§60 (v35 공식 50-fold + SEAL 비교)**, **§57 (case leakage 진단)**.
 
 > [!IMPORTANT]
 > **방법론 경고 3건 — 다음 arm 설계 전에 읽을 것**:
@@ -26,7 +26,7 @@
 > 2. **학습 길이가 다른 arm 간 비교는 그 자체로 교란이다** (§42-43 arm C 교훈의 재확인).
 >    control은 항상 같은 epoch 수로 새로 학습할 것.
 
-**열린 과제**: ⓪ **CV-2의 `covariance_matrix` 경로 확인**(§69-7: `_projected_covariance_matrix`가 `dimension=32` 기본이라 P의 앞 32열만 쓴다 — K 변경 시 영향 파악 선행), ⓪′ **K=128 (a=0.85π/K) CV-only 학습 arm**(§69-4), ⓪″ **learnable 사영**(§69: label-free 축 8개가 전부 같은 천장), ① ~~G-2 제거 확정~~ → §68에서 CV-only가 G 분기 전체를 제거하고 동률이므로 **해소됨**(§66-6: er_status 단일 task·단일 seed이므로 task 1~2개 추가 확인 후 코드에서 실제 삭제), ⓪′ **P-2 / CV-1 재판정**(§66-6: gradient clipping 등 안정화 후 50 epoch 완주 — **control도 같은 조치로 재학습해야 공정**), ⓪″ **v37 label 조건화**(§65-3: v37은 label-free라 §62-2 진단의 절반만 답했다 — 미검정 레버), ① **공식 50-fold 전면 재산출**(§64: fp32 수치 전부 참고용 → §53 표 9개 + 잔여 8개; 캐싱으로 task당 ~50초, 실행 전 `/tmp/pathobench_official_workers/` fp32 캐시 정리 필수), ② **v35 공식 50-fold 잔여 15개** + SEAL 최종 재비교(§60), ③ v30 vs v34 CV 공정 비교(PCA-per-fold), ④ v34-512 학습, ⑤ **chunk 단위(bag 내부) 스트리밍** 미구현(rev.2 §3), ⑥ v30 six-task / B2b cardinality 효과 분리, ⑦ frozen-v30 multi-resolution headroom, ⑧ v30 medium 참조 재학습. **해결·폐기**: v36 Q1(§65 기각), v37 context-adaptive(§65 기각), rare branch 제거(§61 완료). 상세 기록은 [`history/archive.md`](history/archive.md).
+**열린 과제**: ⓪ **v41 두 손잡이 분리**(§70-3: 대역폭 정규화만 / CV-2 연동만, arm 2개), ⓪′ **v41 seed 반복**(+0.027이 요동 ±0.02~0.03 대비 여유가 크지 않다), ⓪″ **다른 task로 일반화 확인**(§70-6: 지금까지 전부 er_status 단일 task — SEAL 우위 주장에 필수), ⓪‴ **learnable 사영**(§69: label-free 축 8개가 전부 같은 천장, 이제 P가 config 교체 가능)(§66-6: er_status 단일 task·단일 seed이므로 task 1~2개 추가 확인 후 코드에서 실제 삭제), ⓪′ **P-2 / CV-1 재판정**(§66-6: gradient clipping 등 안정화 후 50 epoch 완주 — **control도 같은 조치로 재학습해야 공정**), ⓪″ **v37 label 조건화**(§65-3: v37은 label-free라 §62-2 진단의 절반만 답했다 — 미검정 레버), ① **공식 50-fold 전면 재산출**(§64: fp32 수치 전부 참고용 → §53 표 9개 + 잔여 8개; 캐싱으로 task당 ~50초, 실행 전 `/tmp/pathobench_official_workers/` fp32 캐시 정리 필수), ② **v35 공식 50-fold 잔여 15개** + SEAL 최종 재비교(§60), ③ v30 vs v34 CV 공정 비교(PCA-per-fold), ④ v34-512 학습, ⑤ **chunk 단위(bag 내부) 스트리밍** 미구현(rev.2 §3), ⑥ v30 six-task / B2b cardinality 효과 분리, ⑦ frozen-v30 multi-resolution headroom, ⑧ v30 medium 참조 재학습. **해결·폐기**: v36 Q1(§65 기각), v37 context-adaptive(§65 기각), rare branch 제거(§61 완료). 상세 기록은 [`history/archive.md`](history/archive.md).
 
 **Branches**: `main` = v30 확정 baseline + 미채택 v31 CCER-v2 재현 코드. 참고용 branch/tag 구조는
 [`history/branch_structure.md`](history/branch_structure.md).
@@ -2334,3 +2334,76 @@ full 1536² 공분산 실측: 60 bags×16384 cells에서 **2.81 ms / 0.53 GiB**.
    CV-2도 함께 줄어든다. K 증설 arm에서는 `dimension`을 K에 연동할지가 별도 결정 사항이다.
 2. **learnable 사영** — label-free 축 8개가 전부 같은 천장이므로 천장을 뚫는 유일한 정보원은 라벨.
 3. seed 반복 필수: 단일 측정의 요동이 ±0.05다.
+
+---
+
+## 70. 2026-08-09 — v41: **지도학습 SEAL을 넘었다** (0.7303) — 이득의 정체는 차원이 아니라 대역폭·CV-2
+
+**상태**: §69의 sketch 기하 손잡이 2개를 실제 학습 arm에 적용했다. **er_status 50-fold에서
+0.6989 → 0.7303**으로, 같은 코호트·같은 프로토콜의 **지도학습 SEAL ABMIL(0.717)을 처음으로
+앞섰다.**
+
+### 1. 결과
+
+| arm | 구성 | val_ce | macro AUROC | pooled |
+|---|---|---|---|---|
+| v38_control | 전 분기 | 0.3411 | 0.6994 ± 0.087 | 0.6946 |
+| v40_cv_only | CV-only, K=64, `a=0.019` 고정, CV-2=32 | 0.3401 | 0.6989 ± 0.087 | 0.6956 |
+| **v41_K64** | + 대역폭 정규화 + CV-2 연동 | 0.3455 | **0.7260 ± 0.088** | 0.7234 |
+| **v41_K128** | + 차원 증설 | **0.3333** | **0.7303 ± 0.096** | **0.7289** |
+| *(참고) SEAL ABMIL* | *지도학습* | — | *0.717 ± 0.086* | — |
+| *(참고) SEAL MeanMIL* | *지도학습* | — | *0.712 ± 0.091* | — |
+
+fold-paired (20k bootstrap, 50 folds):
+
+| 비교 | Δmacro | 95% CI | 이긴 fold |
+|---|---|---|---|
+| **v41_K64 − v40_cv_only** | **+0.0271** | [+0.0108, +0.0437] | 31/50 ** |
+| v41_K128 − v41_K64 | +0.0043 | [−0.0073, +0.0160] | 27/50 |
+| **v41_K128 − v38_control** | **+0.0310** | [+0.0149, +0.0464] | 37/50 ** |
+
+### 2. 이득은 차원이 아니라 대역폭·CV-2에서 나왔다
+
+**K를 64로 그대로 두고** 두 손잡이만 바꾼 arm이 **+0.0271**(CI가 0에서 멀리)이고,
+K를 배로 키운 추가 이득은 **+0.0043**으로 CI가 0을 포함한다 — §69에서 예고한 대로
+위상 요동(±0.02~0.03) 규모에 묻힌다.
+
+**K=64 arm을 함께 돌린 것이 결정적이었다.** 그게 없었으면 +0.031 전체를 "차원 효과"로
+잘못 귀속했을 것이다. (ridge-only 진단이 K 64→128에 +0.016을 예측했으나 학습 arm에서는
++0.004에 그쳤다 — ridge-only 진단이 학습 arm의 이득을 과대평가한다는 첫 사례.)
+
+### 3. ⚠️ 아직 분리되지 않은 것
+
+v41_K64가 **두 가지를 동시에** 바꿨다:
+- `a = 0.85π/K` 대역폭 정규화 (0.019 → 0.041724, `a·K` 1.216 → 2.6704 rad)
+- CV-2의 `covariance_matrix_dim` 32 → 64 (K 연동)
+
+ridge-only 진단에서는 대역폭 정규화만으로 K=64가 0.6824(현행 사다리 0.6614 대비 +0.021)
+였으므로 **대역폭 쪽이 주된 기여로 추정**되나, CV-2가 두 배 넓어진 효과도 실재할 수 있다.
+**손잡이를 하나씩 끄는 arm 2개로 분리해야 한다.**
+
+### 4. 합성 지표 불신, 네 번째 사례
+
+v41_K64는 val_ce가 **0.3455**로 v40_cv_only(0.3401)보다 **나쁜데** er_status는 **+0.027 좋다.**
+(K128은 val_ce·AUROC가 같은 방향이라 일관되지 않다.) §69-6의 경고가 다시 확인됐다 —
+**판정은 er_status 50-fold로만.**
+
+### 5. 비용
+
+| arm | epoch 시간 | peak VRAM | feats |
+|---|---|---|---|
+| K=64 | ~72s (14.29 it/s) | 41.7 GiB (22%) | 2,080 |
+| K=128 | ~95s (10.79 it/s) | 41.8 GiB (22%) | 8,256 |
+
+VRAM이 22%뿐이라 K=256도 여유가 크다(§69-4 ridge-only에서 0.7009로 최고였으나
+K128→256 이득이 +0.003이라 기대는 낮다).
+
+### 6. 다음
+
+1. **원인 분리** — 대역폭 정규화만 / CV-2 연동만, arm 2개(각 ~1시간). 어느 손잡이가 진짜인지
+   알아야 다음 설계가 선다.
+2. **seed 반복** — K64/K128 각 2~3 seed. +0.027은 요동보다 크지만 여유가 크지 않다.
+3. **learnable 사영**(§69-7) — label-free 축이 전부 천장이었으므로 남은 유일한 정보원은 라벨.
+   이제 P가 config로 교체 가능해졌으니 착수 비용이 낮다.
+4. **다른 task로 일반화 확인** — 지금까지 전부 er_status 단일 task다. SEAL 우위 주장을 하려면
+   최소 2~3개 task가 필요하다.
