@@ -3,6 +3,8 @@ from importlib import import_module
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 import torch
+from collections import deque
+
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data._utils.collate import default_collate
 from lightning import LightningDataModule
@@ -118,13 +120,30 @@ def collate_synthetic_training_episode(samples: list[Any]):
 
 
 class _CudaPrefetchIterator:
-    """Generate the next CUDA batch while the current batch trains."""
+    """Generate upcoming CUDA batches while the current batch trains.
 
-    def __init__(self, source: Any) -> None:
+    `depth` batches are kept in flight on one background CUDA stream. Depth 1
+    is enough to hide generation when generation is the SHORTER leg; it buys
+    nothing in steady state once generation is the longer one, because the
+    single producer is then saturated. What deeper queues actually buy here is
+    variance absorption: synthetic episodes span 20k to 950k cells, so a run of
+    large episodes stalls a depth-1 queue even when the average would keep up.
+
+    The cost is GPU memory -- a queued episode is up to ~5.9 GB at the top of
+    that range -- which is why this is a knob and not simply raised.
+    """
+
+    def __init__(self, source: Any, depth: int = 1) -> None:
         self.source = source
+        self.depth = max(1, int(depth))
+        # One worker, so generation stays sequential on one stream: several
+        # concurrent generators would interleave their kernels and multiply
+        # peak memory rather than overlap usefully.
         self.executor = ThreadPoolExecutor(max_workers=1)
         self.stream = torch.cuda.Stream()
-        self.future = self.executor.submit(self._next_batch)
+        self.futures: deque[Any] = deque()
+        self.exhausted = False
+        self._fill()
 
     def _next_batch(self) -> Any:
         with torch.cuda.stream(self.stream):
@@ -132,16 +151,28 @@ class _CudaPrefetchIterator:
         self.stream.synchronize()
         return batch
 
+    def _fill(self) -> None:
+        while not self.exhausted and len(self.futures) < self.depth:
+            self.futures.append(self.executor.submit(self._next_batch))
+
     def __iter__(self) -> "_CudaPrefetchIterator":
         return self
 
     def __next__(self) -> Any:
+        if not self.futures:
+            raise StopIteration
         try:
-            batch = self.future.result()
+            batch = self.futures.popleft().result()
+        except StopIteration:
+            # A queued future hit the end of the source. Mark exhausted so no
+            # further work is submitted, then drain what was already produced --
+            # dropping it would silently shorten the epoch.
+            self.exhausted = True
+            return self.__next__()
         except BaseException:
             self.executor.shutdown(wait=False)
             raise
-        self.future = self.executor.submit(self._next_batch)
+        self._fill()
         return batch
 
     def __del__(self) -> None:
@@ -151,10 +182,14 @@ class _CudaPrefetchIterator:
 
 
 class CudaPrefetchDataLoader(DataLoader[Any]):
-    """DataLoader whose next batch is produced on a background CUDA stream."""
+    """DataLoader whose upcoming batches are produced on a background stream."""
+
+    def __init__(self, *args: Any, prefetch_depth: int = 1, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.prefetch_depth = max(1, int(prefetch_depth))
 
     def __iter__(self) -> _CudaPrefetchIterator:
-        return _CudaPrefetchIterator(super().__iter__())
+        return _CudaPrefetchIterator(super().__iter__(), depth=self.prefetch_depth)
 
 
 def collate_synthetic_evaluation_episode(samples: list[Any]):
@@ -347,6 +382,13 @@ class DataInterface(LightningDataModule):
         # dataset hands the loader CUDA tensors already, which pin_memory()
         # cannot pin.
         pin_memory = self.hparams.get("pin_memory", True) and not generates_on_cuda
+        extra: dict[str, Any] = {}
+        if loader_cls is CudaPrefetchDataLoader:
+            # How many generated episodes may sit on the GPU waiting to train.
+            # Depth 1 already hides generation behind the step; more only
+            # absorbs the size variance of synthetic episodes, and each queued
+            # episode costs its own GPU memory.
+            extra["prefetch_depth"] = self.hparams.get("cuda_prefetch_depth", 1)
         return loader_cls(
             dataset,
             batch_size=batch_size,
@@ -357,6 +399,7 @@ class DataInterface(LightningDataModule):
             persistent_workers=persistent_workers,
             collate_fn=collate_fn,
             multiprocessing_context=multiprocessing_context,
+            **extra,
         )
 
     def _dataset_class(self, dataset_src: str) -> type[Dataset[Any]]:
