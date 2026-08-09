@@ -195,3 +195,96 @@ class TestRidgeAblation(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCovarianceOnly(unittest.TestCase):
+    """CV-only arm (docs SS68): keep ONLY the two covariance evidence terms."""
+
+    def test_default_is_off(self) -> None:
+        self.assertFalse(_build().meta_classifier.covariance_only)
+
+    def test_final_logits_equal_the_two_covariance_terms(self) -> None:
+        """final == cov_res*CV-1 + cov_rel_res*CV-2, nothing else."""
+        model = _build(meta_covariance_only=True)
+        x, y, mask = _episode()
+        with torch.no_grad():
+            logits, auxiliary = model(x, y, mask, return_auxiliary=True)
+        meta = model.meta_classifier
+        expected = (
+            torch.sigmoid(meta.covariance_residual_logit)
+            * auxiliary["covariance_logits"]
+            + meta.covariance_relation_residual_scale
+            * auxiliary["covariance_relation_logits"]
+        )
+        delta = (logits.float() - expected.float()).abs().max()
+        self.assertLess(
+            float(delta),
+            1e-4,
+            "CV-only output is not exactly the two covariance terms "
+            f"(||delta||inf={float(delta):.3e}) -- some other branch still leaks "
+            "into the final logits.",
+        )
+
+    def test_dense_and_ragged_paths_agree(self) -> None:
+        model = _build(meta_covariance_only=True)
+        x, y, mask = _episode()
+        with torch.no_grad():
+            ragged = model(list(x.unbind(0)), y, mask)
+            dense = model.forward_episode_batch(
+                x.unsqueeze(0), y.unsqueeze(0), mask.unsqueeze(0)
+            )
+        delta = (ragged.float() - dense[0].float()).abs().max()
+        self.assertLess(float(delta), 1e-4, f"dense/ragged disagree ({delta:.3e})")
+
+    def test_it_actually_changes_the_output(self) -> None:
+        x, y, mask = _episode()
+        with torch.no_grad():
+            full = _build()(x, y, mask).float()
+            cv = _build(meta_covariance_only=True)(x, y, mask).float()
+        self.assertGreater(float((full - cv).abs().max()), 1e-5)
+
+    def test_checkpoints_stay_loadable(self) -> None:
+        full = _build()
+        cv = _build(meta_covariance_only=True)
+        self.assertEqual(
+            {k: tuple(v.shape) for k, v in full.state_dict().items()},
+            {k: tuple(v.shape) for k, v in cv.state_dict().items()},
+        )
+        cv.load_state_dict(full.state_dict(), strict=True)
+
+    def test_conflicting_flags_are_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            _build(meta_covariance_only=True, meta_enable_covariance_ridge=False)
+
+    def test_skip_matches_a_full_branch_model_with_the_same_weights(self) -> None:
+        """The skip must be numerically identical to computing-then-discarding.
+
+        This is the anti-drift guard: the CV-only arm skips the slot pipeline
+        entirely, so nothing else would notice if that path silently produced a
+        different covariance sketch. A first implementation derived
+        `centered_delta` from the pool-standardised `instances` instead of the
+        raw-centred tensor the caller passes in, which moved the output by
+        2.4e-2 -- caught here, not in a 50-epoch run.
+        """
+        full = _build()
+        skip = _build(meta_covariance_only=True)
+        skip.load_state_dict(full.state_dict(), strict=True)
+        x, y, mask = _episode()
+        with torch.no_grad():
+            _, auxiliary = full(x, y, mask, return_auxiliary=True)
+            actual = skip(x, y, mask)
+        meta = full.meta_classifier
+        expected = (
+            torch.sigmoid(meta.covariance_residual_logit)
+            * auxiliary["covariance_logits"]
+            + meta.covariance_relation_residual_scale
+            * auxiliary["covariance_relation_logits"]
+        )
+        delta = (actual.float() - expected.float()).abs().max()
+        self.assertLess(
+            float(delta),
+            1e-4,
+            f"the skip changed the model (||delta||inf={float(delta):.3e}); it "
+            "must reproduce the covariance terms of the full-branch model bit "
+            "for bit, or the running CV-only arm is not the model this trains.",
+        )

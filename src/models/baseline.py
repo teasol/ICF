@@ -491,6 +491,7 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         use_raw_mean_branch: bool = False,
         raw_stat_tokens: Sequence[str] = (),
         covariance_sketch_dim: int | None = None,
+        covariance_only: bool = False,
         covariance_mode: str = "covariance",
         covariance_shrinkage: float = 0.0,
         include_cls_token: bool = False,
@@ -648,6 +649,13 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             )
         self.raw_stat_tokens = tuple(raw_stat_tokens)
         self.covariance_sketch_dim = int(covariance_sketch_dim)
+        # CV-only (docs SS68): emit ONLY the covariance tensors and skip the
+        # slot pipeline, tails, metadata, anchors and global summary entirely.
+        # Measured: 18.73 ms -> 0.40 ms floor on 8 bags x 4000 cells, i.e. ~98%
+        # of the old CV-only forward was computed and discarded.
+        # The dead keys are ABSENT, not zero-filled, so a stray consumer raises
+        # KeyError at its own line instead of silently reading a zero.
+        self.covariance_only = bool(covariance_only)
         self.covariance_mode = str(covariance_mode)
         self.covariance_shrinkage = float(covariance_shrinkage)
         # Eval-only bag-at-a-time streaming (docs v35 §3.3). Numerically exact --
@@ -1300,6 +1308,45 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
         tails, rare states, and covariance normalization. ``ccts_lambdas`` is
         not supported on the padded path (v30 configs do not enable it).
         """
+        if self.covariance_only:
+            # `instances` here is ALREADY pool-standardised by the caller, while
+            # `centered_delta` is raw-centred and passed in separately. Deriving
+            # it from `instances` instead is exactly the bug that broke
+            # dense/ragged agreement by 2.4e-2 on the first attempt -- honour the
+            # argument, and fall back to the same formula the full path uses.
+            if centered_delta is None:
+                if cell_mask is None:
+                    centered_delta = instances - instances.mean(dim=-2, keepdim=True)
+                    counts = None
+                else:
+                    counts = cell_mask.sum(dim=-1).clamp_min(1)
+                    masked = instances.masked_fill(~cell_mask.unsqueeze(-1), 0.0)
+                    centered_delta = masked - (
+                        masked.sum(dim=-2, keepdim=True)
+                        / counts.unsqueeze(-1).unsqueeze(-1)
+                    )
+                    centered_delta = centered_delta.masked_fill(
+                        ~cell_mask.unsqueeze(-1), 0.0
+                    )
+            else:
+                counts = (
+                    cell_mask.sum(dim=-1).clamp_min(1)
+                    if cell_mask is not None
+                    else None
+                )
+            if covariance_sketch is None:
+                covariance_sketch = self._covariance_sketch(
+                    centered_delta, count=counts
+                )
+            representation = {
+                "covariance_sketch": covariance_sketch,
+                "covariance_matrix": (
+                    self._projected_covariance_matrix(centered_delta)
+                    if self.emit_covariance_matrix
+                    else centered_delta.new_zeros((instances.shape[0], 1, 1))
+                ),
+            }
+            return (representation, {}) if return_auxiliary else representation
         num_bags, num_instances, _ = instances.shape
         if cell_mask is not None:
             if cell_mask.shape != (num_bags, num_instances):
@@ -1830,6 +1877,23 @@ class StructuredEpisodePopulationAggregator(EpisodePopulationAggregator):
             # Pass 2: these are filled per bag below instead of up front.
             global_summaries = []
             covariance_sketches = []
+        if self.covariance_only:
+            # Same derivation as the full path (_bag_view with the episode's
+            # pool statistics), just without the slot pipeline that follows.
+            sketches, matrices = [], []
+            for raw_bag in raw_bags:
+                _, _, centered_delta = self._bag_view(raw_bag, pool_mean, pool_std)
+                sketches.append(self._covariance_sketch(centered_delta))
+                matrices.append(
+                    self._projected_covariance_matrix(centered_delta)
+                    if self.emit_covariance_matrix
+                    else centered_delta.new_zeros((1, 1))
+                )
+            representation = {
+                "covariance_sketch": torch.stack(sketches),
+                "covariance_matrix": torch.stack(matrices),
+            }
+            return (representation, {}) if return_auxiliary else representation
         for b_idx in range(len(raw_bags)):
             if stream_bags:
                 bag, bag_summary, centered_delta = self._bag_view(
@@ -2556,6 +2620,7 @@ class StructuredPopulationMetaClassifier(nn.Module):
         meta_enable_global_ridge: bool = True,
         meta_enable_abundance_ridge: bool = True,
         meta_enable_covariance_ridge: bool = True,
+        meta_covariance_only: bool = False,
         population_token_mode: str = "projected",
         bag_aggregation: str = "projected",
         bag_aggregation_heads: int = 8,
@@ -2626,6 +2691,15 @@ class StructuredPopulationMetaClassifier(nn.Module):
         # Parameter-preserving (strict ckpt load both ways), no new parameters.
         self.force_abundance_ridge_zero = not bool(meta_enable_abundance_ridge)
         self.force_covariance_ridge_zero = not bool(meta_enable_covariance_ridge)
+        # CV-only arm (docs SS68): keep ONLY the two covariance evidence terms.
+        # Applied in _fuse_evidence, which both forward paths call.
+        self.covariance_only = bool(meta_covariance_only)
+        if self.covariance_only and self.force_covariance_ridge_zero:
+            raise ValueError(
+                "meta_covariance_only with meta_enable_covariance_ridge=False "
+                "leaves only CV-2, which would make the arm's name misleading. "
+                "Disable one of the two."
+            )
         if self.include_cls_token and typed_bag_preserving_branch:
             raise NotImplementedError(
                 "include_cls_token with typed_bag_preserving_branch is not "
@@ -3468,11 +3542,146 @@ class StructuredPopulationMetaClassifier(nn.Module):
         return context_variance.log(), query_variance.log(), eigenvalues[selected]
 
 
+    def _covariance_only_forward(
+        self,
+        context: dict[str, torch.Tensor],
+        context_labels: torch.Tensor,
+        query: dict[str, torch.Tensor],
+        batched: bool,
+        return_auxiliary: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """CV-only evidence path (docs SS68).
+
+        Computes ONLY
+
+            final = cov_res_scale*CV-1 + cov_rel_res_scale*CV-2
+
+        and never touches the structural tokens, class memories, population
+        attention, or rare branch -- none of which the aggregator even produces
+        in this mode. `tests/test_ridge_ablation.py::TestCovarianceOnly` pins
+        this against a full-branch model carrying the same weights, so if this
+        implementation ever drifts from the branch it replaces, that test fails
+        rather than a run silently training a different model (the SS62-7
+        duplicate-drift failure mode).
+        """
+        ridge = (
+            self._abundance_ridge_logits_batched
+            if batched
+            else self._abundance_ridge_logits
+        )
+        covariance_ridge_logits = ridge(
+            context["covariance_sketch"],
+            context_labels,
+            query["covariance_sketch"],
+            ridge_lambda=self.covariance_ridge_log_lambda,
+            dual=True,
+        )
+        if self.force_covariance_ridge_zero:
+            covariance_ridge_logits = covariance_ridge_logits.new_zeros(
+                covariance_ridge_logits.shape
+            )
+        covariance_ridge_scale = self.covariance_ridge_log_scale.exp().clamp(
+            0.1, 100.0
+        )
+        covariance_logits = covariance_ridge_scale * covariance_ridge_logits
+        covariance_residual_scale = torch.sigmoid(self.covariance_residual_logit)
+        logits = covariance_residual_scale * covariance_logits
+
+        covariance_relation_logits = covariance_logits.new_zeros(
+            covariance_logits.shape
+        )
+        covariance_relation_class_separation = covariance_logits.new_zeros(
+            covariance_logits.shape[0] if batched else ()
+        )
+        if self.covariance_relation_enabled:
+            if self.covariance_relation_granularity == "slot":
+                covariance_relation_logits, covariance_relation_class_separation = (
+                    self._slot_covariance_relation_scores(
+                        context["slot_covariance_sketch"],
+                        context["slot_covariance_reliability"], context_labels,
+                        query["slot_covariance_sketch"],
+                        query["slot_covariance_reliability"],
+                    )
+                )
+            elif self.covariance_relation_granularity == "subspace":
+                with torch.autocast(
+                    device_type=context["covariance_matrix"].device.type,
+                    enabled=False,
+                ):
+                    context_feature, query_feature, selected_eigenvalues = (
+                        self._covariance_subspace_features(
+                            context["covariance_matrix"].float(), context_labels,
+                            query["covariance_matrix"].float(),
+                            rank=self.covariance_relation_subspace_rank,
+                            whiten=self.covariance_relation_subspace_whiten,
+                            shrinkage=self.covariance_relation_subspace_shrinkage,
+                        )
+                    )
+                covariance_relation_logits, covariance_relation_class_separation = (
+                    self._covariance_relation_scores(
+                        context_feature, context_labels, query_feature
+                    )
+                )
+            else:
+                raise ValueError(
+                    "Unsupported covariance_relation_granularity "
+                    f"{self.covariance_relation_granularity!r}."
+                )
+            if not self.covariance_relation_diagnostic_only:
+                logits = logits + (
+                    self.covariance_relation_residual_scale
+                    * covariance_relation_logits
+                )
+        if not return_auxiliary:
+            return logits
+        return logits, {
+            "covariance_logits": covariance_logits,
+            "covariance_ridge_logits": covariance_ridge_logits,
+            "covariance_ridge_scale": covariance_ridge_scale,
+            "covariance_residual_scale": covariance_residual_scale,
+            "covariance_relation_enabled": self.covariance_relation_enabled,
+            "covariance_relation_logits": covariance_relation_logits,
+            "covariance_relation_class_separation": (
+                covariance_relation_class_separation
+            ),
+            "covariance_relation_residual_scale": (
+                self.covariance_relation_residual_scale
+            ),
+        }
+
     def _validate_representation(
         self,
         representation: dict[str, torch.Tensor],
         name: str,
     ) -> None:
+        if getattr(self, "covariance_only", False):
+            # CV-only (docs SS68) has a SMALLER but equally strict contract: the
+            # aggregator does not compute the structural tokens at all, so the
+            # dead keys are ABSENT rather than present-and-zero. Absent means a
+            # stray consumer raises KeyError at the offending line instead of
+            # silently averaging zeros into a live branch.
+            expected_keys = {"covariance_sketch", "covariance_matrix"}
+            if (
+                self.covariance_relation_enabled
+                and self.covariance_relation_granularity == "slot"
+            ):
+                expected_keys |= {
+                    "slot_covariance_sketch",
+                    "slot_covariance_reliability",
+                }
+            missing = expected_keys - set(representation)
+            if missing:
+                raise ValueError(
+                    f"{name} covariance-only representation is missing "
+                    f"{sorted(missing)}."
+                )
+            extra = set(representation) - expected_keys
+            if extra:
+                raise ValueError(
+                    f"{name} covariance-only representation carries "
+                    f"{sorted(extra)}; CV-only must not compute them."
+                )
+            return
         expected_keys = {
             "global_summary", "slots", "tails", "slot_metadata",
             "covariance_sketch", "slot_covariance_sketch",
@@ -3900,6 +4109,26 @@ class StructuredPopulationMetaClassifier(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         if getattr(self, "force_rare_logits_zero", False):
             rare_logits = rare_logits.new_zeros(rare_logits.shape)
+        if getattr(self, "covariance_only", False):
+            # CV-only arm (docs SS68). Branch diagnostic: CV-1 alone scores
+            # 0.9052 vs the full model's 0.9199, while Q-5 population attention
+            # emits a CONSTANT (AUROC 0.5000, std 0.0000) and rare is ~0. This
+            # drops every non-covariance evidence term -- including the ungated
+            # `global_shape` base and the fusion interaction, which is built
+            # from exactly those dead/weak terms -- leaving
+            #     final = cov_res_scale*CV-1 + cov_rel_res_scale*CV-2
+            # Both callers (dense and ragged) route through here, so one guard
+            # covers both paths.
+            #
+            # NOTE (docs SS68): this still COMPUTES the discarded machinery.
+            # Measured 18.73 ms vs a 0.40 ms floor on 8 bags x 4000 cells, so
+            # ~98% of the forward is wasted. A real skip must derive
+            # `centered_delta` from `_bag_view` (pool-standardised under
+            # bag_representation=poolz_l2), NOT from a per-bag mean -- a first
+            # attempt at the skip used the per-bag mean and broke dense/ragged
+            # agreement by 2.4e-2.
+            zeros = global_shape_logits.new_zeros(global_shape_logits.shape)
+            return zeros, torch.sigmoid(self.fusion_residual_logit)
         evidence = torch.stack(
             (global_shape_logits, population_logits, rare_logits), dim=-1
         )
@@ -4337,6 +4566,11 @@ class StructuredPopulationMetaClassifier(nn.Module):
         query_cell_mask: torch.Tensor | None = None,
         return_auxiliary: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        if self.covariance_only:
+            return self._covariance_only_forward(
+                context, context_labels, query,
+                batched=True, return_auxiliary=return_auxiliary,
+            )
         context_global_tokens = context["global_summary"]
         query_global_tokens = query["global_summary"]
         # v37 -- mirrors the ragged path above; see the comment there.
@@ -4568,6 +4802,11 @@ class StructuredPopulationMetaClassifier(nn.Module):
     ) -> torch.Tensor | tuple[torch.Tensor, dict[str, torch.Tensor]]:
         self._validate_representation(context, "context")
         self._validate_representation(query, "query")
+        if self.covariance_only:
+            return self._covariance_only_forward(
+                context, context_labels, query,
+                batched=False, return_auxiliary=return_auxiliary,
+            )
         if context_labels.shape != (context["global_summary"].shape[0],):
             raise ValueError("context_labels must have shape [context].")
         if torch.any((context_labels < 0) | (context_labels >= self.num_classes)):
@@ -4832,6 +5071,7 @@ class BaseModel(nn.Module):
         meta_enable_global_ridge: bool = True,
         meta_enable_abundance_ridge: bool = True,
         meta_enable_covariance_ridge: bool = True,
+        meta_covariance_only: bool = False,
         meta_population_token_mode: str = "projected",
         meta_bag_aggregation: str = "projected",
         meta_fusion_residual_scale: float = 0.10,
@@ -4856,6 +5096,7 @@ class BaseModel(nn.Module):
         self.input_dim = int(input_dim)
         self.num_classes = int(num_classes)
         self.aggregator = StructuredEpisodePopulationAggregator(
+            covariance_only=meta_covariance_only,
             input_dim=self.input_dim,
             num_slots=aggregator_num_slots,
             num_density_slots=aggregator_num_density_slots,
@@ -4946,6 +5187,7 @@ class BaseModel(nn.Module):
             meta_enable_global_ridge=meta_enable_global_ridge,
             meta_enable_abundance_ridge=meta_enable_abundance_ridge,
             meta_enable_covariance_ridge=meta_enable_covariance_ridge,
+            meta_covariance_only=meta_covariance_only,
             population_token_mode=meta_population_token_mode,
             bag_aggregation=meta_bag_aggregation,
             bag_aggregation_num_slots=self.aggregator.num_slots,
@@ -5037,7 +5279,40 @@ class BaseModel(nn.Module):
             if flat_cell_mask is not None
             else None
         )
-        if self.aggregator.bag_representation in ("poolz", "poolz_l2"):
+        if self.meta_classifier.covariance_only:
+            # CV-only (docs SS68): downstream needs only the covariance sketch
+            # and matrix. `centered_delta` -- the raw per-bag centring that
+            # `_bag_view` returns as its THIRD value -- does not depend on the
+            # context-pool statistics, so this skips the pool stats, the
+            # poolz_l2 standardisation of every cell, the per-episode anchors
+            # (top-k over cells) and the raw-stat tokens outright.
+            # `classification_flat` is passed through unstandardised because the
+            # only consumer left, `_covariance_sketch`, already has its input.
+            # Equivalence with the full-branch model is pinned by
+            # tests/test_ridge_ablation.py::TestCovarianceOnly.
+            if flat_cell_mask is None:
+                centered_delta = flat_x - flat_x.mean(dim=-2, keepdim=True)
+            else:
+                masked = flat_x.masked_fill(~flat_cell_mask.unsqueeze(-1), 0.0)
+                centered_delta = masked - (
+                    masked.sum(dim=-2, keepdim=True)
+                    / flat_valid_count.unsqueeze(-1).unsqueeze(-1)
+                )
+                centered_delta = centered_delta.masked_fill(
+                    ~flat_cell_mask.unsqueeze(-1), 0.0
+                )
+            covariance_sketch = self.aggregator._covariance_sketch(
+                centered_delta, count=flat_valid_count
+            )
+            classification_flat = flat_x
+            # Only consumer left is `query_instances` for the rare branch, which
+            # the CV-only meta-classifier returns before ever touching. A
+            # reshape, not a recomputation.
+            classification_x = x
+            global_summary = None
+            raw_stats = None
+            per_bag_anchors = None
+        elif self.aggregator.bag_representation in ("poolz", "poolz_l2"):
             # Per-episode context-pool stats, broadcast back over that episode's bags.
             episode_mean, episode_std = self.aggregator._context_pool_stats_batched(
                 x, is_context, cell_mask=cell_mask
@@ -5054,38 +5329,41 @@ class BaseModel(nn.Module):
             )
         else:
             pool_mean = pool_std = None
-        classification_flat, global_summary, centered_delta = self.aggregator._bag_view(
-            flat_x, pool_mean, pool_std, cell_mask=flat_cell_mask
-        )
-        covariance_sketch = self.aggregator._covariance_sketch(
-            centered_delta, count=flat_valid_count
-        )
-        if self.aggregator.raw_stat_tokens:
-            raw_stats = self.aggregator._raw_stat_tokens(
-                flat_x, cell_mask=flat_cell_mask
-            )
-        else:
-            raw_stats = None
-        classification_x = classification_flat.reshape_as(x)
-        anchors = torch.stack(
-            [
-                self.aggregator._context_anchors(
-                    list(classification_x[episode].unbind(0)),
-                    is_context[episode],
-                    (
-                        list(cell_mask[episode].unbind(0))
-                        if cell_mask is not None
-                        else None
-                    ),
+        if not self.meta_classifier.covariance_only:
+            classification_flat, global_summary, centered_delta = (
+                self.aggregator._bag_view(
+                    flat_x, pool_mean, pool_std, cell_mask=flat_cell_mask
                 )
-                for episode in range(episodes)
-            ]
-        )
-        per_bag_anchors = (
-            anchors[:, None]
-            .expand(-1, num_bags, -1, -1)
-            .reshape(episodes * num_bags, anchors.shape[1], anchors.shape[2])
-        )
+            )
+            covariance_sketch = self.aggregator._covariance_sketch(
+                centered_delta, count=flat_valid_count
+            )
+            if self.aggregator.raw_stat_tokens:
+                raw_stats = self.aggregator._raw_stat_tokens(
+                    flat_x, cell_mask=flat_cell_mask
+                )
+            else:
+                raw_stats = None
+            classification_x = classification_flat.reshape_as(x)
+            anchors = torch.stack(
+                [
+                    self.aggregator._context_anchors(
+                        list(classification_x[episode].unbind(0)),
+                        is_context[episode],
+                        (
+                            list(cell_mask[episode].unbind(0))
+                            if cell_mask is not None
+                            else None
+                        ),
+                    )
+                    for episode in range(episodes)
+                ]
+            )
+            per_bag_anchors = (
+                anchors[:, None]
+                .expand(-1, num_bags, -1, -1)
+                .reshape(episodes * num_bags, anchors.shape[1], anchors.shape[2])
+            )
         flat_representation = self.aggregator._forward_dense(
             classification_flat,
             per_bag_anchors,
@@ -5280,11 +5558,19 @@ class BaseModel(nn.Module):
         if not return_auxiliary:
             return result
         logits, auxiliary = result
+        structural = {}
+        if not self.meta_classifier.covariance_only:
+            # CV-only never builds these -- reporting them as zeros would hand
+            # callers a plausible-looking tensor for something that was never
+            # computed (docs SS68).
+            structural = {
+                "bag_tokens": representation["global_summary"],
+                "slot_tokens": representation["slots"],
+                "tail_tokens": representation["tails"],
+                "slot_metadata": representation["slot_metadata"],
+            }
         return logits, {
-            "bag_tokens": representation["global_summary"],
-            "slot_tokens": representation["slots"],
-            "tail_tokens": representation["tails"],
-            "slot_metadata": representation["slot_metadata"],
+            **structural,
             "context_mask": is_context,
             "aggregator": aggregator_auxiliary,
             **auxiliary,

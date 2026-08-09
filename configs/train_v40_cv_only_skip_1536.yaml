@@ -1,0 +1,84 @@
+# v40 — CV-only (skip 구현): covariance 두 항만 남긴 모델
+#
+# train_v40_cv_only_1536.yaml 과 **완전히 동일한 모델**이다. 다른 것은 구현뿐 —
+# 죽은 분기를 계산하고 버리는 대신 아예 건너뛴다(docs SS68):
+#   훈련 경로 forward_episode_batch  16.91 ms -> 2.85 ms (5.9x)
+#   평가 경로 ragged forward         19.20 ms -> 9.39 ms (2.0x)
+# 등가성은 tests/test_ridge_ablation.py::TestCovarianceOnly의
+# test_skip_matches_a_full_branch_model_with_the_same_weights 가 고정한다.
+# 같은 seed로 두 구현을 나란히 돌리는 것 자체가 등가성의 end-to-end 확인이다.
+#
+# docs/current_status.md §68.
+#
+# 근거 (분기 기여도 진단, v38_control ckpt, 합성 200 에피소드):
+#   FINAL (모델 출력)              0.9199
+#   CV-1 covariance ridge  closed  0.9052   <- 단독으로 최종에 육박
+#   CV-2 covariance relation learned 0.8867
+#   P-2 abundance ridge    closed  0.6254
+#   G   global_shape       mixed   0.5949
+#   Q-5 population attention learned 0.5000  <- std 0.0000, 문자 그대로 상수
+#   R   rare/tail          learned 0.5196   <- std 0.0008
+# 즉 판별력은 covariance 두 항이 사실상 전부 만들고 있고, Q-5는 죽어 있다.
+# v36 Q1과 v37이 겨냥한 것이 바로 이 죽은 Q-5였다(둘 다 Δ≈0으로 실패).
+#
+# 이 arm은 그래서 남는 것만 남긴다:
+#   final = cov_res_scale·CV-1 + cov_rel_res_scale·CV-2
+# `meta_covariance_only: true`가 _fuse_evidence 한 곳에서 처리하며(dense·ragged
+# 공통 진입점) global_shape(게이트 없는 베이스 항), population, rare,
+# fusion interaction을 전부 0으로 만든다. interaction은 어차피 그 셋으로
+# 만들어지므로 함께 죽이는 것이 맞다.
+#
+# ⚠️ 비용 주의: 파라미터는 줄지만 **epoch 시간은 별로 안 줄어든다.** 지배적 비용은
+# aggregator(최대 16,384 cell 처리)인데 covariance sketch 자체가 거기서 나오므로
+# 그대로 돌아야 한다. 죽은 분기의 출력을 0으로 만들 뿐 연산을 건너뛰지는 않는다.
+#
+# 비교 기준: v38_ridge_ablation_control (동일 조건 all-branch, 50ep, rare-free,
+# bf16, seed 42, v37 backbone) — er_status macro 0.6994 / val_ce 0.3411.
+# clipping은 넣지 않는다(§67: clipping이 오히려 −0.0317의 손상을 냈다).
+# nonfinite_gradient_policy: zero 만 켠다 — non-finite가 없으면 완전한 no-op이라
+# v38 궤적과 비교 가능하고, 터질 때만 구제된다.
+#
+# ⚠️ EVALUATE WITH THIS CONFIG — 죽인 분기의 파라미터는 gradient를 받지 않아 init
+# 상태로 남는다. 다른 config로 채점하면 미학습 분기가 주입된다.
+
+seed: 42
+ckpt_path:
+
+data: default
+data_overrides:
+  episode_batch_size: 1
+  dataset_kwargs:
+    num_cells: [1, 16384]
+    num_cells_log_uniform_power: 1.5
+
+model: default
+
+optimizer: default
+scheduler: default
+
+trainer: default
+trainer_overrides:
+  devices: 1
+  max_epochs: 50
+
+logger: default
+logger_overrides:
+  experiment_name: v40_cv_only_skip
+
+callbacks: default
+
+model_kwargs:
+  training_targets_per_episode: [5, 12]
+  ranking_loss_weight: 0.10
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0
+  nonfinite_gradient_policy: zero
+  meta_enable_rare_evidence: false
+  # ⚠️ 이 arm에서 bag_aggregation은 **무의미**하다. 40->1 압축 결과(bag token)를
+  # 쓰는 곳이 global_shape / class memory / population 뿐인데 셋 다 0이므로,
+  # v37 context-adaptive weight maker(1.53M)는 계산되고 통째로 버려진다.
+  # v36/v37/v38/v39 계보의 튜닝 축은 CV-only에 적용되지 않는다 — 이 값은
+  # 앞선 arm들과 config diff를 최소화하려고 남겨둔 것일 뿐이다.
+  meta_bag_aggregation: context_adaptive
+  # CV-1 + CV-2 만 남긴다.
+  meta_covariance_only: true

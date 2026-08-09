@@ -660,6 +660,12 @@ class ModelInterface(L.LightningModule):
                 "covariance_relation_class_separation"
             ].float().mean()
 
+        # CV-only (docs SS68) skips the population branch entirely, so these
+        # diagnostics have no input. Guarding on the key -- rather than emitting
+        # a zero -- keeps "the branch did not run" distinguishable from "the
+        # branch ran and produced zero" in the metrics.
+        if "population_slot_weights" not in auxiliary:
+            return total, terms
         population_weights = auxiliary["population_slot_weights"].float()
         routing_entropy = (
             -(
