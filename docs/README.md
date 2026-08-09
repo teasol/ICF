@@ -60,3 +60,16 @@
   Musk 0.95 지렛대 1 기준(`train_v24_musklike_easy.yaml`)을 유지합니다. 폐기된 v23/v24 candidate(`train_v23_medium_bag_mean`, `train_v24_medium_bag_proj`, `train_v24_medium_bag_proj_bottleneck`)는 `configs/archive/v23_v24_candidates/`로, 구버전(v18~v21)은 `configs/archive/`로, IA-MIL 3종은 `configs/archive/ia_mil/`로, 닫힌 musklike 지렛대(rawstats/mean_token)는 `configs/archive/musklike_easy_levers/`로 관리합니다. ICI의 fold/seed는 config가 아니라 `--cv`/`--seed`로 주입하므로 fold별 config를 만들지 않습니다.
 - **단일 출처화**: 동일한 수치나 진행 상태를 중복해 기록하지 않으며, 상태는 `current_status.md`에만 기록합니다.
 - **자율 연속 실행과 추적성**: `current_status.md`에 다음 Action과 판정 기준이 명확하면 재확인 없이 실행합니다. 각 논리 단위의 결과·명령·로그/산출물 경로·판단·후속 Action을 SSOT에 기록하고 Git 커밋하여 다른 작업공간이 즉시 이어받을 수 있게 합니다.
+
+
+---
+
+## 2026-08-09 재편 (CV-only 전환)
+
+- `current_architecture.md` / `current_experiments.md`를 **CV-only(v40~) 기준으로 전면
+  재작성**했다. 이전 판은 `history/architecture_v34_v39_pre_cvonly.md`,
+  `history/experiments_pre_cvonly.md`.
+- v36 Q1 / v37 proposal은 **둘 다 기각**(§65)되어 `history/`로 이동했다.
+  현재 활성 proposal은 **없다** — 다음 노선(learnable 사영)이 정해지면 새로 작성한다.
+- 판정 기준이 **SEAL 10개 task macro 평균**으로 바뀌었다(§71-4). `seal_univ2_baseline_17tasks.csv`의
+  `in_seal=yes` 행이 대상이고, 러너는 `scripts/eval_seal_tasks.sh`다.

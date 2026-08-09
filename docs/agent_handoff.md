@@ -372,10 +372,11 @@ scripts/launch_interactive_training.sh \
    - `docs/` 최상위 루트에는 새 Agent가 즉시 정독해야 하는 **핵심 Living 문서 5개와 현행 proposal 1개만 존재**해야 합니다:
      - [`agent_handoff.md`](agent_handoff.md): 운영 규칙, 바이너리 경로, Git 수칙, Docs/Config 관리 지침
      - [`current_status.md`](current_status.md): 개발 현황, 최신 수치, Git 커밋 이력, 이슈 진단 및 Action Plan (SSOT)
-     - [`current_architecture.md`](current_architecture.md): Architecture **v34** 수학적 기술 명세 (retrieval 없음; 40 token → 40→1 사영 → 6개 evidence 분기, train/eval 경로 차이 포함)
-     - [`current_experiments.md`](current_experiments.md): 실험 전략(합성=결정 / ICI=최종 테스트), 검정력, 평가 프로토콜, Stage 1~3 실행 명령어
+     - [`current_architecture.md`](current_architecture.md): **CV-only(v40~) 명세** — 공분산 sketch + closed-form ridge(CV-1) + subspace/prototype(CV-2) 2개 분기만. 이전 6-분기 판은 `history/architecture_v34_v39_pre_cvonly.md`
+     - [`current_experiments.md`](current_experiments.md): **CV-only 이후 실험 절차** — 판정은 SEAL 10개 macro 평균, 금지된 판정 방식 목록, 표준 실행 명령. 이전 판은 `history/experiments_pre_cvonly.md`
      - [`README.md`](README.md): 전체 문서 맵 및 갱신 규칙
      - `architecture_*_proposal.md`: 현재 활성 개선안 1개. 완료·폐기 시 `history/`로 이동
+     (**2026-08-09 현재 활성 proposal 없음** — v36 Q1·v37 모두 기각되어 history로 이동)
    - 최상위 Living 문서와 현행 proposal은 항상 서로 일관된 맥락을 유지합니다.
 
 2. **`docs/history/` 하위 아카이빙 규칙 (Historical & Deep-Dive Docs)**:
