@@ -134,6 +134,9 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 4. **seed 반복** — 지금까지 arm당 1 seed다.
 5. **병목이 표현이 아닐 가능성** — CV-1 단독 0.9052 vs 전체 0.9199. 그 위에 얹은 모든
    시도(v36·v37·v42·v43·v44·v45)가 Δ≈0이었다. task 자체의 정보 한계일 수 있다.
+6. **새 합성 cardinality arm** — 기본 데이터가 bag별 독립 cell 수 + zero-padding/mask로
+   바뀌었다(§81). 이전 arm과 데이터 분포가 다르므로 새 학습은 반드시 새 arm으로 취급한다.
+   현 padding 유효률은 15.85%라 학습 전 length-bucket 또는 GPU step/VRAM smoke가 필요하다.
 
 ---
 

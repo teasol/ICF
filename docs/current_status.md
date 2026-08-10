@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-10` (§72~§80 — 세션 요약은 **§72**)
+**Last updated**: `2026-08-10` (§72~§81 — 세션 요약은 **§72**, 최신 변경은 **§81**)
 
 **한 줄**: CV-2 손잡이는 **소진**됐고(§75·§76·§77), 소스에서 죽은 분기를 **실제로 삭제**했으며
 (§73, −11,285줄), 학습을 **2.4배** 빠르게 했다(§74). 새 계보 B는 두 판본 모두 **기각**됐다 —
@@ -2848,3 +2848,21 @@ v53 0.4708 vs v52 0.5104)가 들어오며 뒤집혔다. **부분 집계로 판�
    동률인지는 seed 반복 없이는 말할 수 없다.
 
 **환경 수칙**: GPU 0·1을 우선 사용하고 다른 GPU는 사용자 허락을 받을 것.
+
+---
+
+## 81. 2026-08-10 — episode 내부 bag별 cardinality + zero-padding/mask
+
+**변경**: 합성 `default` 데이터의 `per_bag_cardinality`를 켰다. 이제 `[1,16384]`,
+log-uniform power 1.5에서 **bag마다 독립적으로** cell 수를 뽑는다. ragged list는
+`collate_synthetic_training_episode`가 batch 크기 1에서도
+`[episode, bag, max_cells, dim]`으로 zero-padding하고 `cell_mask`/`bag_mask`를 함께 반환한다.
+CV-only와 Encoder+Ridge의 `forward_episode_batch`는 mask된 cell을 통계·attention에서 제외한다.
+
+**검증**: 신규 `tests/test_per_bag_cardinality_padding.py`와 golden/mask/dense-path를 포함한
+compact suite — **109 tests 통과**.
+
+**비용 경고(1,000 episode cardinality Monte Carlo)**: bag 60~100개, 상한 16,384에서는
+episode max 중앙값 **15,568**, zero-padding 유효률 평균 **15.85%**로 약 **6.3배 padding
+overhead**다. 정확성 변경은 완료했지만 다음 학습 전에 length-bucket encoder를 구현·측정하거나,
+이 비용을 받아들이고 GPU 0·1 smoke benchmark로 step time/VRAM을 확인해야 한다.

@@ -181,7 +181,17 @@ attention은 에피소드당 2.7e10 쌍이라 불가"였는데, **쌍의 개수�
 
 ---
 
-## C. 주요 손잡이
+## C. 합성 cardinality와 padding 계약
+
+- `configs/data/default.yaml`은 `per_bag_cardinality: true`: 한 episode 안에서도 각 bag이
+  `[1,8192]`(arm override 시 `[1,16384]`)에서 독립적으로 cell 수를 뽑는다.
+- collator는 ragged bags를 batch 최대 길이까지 zero-padding하고 `cell_mask`와 `bag_mask`를
+  반환한다. batch 크기 1도 반드시 이 dense masked 경로를 탄다.
+- 모델은 padding 값을 데이터로 해석하면 안 된다. 모든 mean/covariance/attention은
+  `cell_mask`로 제외하고, padded bag은 `bag_mask`로 context/query에서 제외한다.
+- 변경 전과 학습 데이터 분포가 다르므로 재학습 결과를 기존 arm의 연장으로 비교하지 않는다.
+
+## D. 주요 손잡이
 
 | key | 기본 | 계보 | 의미 |
 |---|---|---|---|
@@ -195,11 +205,12 @@ attention은 에피소드당 2.7e10 쌍이라 불가"였는데, **쌍의 개수�
 | `max_cells` | 8192 | B | bag당 세포 상한 |
 | `token_dim` / `num_layers` | 512 / 2 | B | |
 
-## D. Source of Truth
+## E. Source of Truth
 
 - 모델 A: `src/models/baseline.py` (2,224줄)
 - 모델 B: `src/models/set_transformer_ridge.py`
 - 평가: `scripts/eval_seal_tasks.sh` → `scripts/test_pathobench.py`
 - 테스트: `tests/test_ridge_ablation.py`, `test_cvonly_golden.py`,
   `test_paired_relation_head.py`, `test_set_transformer_ridge.py`,
-  `test_training_uses_dense_path.py`, `test_config_numeric_types.py`
+  `test_training_uses_dense_path.py`, `test_per_bag_cardinality_padding.py`,
+  `test_config_numeric_types.py`

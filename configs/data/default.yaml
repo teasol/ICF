@@ -1,7 +1,8 @@
 # Default data config = v34-1536 (PathoBench reporting model, 2026-08-07).
 # Synthetic episodic in-context training: donors share an immune background
-# while a continuous response changes composition/state; B2 log-uniform
-# cardinality over [1, 8192]; 1536-d cells fed directly.
+# while a continuous response changes composition/state; each bag independently
+# draws a B2b log-uniform cardinality over [1, 8192]. Ragged bags are zero-padded
+# by the collator and accompanied by a cell mask; 1536-d cells are fed directly.
 dataset_src: synthetic_data.SyntheticEpisodeDataset
 episode_dataset: true
 episode_batch_size: 4
@@ -23,6 +24,7 @@ dataset_kwargs:
   effect_scale_end: [0.9, 2.1]
   num_bags: [60, 100]
   num_cells: [1, 8192]
+  per_bag_cardinality: true
   latent_dim: 32
   output_dim: 1536
   mlp_hidden_dim: 96

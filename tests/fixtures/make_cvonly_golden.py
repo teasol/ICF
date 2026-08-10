@@ -76,6 +76,9 @@ def episodes_for(config: dict, count: int):
         if k in accepted
     }
     kwargs["num_cells"] = [1, 512]
+    # The recording predates per-bag cardinality; replay its exact dense input
+    # contract even though the active training default is now ragged (§81).
+    kwargs["per_bag_cardinality"] = False
     kwargs["num_bags"] = [12, 16]
     generator = SyntheticManifoldGenerator(**kwargs)
     rng = torch.Generator().manual_seed(SEED)

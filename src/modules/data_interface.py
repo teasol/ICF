@@ -101,10 +101,10 @@ def collate_synthetic_training_episode(samples: list[Any]):
     """
     if not samples:
         raise ValueError("A synthetic training batch cannot be empty.")
-    if len(samples) == 1:
-        return samples[0]
     if not isinstance(samples[0][0], torch.Tensor):
         return _collate_ragged_batch(samples)
+    if len(samples) == 1:
+        return samples[0]
     x = torch.stack([sample[0] for sample in samples])
     y = torch.stack([sample[1] for sample in samples])
     field_count = len(samples[0])
