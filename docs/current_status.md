@@ -1,10 +1,10 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-10` (§84 — v62 Linear-16 + CV-1 K128 hybrid 학습 시작)
+**Last updated**: `2026-08-10` (§84 — v62 OOM 원인 수정, 재실행 대기)
 
-**한 줄**: orthogonal linear manifold를 유지하고 16×512 learned summary와 K128 CV-1 covariance를 concat한 단일-ridge hybrid v62를 GPU 0–3에서 100 epoch 학습 중이다(§84).
+**한 줄**: v62의 OOM 원인이던 cap 이전 raw-Nmax dense 생성을 제거하고, bag별 `[256,8192]` power 2.0 draw를 4096에서 선제 cap하도록 수정했다. 현재 GPU 작업은 없고 재실행 대기다(§84).
 
-**Status**: **v62 Linear-16 + CV-1 K128 hybrid DDP4 학습 진행 중.**
+**Status**: **v62 데이터 생성 메모리 수정 완료 — DDP4 재실행 대기.**
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
   현행 최고 **v41_K128 = SEAL 10개 0.6940** (ABMIL 0.727에 −0.033).
@@ -27,7 +27,7 @@
 
 **지금 돌아가는 것 (2026-08-10)**
 
-**v62 hybrid**가 `logs/20260810_192929/`에서 GPU 0–3 DDP4로 실행 중이다. §84 참조.
+**없음.** 실패한 v62 DDP4는 전부 종료했고 GPU 0–7은 0 MiB다. 수정 후 재실행은 아직 시작하지 않았다. §84 참조.
 
 결과 재확인:
 ```bash
