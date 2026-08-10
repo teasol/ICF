@@ -85,3 +85,25 @@ def test_separate_nuisance_seed_is_independent_of_response_configuration():
         separate_nuisance_rng=True,
     )
     assert scalar.nuisance_seed == xor.nuisance_seed
+    assert scalar.nuisance_seed is not None
+
+def test_orthogonal_linear_manifold_preserves_latent_geometry():
+    generator = SyntheticManifoldGenerator(
+        num_bags=4,
+        num_cells=8,
+        latent_dim=16,
+        output_dim=1536,
+        manifold_mode="orthogonal",
+    )
+    z = torch.randn(2, 7, 16, generator=torch.Generator().manual_seed(11))
+    mapped = generator._map_episode_manifold(
+        z,
+        torch.Generator().manual_seed(12),
+        torch.device("cpu"),
+    )
+    assert mapped.shape == (2, 7, 1536)
+    torch.testing.assert_close(
+        torch.cdist(z[0], z[0]), torch.cdist(mapped[0], mapped[0]),
+        rtol=1e-5,
+        atol=1e-5,
+    )

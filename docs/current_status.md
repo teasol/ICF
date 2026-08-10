@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-10` (§82 — factorized response/XOR Arm 1–5 구현 및 v54 기반 4-GPU 학습 진행)
+**Last updated**: `2026-08-10` (§83 — v61 orthogonal linear manifold ablation 시작)
 
 **한 줄**: 실제 병리 일반화 실패의 원인을 합성 데이터에서 찾기 위해 response 구조를 factor/population/XOR로 확장했다. 기존 v54를 Arm 1로 재사용하고, v54 아키텍처 기반 Arm 2–5를 GPU 0–3에서 학습 중이다(§82).
 
@@ -45,7 +45,7 @@ done
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§82 (현재 실행 중인 데이터 arm; 최우선)**, **§72 (이번 세션 요약 — 어디로 갈지 §80)**, **§79 (계보 B 재설계 — 첫 판본이 내 설계 오류였다)**, **§73 (소스 prune — prune 이전 ckpt는 고정 worktree로만 채점 가능)**, **§74 (학습이 평가 경로를 타고 있었다 + 범인이 아니었던 것들)**, **§76·§77 (CV-2 손잡이 소진 — 더 파지 말 것)**, **§71 (판정 기준 = SEAL 10개 macro 평균)**, **§69 (label-free 사영 8종 전부 천장 / 합성 지표 불신)**, **§68 (CV-only가 baseline이 된 근거)**, **§67 (clipping 켜지 말 것)**, **§66 (CV-1 제거 불가)**.
+**Read first if you are picking this up**: **§83 (MLP→linear manifold ablation)**, **§82 (현재 실행 중인 데이터 arm; 최우선)**, **§72 (이번 세션 요약 — 어디로 갈지 §80)**, **§79 (계보 B 재설계 — 첫 판본이 내 설계 오류였다)**, **§73 (소스 prune — prune 이전 ckpt는 고정 worktree로만 채점 가능)**, **§74 (학습이 평가 경로를 타고 있었다 + 범인이 아니었던 것들)**, **§76·§77 (CV-2 손잡이 소진 — 더 파지 말 것)**, **§71 (판정 기준 = SEAL 10개 macro 평균)**, **§69 (label-free 사영 8종 전부 천장 / 합성 지표 불신)**, **§68 (CV-only가 baseline이 된 근거)**, **§67 (clipping 켜지 말 것)**, **§66 (CV-1 제거 불가)**.
 
 > [!IMPORTANT]
 > **방법론 경고 3건 — 다음 arm 설계 전에 읽을 것**:
@@ -2910,3 +2910,21 @@ XOR exact label 및 marginal balance, 8-factor/4-pop 전부 도달, nuisance see
 
 **완료 후** 각 arm의 train/val CE 궤적과 best epoch를 먼저 표로 모으되, 채택 판정은 합성
 CE/AUROC가 아니라 기존 계약대로 **SEAL 10-task macro 평균**으로 한다. v60은 현재 padding과
+
+## 83. 2026-08-10 — v61: random MLP를 orthogonal linear projection으로 교체
+
+가설: episode별 random nonlinear MLP가 실제 pathology embedding보다 과도한 deformation을
+만들어 모델이 본질적 population signal보다 불필요한 inverse 문제를 풀게 한다. v60 control에서
+`manifold_mode` 하나만 `nonlinear → orthogonal`로 바꾼다. label은 scalar sign, responsive
+population은 1개, bag별 cardinality/padding, v54 모델과 AdamW 1e-4, 50 epoch는 동일하다.
+
+`orthogonal`은 episode마다 새로운 tall matrix `W ∈ R^(1536×32)`를 QR로 만들며
+`WᵀW=I`다. activation/bias가 없는 `x=Wz`라 L2 normalization 전 latent pairwise distance와
+32차원 정보를 보존한다. latent 차원을 16으로 줄이지 않은 이유는 mapping만 격리하기 위해서다.
+
+- config: `configs/train_v61_linear_manifold_1536.yaml`
+- 예정 GPU: 0만 사용
+- 검증: `tests/test_factorized_response.py` **5 passed**. 16→1536 distance-preservation test와
+  v61 CUDA episode `[60 bags, 8 cells, 1536]`, finite 확인.
+- 판정: v60 best SEAL macro 0.6090과 먼저 비교하고, 최종 기준은 SEAL 10-task macro다.
+  합성 val CE가 좋아져도 그것만으로 채택하지 않는다.
