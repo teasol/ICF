@@ -39,7 +39,8 @@ scheduler: default
 
 trainer: default
 trainer_overrides:
-  devices: 1
+  devices: 4
+  strategy: ddp_find_unused_parameters_false
   max_epochs: 50
 
 logger: default

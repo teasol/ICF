@@ -2923,8 +2923,11 @@ population은 1개, bag별 cardinality/padding, v54 모델과 AdamW 1e-4, 50 epo
 32차원 정보를 보존한다. latent 차원을 16으로 줄이지 않은 이유는 mapping만 격리하기 위해서다.
 
 - config: `configs/train_v61_linear_manifold_1536.yaml`
-- 예정 GPU: 0만 사용
+- GPU: 0–3 DDP (`devices: 4`, `ddp_find_unused_parameters_false`)
 - 검증: `tests/test_factorized_response.py` **5 passed**. 16→1536 distance-preservation test와
   v61 CUDA episode `[60 bags, 8 cells, 1536]`, finite 확인.
+- episode matching: `episodes_per_epoch: 1024` 유지 → global 51,200 episodes, rank당 12,800.
+  global batch 4라 optimizer update는 12,800으로 single-GPU control의 1/4이며 결과 해석 시 별도 교란이다.
+- 폐기 run: `logs/20260810_172000/`은 single-GPU Epoch 0 초반에 사용자 요청으로 중단.
 - 판정: v60 best SEAL macro 0.6090과 먼저 비교하고, 최종 기준은 SEAL 10-task macro다.
   합성 val CE가 좋아져도 그것만으로 채택하지 않는다.
