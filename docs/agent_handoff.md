@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-10` — **§73 죽은 분기를 소스에서 실제로 삭제(−11,285줄, `baseline.py` 5,685→2,224)** + **§74 학습이 평가용 ragged 경로를 타고 있었다(74.2→31.3 ms/step)** + **§76·§77 CV-2 손잡이 소진** + **§79 계보 B(Encoder+Ridge) 재설계** + §71 판정 기준 = SEAL 10개 macro 평균. 세션 요약은 `current_status.md` **§72**, 다음 할 일은 **§80**.
+**Last updated**: `2026-08-10` — factorized response/XOR 생성기 계약과 v54 기반 Arm 1–5는 `current_status.md` **§82**. 기존 모델·평가 계약은 §71·§73·§74·§76·§77·§79를 따른다.
 
 > [!IMPORTANT]
 > **모델이 둘이다 (2026-08-10)**
@@ -74,6 +74,16 @@
 
 > **GPU 정책 (2026-08-10, 사용자 지시)**: **GPU 0·1을 우선 사용**하고, 다른 GPU는
 > 사용자 허락을 받은 뒤 쓸 것.
+
+> [!IMPORTANT]
+> **합성 response/cardinality 계약 (§81·§82, 2026-08-10)**
+>
+> - episode 안에서도 bag마다 `[1,16384]` cell 수를 독립 draw한다. training collate는 최대 **4096**까지 zero-pad하며 초과 bag은 매번 `randperm` subsample한다. mask 밖 padding은 모델 통계/attention에서 제외한다.
+> - 생성기는 `response_dim`, `responsive_population_count`, `label_rule(single|xor)`, `random_causal_factors`, `separate_nuisance_rng`를 지원한다. 기본값은 scalar + 1 population으로 기존 경로를 exact 보존한다.
+> - XOR label은 두 causal factor bit가 다를 때 1이다. 각 단일 causal factor는 label과 marginally independent하다. 8-factor/4-pop은 population당 factor 2개로 모든 factor가 실제 state/covariance 효과에 도달한다. sparse task는 현재 arm에서 제외한다.
+> - `separate_nuisance_rng`는 donor mixture/shift, component shift, observation noise의 RNG를 label/factor draw와 분리한다. composition은 호환성을 위해 causal response의 scalar aggregate를 쓴다.
+> - Arm 1은 **기존 v54 결과**다. Arm 2–5는 v54 계보(`set_transformer_ridge` + AdamW 1e-4)다. v41 CV-only로 잘못 시작한 `logs/20260810_143000/`은 폐기다.
+> - 현재 사용자 GPU 허가는 **0–3**까지다. 실행 매핑과 상태는 `current_status.md` §82.
 
 > **죽은 분기 (§68-1 실측)**: Q-5 population attention은 **상수를 뱉는다**(AUROC 0.5000,
 > std 0.0000). v36 Q1과 v37이 겨냥한 것이 바로 이 모듈이라 둘 다 Δ≈0으로 끝났다.

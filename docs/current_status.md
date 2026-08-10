@@ -1,13 +1,10 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-10` (§72~§81 — 세션 요약은 **§72**, 최신 변경은 **§81**)
+**Last updated**: `2026-08-10` (§82 — factorized response/XOR Arm 1–5 구현 및 v54 기반 4-GPU 학습 진행)
 
-**한 줄**: CV-2 손잡이는 **소진**됐고(§75·§76·§77), 소스에서 죽은 분기를 **실제로 삭제**했으며
-(§73, −11,285줄), 학습을 **2.4배** 빠르게 했다(§74). 새 계보 B는 두 판본 모두 **기각**됐다 —
-재설계가 합성 지표를 0.784→0.849로 올리고도 SEAL은 0.6619→0.6526으로 내렸다(§79-6).
-**여전히 v41_K128(0.6940)이 최고다.**
+**한 줄**: 실제 병리 일반화 실패의 원인을 합성 데이터에서 찾기 위해 response 구조를 factor/population/XOR로 확장했다. 기존 v54를 Arm 1로 재사용하고, v54 아키텍처 기반 Arm 2–5를 GPU 0–3에서 학습 중이다(§82).
 
-**Status**: **두 계보 병행.**
+**Status**: **factorized-response 데이터 ablation 학습 진행 중(Arm 2–5, GPU 0–3).**
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
   현행 최고 **v41_K128 = SEAL 10개 0.6940** (ABMIL 0.727에 −0.033).
@@ -30,7 +27,7 @@
 
 **지금 돌아가는 것 (2026-08-10)**
 
-**돌고 있는 작업 없음.** v53/v54 학습·채점 모두 완료(§79-6).
+**v54 기반 Arm 2–5 네 작업이 `logs/20260810_144500/`에서 진행 중**. GPU 0–3에 각 1개, GPU 4–7 미사용. §82 참조.
 
 결과 재확인:
 ```bash
@@ -48,7 +45,7 @@ done
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§72 (이번 세션 요약 — 어디로 갈지 §80)**, **§79 (계보 B 재설계 — 첫 판본이 내 설계 오류였다)**, **§73 (소스 prune — prune 이전 ckpt는 고정 worktree로만 채점 가능)**, **§74 (학습이 평가 경로를 타고 있었다 + 범인이 아니었던 것들)**, **§76·§77 (CV-2 손잡이 소진 — 더 파지 말 것)**, **§71 (판정 기준 = SEAL 10개 macro 평균)**, **§69 (label-free 사영 8종 전부 천장 / 합성 지표 불신)**, **§68 (CV-only가 baseline이 된 근거)**, **§67 (clipping 켜지 말 것)**, **§66 (CV-1 제거 불가)**.
+**Read first if you are picking this up**: **§82 (현재 실행 중인 데이터 arm; 최우선)**, **§72 (이번 세션 요약 — 어디로 갈지 §80)**, **§79 (계보 B 재설계 — 첫 판본이 내 설계 오류였다)**, **§73 (소스 prune — prune 이전 ckpt는 고정 worktree로만 채점 가능)**, **§74 (학습이 평가 경로를 타고 있었다 + 범인이 아니었던 것들)**, **§76·§77 (CV-2 손잡이 소진 — 더 파지 말 것)**, **§71 (판정 기준 = SEAL 10개 macro 평균)**, **§69 (label-free 사영 8종 전부 천장 / 합성 지표 불신)**, **§68 (CV-only가 baseline이 된 근거)**, **§67 (clipping 켜지 말 것)**, **§66 (CV-1 제거 불가)**.
 
 > [!IMPORTANT]
 > **방법론 경고 3건 — 다음 arm 설계 전에 읽을 것**:
@@ -2891,3 +2888,25 @@ bag cardinality는 §81 계약을 그대로 사용한다: bag별 독립 draw, tr
 Arm 2–5는 모두 v54의 `set_transformer_ridge` + AdamW 1e-4를 사용한다. config는 `train_v57_scalar_2pop_1536.yaml`,
 `train_v58_xor_2factor_2pop_1536.yaml`, `train_v59_xor_8factor_4pop_1536.yaml`,
 `train_v60_scalar_1pop_current_1536.yaml`.
+
+### 82-1. 실행 상태와 다음 단계
+
+- **정상 실행 run**: `logs/20260810_144500/`, checkpoint root
+  `checkpoints/20260810_144500/`. 모두 v54 계보(`set_transformer_ridge`, AdamW 1e-4),
+  50 epoch, seed 42다.
+- GPU 배치: v57→0, v58→1, v59→2, v60→3. 사용자가 GPU 0–3 사용을 명시 허가했으며
+  GPU 4–7은 사용하지 않는다.
+- handoff 시점(프로세스 elapsed 약 1분): 네 worker 모두 생존, Epoch 0 **38–40%**,
+  약 **6.9–7.2 step/s**. 첫 epoch 전이라 checkpoint/event artifact는 아직 없고 stdout은
+  2026-08-10 14:30:34까지 갱신됐다. 다음 세션은 checkpoint/event mtime과 프로세스를 다시
+  확인해야 한다.
+- 폐기 실행: `logs/20260810_143000/`은 실수로 v41 CV-only/default optimizer를 사용해
+  Epoch 1 초반에 중단했다. GPU 메모리 0 MiB까지 해제 확인. **결과로 사용 금지**.
+
+검증: `tests/test_factorized_response.py` 4개 통과(기본 scalar/1-pop exact compatibility,
+XOR exact label 및 marginal balance, 8-factor/4-pop 전부 도달, nuisance seed independence).
+프로젝트 전체 pytest는 BagPFN 환경에 pytest가 없고 system Python에는 Lightning이 없어 이번
+세션에서 재실행하지 못했다. 직전 padding 커밋 기준 compact suite는 111개 통과했다.
+
+**완료 후** 각 arm의 train/val CE 궤적과 best epoch를 먼저 표로 모으되, 채택 판정은 합성
+CE/AUROC가 아니라 기존 계약대로 **SEAL 10-task macro 평균**으로 한다. v60은 현재 padding과
