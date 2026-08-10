@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-10` — v62 첫 DDP4 run은 cap 이전 raw-Nmax dense 생성 OOM으로 종료했고, 선제 4096 cap 및 `[256,8192]` power 2.0 규칙으로 수정 완료해 재실행 대기다. 실행 상태는 `current_status.md` §84. v57–v61 결과는 §82·§83. 최고 v61도 SEAL 10개 0.6157로 v41 0.6940에 미달해 승격 기각했다. 상세는 `current_status.md` **§82·§83**. 기존 모델·평가 계약은 §71·§73·§74·§76·§77·§79를 따른다.
+**Last updated**: `2026-08-10` — cap-first `[256,8192]` power 2.0 v62를 GPU 0–3 DDP4로 재실행 중이다. PID/로그/checkpoint는 `current_status.md` §84. 실행 상태는 `current_status.md` §84. v57–v61 결과는 §82·§83. 최고 v61도 SEAL 10개 0.6157로 v41 0.6940에 미달해 승격 기각했다. 상세는 `current_status.md` **§82·§83**. 기존 모델·평가 계약은 §71·§73·§74·§76·§77·§79를 따른다.
 
 > [!IMPORTANT]
 > **모델이 둘이다 (2026-08-10)**

@@ -1,10 +1,10 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-10` (§84 — v62 OOM 원인 수정, 재실행 대기)
+**Last updated**: `2026-08-10` (§84 — cap-first v62 DDP4 재실행)
 
-**한 줄**: v62의 OOM 원인이던 cap 이전 raw-Nmax dense 생성을 제거하고, bag별 `[256,8192]` power 2.0 draw를 4096에서 선제 cap하도록 수정했다. 현재 GPU 작업은 없고 재실행 대기다(§84).
+**한 줄**: cap-first `[256,8192]` power 2.0 데이터로 v62 Linear-16 + CV-1 K128 hybrid를 GPU 0–3에서 100 epoch 재학습 중이다(§84).
 
-**Status**: **v62 데이터 생성 메모리 수정 완료 — DDP4 재실행 대기.**
+**Status**: **cap-first v62 hybrid DDP4 100-epoch 학습 진행 중.**
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
   현행 최고 **v41_K128 = SEAL 10개 0.6940** (ABMIL 0.727에 −0.033).
@@ -27,7 +27,7 @@
 
 **지금 돌아가는 것 (2026-08-10)**
 
-**없음.** 실패한 v62 DDP4는 전부 종료했고 GPU 0–7은 0 MiB다. 수정 후 재실행은 아직 시작하지 않았다. §84 참조.
+**v62 cap-first**가 `logs/20260810_195208/`에서 GPU 0–3 DDP4로 실행 중이다. §84 참조.
 
 결과 재확인:
 ```bash
@@ -2976,6 +2976,8 @@ CV-1 covariance feature를 concat해 하나의 class-balanced closed-form ridge�
 - config: `configs/train_v62_linear_hybrid_cv1_1536.yaml`. 구현 commit `1cc700b`.
 - 검증: compact suite **117 tests 통과**. 10,000-draw Monte Carlo raw 263–8190, median 2979.5, >4096 36.01%; 한 60-bag episode retained 42개 고유 크기, 19개 cap. full-dim BF16 GPU forward/backward finite, peak smoke descriptor 8,192+8,256.
 - 실패 run: `logs/20260810_192929/v62_linear16_cv1_k128.out`. epoch 9 시작에 cap 이전 `[B, raw Nmax, 1536]` dense 생성으로 rank 2 OOM, DDP hang 후 사용자 요청으로 전부 종료. GPU 메모리 0 MiB 확인. 복구 가능 `last.ckpt`는 epoch 8이지만 데이터 규칙이 바뀌었으므로 재사용하지 않는다.
-- 수정: `per_bag_max_cells=4096`를 generator에 추가해 cap 후 최대치만 dense 생성한다. collate의 4096 cap은 방어선으로 유지한다. 재실행은 아직 시작하지 않았다.
+- 수정: `per_bag_max_cells=4096`를 generator에 추가해 cap 후 최대치만 dense 생성한다. collate의 4096 cap은 방어선으로 유지한다.
+- 재실행: PID 2572965, `logs/20260810_195208/v62_linear16_cv1_k128_capfirst.out`, checkpoint root `checkpoints/20260810_195208/v62_linear16_cv1_k128_capfirst/`. scratch, allocator `expandable_segments:False`.
+- 시작 확인: GPU 0–3 utilization 95–96%, memory 37.9–39.5 GiB로 균형. first-step peak 18.45 GiB, epoch 0 정상 진행.
 
 완료 후 우선 periodic checkpoint의 SEAL 10-task macro 궤적으로 학습 진행이 실제 평가 성능을 높이는지 판정한다.
