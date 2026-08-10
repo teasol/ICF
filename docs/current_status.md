@@ -2873,10 +2873,11 @@ data augmentation으로 쓰고, padding 상한도 4,096으로 고정한다. vali
 
 | arm | 데이터 | 실행 |
 |---|---|---|
-| 1 | scalar + 1 population | 기존 v56 결과 재사용(로컬 산출물 경로는 아직 미확인) |
+| 1 | scalar + 1 population | 기존 v54 결과 재사용 |
 | 2 | scalar + 2 populations | v57, GPU 0 |
 | 3 | 2 factors + XOR | v58, GPU 1 |
 | 4 | 전체 요소: 8 factors + 4 populations + random causal pair XOR | v59, GPU 2 |
+| 5 | current padding control: scalar + 1 population | v60, GPU 3 |
 
 `SyntheticManifoldGenerator`에 `response_dim`, `responsive_population_count`,
 `label_rule`, `random_causal_factors`, `separate_nuisance_rng`를 추가했다. XOR은 episode마다
@@ -2887,5 +2888,6 @@ observation noise는 별도 RNG stream을 사용해 label/factor 난수 소비�
 
 bag cardinality는 §81 계약을 그대로 사용한다: bag별 독립 draw, training collate 최대 4096,
 초과 bag은 매 collate `randperm` subsample, zero padding + mask. 희소 신호는 이번 arm에서 제외한다.
-Arm 2–4 config는 `train_v57_scalar_2pop_1536.yaml`,
-`train_v58_xor_2factor_2pop_1536.yaml`, `train_v59_xor_8factor_4pop_1536.yaml`.
+Arm 2–5는 모두 v54의 `set_transformer_ridge` + AdamW 1e-4를 사용한다. config는 `train_v57_scalar_2pop_1536.yaml`,
+`train_v58_xor_2factor_2pop_1536.yaml`, `train_v59_xor_8factor_4pop_1536.yaml`,
+`train_v60_scalar_1pop_current_1536.yaml`.

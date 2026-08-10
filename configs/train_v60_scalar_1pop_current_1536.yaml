@@ -1,4 +1,4 @@
-# Arm 2: v54 architecture, scalar response + two populations.
+# Arm 5: v54 architecture rerun, current padding, scalar + one population.
 #
 # 왜 다시 올리나. 2e-5는 **학습이 안 되던 구조**에서 고른 값이다. inducing-point
 # 인코더(v50~v52)에서는 LR이 낮을수록 나았다:
@@ -28,7 +28,7 @@ data_overrides:
     num_cells: [1, 16384]
     num_cells_log_uniform_power: 1.5
     response_dim: 1
-    responsive_population_count: 2
+    responsive_population_count: 1
     label_rule: single
 
 model: set_transformer_ridge
@@ -43,7 +43,7 @@ trainer_overrides:
 
 logger: default
 logger_overrides:
-  experiment_name: v57_scalar_2pop_v54
+  experiment_name: v60_scalar_1pop_current_v54
 
 callbacks: default
 
