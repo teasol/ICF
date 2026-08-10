@@ -1,19 +1,80 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-09` — **§71 SEAL 10개 task 평균 0.6940 vs ABMIL 0.727(−0.033), 상회 3/10 — "SEAL 상회"는 er_status 단일 현상이다. 판정 기준을 10개 macro 평균으로 변경(`scripts/eval_seal_tasks.sh`, 2 GPU 20분)** + **§70 v41이 현재 최고: er_status 0.7303. CV-only + `a=0.85π/K` 대역폭 정규화 + CV-2 차원 K 연동(`configs/train_v41_cvonly_K{64,128}_1536.yaml`)** + **§68 CV-only가 새 baseline: 6개 evidence 분기 중 CV-1·CV-2만 남겨도 전 분기 모델과 동률(fold-paired −0.0005), 훈련 forward 5.9×·VRAM 3.4× 절감** + **§69 sketch 기저 진단(label-free 축 8개 무효, 차원만 유효)** + §67 clipping 역효과 + §66 ridge ablation: G-2 global ridge 무기여 확정(Δ −0.0004) / P-2·CV-1은 제거 시 학습 붕괴** + **§65 v36 Q1·v37 두 arm 모두 게이트 미달(Δ −0.0024 / −0.0001)**. §64 평가도 bf16-mixed 강제(2026-08-08 이전 50-fold 수치는 전부 참고용) + 폴드 단위 context 캐싱(bit-identical, 356s→50s) + bc_therapy/er_status 기본 평가 확정. v34-1536 확정(PathoBench 보고용). 공식 50-fold **9/17 완료**(잔여 8개).
+**Last updated**: `2026-08-10` — **§73 죽은 분기를 소스에서 실제로 삭제(−11,285줄, `baseline.py` 5,685→2,224)** + **§74 학습이 평가용 ragged 경로를 타고 있었다(74.2→31.3 ms/step)** + **§76·§77 CV-2 손잡이 소진** + **§79 계보 B(Encoder+Ridge) 재설계** + §71 판정 기준 = SEAL 10개 macro 평균. 세션 요약은 `current_status.md` **§72**, 다음 할 일은 **§80**.
 
 > [!IMPORTANT]
-> **CV-only 계약 (§68, 2026-08-09)**: `meta_covariance_only: true`면
-> `final = cov_res·CV-1 + cov_rel_res·CV-2`만 남고 global_shape(게이트 없는 베이스 항)·
-> population·rare·fusion interaction이 **계산조차 되지 않는다**. 전 분기 모델과 er_status
-> 50-fold **동률**(−0.0005 [−0.0037,+0.0024], 26/50)이면서 훈련 forward 16.91→2.85 ms,
-> peak VRAM 50.5→14.7 GB, epoch 98→60s.
-> ⚠️ **죽은 key는 zeros가 아니라 부재다.** `_validate_representation`이 CV-only 전용의 더 작은
-> 계약을 강제한다(빠지거나 남으면 ValueError). 새 소비처를 추가할 때 이 모드에서 KeyError가
-> 나면 **그게 정상 동작**이다 — 0으로 채우지 말고 분기를 가드할 것.
-> ⚠️ `meta_bag_aggregation`(v37 계열)은 CV-only에서 **무의미**하다. bag token 소비처가 전부
-> 없어서 weight maker가 계산되지 않는다. CV-only는 v36/v37/v38/v39 계보와 무관한 모델이다.
+> **모델이 둘이다 (2026-08-10)**
 >
+> | | A. CV-only | B. Encoder+Ridge |
+> |---|---|---|
+> | 파일 | `src/models/baseline.py` | `src/models/set_transformer_ridge.py` |
+> | 학습 파라미터 | 229개 | 5,010,946개 |
+> | SEAL 10개 | **0.6940** (v41_K128) | 0.6526 (기각, §79-6) |
+>
+> 공유하는 코드는 ridge 솔버(`solve_ridge_system`) 하나뿐이다. 새 모델을 붙일 때
+> `ModelInterface`가 요구하는 것은 `forward` / `forward_episode_batch` /
+> `_architecture_version` 셋뿐이고 auxiliary는 전부 `.get()` 가드다.
+
+> [!IMPORTANT]
+> **§73 prune — 이전 ckpt 호환성 (필독)**
+> config 플래그로 끄기만 하던 5개 분기를 **소스에서 삭제**했다. 근거는 v41_K128 ckpt의
+> 파라미터별 gradient 실측: 43,198,660개 중 gradient를 받는 것이 **229개**뿐이었다.
+> `meta_covariance_only` 플래그 자체도 없앴다 — 선택할 대안이 없으므로.
+>
+> ⚠️ **prune 이전 체크포인트는 현재 트리로 strict 로드가 깨진다.** 채점하려면
+> `8caa96c`에 고정한 worktree `/NHNHOME/BASE/kimds/ICF_pre_prune`를 쓸 것. **유지 필수.**
+>
+> ⚠️ 대규모 삭제 전에는 출력을 fixture로 녹화할 것. `tests/fixtures/cvonly_golden.pt`가
+> 그 예다. 실제로 1 ulp 차이를 잡아냈고, 추적 끝에 "수식은 동일, 텐서 정렬이 달라져
+> 커널 선택이 바뀜"으로 규명됐다. fixture는 **도달 가능한 가중치만** 담을 것 —
+> 전체를 담으면 691MB가 git에 들어간다.
+>
+> ⚠️ **아키텍처에 대한 사실을 config 키에 두지 말 것.** VRAM 가드가
+> `meta_covariance_only`를 읽고 있었는데 그 키를 지우자 조용히 6층 추정으로 돌아가
+> 가드가 무력화됐다. 이제 모델이 `vram_activation_layers`로 직접 선언한다.
+
+> [!IMPORTANT]
+> **§74 학습 경로 — dense를 쓸 것**
+> `_episode_losses`는 단일 에피소드도 `forward_episode_batch`로 보낸다. 이전에는
+> `self.model(...)`(ragged, bag마다 Python 루프)을 불러 **2.4배 느렸다**.
+> `tests/test_training_uses_dense_path.py`가 이 경로를 고정한다.
+>
+> **속도 개선 시 범인이 아닌 것들** (전부 측정으로 배제):
+> 로깅(이미 epoch 단위, 지표 계산 3%) / CPU 비동기 생성(GPU 3.2 ms vs CPU 2,579 ms,
+> **805배**) / 프리페치 깊이(depth 1 > depth 3).
+
+> [!IMPORTANT]
+> **CV-only 계약 (§68)**: `final = cov_res·CV-1 + cov_rel_res·CV-2`.
+> ⚠️ **죽은 key는 zeros가 아니라 부재다.** `_validate_representation`이
+> `{covariance_sketch, covariance_matrix}`만 허용한다(빠지거나 남으면 ValueError).
+> 새 소비처에서 KeyError가 나면 **그게 정상 동작**이다 — 0으로 채우지 말고 분기를 가드할 것.
+
+> [!IMPORTANT]
+> **CV-2는 더 파지 말 것 (§75·§76·§77)**
+> margin activation(identity −0.017), subspace_rank(±0.001), head 구조(paired_head −0.0003)
+> 셋 다 SEAL 10개 평균을 못 움직였다. v43(T→34.0)과 v44(T→2.84)는 **10개 task 전부 셋째
+> 자리까지 일치** — CV-2의 출력 스케일은 성능과 무관하다.
+> 다만 `paired_head`는 **라벨 대칭성**을 정확히 만든다(`learned_head`는 4.4e-2로 깨져 있다).
+
+> **clipping 금지 (§67 실측)**: `gradient_clip_val: 1.0`은 er_status를 **−0.0317** 떨어뜨린다.
+> `nonfinite_gradient_policy: zero`는 non-finite가 없으면 no-op이라 안전하다.
+
+> **sketch 기하 계약 (§69·§70)**: **`a = 0.85π/K`로 대역폭을 고정해야 K 스윕이 공정하다.**
+> ⚠️ ridge-only 진단은 학습 arm의 이득을 과대평가한다(예측 +0.016 vs 실측 +0.004).
+
+> **평가 기준 (§71, 필수)**: 판정은 **SEAL 10개 task macro 평균**
+> (`seal_univ2_baseline_17tasks.csv`의 `in_seal=yes`). **er_status 단일로 판정하지 말 것.**
+> 평가기에는 모델 내부를 모르는 **generic 경로**가 있다(aggregator 없는 모델용).
+> `ICF_FORCE_GENERIC_EVAL=1`로 알려진 모델을 그 경로에 태워 검증할 수 있다.
+
+> **YAML 함정 (§79)**: `lr: 2e-05`는 **문자열**로 파싱된다(소수점과 부호 있는 지수 필요).
+> 값을 출력하면 숫자처럼 보이므로 **타입을 볼 것**. `tests/test_config_numeric_types.py`가
+> 모든 `train_*.yaml`을 검사한다. `optimizer_overrides`는 지원되지 않는다 —
+> LR 변형은 `configs/optimizer/*.yaml`을 만들어 연결한다.
+
+> **GPU 정책 (2026-08-10, 사용자 지시)**: **GPU 0·1을 우선 사용**하고, 다른 GPU는
+> 사용자 허락을 받은 뒤 쓸 것.
+
 > **죽은 분기 (§68-1 실측)**: Q-5 population attention은 **상수를 뱉는다**(AUROC 0.5000,
 > std 0.0000). v36 Q1과 v37이 겨냥한 것이 바로 이 모듈이라 둘 다 Δ≈0으로 끝났다.
 > 새 아키텍처 arm을 설계하기 전에 **그 분기가 살아 있는지부터**

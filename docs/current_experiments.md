@@ -1,12 +1,11 @@
-# Current experiments — CV-only 이후 (2026-08-09~)
+# Current experiments (2026-08-10)
 
-CV-only 이전(v22~v39, 합성 중심 판정)은
-[`history.md`](history.md).
+CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 **그 문서의 판정 절차는 폐기됐다** — 합성 지표로 arm을 고르는 방식이 반복적으로 실패했다.
 
 ---
 
-## 1. 판정 기준 (2026-08-09 확정, §71-4)
+## 1. 판정 기준 (§71-4 확정)
 
 > [!IMPORTANT]
 > **판정은 SEAL 대상 10개 task의 macro-AUROC 평균으로 한다.**
@@ -14,7 +13,7 @@ CV-only 이전(v22~v39, 합성 중심 판정)은
 > bash scripts/eval_seal_tasks.sh <gpu> <ckpt> <config> <tag> <task>...
 > ```
 > 대상은 `docs/seal_univ2_baseline_17tasks.csv`의 **`in_seal=yes` 10개**뿐이다 — SEAL과
-> **같은 코호트·같은 공식 50-fold**로 비교 가능한 행. 나머지 7개는 SEAL에 대응 수치가 없다.
+> **같은 코호트·같은 공식 50-fold**로 비교 가능한 행. 나머지 7개는 대응 수치가 없다.
 
 **금지 사항 (전부 실측으로 무너진 판정 방식)**
 
@@ -22,59 +21,84 @@ CV-only 이전(v22~v39, 합성 중심 판정)은
 |---|---|
 | **합성 val_ce로 arm 고르기** | v37은 val_ce가 더 좋았으나 50-fold는 −0.0068 (§65) |
 | **합성 val_AUROC로 arm 고르기** | CV-only는 ep0 0.8885 = ep49 0.8882로 평평한데 er_status는 +0.037 (§69-6) |
-| **er_status 단일로 판정** | §70이 K 증설을 "무의미(+0.004)"로 오판, 10개로는 +0.0127에 9/10 (§71) |
-| **단일 측정으로 단정** | 기저 요동이 ±0.05, seed 반복 필수 (§69-3) |
-| **ridge-only 진단치를 기대값으로** | K 64→128 예측 +0.016 vs er_status 실측 +0.004 (§70-2) |
+| **er_status 단일로 판정** | §70이 K 증설을 "무의미"로 오판, 10개로는 +0.0127에 9/10 (§71). v45도 er_status만 보면 −0.002지만 10개로는 동률 |
+| **단일 측정으로 단정** | 기저 요동 ±0.05, seed 반복 필수 (§69-3) |
+| **ridge-only 진단치를 기대값으로** | K 64→128 예측 +0.016 vs 실측 +0.004 (§70-2) |
 | **학습 길이가 다른 arm 비교** | control은 항상 같은 epoch 수로 새로 학습 (§42-43, §65) |
+| **값만 보고 config 검증** | `lr: 2e-05`는 YAML이 **문자열**로 읽는다. 출력하면 숫자처럼 보인다 — 타입을 볼 것 (§79) |
 
 ---
 
 ## 2. 표준 실행
 
-**학습** (CV-only, 50 epoch, 약 60~80분/arm, 1 GPU)
+**학습** (50 epoch. CV-only 약 28분, Encoder+Ridge 약 55분)
 ```bash
 CUDA_DEVICES=<gpu> NPROC_PER_NODE=1 \
 TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun \
 NETRC=/NHNHOME/BASE/kimds/.netrc \
-scripts/launch_interactive_training.sh <RUN_NAME> <CONFIG>
+bash scripts/launch_interactive_training.sh <RUN_NAME> <CONFIG>
 ```
-⚠️ **50 epoch을 유지할 것** — 합성 지표는 평평하지만 er_status는 ep11 0.6702 → ep49 0.6989로
-계속 오른다(§69-6). ⚠️ **`gradient_clip_val`을 켜지 말 것** — er_status −0.0317 (§67).
+⚠️ **50 epoch 유지** — 합성 지표는 평평해도 실제 task는 계속 오른다(§69-6).
+⚠️ **`gradient_clip_val` 켜지 말 것** — er_status −0.0317 (§67).
 
-**평가** (SEAL 10개, 2 GPU 분할 약 20분)
+**평가** (SEAL 10개, 2 GPU 분할 약 5분)
 ```bash
 CK=<ckpt>; CFG=<config>; TAG=<tag>
 bash scripts/eval_seal_tasks.sh 0 "$CK" "$CFG" "$TAG" \
-  cptac_luad/{EGFR,STK11,TP53}_mutation bc_therapy/er_status &
+  bc_therapy/{er_status,grade,her2_status} cptac_brca/{PIK3CA,TP53}_mutation &
 bash scripts/eval_seal_tasks.sh 1 "$CK" "$CFG" "$TAG" \
-  bc_therapy/{grade,her2_status} cptac_brca/{PIK3CA,TP53}_mutation \
-  cptac_ccrcc/{BAP1,VHL}_mutation &
+  cptac_luad/{EGFR,STK11,TP53}_mutation cptac_ccrcc/{BAP1,VHL}_mutation &
 wait
 ```
-⚠️ **각 arm은 자기 훈련 config로 채점**한다. CV-only는 삭제된 분기의 파라미터가 init 상태로
-남아 있어 다른 config로 채점하면 미학습 분기가 주입된다.
+⚠️ **각 arm은 자기 훈련 config로 채점**한다.
+⚠️ **prune(§73) 이전 체크포인트는 현재 트리로 로드 불가**다. 채점하려면
+`8caa96c`에 고정한 worktree(`/NHNHOME/BASE/kimds/ICF_pre_prune`)를 쓴다.
 
-**학습 없는 진단** (수 분, GPU 1장)
+**결과 집계**
 ```bash
-python scripts/diagnose_branch_contributions.py --checkpoint <ckpt> --config <cfg>
-python scripts/diagnose_covariance_sketch.py --stages 123
+grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
+  | awk '{s+=$1;k++} END{printf "%.4f (%d)\n", s/k, k}'
 ```
 
 ---
 
-## 3. 현재까지의 결과표 (SEAL 10개 macro 평균)
+## 3. 결과표 (SEAL 10개 macro 평균)
 
-| arm | 10개 평균 | er_status | 비고 |
+| arm | 계보 | 평균 | 비고 |
 |---|---|---|---|
-| SEAL ABMIL (지도학습) | **0.727** | 0.717 | 비교 상대 |
-| SEAL MeanMIL (지도학습) | 0.713 | 0.712 | |
-| **v41_K128** | **0.6940** | 0.7303 | 현행 최고. K=128, CV-2=128, `a=0.85π/K` |
-| v41_K64 | 0.6814 | 0.7260 | K=64 |
-| v38_control (전 분기, 6개) | 미측정 | 0.6994 | |
-| v40_cv_only (CV-only 최초) | 미측정 | 0.6989 | K=64, `a` 고정, CV-2=32 |
+| SEAL ABMIL (지도학습) | — | **0.727** | 비교 상대 |
+| SEAL MeanMIL (지도학습) | — | 0.713 | |
+| **v41_K128** | A | **0.6940** | **현행 최고**. K=128, CV-2=128, `a=0.85π/K` |
+| v45_paired | A | 0.6937 | paired_head + rank 4. 동률(−0.0003) |
+| v42_rank2 | A | 0.6944 | 동률 |
+| v42_rank4 | A | 0.6932 | 동률 |
+| v41_K64 | A | 0.6814 | K=64 |
+| v43_notanh | A | 0.6770 | identity margin, T=150→34.0 |
+| v44_lowT | A | 0.6763 | identity margin, T=4→2.84 |
+| v52_lr2e5 | B(구판) | 0.6619 | inducing-point, 기술자 256차원 |
+| v51_lr1e4 | B(구판) | 0.6047 | 〃 |
+| v53_enc | B(신판) | 0.6526 | 세포 간 attention + 16,384차원, lr 2e-5 |
+| v54_enc | B(신판) | 0.6219 | 〃 lr 1e-4 |
 
-**ABMIL 상회 3/10** (er_status +0.013, her2 +0.016, brca TP53 +0.018).
-크게 밀리는 곳: ccrcc VHL −0.088(0.4503, 랜덤 이하), luad EGFR/TP53 각 −0.066.
+**task별** (주요 arm)
+
+| task | v41 (A) | v45 (A) | v52 (B구판) | v53 (B신판) | v54 (B신판) |
+|---|---|---|---|---|---|
+| er_status | 0.7303 | 0.7281 | 0.6487 | 0.6515 | 0.6377 |
+| grade | 0.7451 | 0.7389 | 0.7398 | 0.7208 | 0.6579 |
+| her2_status | 0.6792 | 0.6652 | 0.6190 | 0.6366 | 0.5586 |
+| brca PIK3CA | 0.5476 | 0.5603 | 0.5657 | 0.5067 | 0.4845 |
+| brca TP53 | 0.8188 | 0.8104 | 0.7656 | 0.7723 | 0.6374 |
+| ccrcc BAP1 | 0.6312 | 0.6589 | 0.6317 | 0.6280 | 0.6146 |
+| **ccrcc VHL** | 0.4503 | 0.4362 | **0.5104** | 0.4708 | **0.5006** |
+| luad EGFR | 0.7642 | 0.7603 | 0.7408 | 0.7072 | 0.6975 |
+| luad STK11 | 0.8891 | 0.8843 | 0.8039 | 0.8242 | 0.7942 |
+| luad TP53 | 0.6846 | 0.6948 | 0.5939 | 0.6081 | 0.6362 |
+| **평균** | **0.6940** | 0.6937 | 0.6619 | 0.6526 | 0.6219 |
+
+⚠️ **ccrcc VHL 단서**: CV-only는 0.44~0.45로 **랜덤 이하**인데 계보 B만 0.5104다. 10개 중
+유일하게 계보 B가 이긴 task이고, 하필 CV-only가 가장 크게 실패하는 곳이다. 두 계보가 다른
+것을 보고 있다는 유일한 증거. 표본 1개라 단정 불가.
 
 ---
 
@@ -82,27 +106,47 @@ python scripts/diagnose_covariance_sketch.py --stages 123
 
 | 결론 | 근거 |
 |---|---|
-| **6개 분기 중 CV-1·CV-2만 남겨도 동률** | fold-paired −0.0005 [−0.0037,+0.0024] (§68) |
+| **6개 분기 중 CV-1·CV-2만 남겨도 동률** | fold-paired −0.0005 (§68) → §73에서 실제 삭제 |
 | **Q-5 population attention은 상수를 뱉는다** | AUROC 0.5000, std 0.0000 (§68-1) |
-| **CV-1 제거 불가** | 안정화 유무 무관하게 학습 붕괴, 2회 재현 (§66·§67) |
-| **G-2 global ridge는 무기여** | Δ −0.0004, CI가 0 포함 (§66) |
-| **label-free 사영 선택은 전부 천장** | 8개 축 모두 0.68±0.03 (§69-3) |
+| **CV-1 제거 불가** | 안정화 무관하게 학습 붕괴, 2회 재현 (§66·§67) |
+| **G-2 global ridge 무기여** | Δ −0.0004, CI가 0 포함 (§66) |
+| **label-free 사영은 전부 천장** | 8개 축 모두 0.68±0.03 (§69-3) |
 | **차원(K)은 유효, 단 대역폭 고정 시** | 9/10 task, +0.0127 (§71-5) |
-| **v36 Q1 / v37 기각** | Δ −0.0024 / −0.0001 (§65) |
-| **E>1은 느리다** | E=1 60s vs E=4 86s (§68-5) |
+| **CV-2 손잡이는 소진됐다** | margin activation(−0.017), rank(±0.001), head 구조(−0.0003) 셋 다 10개 평균을 못 움직임 (§76·§77) |
+| **CV-2 출력 스케일은 성능과 무관** | v43(T→34.0)과 v44(T→2.84)가 10개 task 전부 셋째 자리까지 일치 (§76) |
+| **학습은 dense 경로로** | ragged 74.2 ms vs dense 31.3 ms (§74) |
+| **CV-1의 dual은 옳다** | dual 0.33 ms vs primal 9.8 ms (§78) |
+| **셀-셀 attention은 감당된다** | 최악 구성 3.13 GiB (§79) |
+| **계보 B의 구조 확장은 SEAL을 못 올린다** | 합성 0.78→0.849인데 SEAL 0.6619→0.6526 (§79-6) |
+| **합성 val_AUROC는 SEAL과 역상관할 수 있다** | v54가 합성 최고(0.8623)인데 SEAL 최저(0.6219) (§79-6) |
 
 ---
 
 ## 5. 미해결 / 다음
 
-1. **`subspace_rank` 2·4** — 진행 중. CV-2가 K와 무관하게 항상 rank개로 압축하므로 K 증설
-   혜택을 못 받는다. ⚠️ rank를 올려도 MLP 입력은 여전히 스칼라 4개(§current_architecture 4).
-2. **learnable 사영** — label-free 축이 전부 천장이므로 남은 유일한 정보원은 라벨.
-   ⚠️ CV-1이 closed-form이라 gradient가 ridge solve를 통과해야 한다. CV-2 쪽부터 붙이는 것이
-   안전하다(§66에서 ridge 제거 시 gradient 발산 전력).
-3. **v40_cv_only / v38_control의 10개 채점** — §70이 "대역폭+CV-2 = +0.0271"이라 한 것이
-   er_status 기준이라 10개 기준의 실제 크기를 모른다.
-4. **K=256** — 차원 유효가 확인됐으므로 재검토 가치. VRAM 22%로 여유.
-5. **seed 반복** — 지금까지 arm당 1 seed다.
-6. **task별 편차의 원인** — 같은 TP53이 brca +0.018 / luad −0.066. 코호트 크기(112 vs 324)나
-   조직 특성이 작용하는 것으로 보이나 미규명.
+1. **계보 B는 현재 형태로 기각** — 재설계(세포 간 attention + 16,384차원)가 합성 지표를
+   0.78 → 0.849로 크게 끌어올렸는데 **SEAL은 오히려 내려갔다**(0.6619 → 0.6526).
+   구조 확장이 아니라 **일반화가 문제**다. 더 키우기 전에 왜 합성만 좋아지는지부터.
+2. **ccrcc VHL 단서** — 계보 B만 랜덤을 넘는다. 두 계보가 상보적인지 확인 가치.
+3. **증류/잔차** — CV-1을 teacher로 계보 B를 학습. ⚠️ **순수 증류로는 teacher를 넘을 수
+   없다**(CV-1은 결정적 특징 맵이라 완벽 모방 = 0.6940). 출발점 이동이나 잔차 학습으로만
+   의미가 있다.
+4. **seed 반복** — 지금까지 arm당 1 seed다.
+5. **병목이 표현이 아닐 가능성** — CV-1 단독 0.9052 vs 전체 0.9199. 그 위에 얹은 모든
+   시도(v36·v37·v42·v43·v44·v45)가 Δ≈0이었다. task 자체의 정보 한계일 수 있다.
+
+---
+
+## 6. 성능 (2026-08-10 기준)
+
+| | CV-only | Encoder+Ridge |
+|---|---|---|
+| step | 31.3 ms | 45.7 ms (중앙값) |
+| epoch | 33 s | 56~69 s |
+| 50 epoch | ~28분 | ~55분 |
+
+step 구성(측정): 에피소드 생성(GPU) 22% / 모델 28% / Lightning 오버헤드 50%.
+⚠️ **CPU 비동기 생성은 역효과** — 생성은 에피소드당 35 GFLOP 연산이라 GPU 3.2 ms vs
+CPU 2,579 ms(805배)이고, 옮기면 매 step H2D 전송이 새로 붙는다(§74).
+⚠️ **프리페치 깊이를 올려도 소용없다** — depth 1이 3.9 s, depth 3이 4.8 s. 생성이 모델보다
+길어 생산자가 포화 상태다(§74).
