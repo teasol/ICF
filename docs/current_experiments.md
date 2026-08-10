@@ -79,6 +79,11 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 | v51_lr1e4 | B(구판) | 0.6047 | 〃 |
 | v53_enc | B(신판) | 0.6526 | 세포 간 attention + 16,384차원, lr 2e-5 |
 | v54_enc | B(신판) | 0.6219 | 〃 lr 1e-4 |
+| v57_resp2pop | B(데이터) | 0.6127 | scalar + 2 populations; v60과 동률 |
+| v58_xor2 | B(데이터) | 0.5530 | 2-factor XOR, 기각 |
+| v59_xor8pop4 | B(데이터) | 0.5616 | 8-factor/4-pop XOR, 기각 |
+| v60_scalar1ctrl | B(데이터) | 0.6090 | per-bag cardinality/padding control |
+| v61_linear | B(데이터) | 0.6157 | orthogonal manifold; v60 +0.0067, v41 −0.0783, 승격 기각 |
 
 **task별** (주요 arm)
 

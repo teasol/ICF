@@ -1,10 +1,10 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-10` (§83 — v61 orthogonal linear manifold ablation 시작)
+**Last updated**: `2026-08-10` (§83 — v61 orthogonal linear manifold SEAL 평가 완료)
 
-**한 줄**: 실제 병리 일반화 실패의 원인을 합성 데이터에서 찾기 위해 response 구조를 factor/population/XOR로 확장했다. 기존 v54를 Arm 1로 재사용하고, v54 아키텍처 기반 Arm 2–5를 GPU 0–3에서 학습 중이다(§82).
+**한 줄**: factor/population/XOR와 orthogonal manifold 데이터 ablation(v57–v61)을 완료했다. 최고 v61도 SEAL 10개 **0.6157**로 v60 대비 +0.0067에 그쳤고 v41 0.6940에는 −0.0783이므로, 데이터 변형만으로 일반화 실패를 해소하지 못했다(§82·§83).
 
-**Status**: **factorized-response 데이터 ablation 학습 진행 중(Arm 2–5, GPU 0–3).**
+**Status**: **factorized-response/linear-manifold ablation 완료 — 모두 v41 미달, 후속 방향 결정 필요.**
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
   현행 최고 **v41_K128 = SEAL 10개 0.6940** (ABMIL 0.727에 −0.033).
@@ -27,7 +27,7 @@
 
 **지금 돌아가는 것 (2026-08-10)**
 
-**v54 기반 Arm 2–5 네 작업이 `logs/20260810_144500/`에서 진행 중**. GPU 0–3에 각 1개, GPU 4–7 미사용. §82 참조.
+**없음.** v57–v60과 v61 학습 및 SEAL 10-task 평가가 모두 완료됐다. §82·§83 참조.
 
 결과 재확인:
 ```bash
@@ -45,7 +45,7 @@ done
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§83 (MLP→linear manifold ablation)**, **§82 (현재 실행 중인 데이터 arm; 최우선)**, **§72 (이번 세션 요약 — 어디로 갈지 §80)**, **§79 (계보 B 재설계 — 첫 판본이 내 설계 오류였다)**, **§73 (소스 prune — prune 이전 ckpt는 고정 worktree로만 채점 가능)**, **§74 (학습이 평가 경로를 타고 있었다 + 범인이 아니었던 것들)**, **§76·§77 (CV-2 손잡이 소진 — 더 파지 말 것)**, **§71 (판정 기준 = SEAL 10개 macro 평균)**, **§69 (label-free 사영 8종 전부 천장 / 합성 지표 불신)**, **§68 (CV-only가 baseline이 된 근거)**, **§67 (clipping 켜지 말 것)**, **§66 (CV-1 제거 불가)**.
+**Read first if you are picking this up**: **§83 (v61 평가 완료·판정; 최우선)**, **§82 (factorized-response arm 완료 결과)**, **§72 (이번 세션 요약 — 어디로 갈지 §80)**, **§79 (계보 B 재설계 — 첫 판본이 내 설계 오류였다)**, **§73 (소스 prune — prune 이전 ckpt는 고정 worktree로만 채점 가능)**, **§74 (학습이 평가 경로를 타고 있었다 + 범인이 아니었던 것들)**, **§76·§77 (CV-2 손잡이 소진 — 더 파지 말 것)**, **§71 (판정 기준 = SEAL 10개 macro 평균)**, **§69 (label-free 사영 8종 전부 천장 / 합성 지표 불신)**, **§68 (CV-only가 baseline이 된 근거)**, **§67 (clipping 켜지 말 것)**, **§66 (CV-1 제거 불가)**.
 
 > [!IMPORTANT]
 > **방법론 경고 3건 — 다음 arm 설계 전에 읽을 것**:
@@ -2908,8 +2908,16 @@ XOR exact label 및 marginal balance, 8-factor/4-pop 전부 도달, nuisance see
 프로젝트 전체 pytest는 BagPFN 환경에 pytest가 없고 system Python에는 Lightning이 없어 이번
 세션에서 재실행하지 못했다. 직전 padding 커밋 기준 compact suite는 111개 통과했다.
 
-**완료 후** 각 arm의 train/val CE 궤적과 best epoch를 먼저 표로 모으되, 채택 판정은 합성
-CE/AUROC가 아니라 기존 계약대로 **SEAL 10-task macro 평균**으로 한다. v60은 현재 padding과
+학습은 모두 50 epoch 정상 완료했고 SEAL 10-task best-checkpoint 평가도 완료했다.
+
+| arm | SEAL 10-task macro | Δ vs v60 | 판정 |
+|---|---:|---:|---|
+| v57 scalar + 2 populations | 0.6127 | +0.0037 | 사실상 동률 |
+| v58 2-factor XOR | 0.5530 | −0.0560 | 기각 |
+| v59 8-factor/4-pop XOR | 0.5616 | −0.0474 | 기각 |
+| v60 current scalar control | 0.6090 | — | control |
+
+결론: population 수 증가는 macro를 움직이지 않았고 XOR는 명확히 악화됐다. factorized response는 현재 형태로 기각한다. 로그는 `logs/official50/*_{v57_resp2pop,v58_xor2,v59_xor8pop4,v60_scalar1ctrl}.log`다.
 
 ## 83. 2026-08-10 — v61: random MLP를 orthogonal linear projection으로 교체
 
@@ -2931,3 +2939,25 @@ population은 1개, bag별 cardinality/padding, v54 모델과 AdamW 1e-4, 50 epo
 - 폐기 run: `logs/20260810_172000/`은 single-GPU Epoch 0 초반에 사용자 요청으로 중단.
 - 판정: v60 best SEAL macro 0.6090과 먼저 비교하고, 최종 기준은 SEAL 10-task macro다.
   합성 val CE가 좋아져도 그것만으로 채택하지 않는다.
+
+### 83-1. 완료 결과와 판정
+
+- 정상 run: `logs/20260810_173000/v61_linear_manifold_v54_ddp4.out`, 50 epoch 완료.
+- best checkpoint: `checkpoints/20260810_173000/v61_linear_manifold_v54_ddp4/epoch=049-val_ce_loss=0.4258.ckpt`.
+- 평가: bf16-mixed, 공식 50-fold, SEAL 10-task. 로그 `logs/official50/*_v61_linear.log`.
+- **SEAL macro 0.6157**: v60 0.6090 대비 **+0.0067**, v41_K128 0.6940 대비 **−0.0783**.
+
+| task | v61 | v60 | Δ |
+|---|---:|---:|---:|
+| bc er_status | 0.5303 | 0.5781 | −0.0478 |
+| bc grade | 0.6210 | 0.6546 | −0.0336 |
+| bc her2_status | 0.5239 | 0.6455 | −0.1216 |
+| brca PIK3CA | 0.5707 | 0.4741 | +0.0966 |
+| brca TP53 | 0.7588 | 0.6579 | +0.1009 |
+| luad EGFR | 0.7038 | 0.6715 | +0.0323 |
+| luad STK11 | 0.8265 | 0.7261 | +0.1004 |
+| luad TP53 | 0.5225 | 0.6743 | −0.1518 |
+| ccrcc BAP1 | 0.5631 | 0.5685 | −0.0054 |
+| ccrcc VHL | 0.5365 | 0.4392 | +0.0973 |
+
+**판정: 전체 노선 승격은 기각.** orthogonal manifold는 v60보다 +0.0067 높지만 단일 seed이고 task별 부호가 크게 갈리며, 현행 최고 v41보다 −0.0783 낮다. 따라서 random nonlinear manifold가 일반화 실패의 주원인이라는 가설은 지지되지 않는다. 다만 VHL·BRCA TP53·LUAD STK11의 약 +0.10 상승은 task별 상보성 단서로 남긴다. 다음 arm을 자동 시작하지 않고 후속 가설을 결정한다.

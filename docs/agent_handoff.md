@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-10` — factorized response/XOR 생성기 계약과 v54 기반 Arm 1–5는 `current_status.md` **§82**. 기존 모델·평가 계약은 §71·§73·§74·§76·§77·§79를 따른다.
+**Last updated**: `2026-08-10` — factorized response/XOR v57–v60과 orthogonal manifold v61 평가 완료. 최고 v61도 SEAL 10개 0.6157로 v41 0.6940에 미달해 승격 기각했다. 상세는 `current_status.md` **§82·§83**. 기존 모델·평가 계약은 §71·§73·§74·§76·§77·§79를 따른다.
 
 > [!IMPORTANT]
 > **모델이 둘이다 (2026-08-10)**
@@ -84,6 +84,7 @@
 > - `separate_nuisance_rng`는 donor mixture/shift, component shift, observation noise의 RNG를 label/factor draw와 분리한다. composition은 호환성을 위해 causal response의 scalar aggregate를 쓴다.
 > - Arm 1은 **기존 v54 결과**다. Arm 2–5는 v54 계보(`set_transformer_ridge` + AdamW 1e-4)다. v41 CV-only로 잘못 시작한 `logs/20260810_143000/`은 폐기다.
 > - 현재 사용자 GPU 허가는 **0–3**까지다. 실행 매핑과 상태는 `current_status.md` §82.
+> - 완료 결과: v57 0.6127 / v58 0.5530 / v59 0.5616 / v60 0.6090 / v61 orthogonal 0.6157. 모두 v41 0.6940 미달이며 승격하지 않는다(§82·§83).
 
 > **죽은 분기 (§68-1 실측)**: Q-5 population attention은 **상수를 뱉는다**(AUROC 0.5000,
 > std 0.0000). v36 Q1과 v37이 겨냥한 것이 바로 이 모듈이라 둘 다 Δ≈0으로 끝났다.
