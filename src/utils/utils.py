@@ -479,6 +479,18 @@ def build_callbacks(config: dict[str, Any]) -> list[Any]:
             )
         )
 
+    periodic_config: dict[str, Any] = callbacks_config.get("periodic_checkpoint", {})
+    if periodic_config.get("enabled", False):
+        callbacks.append(
+            ModelCheckpoint(
+                dirpath=periodic_config.get("dirpath", "checkpoints"),
+                filename=periodic_config.get("filename", "periodic-{epoch:03d}"),
+                every_n_epochs=periodic_config.get("every_n_epochs", 10),
+                save_top_k=-1,
+                save_last=False,
+            )
+        )
+
     lr_monitor_config: dict[str, Any] = callbacks_config.get("lr_monitor", {})
     if lr_monitor_config.get("enabled", True):
         callbacks.append(

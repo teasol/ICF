@@ -6,7 +6,7 @@ import lightning as L
 import torch
 from torch.utils.data import DataLoader, TensorDataset
 
-from src.utils.utils import AlwaysSaveLastModelCheckpoint
+from src.utils.utils import AlwaysSaveLastModelCheckpoint, build_callbacks
 
 
 class _WorseningValidationModule(L.LightningModule):
@@ -63,6 +63,22 @@ class AlwaysSaveLastModelCheckpointTest(unittest.TestCase):
             )
             self.assertEqual(checkpoint["epoch"], 2)
             self.assertEqual(callback.best_model_score.item(), 0.0)
+
+    def test_periodic_checkpoint_is_added_separately(self) -> None:
+        callbacks = build_callbacks({
+            "callbacks": {
+                "checkpoint": {"enabled": True},
+                "periodic_checkpoint": {
+                    "enabled": True, "every_n_epochs": 10,
+                    "filename": "periodic-{epoch:03d}",
+                },
+                "lr_monitor": {"enabled": False},
+            }
+        })
+        self.assertEqual(len(callbacks), 2)
+        self.assertIsInstance(callbacks[0], AlwaysSaveLastModelCheckpoint)
+        self.assertEqual(callbacks[1]._every_n_epochs, 10)
+        self.assertEqual(callbacks[1].save_top_k, -1)
 
 
 if __name__ == "__main__":

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 import contextlib
+import math
 
 import torch
 from torch import nn
@@ -259,6 +260,16 @@ class SetTransformerRidgeModel(nn.Module):
     ) -> torch.Tensor:
         return self.encoder(cells, cell_mask=cell_mask).flatten(start_dim=1)
 
+    def _normalize_descriptors(
+        self, context: torch.Tensor, query: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Context-only centering and scalar RMS normalization."""
+        center = context.mean(dim=0, keepdim=True)
+        context = context - center
+        query = query - center
+        rms = context.square().mean().sqrt().clamp_min(1e-6)
+        return context / rms, query / rms
+
     def _ridge_logits(
         self,
         context: torch.Tensor,
@@ -278,12 +289,7 @@ class SetTransformerRidgeModel(nn.Module):
         """
         context = context.float()
         query = query.float()
-        center = context.mean(dim=0, keepdim=True)
-        context = context - center
-        query = query - center
-        rms = context.square().mean().sqrt().clamp_min(1e-6)
-        context = context / rms
-        query = query / rms
+        context, query = self._normalize_descriptors(context, query)
 
         labels = context_labels.long()
         targets = F.one_hot(labels, num_classes=self.num_classes).float()
@@ -403,3 +409,107 @@ class SetTransformerRidgeModel(nn.Module):
         if not return_auxiliary:
             return logits
         return logits, {"bag_descriptors": descriptors}
+
+class CovarianceSetTransformerRidgeModel(SetTransformerRidgeModel):
+    """Orthogonal-manifold Set Transformer + fixed CV-1 covariance descriptor."""
+
+    architecture_version = 42
+
+    def __init__(
+        self,
+        *args,
+        covariance_sketch_dim: int = 128,
+        covariance_slopes: tuple[float, float] | None = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        if not 1 <= covariance_sketch_dim <= self.input_dim:
+            raise ValueError("covariance_sketch_dim must be in [1, input_dim].")
+        self.summary_descriptor_dim = self.descriptor_dim
+        self.covariance_sketch_dim = int(covariance_sketch_dim)
+        if covariance_slopes is None:
+            slope_a = 0.85 * math.pi / self.covariance_sketch_dim
+            slope_b = 0.733 * slope_a
+        else:
+            slope_a, slope_b = map(float, covariance_slopes)
+        feature_index = torch.arange(
+            1, self.input_dim + 1, dtype=torch.float32
+        )[:, None]
+        covariance_index = torch.arange(
+            1, self.covariance_sketch_dim + 1, dtype=torch.float32
+        )[None, :]
+        directions = torch.sin(slope_a * feature_index * covariance_index) + torch.cos(
+            slope_b * (feature_index + 1) * covariance_index
+        )
+        basis = torch.linalg.qr(directions, mode="reduced").Q
+        triangle = torch.triu_indices(
+            self.covariance_sketch_dim, self.covariance_sketch_dim
+        )
+        self.register_buffer("_covariance_projection", basis, persistent=False)
+        self.register_buffer("_covariance_triangle", triangle, persistent=False)
+        self.covariance_descriptor_dim = (
+            self.covariance_sketch_dim * (self.covariance_sketch_dim + 1) // 2
+        )
+        self.descriptor_dim = (
+            self.summary_descriptor_dim + self.covariance_descriptor_dim
+        )
+
+    def _covariance_descriptors(
+        self, cells: torch.Tensor, cell_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        values = cells.float()
+        if cell_mask is None:
+            centered = values - values.mean(dim=-2, keepdim=True)
+            count = values.shape[-2]
+        else:
+            count_tensor = cell_mask.sum(dim=-1, keepdim=True).clamp_min(1).float()
+            masked = values.masked_fill(~cell_mask.unsqueeze(-1), 0.0)
+            mean = masked.sum(dim=-2, keepdim=True) / count_tensor.unsqueeze(-1)
+            centered = (masked - mean).masked_fill(~cell_mask.unsqueeze(-1), 0.0)
+            count = count_tensor
+        projected = centered @ self._covariance_projection.float()
+        covariance = projected.transpose(-1, -2) @ projected
+        if isinstance(count, int):
+            covariance = covariance / count
+        else:
+            covariance = covariance / count.unsqueeze(-1)
+        row, column = self._covariance_triangle
+        return covariance[..., row, column].to(cells.dtype)
+
+    def _descriptors(
+        self, cells: torch.Tensor, cell_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        summary = super()._descriptors(cells, cell_mask=cell_mask)
+        covariance = self._covariance_descriptors(cells, cell_mask=cell_mask)
+        return torch.cat((summary, covariance), dim=-1)
+
+
+
+    def _normalize_block(
+        self, context: torch.Tensor, query: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        center = context.mean(dim=0, keepdim=True)
+        context = context - center
+        query = query - center
+        rms = context.square().mean().sqrt().clamp_min(1e-6)
+        return context / rms, query / rms
+
+    def _normalize_descriptors(
+        self, context: torch.Tensor, query: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        context_summary, context_covariance = context.split(
+            (self.summary_descriptor_dim, self.covariance_descriptor_dim), dim=-1
+        )
+        query_summary, query_covariance = query.split(
+            (self.summary_descriptor_dim, self.covariance_descriptor_dim), dim=-1
+        )
+        context_summary, query_summary = self._normalize_block(
+            context_summary, query_summary
+        )
+        context_covariance, query_covariance = self._normalize_block(
+            context_covariance, query_covariance
+        )
+        return (
+            torch.cat((context_summary, context_covariance), dim=-1),
+            torch.cat((query_summary, query_covariance), dim=-1),
+        )

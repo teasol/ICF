@@ -44,9 +44,11 @@ def main() -> None:
     if args.run_group is not None:
         config["logger"]["group"] = args.run_group
     if args.checkpoint_dir is not None:
-        config["callbacks"].setdefault("checkpoint", {})["dirpath"] = str(
-            args.checkpoint_dir
-        )
+        for callback_name in ("checkpoint", "periodic_checkpoint"):
+            if callback_name in config["callbacks"]:
+                config["callbacks"].setdefault(callback_name, {})["dirpath"] = str(
+                    args.checkpoint_dir
+                )
     if args.ckpt_path is not None:
         config["ckpt_path"] = str(args.ckpt_path.expanduser().resolve())
     if args.init_checkpoint is not None:

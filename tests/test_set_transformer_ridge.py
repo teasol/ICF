@@ -27,7 +27,10 @@ import torch
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.models.set_transformer_ridge import SetTransformerRidgeModel  # noqa: E402
+from src.models.set_transformer_ridge import (  # noqa: E402
+    CovarianceSetTransformerRidgeModel,
+    SetTransformerRidgeModel,
+)
 
 INPUT_DIM = 24
 
@@ -245,6 +248,53 @@ class SetTransformerRidgeTest(unittest.TestCase):
             "changing one summary token left the others unchanged; they are "
             "not attending to each other",
         )
+
+
+class CovarianceSetTransformerRidgeTest(unittest.TestCase):
+    def _hybrid(self) -> CovarianceSetTransformerRidgeModel:
+        torch.manual_seed(0)
+        return CovarianceSetTransformerRidgeModel(
+            input_dim=INPUT_DIM, token_dim=32, num_heads=4, num_layers=2,
+            feedforward_dim=48, num_summary_tokens=4, max_cells=64,
+            covariance_sketch_dim=8, covariance_slopes=(0.07, 0.05),
+        ).eval()
+
+    def test_descriptor_dimensions_are_balanced_and_concatenated(self) -> None:
+        model = self._hybrid()
+        x, _, _ = _episode()
+        descriptor = model._descriptors(x)
+        self.assertEqual(model.summary_descriptor_dim, 4 * 32)
+        self.assertEqual(model.covariance_descriptor_dim, 8 * 9 // 2)
+        self.assertEqual(descriptor.shape, (x.shape[0], 128 + 36))
+
+    def test_covariance_descriptor_is_exact_cv1_upper_triangle(self) -> None:
+        model = self._hybrid()
+        x, _, _ = _episode(bags=8, cells=12)
+        centered = x.float() - x.float().mean(dim=-2, keepdim=True)
+        projected = centered @ model._covariance_projection.float()
+        covariance = projected.transpose(-1, -2) @ projected / x.shape[-2]
+        row, column = model._covariance_triangle
+        torch.testing.assert_close(
+            model._covariance_descriptors(x).float(), covariance[..., row, column]
+        )
+
+    def test_each_block_is_normalized_independently(self) -> None:
+        model = self._hybrid()
+        context = torch.randn(7, model.descriptor_dim)
+        query = torch.randn(2, model.descriptor_dim)
+        normalized, _ = model._normalize_descriptors(context, query)
+        summary, covariance = normalized.split(
+            (model.summary_descriptor_dim, model.covariance_descriptor_dim), dim=-1
+        )
+        self.assertAlmostEqual(float(summary.square().mean()), 1.0, places=5)
+        self.assertAlmostEqual(float(covariance.square().mean()), 1.0, places=5)
+
+    def test_hybrid_gradient_reaches_encoder(self) -> None:
+        model = self._hybrid().train()
+        x, y, query = _episode()
+        torch.nn.functional.cross_entropy(model(x, y, query), y[query]).backward()
+        self.assertTrue(all(p.grad is not None for p in model.encoder.parameters()))
+        self.assertTrue(all(torch.isfinite(p.grad).all() for p in model.encoder.parameters()))
 
 
 if __name__ == "__main__":
