@@ -68,6 +68,7 @@ class SyntheticManifoldGenerator:
         num_cells_log_uniform: bool = False,
         num_cells_log_uniform_power: float = 1.0,
         per_bag_cardinality: bool = False,
+        per_bag_max_cells: int | None = 4096,
         latent_dim: int = 8,
         output_dim: int = 512,
         mlp_hidden_dim: int = 128,
@@ -130,6 +131,8 @@ class SyntheticManifoldGenerator:
             )
         if not num_cells_log_uniform_power > 0.0:
             raise ValueError("num_cells_log_uniform_power must be positive.")
+        if per_bag_max_cells is not None and per_bag_max_cells < 1:
+            raise ValueError("per_bag_max_cells must be positive or None.")
         if response_dim < 1 or responsive_population_count < 1:
             raise ValueError("response_dim and responsive_population_count must be positive.")
         if label_rule not in {"single", "xor"}:
@@ -289,6 +292,9 @@ class SyntheticManifoldGenerator:
         self.num_cells_log_uniform = bool(num_cells_log_uniform)
         self.num_cells_log_uniform_power = float(num_cells_log_uniform_power)
         self.per_bag_cardinality = bool(per_bag_cardinality)
+        self.per_bag_max_cells = (
+            None if per_bag_max_cells is None else int(per_bag_max_cells)
+        )
         self.latent_dim = latent_dim
         self.output_dim = output_dim
         self.mlp_hidden_dim = mlp_hidden_dim
@@ -340,7 +346,8 @@ class SyntheticManifoldGenerator:
         """Sample one episode and randomly permute its bag order.
 
         With ``per_bag_cardinality`` enabled (B2b), every bag draws its own
-        cell count from the configured ``num_cells`` range. The returned
+        cell count from the configured ``num_cells`` range. Counts above
+        ``per_bag_max_cells`` are capped before any dense episode tensor exists. The returned
         ``SyntheticEpisode.x`` is then a ragged list of per-bag tensors. Dense
         cells are exchangeable within a bag, so a uniform subsample of the
         episode-wide draw is distributed exactly like an independent per-bag
@@ -382,8 +389,14 @@ class SyntheticManifoldGenerator:
                         "Every per-bag cardinality must lie within the "
                         f"configured range {self.num_cells}."
                     )
-            # Dense generation runs at the episode maximum; every bag is then
-            # subsampled to its own count so a single pass supports all sizes.
+            # Cap BEFORE dense generation. Cells are exchangeable, so drawing
+            # min(n_i, cap) fresh cells is distributionally identical to drawing
+            # n_i and uniformly subsampling, without ever allocating [B, raw Nmax].
+            if self.per_bag_max_cells is not None:
+                num_cells_per_bag = [
+                    min(count, self.per_bag_max_cells)
+                    for count in num_cells_per_bag
+                ]
             num_cells = int(max(num_cells_per_bag))
         elif num_cells is None:
             num_cells = self.sample_num_cells(generator, device)

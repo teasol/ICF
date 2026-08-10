@@ -11,12 +11,13 @@ data: default
 data_overrides:
   episode_batch_size: 1
   dataset_kwargs:
-    num_cells: [1, 16384]
-    num_cells_log_uniform_power: 1.5
+    num_cells: [256, 8192]
+    num_cells_log_uniform_power: 2.0
     response_dim: 1
     responsive_population_count: 1
     label_rule: single
     manifold_mode: orthogonal
+    per_bag_max_cells: 4096
 
 model: covariance_set_transformer_ridge
 

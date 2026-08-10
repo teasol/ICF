@@ -4,7 +4,10 @@ import unittest
 
 import torch
 
-from src.datasets.synthetic_data import SyntheticEpisodeDataset
+from src.datasets.synthetic_data import (
+    SyntheticEpisodeDataset,
+    SyntheticManifoldGenerator,
+)
 from src.modules.data_interface import (
     collate_synthetic_evaluation_episode,
     collate_synthetic_training_episode,
@@ -61,6 +64,28 @@ class TestPerBagCardinalityPadding(unittest.TestCase):
             self.assertEqual(
                 torch.count_nonzero(padded[0, bag_index, count:]).item(), 0
             )
+
+    def test_cap_is_applied_before_dense_episode_generation(self) -> None:
+        generator = SyntheticManifoldGenerator(
+            num_bags=2, num_cells=(256, 8192), num_cells_log_uniform=True,
+            num_cells_log_uniform_power=2.0, per_bag_cardinality=True,
+            per_bag_max_cells=4096, latent_dim=2, output_dim=4,
+            mlp_hidden_dim=4,
+        )
+        dense_lengths = []
+        original = generator._map_episode_manifold
+
+        def record_dense_length(z, *args):
+            dense_lengths.append(z.shape[1])
+            return original(z, *args)
+
+        generator._map_episode_manifold = record_dense_length
+        episode = generator.sample_episode(
+            generator=torch.Generator().manual_seed(9),
+            num_bags=2, num_cells_per_bag=[8192, 256],
+        )
+        self.assertEqual(dense_lengths, [4096])
+        self.assertEqual(sorted(bag.shape[0] for bag in episode.x), [256, 4096])
 
     def test_long_bag_is_randomly_truncated_to_4096_before_padding(self) -> None:
         long_bag = torch.arange(5000, dtype=torch.float32).unsqueeze(1)

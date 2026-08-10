@@ -2970,12 +2970,12 @@ CV-1 covariance feature를 concat해 하나의 class-balanced closed-form ridge�
 - summary: 16 tokens × 512 = **8,192차원**.
 - covariance: K=128 상삼각 = **8,256차원**, v41과 동일 slope `(0.02086214, 0.01529195)`.
 - 두 block은 context-only center/RMS로 각각 정규화한 뒤 concat한다. 최종 descriptor **16,448차원**.
-- 데이터: v61과 동일한 orthogonal manifold, scalar/1 population, per-bag cardinality + 4096 cap.
+- 데이터: orthogonal manifold, scalar/1 population. raw bag 크기는 `[256,8192]`, log-uniform power 2.0으로 독립 추첨하고, 4096 초과는 **dense 생성 전에** 직접 4096-cell 표본으로 cap한다.
 - 학습: AdamW 1e-4, bf16-mixed, DDP4(GPU 0–3), **100 epoch**.
 - checkpoint: validation best 3 + `last.ckpt`, 별도로 epoch 10/20/…/100을 `periodic-*`로 영구 보존.
 - config: `configs/train_v62_linear_hybrid_cv1_1536.yaml`. 구현 commit `1cc700b`.
-- 검증: compact suite **116 tests 통과**. full-dim BF16 GPU forward/backward finite, peak smoke descriptor 8,192+8,256.
-- 실행: PID 2559257, `logs/20260810_192929/v62_linear16_cv1_k128.out`, checkpoint root `checkpoints/20260810_192929/v62_linear16_cv1_k128/`.
-- 시작 확인: epoch 0 10%, 약 4.5 step/s, first-step peak **31.70 GiB/GPU**, VRAM guard OK.
+- 검증: compact suite **117 tests 통과**. 10,000-draw Monte Carlo raw 263–8190, median 2979.5, >4096 36.01%; 한 60-bag episode retained 42개 고유 크기, 19개 cap. full-dim BF16 GPU forward/backward finite, peak smoke descriptor 8,192+8,256.
+- 실패 run: `logs/20260810_192929/v62_linear16_cv1_k128.out`. epoch 9 시작에 cap 이전 `[B, raw Nmax, 1536]` dense 생성으로 rank 2 OOM, DDP hang 후 사용자 요청으로 전부 종료. GPU 메모리 0 MiB 확인. 복구 가능 `last.ckpt`는 epoch 8이지만 데이터 규칙이 바뀌었으므로 재사용하지 않는다.
+- 수정: `per_bag_max_cells=4096`를 generator에 추가해 cap 후 최대치만 dense 생성한다. collate의 4096 cap은 방어선으로 유지한다. 재실행은 아직 시작하지 않았다.
 
 완료 후 우선 periodic checkpoint의 SEAL 10-task macro 궤적으로 학습 진행이 실제 평가 성능을 높이는지 판정한다.
