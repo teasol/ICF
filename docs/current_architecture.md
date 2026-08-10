@@ -185,8 +185,10 @@ attention은 에피소드당 2.7e10 쌍이라 불가"였는데, **쌍의 개수�
 
 - `configs/data/default.yaml`은 `per_bag_cardinality: true`: 한 episode 안에서도 각 bag이
   `[1,8192]`(arm override 시 `[1,16384]`)에서 독립적으로 cell 수를 뽑는다.
-- collator는 ragged bags를 batch 최대 길이까지 zero-padding하고 `cell_mask`와 `bag_mask`를
-  반환한다. batch 크기 1도 반드시 이 dense masked 경로를 탄다.
+- training collator는 4,096개를 초과한 bag을 매번 `randperm`으로 4,096개까지 subsample한 뒤
+  batch 최대 길이(상한 4,096)까지 zero-padding하고 `cell_mask`/`bag_mask`를 반환한다.
+  batch 크기 1도 반드시 이 dense masked 경로를 탄다. validation/test는 결정성을 위해 생성된
+  cell 순서의 앞 4,096개를 사용하고 ragged 평가 경로를 유지한다.
 - 모델은 padding 값을 데이터로 해석하면 안 된다. 모든 mean/covariance/attention은
   `cell_mask`로 제외하고, padded bag은 `bag_mask`로 context/query에서 제외한다.
 - 변경 전과 학습 데이터 분포가 다르므로 재학습 결과를 기존 arm의 연장으로 비교하지 않는다.

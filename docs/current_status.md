@@ -2860,9 +2860,9 @@ log-uniform power 1.5에서 **bag마다 독립적으로** cell 수를 뽑는다.
 CV-only와 Encoder+Ridge의 `forward_episode_batch`는 mask된 cell을 통계·attention에서 제외한다.
 
 **검증**: 신규 `tests/test_per_bag_cardinality_padding.py`와 golden/mask/dense-path를 포함한
-compact suite — **109 tests 통과**.
+compact suite — **111 tests 통과**.
 
-**비용 경고(1,000 episode cardinality Monte Carlo)**: bag 60~100개, 상한 16,384에서는
-episode max 중앙값 **15,568**, zero-padding 유효률 평균 **15.85%**로 약 **6.3배 padding
-overhead**다. 정확성 변경은 완료했지만 다음 학습 전에 length-bucket encoder를 구현·측정하거나,
-이 비용을 받아들이고 GPU 0·1 smoke benchmark로 step time/VRAM을 확인해야 한다.
+**4,096 random cap**: training collator가 긴 bag을 매 step `randperm`으로 4,096개까지 잘라
+data augmentation으로 쓰고, padding 상한도 4,096으로 고정한다. validation/test는 결정성을 위해
+앞 4,096개를 쓴다. 1,000-episode Monte Carlo에서 padding 유효률 **15.85→34.10%**,
+원 cell 유지율 **58.65%**, truncation 대상 bag **20.67%**다. GPU step/VRAM smoke는 미실행.

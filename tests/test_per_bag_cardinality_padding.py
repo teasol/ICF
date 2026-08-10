@@ -5,7 +5,10 @@ import unittest
 import torch
 
 from src.datasets.synthetic_data import SyntheticEpisodeDataset
-from src.modules.data_interface import collate_synthetic_training_episode
+from src.modules.data_interface import (
+    collate_synthetic_evaluation_episode,
+    collate_synthetic_training_episode,
+)
 
 
 def _dataset() -> SyntheticEpisodeDataset:
@@ -59,6 +62,39 @@ class TestPerBagCardinalityPadding(unittest.TestCase):
                 torch.count_nonzero(padded[0, bag_index, count:]).item(), 0
             )
 
+    def test_long_bag_is_randomly_truncated_to_4096_before_padding(self) -> None:
+        long_bag = torch.arange(5000, dtype=torch.float32).unsqueeze(1)
+        sample = ([long_bag, long_bag + 10_000], torch.tensor([0, 1]))
+
+        torch.manual_seed(123)
+        first = collate_synthetic_training_episode([sample])
+        torch.manual_seed(123)
+        second = collate_synthetic_training_episode([sample])
+
+        padded, _, cell_mask, _ = first
+        self.assertEqual(padded.shape, (1, 2, 4096, 1))
+        self.assertTrue(cell_mask.all())
+        torch.testing.assert_close(padded, second[0])
+        self.assertEqual(torch.unique(padded[0, 0]).numel(), 4096)
+        self.assertFalse(
+            torch.equal(padded[0, 0, :, 0], torch.arange(4096).float())
+        )
+
+    def test_evaluation_cap_is_deterministic_and_remains_ragged(self) -> None:
+        long_bag = torch.arange(5000, dtype=torch.float32).unsqueeze(1)
+        sample = (
+            [long_bag + offset for offset in (0, 10_000, 20_000, 30_000)],
+            torch.tensor([0, 1, 0, 1]),
+        )
+
+        first = collate_synthetic_evaluation_episode([sample])
+        second = collate_synthetic_evaluation_episode([sample])
+
+        self.assertIsInstance(first[0], list)
+        self.assertTrue(all(bag.shape[0] == 4096 for bag in first[0]))
+        for first_bag, second_bag in zip(first[0], second[0]):
+            torch.testing.assert_close(first_bag, second_bag)
+        torch.testing.assert_close(first[2], second[2])
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,6 +10,9 @@ from torch.utils.data._utils.collate import default_collate
 from lightning import LightningDataModule
 
 
+SYNTHETIC_PADDING_MAX_CELLS = 4096
+
+
 class EvaluationEpisodeCollator:
     """Prepend the full training set and mark evaluation positions for masking."""
 
@@ -54,6 +57,9 @@ def _collate_ragged_batch(samples: list[Any]):
     [episodes, bags, instances], [episodes, bags]. ``cell_mask`` marks real
     cells, ``bag_mask`` marks real bags, and padded bags get label -1 so they
     are never sampled as queries or treated as context.
+
+    Bags above 4,096 cells are uniformly subsampled without replacement before
+    padding. A fresh randperm on every collation makes this a training-time view.
     """
     first_bag = samples[0][0][0]
     device = first_bag.device
@@ -61,8 +67,9 @@ def _collate_ragged_batch(samples: list[Any]):
     label_dtype = samples[0][1].dtype
     episodes = len(samples)
     num_bags = max(len(sample[0]) for sample in samples)
-    num_instances = max(
-        bag.shape[0] for sample in samples for bag in sample[0]
+    num_instances = min(
+        SYNTHETIC_PADDING_MAX_CELLS,
+        max(bag.shape[0] for sample in samples for bag in sample[0]),
     )
     dim = first_bag.shape[-1]
     x = torch.zeros(
@@ -85,6 +92,11 @@ def _collate_ragged_batch(samples: list[Any]):
         for bag_index, bag in enumerate(bags):
             if bag.ndim != 2 or bag.shape[-1] != dim:
                 raise ValueError("Ragged bag must be [instances, dim].")
+            if bag.shape[0] > SYNTHETIC_PADDING_MAX_CELLS:
+                index = torch.randperm(bag.shape[0], device=bag.device)[
+                    :SYNTHETIC_PADDING_MAX_CELLS
+                ]
+                bag = bag.index_select(0, index)
             count = bag.shape[0]
             cell_mask[episode_index, bag_index, :count] = True
             x[episode_index, bag_index, :count] = bag
@@ -199,7 +211,20 @@ def collate_synthetic_evaluation_episode(samples: list[Any]):
     Twenty percent of bags (at most 20) are queried together, while one bag
     from every observed class is protected as labelled context.
     """
-    episode = collate_synthetic_training_episode(samples)
+    if len(samples) != 1:
+        raise ValueError("Synthetic evaluation expects exactly one episode.")
+    if not isinstance(samples[0][0], torch.Tensor):
+        # Keep validation/test deterministic and on the model's ragged eval
+        # path. Generated cell order is already random, so the leading cap is
+        # an unbiased fixed subsample without adding collator RNG noise.
+        bags, labels, *extras = samples[0]
+        episode = (
+            [bag[:SYNTHETIC_PADDING_MAX_CELLS] for bag in bags],
+            labels,
+            *extras,
+        )
+    else:
+        episode = collate_synthetic_training_episode(samples)
     x, y = episode[:2]
     num_bags = len(x) if not isinstance(x, torch.Tensor) else x.shape[0]
     observed_classes = torch.unique(y, sorted=True)

@@ -136,7 +136,8 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
    시도(v36·v37·v42·v43·v44·v45)가 Δ≈0이었다. task 자체의 정보 한계일 수 있다.
 6. **새 합성 cardinality arm** — 기본 데이터가 bag별 독립 cell 수 + zero-padding/mask로
    바뀌었다(§81). 이전 arm과 데이터 분포가 다르므로 새 학습은 반드시 새 arm으로 취급한다.
-   현 padding 유효률은 15.85%라 학습 전 length-bucket 또는 GPU step/VRAM smoke가 필요하다.
+   4,096 random cap 적용 후 padding 유효률은 34.10%, 원 cell 유지율은 58.65%다. 긴 bag은
+   step마다 다른 부분집합을 보므로 cardinality 교정과 cell-level augmentation을 함께 얻는다.
 
 ---
 
