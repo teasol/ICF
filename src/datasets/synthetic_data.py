@@ -47,6 +47,9 @@ class SyntheticEpisode:
     # Diagnostic-only instance membership. SyntheticEpisodeDataset never
     # exposes this field in training or evaluation batches.
     responsive_instance_mask: torch.Tensor | None = None
+    causal_factor_indices: torch.Tensor | None = None
+    responsive_population_factors: torch.Tensor | None = None
+    nuisance_seed: int | None = None
 
 
 class SyntheticManifoldGenerator:
@@ -86,6 +89,11 @@ class SyntheticManifoldGenerator:
         response_state_effect_scale: float | tuple[float, float] = (0.1, 0.5),
         response_task_probabilities: tuple[float, ...] = (0.0, 0.0, 0.0, 0.0, 1.0),
         response_covariance_effect_scale: float | tuple[float, float] = (0.0, 0.0),
+        response_dim: int = 1,
+        responsive_population_count: int = 1,
+        label_rule: str = "single",
+        random_causal_factors: bool = False,
+        separate_nuisance_rng: bool = False,
         rare_response_probability: float = 0.0,
         rare_response_fraction: float | tuple[float, float] = (0.01, 0.08),
         observation_noise: float = 0.01,
@@ -122,6 +130,14 @@ class SyntheticManifoldGenerator:
             )
         if not num_cells_log_uniform_power > 0.0:
             raise ValueError("num_cells_log_uniform_power must be positive.")
+        if response_dim < 1 or responsive_population_count < 1:
+            raise ValueError("response_dim and responsive_population_count must be positive.")
+        if label_rule not in {"single", "xor"}:
+            raise ValueError("label_rule must be 'single' or 'xor'.")
+        if label_rule == "xor" and response_dim < 2:
+            raise ValueError("xor requires response_dim >= 2.")
+        if random_causal_factors and response_dim < 2:
+            raise ValueError("random causal factors require response_dim >= 2.")
         if latent_dim < 1 or output_dim < 1 or mlp_hidden_dim < 1:
             raise ValueError("All feature dimensions must be positive.")
         if mlp_num_layers < 1:
@@ -298,6 +314,11 @@ class SyntheticManifoldGenerator:
         )
         self.response_covariance_effect_scale = response_covariance_effect_scale
         self.rare_response_probability = rare_response_probability
+        self.response_dim = int(response_dim)
+        self.responsive_population_count = int(responsive_population_count)
+        self.label_rule = label_rule
+        self.random_causal_factors = bool(random_causal_factors)
+        self.separate_nuisance_rng = bool(separate_nuisance_rng)
         self.rare_response_fraction = rare_response_fraction
         self.observation_noise = observation_noise
         self.normalize_output = bool(normalize_output)
@@ -330,6 +351,14 @@ class SyntheticManifoldGenerator:
         if effect_scale_multiplier < 0:
             raise ValueError("effect_scale_multiplier must be non-negative.")
         device = torch.device(device)
+        nuisance_generator = generator
+        nuisance_seed = None
+        if self.separate_nuisance_rng:
+            nuisance_seed = int(
+                torch.randint(0, 2**31 - 1, (), device=device, generator=generator).item()
+            )
+            nuisance_generator = torch.Generator(device=device).manual_seed(nuisance_seed)
+
         if num_bags is None:
             num_bags = self.sample_num_bags(generator, device)
         elif not self.num_bags[0] <= num_bags <= self.num_bags[1]:
@@ -371,8 +400,42 @@ class SyntheticManifoldGenerator:
                 torch.randperm(num_cells, device=device, generator=generator)[:n_i]
                 for n_i in num_cells_per_bag
             ]
-        y = self._sample_labels(num_bags, generator, device)
-        response_score = self._sample_response_score(y, generator, device)
+        if self.label_rule == "xor":
+            factor_bits = torch.randint(
+                0, 2, (num_bags, self.response_dim), device=device,
+                generator=generator, dtype=torch.long,
+            )
+            if self.random_causal_factors:
+                causal_factors = torch.randperm(
+                    self.response_dim, device=device, generator=generator
+                )[:2]
+            else:
+                causal_factors = torch.tensor([0, 1], device=device)
+            y = torch.logical_xor(
+                factor_bits[:, causal_factors[0]].bool(),
+                factor_bits[:, causal_factors[1]].bool(),
+            ).long()
+            magnitude = self.response_score_min_margin + self.response_score_scale * torch.abs(
+                torch.randn(num_bags, self.response_dim, device=device, generator=generator)
+            )
+            response_vector = factor_bits.float().mul(2).sub(1) * magnitude
+            response_score = response_vector[:, causal_factors].mean(dim=1)
+            remaining = [
+                index for index in range(self.response_dim)
+                if index not in causal_factors.tolist()
+            ]
+            population_factor_indices = causal_factors.tolist() + remaining
+        else:
+            y = self._sample_labels(num_bags, generator, device)
+            response_score = self._sample_response_score(y, generator, device)
+            response_vector = response_score.unsqueeze(1)
+            causal_factors = torch.tensor([0], device=device)
+            population_factor_indices = [0]
+        population_factor_indices = [
+            population_factor_indices[population::self.responsive_population_count]
+            or [population_factor_indices[population % len(population_factor_indices)]]
+            for population in range(self.responsive_population_count)
+        ]
         use_shared_component = bool(
             torch.rand((), device=device, generator=generator).item()
             < self.shared_component_probability
@@ -450,7 +513,7 @@ class SyntheticManifoldGenerator:
                     num_bags,
                     1,
                     device=device,
-                    generator=generator,
+                    generator=nuisance_generator,
                 )
                 base_logit = base_logit + self.donor_mixture_logit_scale * mixture_noise
             else:
@@ -470,7 +533,7 @@ class SyntheticManifoldGenerator:
                 num_bags,
                 num_cells,
                 device=device,
-                generator=generator,
+                generator=nuisance_generator,
             ) < shared_fraction
             # One episode defines a shared cohort composition, while each donor
             # has its own immune-population mixture around that background.
@@ -481,7 +544,7 @@ class SyntheticManifoldGenerator:
                     * torch.randn(
                         num_shared,
                         device=device,
-                        generator=generator,
+                        generator=nuisance_generator,
                     )
                 )
             shared_logits = shared_logits.unsqueeze(0).expand(num_bags, -1)
@@ -492,7 +555,7 @@ class SyntheticManifoldGenerator:
                         num_bags,
                         num_shared,
                         device=device,
-                        generator=generator,
+                        generator=nuisance_generator,
                     )
                 )
             shared_probabilities = torch.softmax(shared_logits, dim=-1)
@@ -500,7 +563,7 @@ class SyntheticManifoldGenerator:
                 shared_probabilities,
                 num_samples=num_cells,
                 replacement=True,
-                generator=generator,
+                generator=nuisance_generator,
             )
             if use_continuous_response:
                 specific_index = torch.full(
@@ -567,7 +630,20 @@ class SyntheticManifoldGenerator:
             effect_mask = (component_index == effect_component_index).unsqueeze(-1)
             effect_cell_fraction = effect_mask.squeeze(-1).float().mean(dim=1)
 
-        if response_task in ("covariance", "interaction", "combined"):
+        factorized_response = (
+            self.label_rule == "xor" or self.responsive_population_count > 1
+        )
+        population_masks = [effect_mask]
+        if factorized_response and effect_mask is not None:
+            assignment = torch.randint(
+                self.responsive_population_count,
+                (num_bags, num_cells), device=device, generator=generator,
+            )
+            population_masks = [
+                effect_mask & (assignment == population).unsqueeze(-1)
+                for population in range(self.responsive_population_count)
+            ]
+        if response_task in ("covariance", "interaction", "combined") and not factorized_response:
             covariance_effect_scale = self._sample_uniform(
                 self.response_covariance_effect_scale, generator, device
             )
@@ -596,8 +672,36 @@ class SyntheticManifoldGenerator:
                 * torch.expm1(response_log_scale)
                 * covariance_direction.view(1, 1, -1)
             )
+        if response_task in ("covariance", "interaction", "combined") and factorized_response:
+            dispersion_factors = []
+            for population, population_mask in enumerate(population_masks):
+                covariance_effect_scale = self._sample_uniform(
+                    self.response_covariance_effect_scale, generator, device
+                ) * effect_scale_multiplier
+                covariance_direction = torch.randn(
+                    self.latent_dim, device=device, generator=generator
+                )
+                covariance_direction = covariance_direction / covariance_direction.norm().clamp_min(1e-8)
+                factors = population_factor_indices[population]
+                response_center = class_mean[effect_component_index].view(1, 1, self.latent_dim)
+                centered_response = z - response_center
+                projected_response = (
+                    centered_response * covariance_direction.view(1, 1, -1)
+                ).sum(dim=-1, keepdim=True)
+                response_log_scale = (
+                    response_vector[:, factors].mean(dim=1).view(num_bags, 1, 1) * covariance_effect_scale
+                ).clamp(-1.5, 1.5)
+                dispersion_factors.append(response_log_scale.exp().flatten())
+                z = z + (
+                    population_mask
+                    * projected_response
+                    * torch.expm1(response_log_scale)
+                    * covariance_direction.view(1, 1, -1)
+                )
+            response_dispersion_factor = torch.stack(dispersion_factors, dim=1)
 
-        if response_task in ("state", "interaction", "combined", "any_positive_sparse"):
+
+        if response_task in ("state", "interaction", "combined", "any_positive_sparse") and not factorized_response:
             effect_scale = self._sample_uniform(
                 self.response_state_effect_scale, generator, device
             )
@@ -612,6 +716,24 @@ class SyntheticManifoldGenerator:
                 * effect_direction.view(1, 1, self.latent_dim)
             )
             z = z + effect_mask * response_shift
+        if response_task in ("state", "interaction", "combined") and factorized_response:
+            for population, population_mask in enumerate(population_masks):
+                effect_scale = self._sample_uniform(
+                    self.response_state_effect_scale, generator, device
+                )
+                effect_direction = torch.randn(
+                    self.latent_dim, device=device, generator=generator
+                )
+                effect_direction = effect_direction / effect_direction.norm().clamp_min(1e-8)
+                factors = population_factor_indices[population]
+                response_shift = (
+                    response_vector[:, factors].mean(dim=1).view(num_bags, 1, 1)
+                    * effect_scale
+                    * effect_scale_multiplier
+                    * effect_direction.view(1, 1, self.latent_dim)
+                )
+                z = z + population_mask * response_shift
+
 
 
         # Same-label donors share episode-level prototypes, but each donor has
@@ -622,7 +744,7 @@ class SyntheticManifoldGenerator:
                 1,
                 self.latent_dim,
                 device=device,
-                generator=generator,
+                generator=nuisance_generator,
             )
             z = z + self.donor_shift_scale * donor_shift
         if self.donor_component_shift_scale > 0:
@@ -631,7 +753,7 @@ class SyntheticManifoldGenerator:
                 num_distributions,
                 self.latent_dim,
                 device=device,
-                generator=generator,
+                generator=nuisance_generator,
             )
             bag_index = torch.arange(num_bags, device=device).unsqueeze(1)
             z = z + self.donor_component_shift_scale * component_shift[
@@ -641,7 +763,7 @@ class SyntheticManifoldGenerator:
         x = self._map_episode_manifold(z, generator, device)
         if self.observation_noise > 0:
             noise = torch.randn(
-                x.shape, dtype=x.dtype, device=device, generator=generator
+                x.shape, dtype=x.dtype, device=device, generator=nuisance_generator
             )
             x = x + self.observation_noise * noise
         if self.normalize_output:
@@ -723,7 +845,7 @@ class SyntheticManifoldGenerator:
         return SyntheticEpisode(
             x=bag_x,
             y=y[permutation],
-            response_score=response_score[permutation],
+            response_score=(response_vector if factorized_response else response_score)[permutation],
             response_task=response_task,
             response_fraction=(
                 response_fraction[permutation].squeeze(1)
@@ -754,6 +876,11 @@ class SyntheticManifoldGenerator:
                 else None
             ),
             responsive_instance_mask=bag_responsive_mask,
+            causal_factor_indices=causal_factors.detach(),
+            responsive_population_factors=torch.tensor(
+                population_factor_indices, device=device, dtype=torch.long
+            ),
+            nuisance_seed=nuisance_seed,
         )
 
     def sample_num_cells(

@@ -2866,3 +2866,26 @@ compact suite — **111 tests 통과**.
 data augmentation으로 쓰고, padding 상한도 4,096으로 고정한다. validation/test는 결정성을 위해
 앞 4,096개를 쓴다. 1,000-episode Monte Carlo에서 padding 유효률 **15.85→34.10%**,
 원 cell 유지율 **58.65%**, truncation 대상 bag **20.67%**다. GPU step/VRAM smoke는 미실행.
+
+## 82. 2026-08-10 — factorized response/XOR 데이터 arm
+
+사용자 확정 비교표:
+
+| arm | 데이터 | 실행 |
+|---|---|---|
+| 1 | scalar + 1 population | 기존 v56 결과 재사용(로컬 산출물 경로는 아직 미확인) |
+| 2 | scalar + 2 populations | v57, GPU 0 |
+| 3 | 2 factors + XOR | v58, GPU 1 |
+| 4 | 전체 요소: 8 factors + 4 populations + random causal pair XOR | v59, GPU 2 |
+
+`SyntheticManifoldGenerator`에 `response_dim`, `responsive_population_count`,
+`label_rule`, `random_causal_factors`, `separate_nuisance_rng`를 추가했다. XOR은 episode마다
+두 causal factor를 고르고 두 bit가 다를 때만 label 1이다. 각 factor 단독 marginal은 label과
+독립이다. v59의 8 factor는 네 population에 2개씩 배치되어 전부 state/covariance 신호에
+도달한다. composition은 기존 scalar aggregate를 유지한다. donor mixture/shift, component shift,
+observation noise는 별도 RNG stream을 사용해 label/factor 난수 소비와 분리했다.
+
+bag cardinality는 §81 계약을 그대로 사용한다: bag별 독립 draw, training collate 최대 4096,
+초과 bag은 매 collate `randperm` subsample, zero padding + mask. 희소 신호는 이번 arm에서 제외한다.
+Arm 2–4 config는 `train_v57_scalar_2pop_1536.yaml`,
+`train_v58_xor_2factor_2pop_1536.yaml`, `train_v59_xor_8factor_4pop_1536.yaml`.
