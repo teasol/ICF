@@ -1,10 +1,10 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-10` (§83 — v61 orthogonal linear manifold SEAL 평가 완료)
+**Last updated**: `2026-08-10` (§84 — v62 Linear-16 + CV-1 K128 hybrid 학습 시작)
 
-**한 줄**: factor/population/XOR와 orthogonal manifold 데이터 ablation(v57–v61)을 완료했다. 최고 v61도 SEAL 10개 **0.6157**로 v60 대비 +0.0067에 그쳤고 v41 0.6940에는 −0.0783이므로, 데이터 변형만으로 일반화 실패를 해소하지 못했다(§82·§83).
+**한 줄**: orthogonal linear manifold를 유지하고 16×512 learned summary와 K128 CV-1 covariance를 concat한 단일-ridge hybrid v62를 GPU 0–3에서 100 epoch 학습 중이다(§84).
 
-**Status**: **factorized-response/linear-manifold ablation 완료 — 모두 v41 미달, 후속 방향 결정 필요.**
+**Status**: **v62 Linear-16 + CV-1 K128 hybrid DDP4 학습 진행 중.**
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
   현행 최고 **v41_K128 = SEAL 10개 0.6940** (ABMIL 0.727에 −0.033).
@@ -27,7 +27,7 @@
 
 **지금 돌아가는 것 (2026-08-10)**
 
-**없음.** v57–v60과 v61 학습 및 SEAL 10-task 평가가 모두 완료됐다. §82·§83 참조.
+**v62 hybrid**가 `logs/20260810_192929/`에서 GPU 0–3 DDP4로 실행 중이다. §84 참조.
 
 결과 재확인:
 ```bash
@@ -45,7 +45,7 @@ done
 > 2. **ICI는 손대지 않습니다.** (잠금 유지)
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§83 (v61 평가 완료·판정; 최우선)**, **§82 (factorized-response arm 완료 결과)**, **§72 (이번 세션 요약 — 어디로 갈지 §80)**, **§79 (계보 B 재설계 — 첫 판본이 내 설계 오류였다)**, **§73 (소스 prune — prune 이전 ckpt는 고정 worktree로만 채점 가능)**, **§74 (학습이 평가 경로를 타고 있었다 + 범인이 아니었던 것들)**, **§76·§77 (CV-2 손잡이 소진 — 더 파지 말 것)**, **§71 (판정 기준 = SEAL 10개 macro 평균)**, **§69 (label-free 사영 8종 전부 천장 / 합성 지표 불신)**, **§68 (CV-only가 baseline이 된 근거)**, **§67 (clipping 켜지 말 것)**, **§66 (CV-1 제거 불가)**.
+**Read first if you are picking this up**: **§84 (v62 실행 상태; 최우선)**, **§83 (v61 평가 완료·판정)**, **§82 (factorized-response arm 완료 결과)**, **§72 (이번 세션 요약 — 어디로 갈지 §80)**, **§79 (계보 B 재설계 — 첫 판본이 내 설계 오류였다)**, **§73 (소스 prune — prune 이전 ckpt는 고정 worktree로만 채점 가능)**, **§74 (학습이 평가 경로를 타고 있었다 + 범인이 아니었던 것들)**, **§76·§77 (CV-2 손잡이 소진 — 더 파지 말 것)**, **§71 (판정 기준 = SEAL 10개 macro 평균)**, **§69 (label-free 사영 8종 전부 천장 / 합성 지표 불신)**, **§68 (CV-only가 baseline이 된 근거)**, **§67 (clipping 켜지 말 것)**, **§66 (CV-1 제거 불가)**.
 
 > [!IMPORTANT]
 > **방법론 경고 3건 — 다음 arm 설계 전에 읽을 것**:
@@ -2961,3 +2961,21 @@ population은 1개, bag별 cardinality/padding, v54 모델과 AdamW 1e-4, 50 epo
 | ccrcc VHL | 0.5365 | 0.4392 | +0.0973 |
 
 **판정: 전체 노선 승격은 기각.** orthogonal manifold는 v60보다 +0.0067 높지만 단일 seed이고 task별 부호가 크게 갈리며, 현행 최고 v41보다 −0.0783 낮다. 따라서 random nonlinear manifold가 일반화 실패의 주원인이라는 가설은 지지되지 않는다. 다만 VHL·BRCA TP53·LUAD STK11의 약 +0.10 상승은 task별 상보성 단서로 남긴다. 다음 arm을 자동 시작하지 않고 후속 가설을 결정한다.
+
+## 84. 2026-08-10 — v62 Linear-16 + CV-1 K128 hybrid
+
+사용자 결정: v61에서 확인한 orthogonal linear manifold는 유지하고, Set Transformer summary와
+CV-1 covariance feature를 concat해 하나의 class-balanced closed-form ridge로 읽는다. CV-2는 보류한다.
+
+- summary: 16 tokens × 512 = **8,192차원**.
+- covariance: K=128 상삼각 = **8,256차원**, v41과 동일 slope `(0.02086214, 0.01529195)`.
+- 두 block은 context-only center/RMS로 각각 정규화한 뒤 concat한다. 최종 descriptor **16,448차원**.
+- 데이터: v61과 동일한 orthogonal manifold, scalar/1 population, per-bag cardinality + 4096 cap.
+- 학습: AdamW 1e-4, bf16-mixed, DDP4(GPU 0–3), **100 epoch**.
+- checkpoint: validation best 3 + `last.ckpt`, 별도로 epoch 10/20/…/100을 `periodic-*`로 영구 보존.
+- config: `configs/train_v62_linear_hybrid_cv1_1536.yaml`. 구현 commit `1cc700b`.
+- 검증: compact suite **116 tests 통과**. full-dim BF16 GPU forward/backward finite, peak smoke descriptor 8,192+8,256.
+- 실행: PID 2559257, `logs/20260810_192929/v62_linear16_cv1_k128.out`, checkpoint root `checkpoints/20260810_192929/v62_linear16_cv1_k128/`.
+- 시작 확인: epoch 0 10%, 약 4.5 step/s, first-step peak **31.70 GiB/GPU**, VRAM guard OK.
+
+완료 후 우선 periodic checkpoint의 SEAL 10-task macro 궤적으로 학습 진행이 실제 평가 성능을 높이는지 판정한다.

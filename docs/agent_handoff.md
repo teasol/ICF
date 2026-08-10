@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-10` — factorized response/XOR v57–v60과 orthogonal manifold v61 평가 완료. 최고 v61도 SEAL 10개 0.6157로 v41 0.6940에 미달해 승격 기각했다. 상세는 `current_status.md` **§82·§83**. 기존 모델·평가 계약은 §71·§73·§74·§76·§77·§79를 따른다.
+**Last updated**: `2026-08-10` — v62 Linear-16 + CV-1 K128 hybrid를 GPU 0–3에서 100 epoch 학습 중이다. 실행 상태는 `current_status.md` §84. v57–v61 결과는 §82·§83. 최고 v61도 SEAL 10개 0.6157로 v41 0.6940에 미달해 승격 기각했다. 상세는 `current_status.md` **§82·§83**. 기존 모델·평가 계약은 §71·§73·§74·§76·§77·§79를 따른다.
 
 > [!IMPORTANT]
 > **모델이 둘이다 (2026-08-10)**
