@@ -1,6 +1,19 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-11` — v66은 SEAL 10-task 0.6548로 기각했다. §86에서 raw bag mean이 PathoBench +0.0037, ICI 5-seed +0.0068이어서 canonical CV branch를 covariance + pre-centering raw bag mean으로 확정했다. 현재 학습/평가 프로세스는 없다.
+**Last updated**: `2026-08-11` — §87 DD와 v70 CV+DD relation MLP를 추가했다. v70은 1-pop linear 합성으로 끝단 MLP만 학습해 SEAL 0.6715(CV +0.0048, 8/10 상승)를 얻었다. v71 CV+MLP ablation은 GPU 0–3 DDP4로 실행 중이며 handoff artifact 기준 epoch 39 / val CE 0.2248이다.
+
+> [!IMPORTANT]
+> **DD/v70 계약 (§87)**
+>
+> DD는 support label로 generalized covariance direction을 만든 뒤 bag별 log projected
+> variance의 class-standardized distances `D0,D1`을 계산하는 training-free branch다.
+> v70은 `[CV0,CV1,CV1-CV0,SEP_CV,D0,D1,D1-D0,SEP_DD] -> 8→32→1`만 학습한다.
+> frozen CV/DD + 321 parameters, 1-pop linear synthetic, SEAL 0.6715.
+> synthetic task는 ST representation에는 약했지만 끝단 relation/calibration에는 8/10 task로
+> 일반화했다. 단 BAP1 −0.0924라 제한적 증거다. v71은 DD 없는 4-d head ablation이다.
+> v71 PID 3878298, 로그 `logs/20260811_155038/v71_cv_mlp_1pop_linear.out`, checkpoint
+> `checkpoints/20260811_155038/v71_cv_mlp_1pop_linear/`. 완료 후 best metadata 확인 → SEAL
+> 10-task 4-GPU 평가가 다음 행동이다.
 
 > [!IMPORTANT]
 > **Canonical CV branch 계약 (§86, 2026-08-11)**

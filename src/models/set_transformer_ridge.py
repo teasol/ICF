@@ -659,6 +659,234 @@ class CovarianceMeanRidgeModel(CovarianceOnlyRidgeModel):
         )
 
 
+class CovarianceMeanDDRidgeModel(CovarianceMeanRidgeModel):
+    """Canonical CV ridge equally ensembled with a training-free DD branch."""
+
+    architecture_version = 48
+
+    def __init__(self, *args, dd_shrinkage=0.25, dd_eps=1e-6, **kwargs):
+        cv_probability_weight = float(kwargs.pop("cv_probability_weight", 1.0))
+        dd_probability_weight = float(kwargs.pop("dd_probability_weight", 1.0))
+        super().__init__(*args, **kwargs)
+        if not 0.0 <= dd_shrinkage < 1.0:
+            raise ValueError("dd_shrinkage must be in [0, 1).")
+        if dd_eps <= 0.0:
+            raise ValueError("dd_eps must be positive.")
+        if self.num_classes != 2:
+            raise ValueError("The DD probability ensemble is binary-only.")
+        if cv_probability_weight < 0.0 or dd_probability_weight < 0.0:
+            raise ValueError("CV/DD probability weights must be non-negative.")
+        if cv_probability_weight + dd_probability_weight <= 0.0:
+            raise ValueError("At least one CV/DD probability weight must be positive.")
+        self.dd_shrinkage = float(dd_shrinkage)
+        self.dd_eps = float(dd_eps)
+        self.cv_probability_weight = cv_probability_weight
+        self.dd_probability_weight = dd_probability_weight
+        self._architecture_version.fill_(self.architecture_version)
+
+    def _covariance_matrices_from_triangle(self, descriptors):
+        triangle = descriptors[..., : self.covariance_descriptor_dim].float()
+        shape = (*triangle.shape[:-1], self.covariance_sketch_dim, self.covariance_sketch_dim)
+        covariance = triangle.new_zeros(shape)
+        row, column = self._covariance_triangle
+        covariance[..., row, column] = triangle
+        covariance[..., column, row] = triangle
+        return covariance
+
+    def _dd_probabilities(
+        self, context_covariance, context_labels, query_covariance
+    ):
+        distances, separation = self._dd_distance_features(
+            context_covariance, context_labels, query_covariance
+        )
+        denominator = distances.sum(dim=-1, keepdim=True) + 2.0 * self.dd_eps
+        probabilities = torch.stack(
+            (distances[:, 1] + self.dd_eps, distances[:, 0] + self.dd_eps),
+            dim=-1,
+        ) / denominator
+        return probabilities
+
+    def _dd_distance_features(
+        self, context_covariance, context_labels, query_covariance
+    ):
+        labels = context_labels.long()
+        class_means = []
+        for class_index in range(2):
+            members = context_covariance[labels == class_index]
+            if members.numel() == 0:
+                raise ValueError("Every class must occur in the context set.")
+            class_means.append(members.mean(dim=0))
+
+        delta = class_means[1] - class_means[0]
+        pooled = context_covariance.mean(dim=0)
+        trace_scale = pooled.diagonal().mean().clamp_min(self.dd_eps)
+        identity = torch.eye(
+            self.covariance_sketch_dim, device=pooled.device, dtype=pooled.dtype
+        )
+        shrunk = (
+            (1.0 - self.dd_shrinkage) * pooled
+            + self.dd_shrinkage * trace_scale * identity
+        )
+        values, vectors = torch.linalg.eigh(shrunk)
+        safe_values = values.clamp_min(self.dd_eps)
+        whitening = (vectors * safe_values.rsqrt().unsqueeze(0)) @ vectors.T
+        operator = whitening @ delta @ whitening
+        eigenvalues, eigenvectors = torch.linalg.eigh(operator)
+        direction = whitening @ eigenvectors[:, eigenvalues.abs().argmax()]
+
+        context_variance = torch.einsum(
+            "d,bdk,k->b", direction, context_covariance, direction
+        ).clamp_min(self.dd_eps)
+        query_variance = torch.einsum(
+            "d,qdk,k->q", direction, query_covariance, direction
+        ).clamp_min(self.dd_eps)
+        context_feature = context_variance.log()
+        query_feature = query_variance.log()
+
+        center = context_feature.mean()
+        scale = (context_feature - center).square().mean().sqrt().clamp_min(
+            self.dd_eps
+        )
+        context_feature = (context_feature - center) / scale
+        query_feature = (query_feature - center) / scale
+
+        prototypes = torch.stack(
+            [context_feature[labels == class_index].mean() for class_index in range(2)]
+        )
+        dispersions = torch.stack(
+            [
+                (context_feature[labels == class_index] - prototypes[class_index])
+                .square()
+                .mean()
+                .clamp_min(self.dd_eps)
+                for class_index in range(2)
+            ]
+        )
+        distances = (query_feature[:, None] - prototypes[None, :]).square()
+        distances = distances / dispersions[None, :]
+        separation = (prototypes[1] - prototypes[0]).abs()
+        return distances, separation
+
+    def _ridge_logits(self, context, context_labels, query):
+        cv_logits = super()._ridge_logits(context, context_labels, query)
+        # CUDA eigh has no bf16 implementation, and whitening should not lose
+        # small eigenvalues to mixed precision in any case.
+        with torch.autocast(device_type=context.device.type, enabled=False):
+            dd_probabilities = self._dd_probabilities(
+                self._covariance_matrices_from_triangle(context),
+                context_labels,
+                self._covariance_matrices_from_triangle(query),
+            )
+        total_weight = self.cv_probability_weight + self.dd_probability_weight
+        final_probabilities = (
+            self.cv_probability_weight * cv_logits.softmax(dim=-1)
+            + self.dd_probability_weight * dd_probabilities
+        ) / total_weight
+        # ModelInterface always softmaxes model outputs; log(p) preserves the
+        # requested probability ensemble exactly through that interface.
+        return final_probabilities.clamp_min(self.dd_eps).log()
+
+
+class CovarianceMeanDDMLPModel(CovarianceMeanDDRidgeModel):
+    """Frozen canonical CV + DD features read by a small learned 8-d head."""
+
+    architecture_version = 49
+
+    def __init__(self, *args, dd_head_hidden_dim=32, **kwargs):
+        super().__init__(*args, **kwargs)
+        if dd_head_hidden_dim < 1:
+            raise ValueError("dd_head_hidden_dim must be positive.")
+        for parameter in self.parameters():
+            parameter.requires_grad_(False)
+        self.cv_dd_head = nn.Sequential(
+            nn.Linear(8, int(dd_head_hidden_dim)),
+            nn.GELU(),
+            nn.Linear(int(dd_head_hidden_dim), 1),
+        )
+        self._architecture_version.fill_(self.architecture_version)
+
+    def _ridge_logits(self, context, context_labels, query):
+        cv_logits = CovarianceMeanRidgeModel._ridge_logits(
+            self, context, context_labels, query
+        )
+        normalized_context, _ = self._normalize_descriptors(context, query)
+        labels = context_labels.long()
+        cv_prototypes = torch.stack(
+            [normalized_context[labels == class_index].mean(dim=0) for class_index in range(2)]
+        )
+        cv_separation = (
+            (cv_prototypes[1] - cv_prototypes[0]).square().mean().sqrt()
+        )
+
+        with torch.autocast(device_type=context.device.type, enabled=False):
+            distances, dd_separation = self._dd_distance_features(
+                self._covariance_matrices_from_triangle(context),
+                context_labels,
+                self._covariance_matrices_from_triangle(query),
+            )
+        cv0, cv1 = cv_logits.float().unbind(dim=-1)
+        d0, d1 = distances.float().unbind(dim=-1)
+        features = torch.stack(
+            (
+                cv0,
+                cv1,
+                cv1 - cv0,
+                cv_separation.float().expand_as(cv0),
+                d0,
+                d1,
+                d1 - d0,
+                dd_separation.float().expand_as(cv0),
+            ),
+            dim=-1,
+        )
+        margin = self.cv_dd_head(features).squeeze(-1)
+        return torch.stack((-0.5 * margin, 0.5 * margin), dim=-1)
+
+
+class CovarianceMeanCVMLPModel(CovarianceMeanRidgeModel):
+    """Frozen canonical CV features read by the v71 4-d ablation head."""
+
+    architecture_version = 50
+
+    def __init__(self, *args, cv_head_hidden_dim=32, **kwargs):
+        super().__init__(*args, **kwargs)
+        if cv_head_hidden_dim < 1:
+            raise ValueError("cv_head_hidden_dim must be positive.")
+        for parameter in self.parameters():
+            parameter.requires_grad_(False)
+        self.cv_head = nn.Sequential(
+            nn.Linear(4, int(cv_head_hidden_dim)),
+            nn.GELU(),
+            nn.Linear(int(cv_head_hidden_dim), 1),
+        )
+        self._architecture_version.fill_(self.architecture_version)
+
+    def _ridge_logits(self, context, context_labels, query):
+        cv_logits = CovarianceMeanRidgeModel._ridge_logits(
+            self, context, context_labels, query
+        )
+        normalized_context, _ = self._normalize_descriptors(context, query)
+        labels = context_labels.long()
+        cv_prototypes = torch.stack(
+            [normalized_context[labels == class_index].mean(dim=0) for class_index in range(2)]
+        )
+        cv_separation = (
+            (cv_prototypes[1] - cv_prototypes[0]).square().mean().sqrt()
+        )
+        cv0, cv1 = cv_logits.float().unbind(dim=-1)
+        features = torch.stack(
+            (
+                cv0,
+                cv1,
+                cv1 - cv0,
+                cv_separation.float().expand_as(cv0),
+            ),
+            dim=-1,
+        )
+        margin = self.cv_head(features).squeeze(-1)
+        return torch.stack((-0.5 * margin, 0.5 * margin), dim=-1)
+
+
 class STCVLPRidgeModel(CovarianceSetTransformerRidgeModel):
     """ST + fixed Covariance (CV) + Learnable P (LP), read by one ridge."""
 

@@ -29,6 +29,9 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from src.models.set_transformer_ridge import (  # noqa: E402
     CovarianceSetTransformerRidgeModel,
+    CovarianceMeanCVMLPModel,
+    CovarianceMeanDDMLPModel,
+    CovarianceMeanDDRidgeModel,
     CovarianceMeanRidgeModel,
     CovarianceOnlyRidgeModel,
     STCVLPRidgeModel,
@@ -453,3 +456,53 @@ class CovarianceMeanAblationTest(unittest.TestCase):
         covariance, mean = normalized.split((36, INPUT_DIM), dim=-1)
         self.assertAlmostEqual(float(covariance.square().mean()), 1.0, places=5)
         self.assertAlmostEqual(float(mean.square().mean()), 1.0, places=5)
+
+    def test_dd_ensemble_returns_normalized_log_probabilities(self):
+        model = CovarianceMeanDDRidgeModel(**self._kwargs()).eval()
+        x, y, query = _episode(cells=12)
+        output = model(x, y, query)
+        probabilities = output.exp()
+        torch.testing.assert_close(
+            probabilities.sum(dim=-1), torch.ones(query.numel()),
+            atol=1e-5, rtol=1e-5,
+        )
+        self.assertTrue(torch.isfinite(output).all())
+
+    def test_dd_ensemble_respects_label_swap(self):
+        model = CovarianceMeanDDRidgeModel(**self._kwargs()).eval()
+        x, y, query = _episode(cells=12)
+        forward = model(x, y, query)
+        swapped = model(x, 1 - y, query)
+        torch.testing.assert_close(forward, swapped.flip(-1), atol=2e-4, rtol=2e-4)
+
+    def test_cv_dd_mlp_is_the_only_trainable_module(self):
+        model = CovarianceMeanDDMLPModel(**self._kwargs()).train()
+        trainable = [name for name, value in model.named_parameters() if value.requires_grad]
+        self.assertTrue(trainable)
+        self.assertTrue(all(name.startswith("cv_dd_head.") for name in trainable))
+        self.assertEqual(sum(value.numel() for value in model.parameters() if value.requires_grad), 321)
+
+        x, y, query = _episode(cells=12)
+        logits = model(x, y, query)
+        self.assertEqual(logits.shape, (query.numel(), 2))
+        torch.nn.functional.cross_entropy(logits, y[query]).backward()
+        for name, value in model.named_parameters():
+            if value.requires_grad:
+                self.assertIsNotNone(value.grad, name)
+                self.assertTrue(torch.isfinite(value.grad).all(), name)
+
+    def test_cv_mlp_ablation_is_the_only_trainable_module(self):
+        model = CovarianceMeanCVMLPModel(**self._kwargs()).train()
+        trainable = [name for name, value in model.named_parameters() if value.requires_grad]
+        self.assertTrue(trainable)
+        self.assertTrue(all(name.startswith("cv_head.") for name in trainable))
+        self.assertEqual(sum(value.numel() for value in model.parameters() if value.requires_grad), 193)
+
+        x, y, query = _episode(cells=12)
+        logits = model(x, y, query)
+        torch.nn.functional.cross_entropy(logits, y[query]).backward()
+        self.assertEqual(logits.shape, (query.numel(), 2))
+        for name, value in model.named_parameters():
+            if value.requires_grad:
+                self.assertIsNotNone(value.grad, name)
+                self.assertTrue(torch.isfinite(value.grad).all(), name)

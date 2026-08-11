@@ -1,0 +1,16 @@
+# v68 — 0.5 * canonical CV probability + 0.5 * training-free rank-1 DD.
+seed: 42
+ckpt_path:
+data: default
+model: covariance_mean_dd_ridge
+optimizer: adamw_1e4
+scheduler: default
+trainer: default
+logger: default
+callbacks: default
+model_kwargs:
+  training_targets_per_episode: [5, 12]
+  ranking_loss_weight: 0.10
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0
+  nonfinite_gradient_policy: zero

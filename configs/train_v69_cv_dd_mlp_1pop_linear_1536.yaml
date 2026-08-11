@@ -1,0 +1,56 @@
+# v69 — frozen canonical CV + rank-1 DD features -> learned 8->32->1 MLP.
+# Synthetic generator: scalar response, one responsive population, single
+# label rule, episode-wise orthogonal linear manifold. DDP4, 50 epochs.
+seed: 42
+ckpt_path:
+
+data: default
+data_overrides:
+  episode_batch_size: 1
+  dataset_kwargs:
+    num_cells: [256, 8192]
+    num_cells_log_uniform_power: 2.0
+    response_dim: 1
+    responsive_population_count: 1
+    label_rule: single
+    manifold_mode: orthogonal
+    per_bag_max_cells: 4096
+
+model: covariance_mean_dd_mlp
+optimizer: adamw_1e4
+scheduler: default
+
+trainer: default
+trainer_overrides:
+  devices: 4
+  strategy: ddp_find_unused_parameters_false
+  max_epochs: 50
+
+logger: default
+logger_overrides:
+  experiment_name: v69_cv_dd_mlp_1pop_linear
+
+callbacks:
+  checkpoint:
+    enabled: true
+    dirpath: checkpoints
+    filename: "{epoch:03d}-{val_ce_loss:.4f}"
+    monitor: val_ce_loss
+    mode: min
+    save_top_k: 3
+    save_last: true
+  periodic_checkpoint:
+    enabled: true
+    dirpath: checkpoints
+    filename: "periodic-{epoch:03d}-{val_ce_loss:.4f}"
+    every_n_epochs: 10
+  lr_monitor:
+    enabled: true
+    logging_interval: epoch
+
+model_kwargs:
+  training_targets_per_episode: [5, 12]
+  ranking_loss_weight: 0.10
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0
+  nonfinite_gradient_policy: zero

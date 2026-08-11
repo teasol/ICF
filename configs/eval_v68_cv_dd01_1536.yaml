@@ -1,0 +1,5 @@
+# v68 CV + 0.1*DD, normalized by the total evidence weight 1.1.
+base_config: eval_v68_cv_dd_1536.yaml
+model_overrides:
+  cv_probability_weight: 1.0
+  dd_probability_weight: 0.1

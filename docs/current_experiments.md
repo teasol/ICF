@@ -175,3 +175,61 @@ covariance+raw-bag-mean을 비교했다. 학습 없이 fold마다 closed-form ri
 결정: 앞으로 CV branch는 covariance upper triangle과 중심화 전 raw bag mean을 항상 concat한다.
 다만 ICI의 95% CI는 각각 [0.414,0.657], [0.427,0.669]로 모두 랜덤을 포함한다.
 CovarianceOnlyRidgeModel은 이 결정을 재검증할 historical control로만 남긴다.
+
+## 8. DD와 v70 learned relation head (2026-08-11)
+
+### 8-1. training-free DD ablation
+
+canonical CV와 같은 fixed P(K128) covariance에서 rank-1 DD를 만들었다. 학습 없이
+support label로 generalized covariance direction을 구하고 query마다 standardized distances
+`D0,D1`을 계산했다.
+
+| arm | 결합 | SEAL 10-task macro | vs CV |
+|---|---|---:|---:|
+| canonical CV | `softmax(CV logits)` | 0.6667 | — |
+| DD-only | opposite-distance probability | 0.5862 | −0.0805 |
+| CV+DD equal | `0.5 CV + 0.5 DD` | 0.6441 | −0.0226 |
+| CV+0.1DD | `(CV + 0.1 DD)/1.1` | 0.6688 | +0.0021 |
+
+DD는 주 classifier로 약하지만 작은 residual evidence로는 7/10 task를 올렸다. BAP1에서
+고정 결합이 크게 실패해 task-independent weight의 한계가 드러났다.
+
+### 8-2. v70 CV+DD+MLP
+
+1-population, scalar response, single label rule, episode-wise orthogonal linear manifold 합성
+task로 frozen CV/DD 출력 위 8→32→1 MLP(321 trainable parameters)만 50 epoch 학습했다.
+GPU 0–3 DDP4, bf16, best epoch 48 `val_ce_loss=0.120259`, 오류/non-finite 없음.
+
+| task | canonical CV | CV+0.1DD | **v70 MLP** | v70−CV |
+|---|---:|---:|---:|---:|
+| er_status | 0.6821 | 0.6902 | **0.7002** | +0.0181 |
+| grade | 0.6717 | 0.6851 | **0.7081** | +0.0364 |
+| her2_status | 0.6388 | 0.6502 | **0.6657** | +0.0269 |
+| brca PIK3CA | 0.5124 | 0.5103 | **0.5131** | +0.0007 |
+| brca TP53 | 0.7957 | 0.8022 | **0.8146** | +0.0189 |
+| luad EGFR | 0.7298 | 0.7387 | **0.7502** | +0.0204 |
+| luad STK11 | 0.8405 | 0.8496 | **0.8692** | +0.0287 |
+| luad TP53 | **0.6891** | 0.6823 | 0.6659 | −0.0232 |
+| ccrcc BAP1 | **0.6978** | 0.6614 | 0.6054 | −0.0924 |
+| ccrcc VHL | 0.4087 | 0.4181 | **0.4226** | +0.0139 |
+| **macro** | 0.6667 | 0.6688 | **0.6715** | **+0.0048** |
+
+v70은 CV 대비 8/10 task를 올렸고 fixed 0.1 결합보다 +0.0027 높았다. 전체 프로젝트 최고
+v41 0.6940에는 아직 −0.0225이며, BAP1 실패가 가장 큰 제한이다.
+
+### 8-3. synthetic task 일반화에 대한 갱신된 해석
+
+같은 1-pop linear synthetic task를 Set Transformer의 고차원 representation 학습에 썼을 때는
+합성 validation은 좋아져도 SEAL 개선이 작거나 없었다(v61/v62 계보). 따라서 이전에는
+synthetic task 자체가 실데이터로 일반화되지 않는다고 해석하기 쉬웠다.
+
+그러나 v70에서는 representation을 새로 만들지 않고 이미 강한 canonical CV와 DD 통계를
+고정한 채, **끝단의 저차원 관계 함수만** 같은 synthetic task로 학습했고 SEAL 8/10 task,
+macro +0.0048을 얻었다. 이는 synthetic task에 실데이터로 이전되는 일반화 신호가 없었던 것이
+아니라, 그 신호가 고용량 Set Transformer 표현 학습보다 **구조화된 통계 사이의 decision rule /
+calibration 학습에 더 잘 전달된다**는 증거다.
+
+다만 개선폭이 작고 BAP1/LUAD TP53가 하락했으므로 “합성 task가 일반적으로 해결됐다”는
+주장은 하지 않는다. 현 단계 결론은 **일반화 효과는 존재하며, 효과의 크기는 학습을 삽입하는
+위치와 inductive bias에 강하게 의존한다**이다. v71 CV+MLP가 DD가 실제로 추가 일반화 신호를
+제공했는지 분리한다.

@@ -1,0 +1,4 @@
+# v70 — completed run originally launched under the provisional v69 name.
+base_config: train_v69_cv_dd_mlp_1pop_linear_1536.yaml
+logger_overrides:
+  experiment_name: v70_cv_dd_mlp_1pop_linear

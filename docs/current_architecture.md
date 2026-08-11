@@ -239,3 +239,59 @@ ICI CI는 0.5를 포함하므로 실세계 통과 주장은 하지 않는다.
 - historical replay: LegacyCovarianceSetTransformerRidgeModel v42,
   LegacySTCVLPRidgeModel v43.
 - CovarianceOnlyRidgeModel v44는 §86 ablation control이며 canonical CV가 아니다.
+
+## G. Dispersion Distance와 learned relation head (2026-08-11, §87)
+
+### G-1. DD는 무엇을 측정하는가
+
+DD(Dispersion Distance)는 canonical CV와 같은 centered projected covariance matrix
+`C_b ∈ R^(K×K)`를 사용하지만 upper triangle 전체에 ridge를 푸는 대신, support label로
+episode-specific한 rank-1 방향을 해석적으로 만든다.
+
+    C̄_c = mean(C_b | y_b=c)              Δ = C̄_1 - C̄_0
+    C_pool = mean_b C_b                   τ = tr(C_pool)/K
+    S = 0.75 C_pool + 0.25 τ I            W = S^(-1/2)
+    A = W Δ W                             A u = λu
+    f = W u,  where |λ| is maximal
+
+`f ∈ R^K`는 전체 pooled dispersion으로 whitening한 뒤 두 클래스의 within-bag variance
+차이가 가장 큰 cell projection 방향이다. 원래 1,536-d embedding 공간에서는 `P f`다.
+각 bag은 이 방향의 log variance scalar로 줄어든다.
+
+    z_b = log(fᵀ C_b f) = log Var((X_b - mean(X_b)) P f)
+
+context-only 통계로 z-score한 뒤 class prototype과 class별 bag-to-bag dispersion을 구한다.
+
+    p_c = mean(z_b | y_b=c)
+    v_c = mean((z_b-p_c)^2 | y_b=c)
+    D_c(q) = (z_q-p_c)^2 / (v_c+ε)
+
+`D_c`는 query의 분산이 class c의 평균 분산에서 얼마나 떨어졌는지를 그 클래스의
+bag-to-bag variance 단위로 잰 standardized squared distance다. 학습 파라미터는 없다.
+
+### G-2. training-free probability와 실패한 고정 결합
+
+반대쪽 distance가 클수록 해당 class evidence가 커지게 한다.
+
+    p_DD(q) = [(D_1+ε)/(D_0+D_1+2ε), (D_0+ε)/(D_0+D_1+2ε)]
+
+SEAL 10-task macro는 DD-only 0.5862, `0.5 p_CV + 0.5 p_DD` 0.6441로 약했다.
+`(p_CV + 0.1 p_DD)/1.1`은 0.6688로 canonical CV 0.6667보다 +0.0021이었으나,
+고정 가중치는 task별 신뢰도 차이를 처리하지 못했다.
+
+### G-3. v70 CV+DD relation MLP
+
+v70은 feature extractor와 ridge/DD 계산을 모두 고정하고 마지막 321-parameter MLP만 학습한다.
+
+    [CV0, CV1, CV1-CV0, SEP_CV, D0, D1, D1-D0, SEP_DD]
+        -> Linear(8,32) -> GELU -> Linear(32,1) -> margin m
+    model logits = [-m/2, +m/2], so p(y=1)=sigmoid(m)
+
+`SEP_CV`는 context-only normalized canonical-CV descriptor에서 class centroid 사이 RMS 거리,
+`SEP_DD=|p_1-p_0|`는 rank-1 log-dispersion prototype separation이다. 둘 다 episode별
+confidence이고 query label은 보지 않는다. CV ridge lambda=1/logit scale=2와 DD shrinkage
+0.25는 고정이다.
+
+v70 architecture는 CovarianceMeanDDMLPModel v49다. v71 ablation은 DD의 방향·거리·separation을
+모두 제거하고 `[CV0,CV1,CV1-CV0,SEP_CV] -> 4→32→1`만 학습하는
+CovarianceMeanCVMLPModel v50이다.

@@ -1,10 +1,10 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-11` (§86 — v66 기각, canonical CV = covariance + raw bag mean)
+**Last updated**: `2026-08-11` (§87 — DD/v70 relation MLP와 synthetic 일반화 신호)
 
-**한 줄**: v66 4-pop은 기각했고, 앞으로 CV branch는 fixed K128 covariance에 중심화 전 raw bag mean을 항상 concat한다(§86).
+**한 줄**: canonical CV+mean은 유지하며, 1-pop linear synthetic로 끝단 CV+DD MLP만 학습한 v70이 SEAL 0.6715로 CV 대비 8/10 task를 올렸다(§87).
 
-**Status**: **CV+raw-mean 계약 구현·실험 완료; 다음 scalar/1-pop 학습 arm 결정 대기.**
+**Status**: **v70 완료; DD 기여를 분리하는 v71 CV+MLP DDP4 학습 진행 중.**
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
   현행 최고 **v41_K128 = SEAL 10개 0.6940** (ABMIL 0.727에 −0.033).
@@ -27,7 +27,9 @@
 
 **지금 돌아가는 것 (2026-08-11)**
 
-학습/평가 프로세스 없음. v66 및 v67 무학습 PathoBench/ICI 평가가 모두 완료됐고 다음 scalar/1-pop CV+mean 학습 arm 결정을 기다린다.
+v71 CV+MLP ablation이 GPU 0–3 DDP4로 실행 중이다. DD direction/distance/separation은
+완전히 없고 frozen CV의 `[CV0,CV1,CV1-CV0,SEP_CV]`만 4→32→1 head가 읽는다.
+로그: `logs/20260811_155038/v71_cv_mlp_1pop_linear.out`.
 
 결과 재확인:
 ```bash
@@ -45,7 +47,9 @@ done
 > 2. **ICI는 기본 잠금 유지.** §50과 §86은 사용자 명시 해제에 따른 예외 평가.
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§86 (canonical CV+mean 계약/실험 결과)**, §85 (v62–v66), §71 (SEAL 판정), §73–§74 (호환성/학습 경로), §79 (generic 평가/YAML).
+**Read first if you are picking this up**: **§87 (DD/v70/synthetic 일반화)**,
+§86 (canonical CV+mean 계약), §85 (v62–v66), §71 (SEAL 판정), §73–§74
+(호환성/학습 경로), §79 (generic 평가/YAML).
 
 > [!IMPORTANT]
 > **방법론 경고 3건 — 다음 arm 설계 전에 읽을 것**:
@@ -3105,3 +3109,47 @@ control일 뿐, 새 모델에서 CV의 의미가 아니다.
 
 검증: 관련 31 tests 및 기본 suite **129 tests 통과**. 변경 대상 config 15개 해석 성공. 전체 archive config 감사는 이번 변경과 무관한 v18/v19 누락 data fragment 10건으로 실패했다. 다음 학습 arm은 scalar/1-pop 데이터와
 canonical CV+mean을 사용한다.
+
+## 87. 2026-08-11 — Dispersion Distance와 v70 relation MLP: synthetic 일반화 신호 확인
+
+### 87-1. DD 정의와 무학습 결과
+
+DD는 support class별 평균 covariance 차이를 pooled covariance(shrinkage 0.25)로 whitening한
+generalized eigenproblem에서 `|λ|` 최대 rank-1 방향 `f`를 구한다. 각 bag을
+`z_b=log(fᵀC_bf)` scalar로 줄인 뒤 class prototype `p_c`, bag-to-bag dispersion `v_c`, query
+standardized distance `D_c=(z_q-p_c)^2/(v_c+ε)`를 계산한다. 여기까지 학습은 없다.
+
+SEAL 10-task macro: DD-only 0.5862, CV+DD 50:50 0.6441, CV+0.1DD 0.6688.
+canonical CV 0.6667 대비 DD는 단독/강한 결합으로는 약하고 0.1 residual에서만 +0.0021이었다.
+
+### 87-2. v70 CV+DD+MLP
+
+사용자 명칭 확정: provisional v69 run을 앞으로 **v70**이라 부른다. frozen CV/DD 위에
+`[CV0,CV1,CV1-CV0,SEP_CV,D0,D1,D1-D0,SEP_DD]` 8개를 넣는 8→32→1 MLP만 학습한다.
+출력 margin `m`의 class-1 probability는 sigmoid(m)다. trainable parameter 321개.
+
+- 합성: scalar response, responsive population 1, single label, orthogonal linear manifold.
+- GPU 0–3 DDP4, bf16, 50 epochs, 약 14분, non-finite/traceback 없음.
+- best: epoch 48, exact val CE **0.12025946**.
+- SEAL 10-task: **0.6715**, canonical CV +0.0048, CV+0.1DD +0.0027, 8/10 task 상승.
+- 큰 하락: BAP1 −0.0924, LUAD TP53 −0.0232. 프로젝트 최고 v41 0.6940에는 −0.0225.
+
+### 87-3. synthetic task 일반화 결론
+
+같은 1-pop linear task는 Set Transformer representation을 학습할 때 합성 성능을 크게
+올려도 SEAL 효과가 작았다. 반면 강한 고정 통계(CV/DD) 뒤의 321-parameter relation MLP를
+학습하자 8/10 task에서 개선됐다. 따라서 synthetic task에 일반화 정보가 없었던 것이 아니라,
+**고용량 표현 학습에는 전달이 약하고 끝단의 구조화된 decision/calibration 학습에는 전달되는
+일반화 효과가 존재한다.** 일반화 여부는 synthetic task만의 속성이 아니라 학습을 삽입한
+위치와 inductive bias의 함수다. 개선폭이 작고 BAP1 실패가 있어 제한적 근거로 취급한다.
+
+### 87-4. v71 진행 중
+
+v71은 DD를 완전히 제거한 `[CV0,CV1,CV1-CV0,SEP_CV] -> 4→32→1` MLP ablation이다.
+trainable 193개, 동일 합성 task/50 epoch/GPU 0–3 DDP4 조건으로 실행 중이다.
+v70−v71 차이가 DD의 추가 일반화 기여다. handoff 시점 artifact 확인은 epoch 39,
+`val_ce_loss=0.2248`; `last.ckpt`와 `periodic-epoch=039-val_ce_loss=0.2248.ckpt`가
+`2026-08-11 16:00:56`에 갱신됐다. PID 3878298, 로그
+`logs/20260811_155038/v71_cv_mlp_1pop_linear.out`, checkpoint root
+`checkpoints/20260811_155038/v71_cv_mlp_1pop_linear/`. 완료 후 반올림 전 best score를
+checkpoint metadata로 골라 SEAL 10-task 4-GPU 평가한다.
