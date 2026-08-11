@@ -1,4 +1,4 @@
-# Current architecture — 두 계보 (2026-08-10)
+# Current architecture — 두 계보 (2026-08-11)
 
 리포에 **서로 독립인 모델 2개**가 있다. 공유하는 코드는 ridge 솔버
 (`solve_ridge_system`) 하나뿐이다.
@@ -216,3 +216,26 @@ attention은 에피소드당 2.7e10 쌍이라 불가"였는데, **쌍의 개수�
   `test_paired_relation_head.py`, `test_set_transformer_ridge.py`,
   `test_training_uses_dense_path.py`, `test_per_bag_cardinality_padding.py`,
   `test_config_numeric_types.py`
+
+## F. Canonical CV branch 계약 (2026-08-11, §86)
+
+> **앞으로 “CV branch”는 covariance 단독이 아니라
+> fixed covariance upper triangle + raw pre-centering bag mean이다.**
+
+    raw cells ─┬─ bag mean (중심화 전) ─────────────────────────── 1,536-d
+               └─ bag 중심화 → fixed P → covariance upper triangle ─ 8,256-d
+                                                                   (K=128)
+    CV = concat(covariance, raw mean)                              = 9,792-d
+
+covariance와 mean은 ridge 직전 context-only center/scalar-RMS로 각각 독립 정규화한다.
+cell padding은 둘 다에서 제외한다. ICI 512-d 입력에서는 P=512×128이고 CV는
+8,256+512=8,768차원이다.
+
+PathoBench 무학습 SEAL 10-task에서 covariance-only 0.6630 → CV 0.6667(+0.0037),
+ICI 5-seed 평균에서 0.5381 → 0.5449(+0.0068)로 두 도메인 모두 방향이 양수였다.
+ICI CI는 0.5를 포함하므로 실세계 통과 주장은 하지 않는다.
+
+- canonical: CovarianceSetTransformerRidgeModel v46, STCVLPRidgeModel v47.
+- historical replay: LegacyCovarianceSetTransformerRidgeModel v42,
+  LegacySTCVLPRidgeModel v43.
+- CovarianceOnlyRidgeModel v44는 §86 ablation control이며 canonical CV가 아니다.

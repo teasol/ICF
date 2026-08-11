@@ -1,4 +1,4 @@
-# Current experiments (2026-08-10)
+# Current experiments (2026-08-11)
 
 CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 **그 문서의 판정 절차는 폐기됐다** — 합성 지표로 arm을 고르는 방식이 반복적으로 실패했다.
@@ -159,3 +159,19 @@ step 구성(측정): 에피소드 생성(GPU) 22% / 모델 28% / Lightning 오�
 CPU 2,579 ms(805배)이고, 옮기면 매 step H2D 전송이 새로 붙는다(§74).
 ⚠️ **프리페치 깊이를 올려도 소용없다** — depth 1이 3.9 s, depth 3이 4.8 s. 생성이 모델보다
 길어 생산자가 포화 상태다(§74).
+
+## 7. v67 무학습 CV mean ablation (2026-08-11)
+
+동일한 fixed P(K128), ridge lambda=1, logit scale=2에서 covariance-only와
+covariance+raw-bag-mean을 비교했다. 학습 없이 fold마다 closed-form ridge만 풀었다.
+
+| 평가 | covariance-only | canonical CV(+mean) | delta |
+|---|---:|---:|---:|
+| PathoBench SEAL 10-task macro | 0.6630 | **0.6667** | **+0.0037** |
+| ICI 5-seed mean | 0.5381±0.0177 | **0.5449±0.0180** | **+0.0068** |
+| ICI seed-averaged donor | 0.5357 | **0.5476** | **+0.0119** |
+| ICI mean log loss | 0.8998 | **0.8897** | −0.0101 |
+
+결정: 앞으로 CV branch는 covariance upper triangle과 중심화 전 raw bag mean을 항상 concat한다.
+다만 ICI의 95% CI는 각각 [0.414,0.657], [0.427,0.669]로 모두 랜덤을 포함한다.
+CovarianceOnlyRidgeModel은 이 결정을 재검증할 historical control로만 남긴다.

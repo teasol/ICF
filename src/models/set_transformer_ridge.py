@@ -128,11 +128,15 @@ class BagTokenEncoder(nn.Module):
         num_summary_tokens: int = 32,
         max_cells: int = 8192,
         dropout: float = 0.0,
+        center_cells: bool = False,
+        include_mean_token: bool = False,
     ) -> None:
         super().__init__()
         self.num_summary_tokens = int(num_summary_tokens)
         self.max_cells = int(max_cells)
         self.token_dim = int(token_dim)
+        self.center_cells = bool(center_cells)
+        self.include_mean_token = bool(include_mean_token)
         self.input_projection = nn.Linear(input_dim, token_dim)
         self.input_norm = nn.LayerNorm(token_dim)
         # CLS-like: prepended to the cells, so they attend to every cell and to
@@ -174,6 +178,18 @@ class BagTokenEncoder(nn.Module):
     ) -> torch.Tensor:
         """`cells` [bags, cells, input_dim] -> [bags, summary_tokens, token_dim]."""
         cells, cell_mask = self._subsample(cells, cell_mask)
+        if self.center_cells:
+            values = cells.float()
+            if cell_mask is None:
+                values = values - values.mean(dim=-2, keepdim=True)
+            else:
+                valid = cell_mask.unsqueeze(-1)
+                count = cell_mask.sum(dim=-1, keepdim=True).clamp_min(1).float()
+                mean = values.masked_fill(~valid, 0.0).sum(
+                    dim=-2, keepdim=True
+                ) / count.unsqueeze(-1)
+                values = (values - mean).masked_fill(~valid, 0.0)
+            cells = values.to(cells.dtype)
         tokens = self.input_norm(self.input_projection(cells))
         summary = self.summary_tokens.unsqueeze(0).expand(tokens.shape[0], -1, -1)
         tokens = torch.cat((summary, tokens), dim=1)
@@ -199,7 +215,20 @@ class BagTokenEncoder(nn.Module):
 
         for layer in self.layers:
             tokens = layer(tokens, attention_mask=attention_mask)
-        return self.output_norm(tokens[:, : self.num_summary_tokens])
+        summary_output = self.output_norm(tokens[:, : self.num_summary_tokens])
+        if not self.include_mean_token:
+            return summary_output
+        cell_output = self.output_norm(tokens[:, self.num_summary_tokens :])
+        if cell_mask is None:
+            mean_output = cell_output.mean(dim=1, keepdim=True)
+        else:
+            valid_cells = cell_mask.unsqueeze(-1)
+            count = cell_mask.sum(dim=1, keepdim=True).clamp_min(1)
+            mean_output = (
+                cell_output.masked_fill(~valid_cells, 0.0).sum(dim=1, keepdim=True)
+                / count.unsqueeze(-1)
+            )
+        return torch.cat((summary_output, mean_output), dim=1)
 
 
 class SetTransformerRidgeModel(nn.Module):
@@ -226,6 +255,8 @@ class SetTransformerRidgeModel(nn.Module):
         num_summary_tokens: int = 32,
         max_cells: int = 8192,
         dropout: float = 0.0,
+        center_cells: bool = False,
+        include_mean_token: bool = False,
         ridge_lambda: float = 1.0,
         ridge_logit_scale: float = 2.0,
         num_classes: int = 2,
@@ -242,9 +273,11 @@ class SetTransformerRidgeModel(nn.Module):
             num_summary_tokens=num_summary_tokens,
             max_cells=max_cells,
             dropout=dropout,
+            center_cells=center_cells,
+            include_mean_token=include_mean_token,
         )
         # The descriptor the ridge sees: all summary tokens, flattened.
-        self.descriptor_dim = num_summary_tokens * token_dim
+        self.descriptor_dim = (num_summary_tokens + int(include_mean_token)) * token_dim
         self.ridge_log_lambda = nn.Parameter(torch.tensor(float(ridge_lambda)).log())
         self.ridge_log_scale = nn.Parameter(
             torch.tensor(float(ridge_logit_scale)).log()
@@ -411,9 +444,9 @@ class SetTransformerRidgeModel(nn.Module):
         return logits, {"bag_descriptors": descriptors}
 
 class CovarianceSetTransformerRidgeModel(SetTransformerRidgeModel):
-    """Orthogonal-manifold Set Transformer + fixed CV-1 covariance descriptor."""
+    """ST branch + canonical CV (fixed covariance + raw bag mean)."""
 
-    architecture_version = 42
+    architecture_version = 46
 
     def __init__(
         self,
@@ -450,8 +483,11 @@ class CovarianceSetTransformerRidgeModel(SetTransformerRidgeModel):
         self.covariance_descriptor_dim = (
             self.covariance_sketch_dim * (self.covariance_sketch_dim + 1) // 2
         )
+        self.mean_descriptor_dim = self.input_dim
         self.descriptor_dim = (
-            self.summary_descriptor_dim + self.covariance_descriptor_dim
+            self.summary_descriptor_dim
+            + self.covariance_descriptor_dim
+            + self.mean_descriptor_dim
         )
 
     def _covariance_descriptors(
@@ -476,12 +512,26 @@ class CovarianceSetTransformerRidgeModel(SetTransformerRidgeModel):
         row, column = self._covariance_triangle
         return covariance[..., row, column].to(cells.dtype)
 
+    @staticmethod
+    def _bag_means(
+        cells: torch.Tensor, cell_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        values = cells.float()
+        if cell_mask is None:
+            return values.mean(dim=-2).to(cells.dtype)
+        valid = cell_mask.unsqueeze(-1)
+        count = cell_mask.sum(dim=-1, keepdim=True).clamp_min(1).float()
+        return (
+            values.masked_fill(~valid, 0.0).sum(dim=-2) / count
+        ).to(cells.dtype)
+
     def _descriptors(
         self, cells: torch.Tensor, cell_mask: torch.Tensor | None = None
     ) -> torch.Tensor:
         summary = super()._descriptors(cells, cell_mask=cell_mask)
         covariance = self._covariance_descriptors(cells, cell_mask=cell_mask)
-        return torch.cat((summary, covariance), dim=-1)
+        mean = self._bag_means(cells, cell_mask=cell_mask)
+        return torch.cat((summary, covariance, mean), dim=-1)
 
 
 
@@ -497,6 +547,48 @@ class CovarianceSetTransformerRidgeModel(SetTransformerRidgeModel):
     def _normalize_descriptors(
         self, context: torch.Tensor, query: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        sizes = (
+            self.summary_descriptor_dim,
+            self.covariance_descriptor_dim,
+            self.mean_descriptor_dim,
+        )
+        context_summary, context_covariance, context_mean = context.split(
+            sizes, dim=-1
+        )
+        query_summary, query_covariance, query_mean = query.split(sizes, dim=-1)
+        context_summary, query_summary = self._normalize_block(
+            context_summary, query_summary
+        )
+        context_covariance, query_covariance = self._normalize_block(
+            context_covariance, query_covariance
+        )
+        context_mean, query_mean = self._normalize_block(context_mean, query_mean)
+        return (
+            torch.cat((context_summary, context_covariance, context_mean), dim=-1),
+            torch.cat((query_summary, query_covariance, query_mean), dim=-1),
+        )
+
+
+class LegacyCovarianceSetTransformerRidgeModel(CovarianceSetTransformerRidgeModel):
+    """Pre-v67 ST + covariance model, retained for old checkpoint replay."""
+
+    architecture_version = 42
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.descriptor_dim = (
+            self.summary_descriptor_dim + self.covariance_descriptor_dim
+        )
+        self._architecture_version.fill_(self.architecture_version)
+
+    def _descriptors(self, cells, cell_mask=None):
+        summary = SetTransformerRidgeModel._descriptors(
+            self, cells, cell_mask=cell_mask
+        )
+        covariance = self._covariance_descriptors(cells, cell_mask=cell_mask)
+        return torch.cat((summary, covariance), dim=-1)
+
+    def _normalize_descriptors(self, context, query):
         context_summary, context_covariance = context.split(
             (self.summary_descriptor_dim, self.covariance_descriptor_dim), dim=-1
         )
@@ -512,4 +604,165 @@ class CovarianceSetTransformerRidgeModel(SetTransformerRidgeModel):
         return (
             torch.cat((context_summary, context_covariance), dim=-1),
             torch.cat((query_summary, query_covariance), dim=-1),
+        )
+
+
+class CovarianceOnlyRidgeModel(CovarianceSetTransformerRidgeModel):
+    """Fixed CV descriptor read by an episode-local closed-form ridge."""
+
+    architecture_version = 44
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.descriptor_dim = self.covariance_descriptor_dim
+        self._architecture_version.fill_(self.architecture_version)
+
+    def _descriptors(self, cells, cell_mask=None):
+        return self._covariance_descriptors(cells, cell_mask=cell_mask)
+
+    def _normalize_descriptors(self, context, query):
+        return self._normalize_block(context, query)
+
+
+class CovarianceMeanRidgeModel(CovarianceOnlyRidgeModel):
+    """Fixed CV descriptor plus the pre-centering 1536-d bag mean."""
+
+    architecture_version = 45
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.mean_descriptor_dim = self.input_dim
+        self.descriptor_dim = self.covariance_descriptor_dim + self.mean_descriptor_dim
+        self._architecture_version.fill_(self.architecture_version)
+
+    # Bag-mean construction is inherited from the canonical CV branch.
+
+    def _descriptors(self, cells, cell_mask=None):
+        covariance = self._covariance_descriptors(cells, cell_mask=cell_mask)
+        mean = self._bag_means(cells, cell_mask=cell_mask)
+        return torch.cat((covariance, mean), dim=-1)
+
+    def _normalize_descriptors(self, context, query):
+        context_covariance, context_mean = context.split(
+            (self.covariance_descriptor_dim, self.mean_descriptor_dim), dim=-1
+        )
+        query_covariance, query_mean = query.split(
+            (self.covariance_descriptor_dim, self.mean_descriptor_dim), dim=-1
+        )
+        context_covariance, query_covariance = self._normalize_block(
+            context_covariance, query_covariance
+        )
+        context_mean, query_mean = self._normalize_block(context_mean, query_mean)
+        return (
+            torch.cat((context_covariance, context_mean), dim=-1),
+            torch.cat((query_covariance, query_mean), dim=-1),
+        )
+
+
+class STCVLPRidgeModel(CovarianceSetTransformerRidgeModel):
+    """ST + fixed Covariance (CV) + Learnable P (LP), read by one ridge."""
+
+    architecture_version = 47
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.lp_projection = nn.Parameter(self._covariance_projection.clone())
+        self.lp_descriptor_dim = self.covariance_descriptor_dim
+        self.descriptor_dim = (
+            self.summary_descriptor_dim
+            + self.covariance_descriptor_dim
+            + self.mean_descriptor_dim
+            + self.lp_descriptor_dim
+        )
+        self._architecture_version.fill_(self.architecture_version)
+
+    def _lp_descriptors(
+        self, cells: torch.Tensor, cell_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        values = cells.float()
+        if cell_mask is None:
+            centered = values - values.mean(dim=-2, keepdim=True)
+            count: int | torch.Tensor = values.shape[-2]
+        else:
+            count_tensor = cell_mask.sum(dim=-1, keepdim=True).clamp_min(1).float()
+            masked = values.masked_fill(~cell_mask.unsqueeze(-1), 0.0)
+            mean = masked.sum(dim=-2, keepdim=True) / count_tensor.unsqueeze(-1)
+            centered = (masked - mean).masked_fill(~cell_mask.unsqueeze(-1), 0.0)
+            count = count_tensor
+
+        projection = torch.linalg.qr(self.lp_projection.float(), mode="reduced").Q
+        projected = centered @ projection
+        covariance = projected.transpose(-1, -2) @ projected
+        if isinstance(count, int):
+            covariance = covariance / count
+        else:
+            covariance = covariance / count.unsqueeze(-1)
+        row, column = self._covariance_triangle
+        return covariance[..., row, column].to(cells.dtype)
+
+    def _descriptors(
+        self, cells: torch.Tensor, cell_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        st_cv = super()._descriptors(cells, cell_mask=cell_mask)
+        lp = self._lp_descriptors(cells, cell_mask=cell_mask)
+        return torch.cat((st_cv, lp), dim=-1)
+
+    def _normalize_descriptors(
+        self, context: torch.Tensor, query: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        sizes = (
+            self.summary_descriptor_dim,
+            self.covariance_descriptor_dim,
+            self.mean_descriptor_dim,
+            self.lp_descriptor_dim,
+        )
+        context_st, context_cv, context_mean, context_lp = context.split(
+            sizes, dim=-1
+        )
+        query_st, query_cv, query_mean, query_lp = query.split(sizes, dim=-1)
+        context_st, query_st = self._normalize_block(context_st, query_st)
+        context_cv, query_cv = self._normalize_block(context_cv, query_cv)
+        context_mean, query_mean = self._normalize_block(context_mean, query_mean)
+        context_lp, query_lp = self._normalize_block(context_lp, query_lp)
+        return (
+            torch.cat((context_st, context_cv, context_mean, context_lp), dim=-1),
+            torch.cat((query_st, query_cv, query_mean, query_lp), dim=-1),
+        )
+
+class LegacySTCVLPRidgeModel(STCVLPRidgeModel):
+    """Pre-v67 ST + covariance + LP model for v64 checkpoint replay."""
+
+    architecture_version = 43
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.descriptor_dim = (
+            self.summary_descriptor_dim
+            + self.covariance_descriptor_dim
+            + self.lp_descriptor_dim
+        )
+        self._architecture_version.fill_(self.architecture_version)
+
+    def _descriptors(self, cells, cell_mask=None):
+        summary = SetTransformerRidgeModel._descriptors(
+            self, cells, cell_mask=cell_mask
+        )
+        covariance = self._covariance_descriptors(cells, cell_mask=cell_mask)
+        lp = self._lp_descriptors(cells, cell_mask=cell_mask)
+        return torch.cat((summary, covariance, lp), dim=-1)
+
+    def _normalize_descriptors(self, context, query):
+        sizes = (
+            self.summary_descriptor_dim,
+            self.covariance_descriptor_dim,
+            self.lp_descriptor_dim,
+        )
+        context_st, context_cv, context_lp = context.split(sizes, dim=-1)
+        query_st, query_cv, query_lp = query.split(sizes, dim=-1)
+        context_st, query_st = self._normalize_block(context_st, query_st)
+        context_cv, query_cv = self._normalize_block(context_cv, query_cv)
+        context_lp, query_lp = self._normalize_block(context_lp, query_lp)
+        return (
+            torch.cat((context_st, context_cv, context_lp), dim=-1),
+            torch.cat((query_st, query_cv, query_lp), dim=-1),
         )

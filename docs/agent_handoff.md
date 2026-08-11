@@ -1,6 +1,18 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-10` — cap-first `[256,8192]` power 2.0 v62를 GPU 0–3 DDP4로 재실행 중이다. PID/로그/checkpoint는 `current_status.md` §84. 실행 상태는 `current_status.md` §84. v57–v61 결과는 §82·§83. 최고 v61도 SEAL 10개 0.6157로 v41 0.6940에 미달해 승격 기각했다. 상세는 `current_status.md` **§82·§83**. 기존 모델·평가 계약은 §71·§73·§74·§76·§77·§79를 따른다.
+**Last updated**: `2026-08-11` — v66은 SEAL 10-task 0.6548로 기각했다. §86에서 raw bag mean이 PathoBench +0.0037, ICI 5-seed +0.0068이어서 canonical CV branch를 covariance + pre-centering raw bag mean으로 확정했다. 현재 학습/평가 프로세스는 없다.
+
+> [!IMPORTANT]
+> **Canonical CV branch 계약 (§86, 2026-08-11)**
+>
+> 앞으로 CV는 covariance 단독이 아니라 **fixed-projection centered covariance upper
+> triangle + 중심화 전 raw bag mean**이다. K128/1536-d에서는 8,256+1,536=9,792차원,
+> ICI 512-d에서는 8,256+512=8,768차원이다. 두 block은 context-only로 각각 독립
+> center/scalar-RMS 정규화하고 padding을 제외한다.
+>
+> canonical class는 CovarianceSetTransformerRidgeModel v46 / STCVLPRidgeModel v47.
+> v62–v66 replay는 LegacyCovarianceSetTransformerRidgeModel v42 /
+> LegacySTCVLPRidgeModel v43을 쓴다. CovarianceOnlyRidgeModel은 historical control이다.
 
 > [!IMPORTANT]
 > **모델이 둘이다 (2026-08-10)**

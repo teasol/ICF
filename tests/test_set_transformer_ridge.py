@@ -29,6 +29,9 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from src.models.set_transformer_ridge import (  # noqa: E402
     CovarianceSetTransformerRidgeModel,
+    CovarianceMeanRidgeModel,
+    CovarianceOnlyRidgeModel,
+    STCVLPRidgeModel,
     SetTransformerRidgeModel,
 )
 
@@ -251,13 +254,34 @@ class SetTransformerRidgeTest(unittest.TestCase):
 
 
 class CovarianceSetTransformerRidgeTest(unittest.TestCase):
-    def _hybrid(self) -> CovarianceSetTransformerRidgeModel:
+    def _hybrid(self, **overrides) -> CovarianceSetTransformerRidgeModel:
         torch.manual_seed(0)
-        return CovarianceSetTransformerRidgeModel(
+        kwargs = dict(
             input_dim=INPUT_DIM, token_dim=32, num_heads=4, num_layers=2,
             feedforward_dim=48, num_summary_tokens=4, max_cells=64,
             covariance_sketch_dim=8, covariance_slopes=(0.07, 0.05),
-        ).eval()
+        )
+        kwargs.update(overrides)
+        return CovarianceSetTransformerRidgeModel(**kwargs).eval()
+
+    def test_centered_summary_is_invariant_to_per_bag_translation(self) -> None:
+        model = self._hybrid(center_cells=True)
+        x, _, _ = _episode()
+        shift = torch.randn(x.shape[0], 1, x.shape[-1]) * 7
+        torch.testing.assert_close(
+            model.encoder(x), model.encoder(x + shift), atol=2e-5, rtol=2e-5
+        )
+
+    def test_centered_summary_ignores_padded_values(self) -> None:
+        model = self._hybrid(center_cells=True)
+        x, _, _ = _episode(cells=12)
+        padded = torch.cat((x, torch.randn(x.shape[0], 7, INPUT_DIM) * 50), dim=1)
+        mask = torch.zeros(x.shape[0], padded.shape[1], dtype=torch.bool)
+        mask[:, : x.shape[1]] = True
+        torch.testing.assert_close(
+            model.encoder(x), model.encoder(padded, cell_mask=mask),
+            atol=1e-4, rtol=1e-4,
+        )
 
     def test_descriptor_dimensions_are_balanced_and_concatenated(self) -> None:
         model = self._hybrid()
@@ -265,7 +289,8 @@ class CovarianceSetTransformerRidgeTest(unittest.TestCase):
         descriptor = model._descriptors(x)
         self.assertEqual(model.summary_descriptor_dim, 4 * 32)
         self.assertEqual(model.covariance_descriptor_dim, 8 * 9 // 2)
-        self.assertEqual(descriptor.shape, (x.shape[0], 128 + 36))
+        self.assertEqual(model.mean_descriptor_dim, INPUT_DIM)
+        self.assertEqual(descriptor.shape, (x.shape[0], 128 + 36 + INPUT_DIM))
 
     def test_covariance_descriptor_is_exact_cv1_upper_triangle(self) -> None:
         model = self._hybrid()
@@ -283,11 +308,13 @@ class CovarianceSetTransformerRidgeTest(unittest.TestCase):
         context = torch.randn(7, model.descriptor_dim)
         query = torch.randn(2, model.descriptor_dim)
         normalized, _ = model._normalize_descriptors(context, query)
-        summary, covariance = normalized.split(
-            (model.summary_descriptor_dim, model.covariance_descriptor_dim), dim=-1
+        summary, covariance, mean = normalized.split(
+            (model.summary_descriptor_dim, model.covariance_descriptor_dim,
+             model.mean_descriptor_dim), dim=-1
         )
         self.assertAlmostEqual(float(summary.square().mean()), 1.0, places=5)
         self.assertAlmostEqual(float(covariance.square().mean()), 1.0, places=5)
+        self.assertAlmostEqual(float(mean.square().mean()), 1.0, places=5)
 
     def test_hybrid_gradient_reaches_encoder(self) -> None:
         model = self._hybrid().train()
@@ -297,5 +324,132 @@ class CovarianceSetTransformerRidgeTest(unittest.TestCase):
         self.assertTrue(all(torch.isfinite(p.grad).all() for p in model.encoder.parameters()))
 
 
+
+class MeanTokenSetTransformerTest(unittest.TestCase):
+    def test_one_summary_plus_mean_is_1024_at_full_width(self) -> None:
+        model = SetTransformerRidgeModel(
+            input_dim=INPUT_DIM, token_dim=512, num_heads=8, num_layers=1,
+            feedforward_dim=128, num_summary_tokens=1, max_cells=64,
+            center_cells=True, include_mean_token=True,
+        ).eval()
+        x, _, _ = _episode(cells=12)
+        descriptor = model._descriptors(x)
+        self.assertEqual(model.descriptor_dim, 1024)
+        self.assertEqual(descriptor.shape, (x.shape[0], 1024))
+
+    def test_mean_token_ignores_padding_and_cell_order(self) -> None:
+        model = _model(
+            num_summary_tokens=1, center_cells=True, include_mean_token=True
+        )
+        x, _, _ = _episode(cells=12)
+        reference = model.encoder(x)
+        permutation = torch.randperm(x.shape[1])
+        torch.testing.assert_close(
+            reference, model.encoder(x[:, permutation]), atol=1e-4, rtol=1e-4
+        )
+        padded = torch.cat((x, torch.randn(x.shape[0], 7, INPUT_DIM) * 50), dim=1)
+        mask = torch.zeros(x.shape[0], padded.shape[1], dtype=torch.bool)
+        mask[:, : x.shape[1]] = True
+        torch.testing.assert_close(
+            reference, model.encoder(padded, cell_mask=mask),
+            atol=1e-4, rtol=1e-4,
+        )
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class STCVLPRidgeTest(unittest.TestCase):
+    def _model(self) -> STCVLPRidgeModel:
+        torch.manual_seed(0)
+        return STCVLPRidgeModel(
+            input_dim=INPUT_DIM, token_dim=32, num_heads=4, num_layers=2,
+            feedforward_dim=48, num_summary_tokens=4, max_cells=64,
+            covariance_sketch_dim=8, covariance_slopes=(0.07, 0.05),
+            center_cells=True,
+        )
+
+    def test_three_branches_are_concatenated(self) -> None:
+        model = self._model().eval()
+        x, _, _ = _episode()
+        descriptor = model._descriptors(x)
+        self.assertEqual(model.summary_descriptor_dim, 128)
+        self.assertEqual(model.covariance_descriptor_dim, 36)
+        self.assertEqual(model.mean_descriptor_dim, INPUT_DIM)
+        self.assertEqual(model.lp_descriptor_dim, 36)
+        self.assertEqual(descriptor.shape, (x.shape[0], 200 + INPUT_DIM))
+
+    def test_lp_starts_equal_to_fixed_cv(self) -> None:
+        model = self._model().eval()
+        x, _, _ = _episode()
+        torch.testing.assert_close(
+            model._lp_descriptors(x), model._covariance_descriptors(x),
+            atol=2e-5, rtol=2e-5,
+        )
+
+    def test_lp_projection_is_learned_through_ridge(self) -> None:
+        model = self._model().train()
+        x, y, query = _episode()
+        torch.nn.functional.cross_entropy(model(x, y, query), y[query]).backward()
+        self.assertIsNotNone(model.lp_projection.grad)
+        self.assertTrue(torch.isfinite(model.lp_projection.grad).all())
+        self.assertGreater(float(model.lp_projection.grad.abs().max()), 0.0)
+
+    def test_all_three_blocks_are_normalized_independently(self) -> None:
+        model = self._model().eval()
+        context = torch.randn(7, model.descriptor_dim)
+        query = torch.randn(2, model.descriptor_dim)
+        normalized, _ = model._normalize_descriptors(context, query)
+        blocks = normalized.split(
+            (model.summary_descriptor_dim, model.covariance_descriptor_dim,
+             model.mean_descriptor_dim, model.lp_descriptor_dim), dim=-1
+        )
+        for block in blocks:
+            self.assertAlmostEqual(float(block.square().mean()), 1.0, places=5)
+
+class CovarianceMeanAblationTest(unittest.TestCase):
+    def _kwargs(self):
+        return dict(
+            input_dim=INPUT_DIM, token_dim=32, num_heads=4, num_layers=1,
+            feedforward_dim=48, num_summary_tokens=2, max_cells=64,
+            covariance_sketch_dim=8, covariance_slopes=(0.07, 0.05),
+        )
+
+    def test_cv_only_descriptor_has_no_st_tokens(self):
+        model = CovarianceOnlyRidgeModel(**self._kwargs()).eval()
+        x, _, _ = _episode(cells=12)
+        self.assertEqual(model._descriptors(x).shape, (x.shape[0], 36))
+
+    def test_mean_is_computed_before_bag_centering(self):
+        model = CovarianceMeanRidgeModel(**self._kwargs()).eval()
+        x, _, _ = _episode(cells=12)
+        shift = torch.randn(x.shape[0], 1, INPUT_DIM)
+        descriptor = model._descriptors(x)
+        shifted = model._descriptors(x + shift)
+        torch.testing.assert_close(
+            shifted[:, :36], descriptor[:, :36], atol=2e-5, rtol=2e-5
+        )
+        torch.testing.assert_close(
+            shifted[:, 36:] - descriptor[:, 36:], shift.squeeze(1),
+            atol=2e-5, rtol=2e-5,
+        )
+
+    def test_mean_ignores_padding(self):
+        model = CovarianceMeanRidgeModel(**self._kwargs()).eval()
+        x, _, _ = _episode(cells=12)
+        padded = torch.cat((x, torch.randn(x.shape[0], 7, INPUT_DIM) * 50), dim=1)
+        mask = torch.zeros(x.shape[0], padded.shape[1], dtype=torch.bool)
+        mask[:, :x.shape[1]] = True
+        torch.testing.assert_close(
+            model._descriptors(x), model._descriptors(padded, cell_mask=mask),
+            atol=1e-4, rtol=1e-4,
+        )
+
+    def test_cv_and_mean_blocks_are_normalized_independently(self):
+        model = CovarianceMeanRidgeModel(**self._kwargs()).eval()
+        context = torch.randn(7, model.descriptor_dim)
+        query = torch.randn(2, model.descriptor_dim)
+        normalized, _ = model._normalize_descriptors(context, query)
+        covariance, mean = normalized.split((36, INPUT_DIM), dim=-1)
+        self.assertAlmostEqual(float(covariance.square().mean()), 1.0, places=5)
+        self.assertAlmostEqual(float(mean.square().mean()), 1.0, places=5)

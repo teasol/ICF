@@ -1,10 +1,10 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-10` (§84 — cap-first v62 DDP4 재실행)
+**Last updated**: `2026-08-11` (§86 — v66 기각, canonical CV = covariance + raw bag mean)
 
-**한 줄**: cap-first `[256,8192]` power 2.0 데이터로 v62 Linear-16 + CV-1 K128 hybrid를 GPU 0–3에서 100 epoch 재학습 중이다(§84).
+**한 줄**: v66 4-pop은 기각했고, 앞으로 CV branch는 fixed K128 covariance에 중심화 전 raw bag mean을 항상 concat한다(§86).
 
-**Status**: **cap-first v62 hybrid DDP4 100-epoch 학습 진행 중.**
+**Status**: **CV+raw-mean 계약 구현·실험 완료; 다음 scalar/1-pop 학습 arm 결정 대기.**
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
   현행 최고 **v41_K128 = SEAL 10개 0.6940** (ABMIL 0.727에 −0.033).
@@ -25,9 +25,9 @@
 현행 아키텍처 명세는 [`current_architecture.md`](current_architecture.md),
 실험 절차·결과표·금지사항은 [`current_experiments.md`](current_experiments.md).
 
-**지금 돌아가는 것 (2026-08-10)**
+**지금 돌아가는 것 (2026-08-11)**
 
-**v62 cap-first**가 `logs/20260810_195208/`에서 GPU 0–3 DDP4로 실행 중이다. §84 참조.
+학습/평가 프로세스 없음. v66 및 v67 무학습 PathoBench/ICI 평가가 모두 완료됐고 다음 scalar/1-pop CV+mean 학습 arm 결정을 기다린다.
 
 결과 재확인:
 ```bash
@@ -42,10 +42,10 @@ done
 
 > **사용자 결정 (2026-08-05, 확정)**:
 > 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
-> 2. **ICI는 손대지 않습니다.** (잠금 유지)
+> 2. **ICI는 기본 잠금 유지.** §50과 §86은 사용자 명시 해제에 따른 예외 평가.
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§84 (v62 실행 상태; 최우선)**, **§83 (v61 평가 완료·판정)**, **§82 (factorized-response arm 완료 결과)**, **§72 (이번 세션 요약 — 어디로 갈지 §80)**, **§79 (계보 B 재설계 — 첫 판본이 내 설계 오류였다)**, **§73 (소스 prune — prune 이전 ckpt는 고정 worktree로만 채점 가능)**, **§74 (학습이 평가 경로를 타고 있었다 + 범인이 아니었던 것들)**, **§76·§77 (CV-2 손잡이 소진 — 더 파지 말 것)**, **§71 (판정 기준 = SEAL 10개 macro 평균)**, **§69 (label-free 사영 8종 전부 천장 / 합성 지표 불신)**, **§68 (CV-only가 baseline이 된 근거)**, **§67 (clipping 켜지 말 것)**, **§66 (CV-1 제거 불가)**.
+**Read first if you are picking this up**: **§86 (canonical CV+mean 계약/실험 결과)**, §85 (v62–v66), §71 (SEAL 판정), §73–§74 (호환성/학습 경로), §79 (generic 평가/YAML).
 
 > [!IMPORTANT]
 > **방법론 경고 3건 — 다음 arm 설계 전에 읽을 것**:
@@ -2981,3 +2981,127 @@ CV-1 covariance feature를 concat해 하나의 class-balanced closed-form ridge�
 - 시작 확인: GPU 0–3 utilization 95–96%, memory 37.9–39.5 GiB로 균형. first-step peak 18.45 GiB, epoch 0 정상 진행.
 
 완료 후 우선 periodic checkpoint의 SEAL 10-task macro 궤적으로 학습 진행이 실제 평가 성능을 높이는지 판정한다.
+
+
+## 85. 2026-08-11 — v62–v66 hybrid 결과, branch 명칭 확정, 4-pop DDP8 완료
+
+### 85-1. 명칭과 현행 구현 계약
+
+사용자 결정으로 앞으로 branch 이름을 다음처럼 고정한다.
+
+- **CV = Covariance Branch**: 종전 CV-1. fixed K128 projection 뒤 centered covariance
+  upper triangle **8,256차원**.
+- **ST = Set Transformer Branch**: cell self-attention 뒤 learned summary token descriptor.
+- **LP = Learnable P Branch**: CV와 별개의 learnable `P ∈ R^(1536×128)`로 만든 covariance
+  upper triangle. `STCVLPRidgeModel`에서 thin QR로 열 직교성을 유지한다.
+
+`BagTokenEncoder`에는 두 opt-in 기능이 생겼다.
+
+- `center_cells=True`: projection 전 masked in-bag mean 제거.
+- `include_mean_token=True`: Transformer를 통과하고 output-LN된 cell token의 masked mean을
+  learned summary token 뒤에 붙인다. centered raw input의 단순 평균이 아니다.
+
+모든 branch는 ridge 직전 **각자 독립적인 context-only center/scalar-RMS normalization**을
+거친 뒤 concat한다. padding은 mean/attention/covariance 어디에도 들어가면 안 된다.
+관련 `unittest` **27개 통과**.
+
+### 85-2. v62 학습 길이와 SEAL 10-task 궤적
+
+v62 cap-first DDP4 100 epochs 및 10개 periodic checkpoint 평가가 전부 완료됐다.
+
+| epoch | 10-task macro |
+|---:|---:|
+| 10 | 0.6640 |
+| 20 | 0.6577 |
+| 30 | 0.6584 |
+| 40 | 0.6608 |
+| 50 | 0.6691 |
+| 60 | 0.6577 |
+| 70 | 0.6704 |
+| **80** | **0.6753** |
+| 90 | 0.6722 |
+| 100 | 0.6723 |
+
+후반 70–100이 초반보다 높아 ST 학습 효과는 실재하지만 단조롭지 않다. 개발용 best는
+`periodic-epoch=079-val_ce_loss=0.1742.ckpt`의 **0.6753**이고, 동일 10-task에서 checkpoint를
+고른 선택 편향 때문에 보수적 final은 e100 **0.6723**으로 보고한다. v60 0.6090 대비 +0.0663,
+v61 0.6157 대비 +0.0596이나 현행 최고 v41 CV-only 0.6940에는 -0.0187이다.
+
+### 85-3. v63–v65 결과
+
+| arm | 변경 | 평가 checkpoint | SEAL 10-task macro | 판정 |
+|---|---|---:|---:|---|
+| v63 | v62 ST 입력에 in-bag centering | e100 | 0.6719 | v62 e100과 사실상 동률(-0.0004) |
+| v64 | ST + CV + LP | e70 | 0.6637 | LP 채택 근거 없음 |
+| v65 | ST를 summary 1 + transformed-cell mean 1 = 1,024차원으로 축소 | e80 | 0.6653 | 8,192차원 ST 대체 실패 |
+
+v63은 e10 0.6636 → e100 0.6719로 +0.0083(8/10 task 상승)하여 학습 효과를 재확인했지만
+centering 자체의 macro 이득은 없었다. v64 LP는 CV와 같은 basis에서 시작해 중복 covariance가
+ridge regularization을 바꾸는 교란이 있으며 e70 기준 v63 e100보다 -0.0082다. v65 compact ST는
+v64보다 +0.0016이나 v62 best보다 -0.0100이다. v64/v65 모두 100 epochs 정상 완료했지만 공식
+10-task 평가는 각각 e70/e80만 수행했다.
+
+### 85-4. v66: v62 + scalar response의 4 populations
+
+v62의 모델·orthogonal manifold·bag 분포를 그대로 두고
+`responsive_population_count: 1 → 4`만 변경했다. `response_dim=1`,
+`label_rule=single`이라 네 population은 같은 binary response를 공유하되 독립 mask/direction을
+쓴다. config는 `configs/train_v66_v62_4pop_1536.yaml`.
+
+- 실행: `logs/20260811_010448/v66_v62_4pop_ddp8_e50.out`
+- checkpoint: `checkpoints/20260811_010448/v66_v62_4pop_ddp8_e50/`
+- GPU 0–7 DDP8, 50 epochs, epoch당 128 optimizer steps, 총 **6,400 updates**.
+- **2026-08-11 01:21:03 정상 완료**, `max_epochs=50 reached`.
+- final periodic: `periodic-epoch=049-val_ce_loss=0.2341.ckpt`.
+- validation best: `epoch=048-val_ce_loss=0.2338.ckpt`.
+- first-step peak allocated 19.72 GiB/GPU. OOM/NaN/traceback 없음.
+
+### 85-5. 다음
+
+1. **v66 e50 공식 SEAL 10-task 평가**가 최우선. 현재 학습은 끝났고 GPU 0–7은 비어 있다.
+2. 최종 checkpoint 비교가 필요하면 v64 e100, v65 e100도 평가하되, 이미 e70/e80에서 v62보다
+   낮으므로 우선순위는 v66보다 낮다.
+3. 현재 실험계 최고는 v62 e80 0.6753, 보수적 v62 e100 0.6723이며 프로젝트 전체 최고는
+   여전히 v41 CV-only 0.6940이다.
+
+## 86. 2026-08-11 — v66 기각 + CV의 raw bag-mean 승격
+
+### 86-1. v66 공식 판정
+
+v66 e50 final periodic checkpoint의 공식 SEAL 10-task macro는 **0.6548**였다. 모든 task가
+rc=0으로 완료됐고 OOM/NaN/traceback은 없었다. v62 e50 0.6691 대비 **−0.0143**,
+v62 e100 0.6723 대비 −0.0175, v41 0.6940 대비 −0.0392다. 따라서
+responsive_population_count 4는 기각하고 합성 생성기는 **scalar response + 1 population +
+single label rule**을 유지한다.
+
+### 86-2. 무학습 CV-only 대 CV+raw-mean
+
+현재 hybrid의 고정 P covariance feature에 중심화 전 raw bag mean을 concat하는 무료 arm을
+동일한 초기 ridge(lambda=1, scale=2)로 비교했다. encoder 학습은 없고 매 fold에서
+class-balanced closed-form dual ridge만 다시 풀었다.
+
+- PathoBench SEAL 10-task: CV-only **0.6630** → CV+mean **0.6667** (**+0.0037**),
+  6/10 task 상승. 가장 큰 변화는 ccrcc BAP1 +0.0278, er_status −0.0089.
+- ICI는 원래 잠금을 이번 사용자 요청으로 명시 해제했다. 전체 donor cell, bf16,
+  5 seeds × 5 folds, P shape **512×128**.
+- ICI across-seed mean: **0.5381±0.0177 → 0.5449±0.0180 (+0.0068)**.
+  다섯 seed 모두 +0.0049~+0.0097.
+- ICI seed-averaged donor AUROC: **0.5357 [0.414,0.657] →
+  0.5476 [0.427,0.669] (+0.0119)**. 둘 다 0.5를 포함하므로 ICI 자체는 여전히 랜덤 수준이다.
+
+### 86-3. 확정 계약과 호환성
+
+사용자 결정: 앞으로 **CV branch는 fixed-projection centered covariance upper triangle에
+중심화 전 raw bag mean을 항상 concat한 feature**다. K128/1536-d 입력에서
+8,256 + 1,536 = **9,792차원**; ICI 512-d에서는 8,256 + 512 = **8,768차원**이다.
+covariance와 mean은 ridge 직전 context-only center/scalar-RMS로 각각 독립 정규화하며,
+padding은 두 통계에서 모두 제외한다.
+
+canonical CovarianceSetTransformerRidgeModel은 architecture v46,
+canonical STCVLPRidgeModel은 v47로 올렸다. v62–v66 checkpoint를 새 의미로 조용히 읽지
+않도록 과거 config는 LegacyCovarianceSetTransformerRidgeModel(v42) /
+LegacySTCVLPRidgeModel(v43)에 고정했다. CovarianceOnlyRidgeModel은 historical ablation
+control일 뿐, 새 모델에서 CV의 의미가 아니다.
+
+검증: 관련 31 tests 및 기본 suite **129 tests 통과**. 변경 대상 config 15개 해석 성공. 전체 archive config 감사는 이번 변경과 무관한 v18/v19 누락 data fragment 10건으로 실패했다. 다음 학습 arm은 scalar/1-pop 데이터와
+canonical CV+mean을 사용한다.

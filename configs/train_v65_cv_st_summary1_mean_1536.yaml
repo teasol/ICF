@@ -1,7 +1,8 @@
-# v62: orthogonal linear manifold + 16-token Set Transformer + K128 CV-1.
+# v65: CV + compact ST with one learned summary token and one mean token.
+# ST is 512 summary + 512 transformed-cell masked mean; fixed CV remains K128.
 #
-# One class-balanced closed-form ridge reads a 16,448-d concatenated descriptor:
-# summary 16x512=8,192 and CV-1 upper-triangle covariance 128x129/2=8,256.
+# One class-balanced closed-form ridge reads a 9,280-d concatenated descriptor:
+# ST 1,024 + CV 8,256.
 # The two blocks use independent context-only center/RMS normalization. CV-2 is absent.
 # DDP4, 100 epochs, with permanent checkpoints every 10 epochs plus best-3/last.
 seed: 42
@@ -32,7 +33,7 @@ trainer_overrides:
 
 logger: default
 logger_overrides:
-  experiment_name: v62_linear16_cv1_k128
+  experiment_name: v65_cv_st_summary1_mean
 
 callbacks:
   checkpoint:
@@ -52,10 +53,15 @@ callbacks:
     enabled: true
     logging_interval: epoch
 
+model_overrides:
+  center_cells: true
+  num_summary_tokens: 1
+  include_mean_token: true
+
 model_kwargs:
   training_targets_per_episode: [5, 12]
   ranking_loss_weight: 0.10
   routing_sparsity_weight: 0.0
   routing_balance_weight: 0.0
   nonfinite_gradient_policy: zero
-  # Hybrid dimensions: summary 16x512=8192; covariance K128 triangle=8256.
+  # Dimensions: ST (1 summary + 1 mean) x512=1024; CV K128=8256.
