@@ -69,6 +69,8 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 | SEAL ABMIL (지도학습) | — | **0.727** | 비교 상대 |
 | SEAL MeanMIL (지도학습) | — | 0.713 | |
 | **v41_K128** | A | **0.6940** | **현행 최고**. K=128, CV-2=128, `a=0.85π/K` |
+| **v76 learnable P** | relation | **0.6748** | **활성 baseline**. v74 +0.0017, 6/10 상승 |
+| v74 fixed P + DD + CT | relation | 0.6731 | v76 control |
 | v45_paired | A | 0.6937 | paired_head + rank 4. 동률(−0.0003) |
 | v42_rank2 | A | 0.6944 | 동률 |
 | v42_rank4 | A | 0.6932 | 동률 |

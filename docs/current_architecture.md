@@ -1,5 +1,12 @@
 # Current architecture — 두 계보 (2026-08-11)
 
+> [!IMPORTANT]
+> **활성 실험 baseline은 v76** (`CovarianceMeanLearnablePDDCTMLPModel`)이다.
+> centered cells를 learnable orthogonal P(1536×128)에 사영해 만든 covariance를 CV와 DD가
+> 공유하고, CT와 함께 12개 relation feature를 만들어 12→32→1 MLP가 읽는다.
+> 학습 파라미터는 P 196,608개 + head 449개 = **197,057개**다. P는 CV ridge 경로로만
+> 학습되며 DD/CT는 training-free다. 아래 A/B는 이 경로의 역사적 구성요소와 비교 계보다.
+
 리포에 **서로 독립인 모델 2개**가 있다. 공유하는 코드는 ridge 솔버
 (`solve_ridge_system`) 하나뿐이다.
 

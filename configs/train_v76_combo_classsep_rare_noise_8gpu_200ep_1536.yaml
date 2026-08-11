@@ -1,0 +1,8 @@
+# Resume-compatible 200-epoch extension of the 8-GPU combo arm.
+base_config: train_v76_combo_classsep_rare_noise_8gpu_1536.yaml
+
+trainer_overrides:
+  max_epochs: 200
+
+logger_overrides:
+  experiment_name: v76_combo_classsep_rare_noise_8gpu_200ep

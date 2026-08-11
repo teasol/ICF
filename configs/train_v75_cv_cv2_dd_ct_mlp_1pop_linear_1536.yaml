@@ -1,0 +1,8 @@
+# v75 — active v74 plus the exact v41 rank-1 CV-2 learned relation branch.
+# Trainable: CV-2 4->32->2 head and terminal 16->32->1 head (803 parameters).
+base_config: train_v74_cv_dd_ct_mlp_1pop_linear_1536.yaml
+
+model: covariance_mean_cv2_dd_ct_mlp
+
+logger_overrides:
+  experiment_name: v75_cv_cv2_dd_ct_mlp_1pop_linear

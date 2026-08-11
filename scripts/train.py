@@ -75,7 +75,7 @@ def main() -> None:
             raise ValueError("Use only one of init_checkpoint and ckpt_path.")
         missing, _ = initialize_model_weights(model, init_checkpoint)
         new_tensor_count = sum(
-            key.startswith("model.meta_classifier.ccer_v2_") for key in missing
+            key != "model._architecture_version" for key in missing
         )
         print(
             f"Initialized weights from {init_checkpoint}; "

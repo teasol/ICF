@@ -979,6 +979,8 @@ class CovarianceMeanDDCTMLPModel(CovarianceMeanDDRidgeModel):
         cv_separation = (
             (cv_prototypes[1] - cv_prototypes[0]).square().mean().sqrt()
         )
+        # DD reads covariance produced by the current projection P, but remains
+        # training-free: P is optimized only through the CV ridge path.
         with torch.no_grad(), torch.autocast(
             device_type=context.device.type, enabled=False
         ):
@@ -1065,6 +1067,325 @@ class CovarianceMeanDDCTMLPModel(CovarianceMeanDDRidgeModel):
         if not return_auxiliary:
             return logits
         return logits, {"bag_descriptors": descriptors}
+
+
+class CovarianceMeanLearnablePDDCTMLPModel(CovarianceMeanDDCTMLPModel):
+    """v76: v74 with one learnable projection shared by CV and DD."""
+
+    architecture_version = 54
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        initial_projection = self._buffers.pop("_covariance_projection")
+        self._covariance_projection = nn.Parameter(initial_projection.clone())
+        self._architecture_version.fill_(self.architecture_version)
+
+    def _effective_covariance_projection(self):
+        # Learn the K-dimensional subspace without introducing arbitrary scale
+        # or conditioning changes into covariance magnitudes.
+        return torch.linalg.qr(
+            self._covariance_projection.float(), mode="reduced"
+        ).Q
+
+    def _covariance_descriptors(
+        self, cells: torch.Tensor, cell_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        values = cells.float()
+        if cell_mask is None:
+            centered = values - values.mean(dim=-2, keepdim=True)
+            count: int | torch.Tensor = values.shape[-2]
+        else:
+            count_tensor = cell_mask.sum(dim=-1, keepdim=True).clamp_min(1).float()
+            masked = values.masked_fill(~cell_mask.unsqueeze(-1), 0.0)
+            mean = masked.sum(dim=-2, keepdim=True) / count_tensor.unsqueeze(-1)
+            centered = (masked - mean).masked_fill(~cell_mask.unsqueeze(-1), 0.0)
+            count = count_tensor
+        projected = centered @ self._effective_covariance_projection()
+        covariance = projected.transpose(-1, -2) @ projected
+        if isinstance(count, int):
+            covariance = covariance / count
+        else:
+            covariance = covariance / count.unsqueeze(-1)
+        row, column = self._covariance_triangle
+        return covariance[..., row, column].to(cells.dtype)
+
+
+class PopulationTokenResidualModel(CovarianceMeanLearnablePDDCTMLPModel):
+    """v77: frozen v76 plus a label-symmetric population-token residual."""
+
+    architecture_version = 55
+    init_checkpoint_new_parameter_prefixes = (
+        "population_relation_head.",
+        "population_residual_gate",
+    )
+
+    def __init__(self, *args, population_hidden_dim=32, **kwargs):
+        super().__init__(*args, **kwargs)
+        if population_hidden_dim < 1:
+            raise ValueError("population_hidden_dim must be positive.")
+        for parameter in self.parameters():
+            parameter.requires_grad_(False)
+        self.population_relation_head = nn.Sequential(
+            nn.Linear(3, int(population_hidden_dim)),
+            nn.GELU(),
+            nn.Linear(int(population_hidden_dim), 1),
+        )
+        # Exact v76 output at initialization. The gate learns first, then
+        # propagates gradient into the shared relation head.
+        self.population_residual_gate = nn.Parameter(torch.zeros(()))
+        self._architecture_version.fill_(self.architecture_version)
+
+    def _population_bag_statistics(self, context_bags, query_bags):
+        sampled_context = [self._ct_sample_bag(bag) for bag in context_bags]
+        sampled_query = [self._ct_sample_bag(bag) for bag in query_bags]
+        pooled = torch.cat(sampled_context, dim=0)
+        center = pooled.mean(dim=0, keepdim=True)
+        scale = (pooled - center).square().mean(dim=0, keepdim=True).sqrt()
+        scale = scale.clamp_min(self.ct_eps)
+        context = [(bag.float() - center) / scale for bag in sampled_context]
+        query = [(bag.float() - center) / scale for bag in sampled_query]
+        pooled = torch.cat(context, dim=0)
+
+        token_count = min(self.ct_num_tokens, pooled.shape[0])
+        first = (
+            (pooled - pooled.mean(dim=0, keepdim=True))
+            .square().mean(dim=1).argmin()
+        )
+        selected = [first]
+        minimum_distance = (pooled - pooled[first]).square().mean(dim=1)
+        for _ in range(1, token_count):
+            index = minimum_distance.argmax()
+            selected.append(index)
+            distance = (pooled - pooled[index]).square().mean(dim=1)
+            minimum_distance = torch.minimum(minimum_distance, distance)
+        tokens = pooled[torch.stack(selected)]
+
+        def statistics(bags):
+            outputs = []
+            for bag in bags:
+                distance = (bag[:, None, :] - tokens[None, :, :]).square().mean(dim=-1)
+                assignment = (-distance / self.ct_temperature).softmax(dim=-1)
+                abundance = assignment.mean(dim=0)
+                mass = assignment.sum(dim=0).clamp_min(self.ct_eps)
+                distance_mean = (assignment * distance).sum(dim=0) / mass
+                distance_variance = (
+                    assignment * (distance - distance_mean).square()
+                ).sum(dim=0) / mass
+                outputs.append(torch.stack(
+                    (abundance, distance_mean, distance_variance), dim=-1
+                ))
+            return torch.stack(outputs)
+
+        return statistics(context), statistics(query)
+
+    def _population_residual_margin(
+        self, context_bags, context_labels, query_bags
+    ):
+        labels = context_labels.long()
+        with torch.no_grad(), torch.autocast(
+            device_type=context_bags[0].device.type, enabled=False
+        ):
+            context, query = self._population_bag_statistics(
+                context_bags, query_bags
+            )
+            center = context.mean(dim=0, keepdim=True)
+            scale = (context - center).square().mean(dim=0, keepdim=True).sqrt()
+            scale = scale.clamp_min(self.ct_eps)
+            context = (context - center) / scale
+            query = (query - center) / scale
+            prototypes = torch.stack([
+                context[labels == class_index].mean(dim=0)
+                for class_index in range(2)
+            ])
+            distance = (
+                query[:, None, :, :] - prototypes[None, :, :, :]
+            ).square().mean(dim=-1)
+            separation = (
+                prototypes[1] - prototypes[0]
+            ).square().mean(dim=-1).sqrt()
+            d0, d1 = distance.unbind(dim=1)
+            separation = separation.unsqueeze(0).expand_as(d0)
+            forward_features = torch.stack((d0, d1, separation), dim=-1)
+            reverse_features = torch.stack((d1, d0, separation), dim=-1)
+        token_margin = (
+            self.population_relation_head(forward_features).squeeze(-1)
+            - self.population_relation_head(reverse_features).squeeze(-1)
+        )
+        return token_margin.mean(dim=-1)
+
+    def _relation_logits(
+        self, context, context_labels, query, context_bags, query_bags
+    ):
+        baseline = super()._relation_logits(
+            context, context_labels, query, context_bags, query_bags
+        )
+        residual_margin = self._population_residual_margin(
+            context_bags, context_labels, query_bags
+        )
+        margin = self.population_residual_gate * residual_margin
+        residual = torch.stack((-0.5 * margin, 0.5 * margin), dim=-1)
+        return baseline + residual
+
+
+class CovarianceMeanCV2DDCTMLPModel(CovarianceMeanDDCTMLPModel):
+    """v74 plus the exact v41 rank-1 CV-2 learned relation branch."""
+
+    architecture_version = 53
+
+    def __init__(
+        self,
+        *args,
+        cv2_shrinkage=0.25,
+        cv2_eps=1e-6,
+        cv2_head_hidden_dim=32,
+        relation_head_hidden_dim=32,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        if not 0.0 <= cv2_shrinkage < 1.0:
+            raise ValueError("cv2_shrinkage must be in [0, 1).")
+        if cv2_eps <= 0.0:
+            raise ValueError("cv2_eps must be positive.")
+        if cv2_head_hidden_dim < 1 or relation_head_hidden_dim < 1:
+            raise ValueError("CV-2 and relation hidden dimensions must be positive.")
+        self.cv2_shrinkage = float(cv2_shrinkage)
+        self.cv2_eps = float(cv2_eps)
+
+        # Replace v74's 12-d head. CV/DD/CT remain frozen; v41 CV-2's learned
+        # 4->32->2 head and the new 16-d terminal head are the only parameters.
+        del self.cv_dd_ct_head
+        for parameter in self.parameters():
+            parameter.requires_grad_(False)
+        self.cv2_relation_head = nn.Sequential(
+            nn.Linear(4, int(cv2_head_hidden_dim)),
+            nn.GELU(),
+            nn.Linear(int(cv2_head_hidden_dim), 2),
+        )
+        self.cv_cv2_dd_ct_head = nn.Sequential(
+            nn.Linear(16, int(relation_head_hidden_dim)),
+            nn.GELU(),
+            nn.Linear(int(relation_head_hidden_dim), 1),
+        )
+        self._architecture_version.fill_(self.architecture_version)
+
+    def _cv2_relation_features(
+        self, context_covariance, context_labels, query_covariance
+    ):
+        """v41 CV-2: rank-1 whitened log-variance prototype features."""
+        labels = context_labels.long()
+        class_means = []
+        for class_index in range(2):
+            members = context_covariance[labels == class_index].float()
+            if members.numel() == 0:
+                raise ValueError("Every class must occur in context covariance.")
+            class_means.append(members.mean(dim=0))
+        delta = class_means[1] - class_means[0]
+        pooled = context_covariance.float().mean(dim=0)
+        trace_scale = pooled.diagonal().mean().clamp_min(self.cv2_eps)
+        identity = torch.eye(
+            pooled.shape[-1], device=pooled.device, dtype=pooled.dtype
+        )
+        pooled = (
+            (1.0 - self.cv2_shrinkage) * pooled
+            + self.cv2_shrinkage * trace_scale * identity
+        )
+        values, vectors = torch.linalg.eigh(pooled)
+        safe_values = values.clamp_min(1e-5)
+        whitening = (vectors * safe_values.rsqrt().unsqueeze(0)) @ vectors.T
+        operator = whitening @ delta @ whitening
+        if torch.isnan(operator).any():
+            whitening = identity
+            operator = delta
+        eigenvalues, eigenvectors = torch.linalg.eigh(operator)
+        selected = eigenvalues.abs().topk(1).indices
+        filters = whitening @ eigenvectors[:, selected]
+        context_variance = torch.einsum(
+            "di,bdk,ki->bi", filters, context_covariance.float(), filters
+        ).clamp_min(self.cv2_eps)
+        query_variance = torch.einsum(
+            "di,qdk,ki->qi", filters, query_covariance.float(), filters
+        ).clamp_min(self.cv2_eps)
+        context_feature = context_variance.log()
+        query_feature = query_variance.log()
+
+        center = context_feature.mean(dim=-2, keepdim=True)
+        scale = torch.sqrt(
+            (context_feature - center).square().mean(dim=(-2, -1), keepdim=True)
+            + self.cv2_eps
+        )
+        context_z = (context_feature - center) / scale
+        query_z = (query_feature - center) / scale
+        prototypes = torch.stack(
+            [context_z[labels == class_index].mean(dim=0) for class_index in range(2)]
+        )
+        separation = (prototypes[1] - prototypes[0]).square().mean().sqrt()
+        dispersions = torch.stack(
+            [
+                (context_z[labels == class_index] - prototypes[class_index])
+                .square()
+                .mean(dim=-1)
+                .mean()
+                .clamp_min(self.cv2_eps)
+                for class_index in range(2)
+            ]
+        )
+        distances = (
+            query_z[:, None, :] - prototypes[None, :, :]
+        ).square().mean(dim=-1)
+        d0 = distances[:, 0] / dispersions[0]
+        d1 = distances[:, 1] / dispersions[1]
+        return torch.stack(
+            (d0, d1, d0 - d1, separation.expand_as(d0)), dim=-1
+        ), separation
+
+    def _cv2_logits(self, relation_features):
+        class_scores = self.cv2_relation_head(relation_features)
+        margin = torch.tanh(class_scores[:, 1] - class_scores[:, 0])
+        return torch.stack((-0.5 * margin, 0.5 * margin), dim=-1)
+
+    def _relation_logits(
+        self, context, context_labels, query, context_bags, query_bags
+    ):
+        cv_logits = CovarianceMeanRidgeModel._ridge_logits(
+            self, context, context_labels, query
+        )
+        normalized_context, _ = self._normalize_descriptors(context, query)
+        labels = context_labels.long()
+        cv_prototypes = torch.stack(
+            [normalized_context[labels == class_index].mean(dim=0) for class_index in range(2)]
+        )
+        cv_separation = (
+            (cv_prototypes[1] - cv_prototypes[0]).square().mean().sqrt()
+        )
+        with torch.no_grad(), torch.autocast(
+            device_type=context.device.type, enabled=False
+        ):
+            context_covariance = self._covariance_matrices_from_triangle(context)
+            query_covariance = self._covariance_matrices_from_triangle(query)
+            cv2_features, cv2_separation = self._cv2_relation_features(
+                context_covariance, context_labels, query_covariance
+            )
+            distances, dd_separation = self._dd_distance_features(
+                context_covariance, context_labels, query_covariance
+            )
+            q0, q1, ct_separation = self._ct_features(
+                context_bags, context_labels, query_bags
+            )
+        cv2_logits = self._cv2_logits(cv2_features)
+        cv0, cv1 = cv_logits.float().unbind(dim=-1)
+        cv20, cv21 = cv2_logits.float().unbind(dim=-1)
+        d0, d1 = distances.float().unbind(dim=-1)
+        features = torch.stack(
+            (
+                cv0, cv1, cv1 - cv0, cv_separation.float().expand_as(cv0),
+                cv20, cv21, cv21 - cv20, cv2_separation.float().expand_as(cv0),
+                d0, d1, d1 - d0, dd_separation.float().expand_as(cv0),
+                q0, q1, q0 - q1, ct_separation.float().expand_as(cv0),
+            ),
+            dim=-1,
+        )
+        margin = self.cv_cv2_dd_ct_head(features).squeeze(-1)
+        return torch.stack((-0.5 * margin, 0.5 * margin), dim=-1)
 
 
 class CovarianceMeanDDMagnitudeMLPModel(CovarianceMeanDDRidgeModel):

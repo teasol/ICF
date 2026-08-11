@@ -414,10 +414,16 @@ def initialize_model_weights(
     incompatible = model.load_state_dict(compatible_state, strict=False)
     missing = list(incompatible.missing_keys)
     unexpected = list(incompatible.unexpected_keys)
+    declared_prefixes = tuple(
+        f"model.{prefix}"
+        for prefix in getattr(
+            model.model, "init_checkpoint_new_parameter_prefixes", ()
+        )
+    )
     allowed_missing = {
-        key
-        for key in missing
+        key for key in missing
         if key == "model._architecture_version"
+        or any(key.startswith(prefix) for prefix in declared_prefixes)
     }
     disallowed_missing = sorted(set(missing) - allowed_missing)
     if disallowed_missing or unexpected:

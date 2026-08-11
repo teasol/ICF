@@ -1,0 +1,9 @@
+# Class-separation difficulty sweep: lower-separation stress test.
+base_config: train_v76_cv_learnable_p_dd_ct_mlp_1pop_linear_1536.yaml
+
+data_overrides:
+  dataset_kwargs:
+    class_separation: [0.1, 0.5]
+
+logger_overrides:
+  experiment_name: v76_classsep_veryhard

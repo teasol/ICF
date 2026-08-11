@@ -1,0 +1,18 @@
+# Combined difficulty arm selected from the one-axis sweep.
+# Keep the original strong response family; change only the three axes that
+# individually improved SEAL transfer: class separation, rarity, and noise.
+base_config: train_v76_cv_learnable_p_dd_ct_mlp_1pop_linear_1536.yaml
+
+data_overrides:
+  dataset_kwargs:
+    class_separation: [0.5, 1.4]
+    rare_response_probability: 0.15
+    rare_response_fraction: [0.02, 0.08]
+    observation_noise: 0.01
+
+trainer_overrides:
+  devices: 8
+  strategy: ddp_find_unused_parameters_false
+
+logger_overrides:
+  experiment_name: v76_combo_classsep_rare_noise_8gpu

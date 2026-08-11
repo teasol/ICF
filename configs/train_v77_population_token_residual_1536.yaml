@@ -1,0 +1,9 @@
+# v77 — frozen v76 plus a label-symmetric 16-token population residual.
+# Warm-start P and the 12->32->1 baseline head from the promoted v76 checkpoint.
+base_config: train_v76_cv_learnable_p_dd_ct_mlp_1pop_linear_1536.yaml
+
+model: population_token_residual
+init_checkpoint: checkpoints/20260811_200356/v76_cv_learnable_p_dd_ct_mlp_1pop_linear/epoch=046-val_ce_loss=0.1201.ckpt
+
+logger_overrides:
+  experiment_name: v77_population_token_residual

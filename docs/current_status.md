@@ -1,11 +1,10 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-11` (§88 — v74 CV+DD+CT를 활성 baseline으로 확정)
+**Last updated**: `2026-08-12` (§90 — v77와 synthetic 난이도 축 실험, ClassSep sweep 진행 중)
 
-**한 줄**: support-selected Composition Token을 v70에 추가한 v74가 SEAL 10-task
-0.6731로 v70보다 +0.0016, 6/10 task 상승하여 앞으로의 활성 baseline이 됐다(§88).
+**한 줄**: v77 population-token residual은 동률로 기각했고, ClassSep Medium `[0.5,1.4]`가 SEAL 0.6823으로 후보 최고다. 더 넓은 ClassSep sweep이 진행 중이다(§90).
 
-**Status**: **v74 CV+DD+CT+MLP 확정 baseline. 학습·공식 평가·테스트 완료, 실행 작업 없음.**
+**Status**: **활성 baseline은 v76(0.6748), 최고 난이도 후보는 ClassSep Medium(0.6823). Mild/Hard/Very-hard sweep 진행 중.**
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
   현행 최고 **v41_K128 = SEAL 10개 0.6940** (ABMIL 0.727에 −0.033).
@@ -26,7 +25,7 @@
 현행 아키텍처 명세는 [`current_architecture.md`](current_architecture.md),
 실험 절차·결과표·금지사항은 [`current_experiments.md`](current_experiments.md).
 
-**지금 돌아가는 것 (2026-08-11)**: 없음. v74 학습과 공식 10-task 평가까지 완료했다.
+**지금 돌아가는 것 (2026-08-12)**: `scripts/run_v76_classsep_sweep.py`가 GPU 0–3에서 Mild → Hard → Very-hard를 순차 학습·평가 중이다. 08:24 기준 Mild epoch 19 artifact와 worker 4개 생존을 확인했다.
 
 결과 재확인:
 ```bash
@@ -44,7 +43,8 @@ done
 > 2. **ICI는 기본 잠금 유지.** §50과 §86은 사용자 명시 해제에 따른 예외 평가.
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§88 (v74 baseline/CT/v71–v74 판정)**,
+**Read first if you are picking this up**: **§90 (v77·난이도 축 결과와 active ClassSep sweep)**, §89 (v76 learnable P 승격/학습 경계),
+§88 (v74 baseline/CT/v71–v74 판정),
 §87 (DD/v70/synthetic 일반화),
 §86 (canonical CV+mean 계약), §85 (v62–v66), §71 (SEAL 판정), §73–§74
 (호환성/학습 경로), §79 (generic 평가/YAML).
@@ -3217,3 +3217,70 @@ v74가 6/10 task에서 상승했고 가장 큰 개선은 BAP1 +0.0147이다. 개
 - eval tag: `v74_ct_e49`
 - 검증: 관련 37 tests, 전체 **135 tests** 통과.
 - 다음: 새 arm은 v74에서 한 요소만 바꾸며, 공식 10-task macro와 v74 task별 결과로 판정한다.
+
+## 89. 2026-08-11 — v76 learnable P를 활성 baseline으로 승격
+
+v74의 `CV+DD+CT -> 12→32→1 MLP`를 유지하고, CV와 DD covariance 전 단계의
+공유 projection `P ∈ R^(1536×128)`만 learnable parameter로 바꿨다. P는 v74 fixed
+basis에서 시작하고 매 forward thin QR로 직교화한다. **P는 CV ridge 경로로만 학습**하며,
+DD는 현재 P로 만든 covariance를 읽지만 DD→P gradient는 차단한다. CT는 그대로 frozen이다.
+
+학습되는 것은 정확히 두 부분이다.
+
+- `_covariance_projection`: 1536×128 = **196,608 parameters**
+- terminal relation MLP `12→32→1`: **449 parameters**
+- 합계 **197,057 trainable parameters**
+
+closed-form ridge의 episode-local 회귀계수, DD generalized direction/distance, CT token
+selection/abundance에는 optimizer parameter가 없다. gradient는 ridge solve를 통과해 P에
+도달한다. DD는 업데이트된 P의 covariance를 매번 다시 읽지만 자체 학습되지는 않는다.
+CT feature는 raw 1536-d cells에서 독립 계산되어 P와 무관하고, CT 자체도 학습되지 않는다.
+
+best checkpoint는
+`checkpoints/20260811_200356/v76_cv_learnable_p_dd_ct_mlp_1pop_linear/epoch=046-val_ce_loss=0.1201.ckpt`.
+공식 SEAL 10-task macro **0.6748**, v74 0.6731 대비 **+0.0017**, 6/10 task 상승으로
+사용자 결정에 따라 활성 baseline으로 승격한다. task 변화는 er −0.0329, grade +0.0221,
+HER2 +0.0080, PIK3CA +0.0291, BRCA TP53 +0.0018, EGFR +0.0319, STK11 −0.0077,
+LUAD TP53 +0.0124, BAP1 −0.0414, VHL −0.0060이다. seed 반복 전 강한 우월성 주장은 하지 않는다.
+
+P 이동은 작지 않았다: raw relative Frobenius 0.479, projector relative Frobenius 0.614,
+principal angle 평균 25.5°/최대 33.7°. QR은 subspace 이동을 막지 않고 scale/shear만 제한한다.
+
+## 90. 2026-08-12 — v77 기각, synthetic 난이도 축 분해, ClassSep sweep 진행 중
+
+### 90-1. v77 population-token residual
+
+v77은 frozen v76 위에 16개 population token별 abundance·거리 평균·거리 분산을 만들고,
+class prototype까지의 대칭 거리 features를 `3→32→1` shared MLP로 읽는다. zero-init scalar
+gate로 v76 출력을 exact warm-start하며 학습 파라미터는 MLP 161개 + gate 1개 = **162개**다.
+gate는 e14 0.0161 → e50 0.0649로 열렸지만 SEAL macro는 e14 **0.6748**, e49 **0.6750**으로
+v76 0.6748과 동률이었다. token 평균 희석과 CT 중복으로 판단해 **승격하지 않는다**.
+
+### 90-2. Full Medium과 단독 난이도 축
+
+과거 Medium의 ClassSep/response strength/rare/noise를 모두 적용하면 합성 val CE는
+0.1201 → 0.4118로 어려워졌지만 SEAL은 e30 **0.6604**, e49 **0.6635**로 하락했다.
+한 번에 한 축만 Medium으로 바꿔 4-GPU/50 epochs 후 validation-best를 평가한 결과는 다음과 같다.
+
+| arm | 변경 | best val CE | SEAL macro | Δ vs v76 |
+|---|---|---:|---:|---:|
+| v76 | 없음 | 0.1201 | 0.6748 | — |
+| ClassSep | `[1.0,2.0]→[0.5,1.4]` | 0.1485 | **0.6823** | **+0.0075** |
+| Response | response score/effect family만 Medium | 0.3535 | 0.6681 | −0.0067 |
+| Rare | probability 0→0.15 | 0.1399 | 0.6799 | +0.0051 |
+| Noise | 0.005→0.01 | 0.1222 | 0.6808 | +0.0060 |
+
+ClassSep가 가장 건전했고 Rare/Noise는 BAP1 상승 의존도가 컸다. ClassSep+Rare+Noise 결합은
+8-GPU e50 **0.6722**, 총 200 epochs **0.6701**로 비가산적이었다. 합성 val CE는
+0.1716→0.1675로 좋아졌으나 SEAL은 하락했으므로 결합 arm은 기각한다.
+
+### 90-3. Active — ClassSep 단독 난이도 sweep
+
+- 기존 anchor: baseline `[1.0,2.0]` 0.6748, Medium `[0.5,1.4]` 0.6823.
+- 신규: Mild `[0.8,1.7]`, Hard `[0.2,0.8]`, Very-hard `[0.1,0.5]`.
+- `scripts/run_v76_classsep_sweep.py`, GPU 0–3, arm별 50 epochs 후 validation-best 즉시 SEAL 평가.
+- artifacts: `checkpoints/20260812_v76_classsep_sweep/`, `logs/20260812_v76_classsep_sweep/`.
+- 08:24 확인: Mild epoch 19 CE 0.1414 checkpoint 생성, runner/DDP worker 4개 및 artifact 갱신 정상.
+
+다음 세션은 sweep 완료 여부와 세 신규 macro를 먼저 확인한다. ClassSep 승격 전 최소 seed 반복이
+필요하며, SEAL checkpoint 선택 편향을 피하기 위해 각 arm은 validation-best 하나로 판정한다.

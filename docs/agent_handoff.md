@@ -1,24 +1,24 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-11` — §88에서 CT(Composition Token)를 추가하고 v74
-CV+DD+CT+MLP를 활성 baseline으로 확정했다. 공식 SEAL 10-task macro 0.6731로
-v70 0.6715보다 +0.0016, 6/10 task 상승이다.
+**Last updated**: `2026-08-12` — 활성 baseline은 v76 learnable-P CV+DD+CT+MLP (SEAL 0.6748)로 유지한다. v77은 동률로 기각했고 ClassSep Medium `[0.5,1.4]` 0.6823이 후보 최고다. 진행 상태는 §90.
 
 > [!IMPORTANT]
-> **활성 baseline: v74 CV+DD+CT relation head (§88)**
+> **활성 baseline: v76 learnable-P CV+DD+CT relation head (§89)**
 >
 > DD는 support label로 generalized covariance direction을 만들고 standardized dispersion
 > distances `D0,D1`을 계산한다. CT는 support cells에서 label-free farthest-point 후보
 > token 16개를 만든 뒤, bag-level abundance의 표준화 class 차이로 label-0/label-1
 > discriminative token을 대칭 선택한다. query label은 사용하지 않는다.
 >
-> v74 head 입력:
+> v76 head 입력은 v74와 동일:
 > `[CV0,CV1,CV1-CV0,SEP_CV,D0,D1,D1-D0,SEP_DD,q0,q1,q0-q1,SEP_CT]`
-> → 12→32→1, **449 trainable parameters**. CV/DD/CT는 frozen/training-free다.
+> → 12→32→1. P(1536×128)와 head만 학습되어 **197,057 trainable parameters**다.
+> P는 CV ridge gradient로 학습되고 DD는 현재 P의 covariance를 읽되 DD→P gradient는 없다.
+> DD/CT 자체는 training-free다.
 > synthetic는 v70과 동일한 scalar/1-pop/single-label/orthogonal-linear, 50 epochs.
 > best checkpoint는
-> `checkpoints/20260811_172825/v74_cv_dd_ct_mlp_1pop_linear/epoch=049-val_ce_loss=0.1197.ckpt`.
-> 공식 SEAL macro **0.6731**. v70은 재현 control, v71(CV+MLP) 0.6667,
+> `checkpoints/20260811_200356/v76_cv_learnable_p_dd_ct_mlp_1pop_linear/epoch=046-val_ce_loss=0.1201.ckpt`.
+> 공식 SEAL macro **0.6748**. v74는 fixed-P control 0.6731, v70은 재현 control, v71(CV+MLP) 0.6667,
 > v72(nonlinear manifold) 0.6709, v73(+Magnitude) 0.6473으로 승격하지 않는다.
 
 > [!IMPORTANT]

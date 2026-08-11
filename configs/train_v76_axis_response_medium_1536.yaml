@@ -1,0 +1,14 @@
+# One-axis difficulty ablation: reduce the causal response-strength family to
+# historical Medium values while keeping class separation, rarity, and noise.
+base_config: train_v76_cv_learnable_p_dd_ct_mlp_1pop_linear_1536.yaml
+
+data_overrides:
+  dataset_kwargs:
+    response_score_scale: 0.80
+    response_score_min_margin: 0.08
+    response_mixture_effect_scale: 1.40
+    response_state_effect_scale: [0.45, 1.00]
+    response_covariance_effect_scale: [0.30, 0.80]
+
+logger_overrides:
+  experiment_name: v76_axis_response_medium

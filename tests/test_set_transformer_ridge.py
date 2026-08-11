@@ -32,6 +32,9 @@ from src.models.set_transformer_ridge import (  # noqa: E402
     CovarianceMeanCVMLPModel,
     CovarianceMeanDDMLPModel,
     CovarianceMeanDDCTMLPModel,
+    CovarianceMeanLearnablePDDCTMLPModel,
+    PopulationTokenResidualModel,
+    CovarianceMeanCV2DDCTMLPModel,
     CovarianceMeanDDMagnitudeMLPModel,
     CovarianceMeanDDRidgeModel,
     CovarianceMeanRidgeModel,
@@ -525,6 +528,134 @@ class CovarianceMeanAblationTest(unittest.TestCase):
         torch.testing.assert_close(q0, swapped1)
         torch.testing.assert_close(q1, swapped0)
         torch.testing.assert_close(separation, swapped_separation)
+
+    def test_cv_cv2_dd_ct_mlp_trainable_contract(self):
+        model = CovarianceMeanCV2DDCTMLPModel(
+            **self._kwargs(), ct_num_tokens=4, ct_cells_per_bag=8
+        ).train()
+        trainable = [
+            name for name, value in model.named_parameters() if value.requires_grad
+        ]
+        self.assertTrue(trainable)
+        self.assertTrue(all(
+            name.startswith(("cv2_relation_head.", "cv_cv2_dd_ct_head."))
+            for name in trainable
+        ))
+        self.assertEqual(
+            sum(value.numel() for value in model.parameters() if value.requires_grad),
+            803,
+        )
+        x, y, query = _episode(cells=12)
+        logits = model(x, y, query)
+        self.assertEqual(logits.shape, (query.numel(), 2))
+        self.assertTrue(torch.isfinite(logits).all())
+        torch.nn.functional.cross_entropy(logits, y[query]).backward()
+        for name, value in model.named_parameters():
+            if value.requires_grad:
+                self.assertIsNotNone(value.grad, name)
+                self.assertTrue(torch.isfinite(value.grad).all(), name)
+
+        descriptors = model._descriptors(x)
+        context_mask = model._context_split(x.shape[0], query, x.device)
+        with torch.no_grad():
+            features, separation = model._cv2_relation_features(
+                model._covariance_matrices_from_triangle(descriptors[context_mask]),
+                y[context_mask],
+                model._covariance_matrices_from_triangle(descriptors[query]),
+            )
+        self.assertEqual(features.shape, (query.numel(), 4))
+        self.assertTrue(torch.isfinite(features).all())
+        self.assertTrue(torch.isfinite(separation))
+
+    def test_learnable_p_dd_ct_contract_and_gradient(self):
+        model = CovarianceMeanLearnablePDDCTMLPModel(
+            **self._kwargs(), ct_num_tokens=4, ct_cells_per_bag=8
+        ).train()
+        trainable = {
+            name: value for name, value in model.named_parameters()
+            if value.requires_grad
+        }
+        self.assertEqual(
+            set(trainable),
+            {
+                "_covariance_projection",
+                "cv_dd_ct_head.0.weight", "cv_dd_ct_head.0.bias",
+                "cv_dd_ct_head.2.weight", "cv_dd_ct_head.2.bias",
+            },
+        )
+        self.assertEqual(sum(value.numel() for value in trainable.values()), 641)
+        projection = model._effective_covariance_projection()
+        torch.testing.assert_close(
+            projection.T @ projection,
+            torch.eye(model.covariance_sketch_dim),
+            atol=2e-5, rtol=2e-5,
+        )
+        x, y, query = _episode(cells=12)
+        loss = torch.nn.functional.cross_entropy(model(x, y, query), y[query])
+        loss.backward()
+        gradient = model._covariance_projection.grad
+        self.assertIsNotNone(gradient)
+        self.assertTrue(torch.isfinite(gradient).all())
+        self.assertGreater(float(gradient.abs().max()), 0.0)
+
+    def test_learnable_p_starts_from_v74_outputs(self):
+        torch.manual_seed(17)
+        baseline = CovarianceMeanDDCTMLPModel(
+            **self._kwargs(), ct_num_tokens=4, ct_cells_per_bag=8
+        ).eval()
+        torch.manual_seed(17)
+        learnable = CovarianceMeanLearnablePDDCTMLPModel(
+            **self._kwargs(), ct_num_tokens=4, ct_cells_per_bag=8
+        ).eval()
+        x, y, query = _episode(cells=12)
+        torch.testing.assert_close(
+            learnable(x, y, query), baseline(x, y, query),
+            atol=2e-5, rtol=2e-5,
+        )
+
+    def test_population_residual_trainable_contract_and_zero_init(self):
+        torch.manual_seed(19)
+        baseline = CovarianceMeanLearnablePDDCTMLPModel(
+            **self._kwargs(), ct_num_tokens=4, ct_cells_per_bag=8
+        ).eval()
+        torch.manual_seed(19)
+        model = PopulationTokenResidualModel(
+            **self._kwargs(), ct_num_tokens=4, ct_cells_per_bag=8
+        ).train()
+        trainable = {
+            name: value for name, value in model.named_parameters()
+            if value.requires_grad
+        }
+        self.assertEqual(
+            set(trainable),
+            {
+                "population_residual_gate",
+                "population_relation_head.0.weight",
+                "population_relation_head.0.bias",
+                "population_relation_head.2.weight",
+                "population_relation_head.2.bias",
+            },
+        )
+        self.assertEqual(sum(value.numel() for value in trainable.values()), 162)
+        x, y, query = _episode(cells=12)
+        torch.testing.assert_close(model(x, y, query), baseline(x, y, query))
+        loss = torch.nn.functional.cross_entropy(model(x, y, query), y[query])
+        loss.backward()
+        self.assertIsNotNone(model.population_residual_gate.grad)
+        self.assertTrue(torch.isfinite(model.population_residual_gate.grad))
+
+    def test_population_residual_is_label_antisymmetric(self):
+        model = PopulationTokenResidualModel(
+            **self._kwargs(), ct_num_tokens=4, ct_cells_per_bag=8
+        ).eval()
+        x, y, query = _episode(cells=12)
+        context = [x[i] for i in range(6)]
+        query_bags = [x[i] for i in query.tolist()]
+        margin = model._population_residual_margin(context, y[:6], query_bags)
+        swapped = model._population_residual_margin(
+            context, 1 - y[:6], query_bags
+        )
+        torch.testing.assert_close(margin, -swapped)
 
     def test_cv_dd_magnitude_mlp_is_the_only_trainable_module(self):
         model = CovarianceMeanDDMagnitudeMLPModel(**self._kwargs()).train()
