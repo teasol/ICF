@@ -31,6 +31,8 @@ from src.models.set_transformer_ridge import (  # noqa: E402
     CovarianceSetTransformerRidgeModel,
     CovarianceMeanCVMLPModel,
     CovarianceMeanDDMLPModel,
+    CovarianceMeanDDCTMLPModel,
+    CovarianceMeanDDMagnitudeMLPModel,
     CovarianceMeanDDRidgeModel,
     CovarianceMeanRidgeModel,
     CovarianceOnlyRidgeModel,
@@ -490,6 +492,70 @@ class CovarianceMeanAblationTest(unittest.TestCase):
             if value.requires_grad:
                 self.assertIsNotNone(value.grad, name)
                 self.assertTrue(torch.isfinite(value.grad).all(), name)
+
+    def test_cv_dd_ct_mlp_contract_and_label_swap(self):
+        model = CovarianceMeanDDCTMLPModel(
+            **self._kwargs(), ct_num_tokens=4, ct_cells_per_bag=8
+        ).train()
+        trainable = [name for name, value in model.named_parameters() if value.requires_grad]
+        self.assertTrue(trainable)
+        self.assertTrue(all(name.startswith("cv_dd_ct_head.") for name in trainable))
+        self.assertEqual(
+            sum(value.numel() for value in model.parameters() if value.requires_grad),
+            449,
+        )
+        x, y, query = _episode(cells=12)
+        logits = model(x, y, query)
+        self.assertEqual(logits.shape, (query.numel(), 2))
+        self.assertTrue(torch.isfinite(logits).all())
+        torch.nn.functional.cross_entropy(logits, y[query]).backward()
+        self.assertTrue(all(
+            value.grad is not None and torch.isfinite(value.grad).all()
+            for value in model.cv_dd_ct_head.parameters()
+        ))
+
+        context = [x[i] for i in range(6)]
+        query_bags = [x[6], x[7]]
+        q0, q1, separation = model._ct_features(
+            context, y[:6], query_bags
+        )
+        swapped0, swapped1, swapped_separation = model._ct_features(
+            context, 1 - y[:6], query_bags
+        )
+        torch.testing.assert_close(q0, swapped1)
+        torch.testing.assert_close(q1, swapped0)
+        torch.testing.assert_close(separation, swapped_separation)
+
+    def test_cv_dd_magnitude_mlp_is_the_only_trainable_module(self):
+        model = CovarianceMeanDDMagnitudeMLPModel(**self._kwargs()).train()
+        trainable = [name for name, value in model.named_parameters() if value.requires_grad]
+        self.assertTrue(trainable)
+        self.assertTrue(
+            all(name.startswith("cv_dd_magnitude_head.") for name in trainable)
+        )
+        self.assertEqual(
+            sum(value.numel() for value in model.parameters() if value.requires_grad),
+            449,
+        )
+
+        x, y, query = _episode(cells=12)
+        logits = model(x, y, query)
+        self.assertEqual(logits.shape, (query.numel(), 2))
+        self.assertTrue(torch.isfinite(logits).all())
+        torch.nn.functional.cross_entropy(logits, y[query]).backward()
+        for name, value in model.named_parameters():
+            if value.requires_grad:
+                self.assertIsNotNone(value.grad, name)
+                self.assertTrue(torch.isfinite(value.grad).all(), name)
+
+        context_mean = torch.randn(6, INPUT_DIM)
+        query_mean = torch.randn(2, INPUT_DIM)
+        distances, separation = model._magnitude_distance_features(
+            context_mean, torch.tensor([0, 0, 0, 1, 1, 1]), query_mean
+        )
+        self.assertEqual(distances.shape, (2, 2))
+        self.assertTrue(torch.isfinite(distances).all())
+        self.assertTrue(torch.isfinite(separation))
 
     def test_cv_mlp_ablation_is_the_only_trainable_module(self):
         model = CovarianceMeanCVMLPModel(**self._kwargs()).train()

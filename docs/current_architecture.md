@@ -295,3 +295,32 @@ confidence이고 query label은 보지 않는다. CV ridge lambda=1/logit scale=
 v70 architecture는 CovarianceMeanDDMLPModel v49다. v71 ablation은 DD의 방향·거리·separation을
 모두 제거하고 `[CV0,CV1,CV1-CV0,SEP_CV] -> 4→32→1`만 학습하는
 CovarianceMeanCVMLPModel v50이다.
+
+## H. 활성 baseline v74: Composition Token branch
+
+CT는 평균이나 covariance가 아니라 **판별적인 cell-state의 bag-level abundance**를 측정한다.
+각 bag에서 최대 64 cells를 균등 샘플링하고 support 전체 통계로 각 원본 coordinate를
+표준화한다. 1,536차원은 projection 없이 유지한다. support cells에서 label-free
+farthest-point selection으로 후보 token 16개를 만든 뒤 soft assignment abundance
+`h_b ∈ R^16`을 계산한다.
+
+    S_j = (mean(h_bj | y=0) - mean(h_bj | y=1)) / SE_j
+    j0 = argmax S_j
+    j1 = argmin S_j
+
+label은 후보 생성에는 쓰지 않고 class-discriminative token 선택에만 쓴다. query bag은
+선택된 token의 standardized abundance `q0,q1`을 읽는다. label swap은 j0/j1을 교환하며
+query label은 어떤 단계에서도 보지 않는다.
+
+    [CV0,CV1,CV1-CV0,SEP_CV,
+     D0,D1,D1-D0,SEP_DD,
+     q0,q1,q0-q1,SEP_CT]
+        -> Linear(12,32) -> GELU -> Linear(32,1)
+
+v74는 `CovarianceMeanDDCTMLPModel` architecture v52, trainable 449 parameters다.
+CV/DD/CT는 모두 frozen 또는 training-free이고 relation head만 synthetic task로 학습한다.
+공식 SEAL 10-task macro 0.6731로 v70보다 +0.0016, 6/10 task 상승하여 활성 baseline이다.
+
+v73의 full-dimensional Magnitude Distance는 Woodbury로 shrinkage Fisher direction을 정확히
+계산했지만 macro 0.6473으로 실패했다. raw bag mean은 canonical CV에 이미 포함되므로
+Magnitude를 활성 architecture에 넣지 않는다.

@@ -1,19 +1,25 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-11` — §87 DD와 v70 CV+DD relation MLP를 추가했다. v70은 1-pop linear 합성으로 끝단 MLP만 학습해 SEAL 0.6715(CV +0.0048, 8/10 상승)를 얻었다. v71 CV+MLP ablation은 GPU 0–3 DDP4로 실행 중이며 handoff artifact 기준 epoch 39 / val CE 0.2248이다.
+**Last updated**: `2026-08-11` — §88에서 CT(Composition Token)를 추가하고 v74
+CV+DD+CT+MLP를 활성 baseline으로 확정했다. 공식 SEAL 10-task macro 0.6731로
+v70 0.6715보다 +0.0016, 6/10 task 상승이다.
 
 > [!IMPORTANT]
-> **DD/v70 계약 (§87)**
+> **활성 baseline: v74 CV+DD+CT relation head (§88)**
 >
-> DD는 support label로 generalized covariance direction을 만든 뒤 bag별 log projected
-> variance의 class-standardized distances `D0,D1`을 계산하는 training-free branch다.
-> v70은 `[CV0,CV1,CV1-CV0,SEP_CV,D0,D1,D1-D0,SEP_DD] -> 8→32→1`만 학습한다.
-> frozen CV/DD + 321 parameters, 1-pop linear synthetic, SEAL 0.6715.
-> synthetic task는 ST representation에는 약했지만 끝단 relation/calibration에는 8/10 task로
-> 일반화했다. 단 BAP1 −0.0924라 제한적 증거다. v71은 DD 없는 4-d head ablation이다.
-> v71 PID 3878298, 로그 `logs/20260811_155038/v71_cv_mlp_1pop_linear.out`, checkpoint
-> `checkpoints/20260811_155038/v71_cv_mlp_1pop_linear/`. 완료 후 best metadata 확인 → SEAL
-> 10-task 4-GPU 평가가 다음 행동이다.
+> DD는 support label로 generalized covariance direction을 만들고 standardized dispersion
+> distances `D0,D1`을 계산한다. CT는 support cells에서 label-free farthest-point 후보
+> token 16개를 만든 뒤, bag-level abundance의 표준화 class 차이로 label-0/label-1
+> discriminative token을 대칭 선택한다. query label은 사용하지 않는다.
+>
+> v74 head 입력:
+> `[CV0,CV1,CV1-CV0,SEP_CV,D0,D1,D1-D0,SEP_DD,q0,q1,q0-q1,SEP_CT]`
+> → 12→32→1, **449 trainable parameters**. CV/DD/CT는 frozen/training-free다.
+> synthetic는 v70과 동일한 scalar/1-pop/single-label/orthogonal-linear, 50 epochs.
+> best checkpoint는
+> `checkpoints/20260811_172825/v74_cv_dd_ct_mlp_1pop_linear/epoch=049-val_ce_loss=0.1197.ckpt`.
+> 공식 SEAL macro **0.6731**. v70은 재현 control, v71(CV+MLP) 0.6667,
+> v72(nonlinear manifold) 0.6709, v73(+Magnitude) 0.6473으로 승격하지 않는다.
 
 > [!IMPORTANT]
 > **Canonical CV branch 계약 (§86, 2026-08-11)**
@@ -97,8 +103,8 @@
 > 모든 `train_*.yaml`을 검사한다. `optimizer_overrides`는 지원되지 않는다 —
 > LR 변형은 `configs/optimizer/*.yaml`을 만들어 연결한다.
 
-> **GPU 정책 (2026-08-10, 사용자 지시)**: **GPU 0·1을 우선 사용**하고, 다른 GPU는
-> 사용자 허락을 받은 뒤 쓸 것.
+> **GPU 정책 (2026-08-11, 사용자 지시)**: 현재 ICF 학습·평가는 **GPU 0–3 사용 허가**.
+> GPU 4–7은 별도 사용자 허락 없이 사용하지 말 것.
 
 > [!IMPORTANT]
 > **합성 response/cardinality 계약 (§81·§82, 2026-08-10)**

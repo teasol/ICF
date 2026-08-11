@@ -843,6 +843,379 @@ class CovarianceMeanDDMLPModel(CovarianceMeanDDRidgeModel):
         return torch.stack((-0.5 * margin, 0.5 * margin), dim=-1)
 
 
+class CovarianceMeanDDCTMLPModel(CovarianceMeanDDRidgeModel):
+    """Frozen CV + DD + support-selected Composition Tokens -> learned head."""
+
+    architecture_version = 52
+
+    def __init__(
+        self,
+        *args,
+        ct_num_tokens=16,
+        ct_cells_per_bag=64,
+        ct_temperature=0.5,
+        ct_eps=1e-6,
+        ct_head_hidden_dim=32,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        if ct_num_tokens < 2 or ct_cells_per_bag < 1:
+            raise ValueError("CT requires at least two tokens and one cell per bag.")
+        if ct_temperature <= 0.0 or ct_eps <= 0.0:
+            raise ValueError("CT temperature and epsilon must be positive.")
+        if ct_head_hidden_dim < 1:
+            raise ValueError("ct_head_hidden_dim must be positive.")
+        self.ct_num_tokens = int(ct_num_tokens)
+        self.ct_cells_per_bag = int(ct_cells_per_bag)
+        self.ct_temperature = float(ct_temperature)
+        self.ct_eps = float(ct_eps)
+        for parameter in self.parameters():
+            parameter.requires_grad_(False)
+        self.cv_dd_ct_head = nn.Sequential(
+            nn.Linear(12, int(ct_head_hidden_dim)),
+            nn.GELU(),
+            nn.Linear(int(ct_head_hidden_dim), 1),
+        )
+        self._architecture_version.fill_(self.architecture_version)
+
+    def _ct_sample_bag(self, bag, mask=None):
+        values = bag.float()
+        if mask is not None:
+            values = values[mask.bool()]
+        if values.shape[0] == 0:
+            raise ValueError("Every bag must contain at least one valid cell.")
+        if values.shape[0] <= self.ct_cells_per_bag:
+            return values
+        index = torch.linspace(
+            0,
+            values.shape[0] - 1,
+            self.ct_cells_per_bag,
+            device=values.device,
+        ).round().long()
+        return values.index_select(0, index)
+
+    def _ct_features(self, context_bags, context_labels, query_bags):
+        """Select two label-equivariant discriminative composition tokens."""
+        labels = context_labels.long()
+        sampled_context = [self._ct_sample_bag(bag) for bag in context_bags]
+        sampled_query = [self._ct_sample_bag(bag) for bag in query_bags]
+        pooled = torch.cat(sampled_context, dim=0)
+
+        # Context-only coordinate standardisation preserves all input dimensions.
+        center = pooled.mean(dim=0, keepdim=True)
+        scale = (pooled - center).square().mean(dim=0, keepdim=True).sqrt()
+        scale = scale.clamp_min(self.ct_eps)
+        context = [(bag - center) / scale for bag in sampled_context]
+        query = [(bag - center) / scale for bag in sampled_query]
+        pooled = torch.cat(context, dim=0)
+
+        # Deterministic farthest-point tokens. Labels are deliberately absent.
+        token_count = min(self.ct_num_tokens, pooled.shape[0])
+        first = (pooled - pooled.mean(dim=0, keepdim=True)).square().mean(dim=1).argmin()
+        selected = [first]
+        minimum_distance = (pooled - pooled[first]).square().mean(dim=1)
+        for _ in range(1, token_count):
+            index = minimum_distance.argmax()
+            selected.append(index)
+            distance = (pooled - pooled[index]).square().mean(dim=1)
+            minimum_distance = torch.minimum(minimum_distance, distance)
+        tokens = pooled[torch.stack(selected)]
+
+        def abundance(bags):
+            outputs = []
+            for bag in bags:
+                distance = (bag[:, None, :] - tokens[None, :, :]).square().mean(dim=-1)
+                outputs.append((-distance / self.ct_temperature).softmax(dim=-1).mean(dim=0))
+            return torch.stack(outputs)
+
+        context_abundance = abundance(context)
+        query_abundance = abundance(query)
+        class_mean = []
+        class_variance = []
+        for class_index in range(2):
+            members = context_abundance[labels == class_index]
+            if members.numel() == 0:
+                raise ValueError("Every class must occur in the context set.")
+            class_mean.append(members.mean(dim=0))
+            class_variance.append(
+                (members - members.mean(dim=0)).square().mean(dim=0)
+            )
+        class_mean = torch.stack(class_mean)
+        class_variance = torch.stack(class_variance)
+        standard_error = (
+            class_variance[0] / (labels == 0).sum().clamp_min(1)
+            + class_variance[1] / (labels == 1).sum().clamp_min(1)
+        ).sqrt().clamp_min(self.ct_eps)
+        discriminative_score = (class_mean[0] - class_mean[1]) / standard_error
+        label0_token = discriminative_score.argmax()
+        label1_token = discriminative_score.argmin()
+
+        abundance_center = context_abundance.mean(dim=0)
+        abundance_scale = (
+            context_abundance - abundance_center
+        ).square().mean(dim=0).sqrt().clamp_min(self.ct_eps)
+        standardized_query = (
+            query_abundance - abundance_center
+        ) / abundance_scale
+        q0 = standardized_query[:, label0_token]
+        q1 = standardized_query[:, label1_token]
+        separation = 0.5 * (
+            discriminative_score[label0_token].abs()
+            + discriminative_score[label1_token].abs()
+        )
+        return q0, q1, separation
+
+    def _relation_logits(
+        self, context, context_labels, query, context_bags, query_bags
+    ):
+        cv_logits = CovarianceMeanRidgeModel._ridge_logits(
+            self, context, context_labels, query
+        )
+        normalized_context, _ = self._normalize_descriptors(context, query)
+        labels = context_labels.long()
+        cv_prototypes = torch.stack(
+            [normalized_context[labels == class_index].mean(dim=0) for class_index in range(2)]
+        )
+        cv_separation = (
+            (cv_prototypes[1] - cv_prototypes[0]).square().mean().sqrt()
+        )
+        with torch.no_grad(), torch.autocast(
+            device_type=context.device.type, enabled=False
+        ):
+            distances, dd_separation = self._dd_distance_features(
+                self._covariance_matrices_from_triangle(context),
+                context_labels,
+                self._covariance_matrices_from_triangle(query),
+            )
+            q0, q1, ct_separation = self._ct_features(
+                context_bags, context_labels, query_bags
+            )
+        cv0, cv1 = cv_logits.float().unbind(dim=-1)
+        d0, d1 = distances.float().unbind(dim=-1)
+        features = torch.stack(
+            (
+                cv0, cv1, cv1 - cv0, cv_separation.float().expand_as(cv0),
+                d0, d1, d1 - d0, dd_separation.float().expand_as(cv0),
+                q0, q1, q0 - q1, ct_separation.float().expand_as(cv0),
+            ),
+            dim=-1,
+        )
+        margin = self.cv_dd_ct_head(features).squeeze(-1)
+        return torch.stack((-0.5 * margin, 0.5 * margin), dim=-1)
+
+    @staticmethod
+    def _as_bag_list(instances):
+        if isinstance(instances, torch.Tensor):
+            return [bag for bag in instances]
+        return list(instances)
+
+    def forward(self, instances, labels, query_index, return_auxiliary=False):
+        bags = self._as_bag_list(instances)
+        descriptors = torch.cat(
+            [self._descriptors(bag.unsqueeze(0)) for bag in bags]
+        )
+        if labels.shape[0] != descriptors.shape[0]:
+            raise ValueError("Every bag needs exactly one label.")
+        index = query_index.long()
+        is_context = self._context_split(len(bags), index, descriptors.device)
+        context_bags = [bags[i] for i in is_context.nonzero().flatten().tolist()]
+        query_bags = [bags[i] for i in index.tolist()]
+        logits = self._relation_logits(
+            descriptors[is_context], labels[is_context], descriptors[index],
+            context_bags, query_bags,
+        )
+        if not return_auxiliary:
+            return logits
+        return logits, {"bag_descriptors": descriptors, "context_mask": is_context}
+
+    def forward_episode_batch(
+        self, x, y, mask_index, return_auxiliary=False,
+        cell_mask=None, bag_mask=None,
+    ):
+        if x.ndim != 4:
+            raise ValueError("Batched x must be [episodes, bags, cells, dim].")
+        episodes, num_bags = x.shape[:2]
+        flat_cells = x.reshape(episodes * num_bags, x.shape[2], x.shape[3])
+        flat_mask = None if cell_mask is None else cell_mask.reshape(
+            episodes * num_bags, cell_mask.shape[-1]
+        )
+        descriptors = self._descriptors(flat_cells, cell_mask=flat_mask).reshape(
+            episodes, num_bags, -1
+        )
+        outputs = []
+        for episode in range(episodes):
+            valid = (
+                torch.ones(num_bags, dtype=torch.bool, device=x.device)
+                if bag_mask is None else bag_mask[episode]
+            )
+            index = mask_index[episode].long()
+            is_context = self._context_split(num_bags, index, x.device) & valid
+            def valid_bag(i):
+                bag = x[episode, i]
+                return bag if cell_mask is None else bag[cell_mask[episode, i]]
+            context_bags = [
+                valid_bag(i) for i in is_context.nonzero().flatten().tolist()
+            ]
+            query_bags = [valid_bag(i) for i in index.tolist()]
+            outputs.append(self._relation_logits(
+                descriptors[episode][is_context], y[episode][is_context],
+                descriptors[episode][index], context_bags, query_bags,
+            ))
+        logits = torch.stack(outputs)
+        if not return_auxiliary:
+            return logits
+        return logits, {"bag_descriptors": descriptors}
+
+
+class CovarianceMeanDDMagnitudeMLPModel(CovarianceMeanDDRidgeModel):
+    """Frozen CV + DD + raw-mean magnitude features with a learned 12-d head."""
+
+    architecture_version = 51
+
+    def __init__(
+        self,
+        *args,
+        magnitude_shrinkage=0.25,
+        magnitude_eps=1e-6,
+        magnitude_head_hidden_dim=32,
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        if not 0.0 < magnitude_shrinkage <= 1.0:
+            raise ValueError("magnitude_shrinkage must be in (0, 1].")
+        if magnitude_eps <= 0.0:
+            raise ValueError("magnitude_eps must be positive.")
+        if magnitude_head_hidden_dim < 1:
+            raise ValueError("magnitude_head_hidden_dim must be positive.")
+        self.magnitude_shrinkage = float(magnitude_shrinkage)
+        self.magnitude_eps = float(magnitude_eps)
+        for parameter in self.parameters():
+            parameter.requires_grad_(False)
+        self.cv_dd_magnitude_head = nn.Sequential(
+            nn.Linear(12, int(magnitude_head_hidden_dim)),
+            nn.GELU(),
+            nn.Linear(int(magnitude_head_hidden_dim), 1),
+        )
+        self._architecture_version.fill_(self.architecture_version)
+
+    def _magnitude_distance_features(
+        self, context_mean, context_labels, query_mean
+    ):
+        """Full-dimensional Fisher distances via an exact low-rank inverse."""
+        labels = context_labels.long()
+        means = context_mean.float()
+        queries = query_mean.float()
+        prototypes = []
+        centered = []
+        for class_index in range(2):
+            members = means[labels == class_index]
+            if members.numel() == 0:
+                raise ValueError("Every class must occur in the context set.")
+            prototype = members.mean(dim=0)
+            prototypes.append(prototype)
+            centered.append(members - prototype)
+
+        residuals = torch.cat(centered, dim=0)
+        sample_count = max(int(residuals.shape[0]), 1)
+        trace_scale = residuals.square().sum() / (
+            sample_count * residuals.shape[1]
+        )
+        trace_scale = trace_scale.clamp_min(self.magnitude_eps)
+        diagonal = self.magnitude_shrinkage * trace_scale
+        low_rank_scale = (1.0 - self.magnitude_shrinkage) / sample_count
+        delta = prototypes[1] - prototypes[0]
+
+        # (diagonal I + low_rank_scale R^T R)^-1 delta via Woodbury.
+        if low_rank_scale == 0.0:
+            direction = delta / diagonal
+        else:
+            gram = residuals @ residuals.T
+            small = torch.eye(
+                sample_count, device=means.device, dtype=means.dtype
+            ) + (low_rank_scale / diagonal) * gram
+            correction = torch.linalg.solve(small, residuals @ delta)
+            direction = (
+                delta / diagonal
+                - (low_rank_scale / diagonal.square())
+                * (residuals.T @ correction)
+            )
+        direction = direction / direction.norm().clamp_min(self.magnitude_eps)
+
+        context_feature = means @ direction
+        query_feature = queries @ direction
+        center = context_feature.mean()
+        scale = (context_feature - center).square().mean().sqrt().clamp_min(
+            self.magnitude_eps
+        )
+        context_feature = (context_feature - center) / scale
+        query_feature = (query_feature - center) / scale
+        scalar_prototypes = torch.stack(
+            [context_feature[labels == class_index].mean() for class_index in range(2)]
+        )
+        dispersions = torch.stack(
+            [
+                (context_feature[labels == class_index] - scalar_prototypes[class_index])
+                .square()
+                .mean()
+                .clamp_min(self.magnitude_eps)
+                for class_index in range(2)
+            ]
+        )
+        distances = (query_feature[:, None] - scalar_prototypes[None, :]).square()
+        distances = distances / dispersions[None, :]
+        separation = (scalar_prototypes[1] - scalar_prototypes[0]).abs()
+        return distances, separation
+
+    def _ridge_logits(self, context, context_labels, query):
+        cv_logits = CovarianceMeanRidgeModel._ridge_logits(
+            self, context, context_labels, query
+        )
+        normalized_context, _ = self._normalize_descriptors(context, query)
+        labels = context_labels.long()
+        cv_prototypes = torch.stack(
+            [normalized_context[labels == class_index].mean(dim=0) for class_index in range(2)]
+        )
+        cv_separation = (
+            (cv_prototypes[1] - cv_prototypes[0]).square().mean().sqrt()
+        )
+
+        with torch.autocast(device_type=context.device.type, enabled=False):
+            dd_distances, dd_separation = self._dd_distance_features(
+                self._covariance_matrices_from_triangle(context),
+                context_labels,
+                self._covariance_matrices_from_triangle(query),
+            )
+            magnitude_distances, magnitude_separation = (
+                self._magnitude_distance_features(
+                    context[..., -self.mean_descriptor_dim :],
+                    context_labels,
+                    query[..., -self.mean_descriptor_dim :],
+                )
+            )
+        cv0, cv1 = cv_logits.float().unbind(dim=-1)
+        d0, d1 = dd_distances.float().unbind(dim=-1)
+        m0, m1 = magnitude_distances.float().unbind(dim=-1)
+        features = torch.stack(
+            (
+                cv0,
+                cv1,
+                cv1 - cv0,
+                cv_separation.float().expand_as(cv0),
+                d0,
+                d1,
+                d1 - d0,
+                dd_separation.float().expand_as(cv0),
+                m0,
+                m1,
+                m1 - m0,
+                magnitude_separation.float().expand_as(cv0),
+            ),
+            dim=-1,
+        )
+        margin = self.cv_dd_magnitude_head(features).squeeze(-1)
+        return torch.stack((-0.5 * margin, 0.5 * margin), dim=-1)
+
+
 class CovarianceMeanCVMLPModel(CovarianceMeanRidgeModel):
     """Frozen canonical CV features read by the v71 4-d ablation head."""
 

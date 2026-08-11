@@ -233,3 +233,24 @@ calibration 학습에 더 잘 전달된다**는 증거다.
 주장은 하지 않는다. 현 단계 결론은 **일반화 효과는 존재하며, 효과의 크기는 학습을 삽입하는
 위치와 inductive bias에 강하게 의존한다**이다. v71 CV+MLP가 DD가 실제로 추가 일반화 신호를
 제공했는지 분리한다.
+
+## 9. v71–v74 relation-head ablation과 활성 baseline
+
+| arm | relation feature | synthetic manifold | SEAL macro | 판정 |
+|---|---|---|---:|---|
+| v70 | CV 4 + DD 4 | orthogonal linear | 0.6715 | control |
+| v71 | CV 4 | orthogonal linear | 0.6667 | DD 제거로 −0.0048 |
+| v72 | CV 4 + DD 4 | 1-hidden-layer MLP | 0.6709 | v70과 동률 |
+| v73 | CV 4 + DD 4 + Magnitude 4 | orthogonal linear | 0.6473 | 기각 |
+| **v74** | **CV 4 + DD 4 + CT 4** | **orthogonal linear** | **0.6731** | **활성 baseline** |
+
+v74 task별 fold-mean AUROC는 ER 0.7045, grade 0.7070, HER2 0.6675, BRCA
+PIK3CA 0.5142, BRCA TP53 0.8155, LUAD EGFR 0.7517, LUAD STK11 0.8663,
+LUAD TP53 0.6632, CCRCC BAP1 0.6201, CCRCC VHL 0.4210이다. v70보다 6/10 상승,
+macro +0.0016이며 BAP1 +0.0147이 가장 크다.
+
+앞으로 relation-head arm의 control은 v74와 같은 scalar/1-pop/single-label/orthogonal-linear
+50-epoch 조건을 사용한다. best checkpoint는
+`checkpoints/20260811_172825/v74_cv_dd_ct_mlp_1pop_linear/epoch=049-val_ce_loss=0.1197.ckpt`,
+config는 `configs/train_v74_cv_dd_ct_mlp_1pop_linear_1536.yaml`, 평가 tag는
+`v74_ct_e49`다. arm 판정은 공식 10-task macro와 task별 regression을 함께 본다.

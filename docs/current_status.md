@@ -1,10 +1,11 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-11` (§87 — DD/v70 relation MLP와 synthetic 일반화 신호)
+**Last updated**: `2026-08-11` (§88 — v74 CV+DD+CT를 활성 baseline으로 확정)
 
-**한 줄**: canonical CV+mean은 유지하며, 1-pop linear synthetic로 끝단 CV+DD MLP만 학습한 v70이 SEAL 0.6715로 CV 대비 8/10 task를 올렸다(§87).
+**한 줄**: support-selected Composition Token을 v70에 추가한 v74가 SEAL 10-task
+0.6731로 v70보다 +0.0016, 6/10 task 상승하여 앞으로의 활성 baseline이 됐다(§88).
 
-**Status**: **v70 완료; DD 기여를 분리하는 v71 CV+MLP DDP4 학습 진행 중.**
+**Status**: **v74 CV+DD+CT+MLP 확정 baseline. 학습·공식 평가·테스트 완료, 실행 작업 없음.**
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
   현행 최고 **v41_K128 = SEAL 10개 0.6940** (ABMIL 0.727에 −0.033).
@@ -20,16 +21,12 @@
 * **CV-2는 더 파지 말 것** — margin activation(−0.017), subspace_rank(±0.001),
   head 구조(−0.0003) 셋 다 10개 평균을 못 움직였다. 병목이 아니다.
 * **판정은 SEAL 10개 macro 평균만** (§71-4). 합성 val_ce·val_AUROC는 신뢰하지 않는다.
-* **GPU 정책**: 0·1을 우선 사용, 다른 GPU는 사용자 허락 후.
+* **GPU 정책**: 현재 GPU 0–3 사용 허가. GPU 4–7은 별도 사용자 허락 후.
 
 현행 아키텍처 명세는 [`current_architecture.md`](current_architecture.md),
 실험 절차·결과표·금지사항은 [`current_experiments.md`](current_experiments.md).
 
-**지금 돌아가는 것 (2026-08-11)**
-
-v71 CV+MLP ablation이 GPU 0–3 DDP4로 실행 중이다. DD direction/distance/separation은
-완전히 없고 frozen CV의 `[CV0,CV1,CV1-CV0,SEP_CV]`만 4→32→1 head가 읽는다.
-로그: `logs/20260811_155038/v71_cv_mlp_1pop_linear.out`.
+**지금 돌아가는 것 (2026-08-11)**: 없음. v74 학습과 공식 10-task 평가까지 완료했다.
 
 결과 재확인:
 ```bash
@@ -47,7 +44,8 @@ done
 > 2. **ICI는 기본 잠금 유지.** §50과 §86은 사용자 명시 해제에 따른 예외 평가.
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§87 (DD/v70/synthetic 일반화)**,
+**Read first if you are picking this up**: **§88 (v74 baseline/CT/v71–v74 판정)**,
+§87 (DD/v70/synthetic 일반화),
 §86 (canonical CV+mean 계약), §85 (v62–v66), §71 (SEAL 판정), §73–§74
 (호환성/학습 경로), §79 (generic 평가/YAML).
 
@@ -3143,13 +3141,79 @@ canonical CV 0.6667 대비 DD는 단독/강한 결합으로는 약하고 0.1 res
 일반화 효과가 존재한다.** 일반화 여부는 synthetic task만의 속성이 아니라 학습을 삽입한
 위치와 inductive bias의 함수다. 개선폭이 작고 BAP1 실패가 있어 제한적 근거로 취급한다.
 
-### 87-4. v71 진행 중
+### 87-4. v71 완료 — 상세 판정은 §88
 
-v71은 DD를 완전히 제거한 `[CV0,CV1,CV1-CV0,SEP_CV] -> 4→32→1` MLP ablation이다.
-trainable 193개, 동일 합성 task/50 epoch/GPU 0–3 DDP4 조건으로 실행 중이다.
-v70−v71 차이가 DD의 추가 일반화 기여다. handoff 시점 artifact 확인은 epoch 39,
-`val_ce_loss=0.2248`; `last.ckpt`와 `periodic-epoch=039-val_ce_loss=0.2248.ckpt`가
-`2026-08-11 16:00:56`에 갱신됐다. PID 3878298, 로그
-`logs/20260811_155038/v71_cv_mlp_1pop_linear.out`, checkpoint root
-`checkpoints/20260811_155038/v71_cv_mlp_1pop_linear/`. 완료 후 반올림 전 best score를
-checkpoint metadata로 골라 SEAL 10-task 4-GPU 평가한다.
+v71은 DD를 제거한 `[CV0,CV1,CV1-CV0,SEP_CV] -> 4→32→1` ablation으로 완료됐다.
+SEAL macro 0.6667로 canonical CV와 같고 v70보다 −0.0048이어서, DD feature가 v70의
+추가 일반화에 실제로 기여했음을 확인했다. 이후 v72–v74와 활성 baseline 판정은 §88에 있다.
+
+## 88. 2026-08-11 — v71–v74 ablation 완료, v74 CV+DD+CT를 활성 baseline으로 확정
+
+### 88-1. 네 arm의 공식 판정
+
+모든 arm은 GPU 0–3 DDP4, bf16, 50 epochs로 학습하고 자기 best checkpoint를 공식
+SEAL 10-task/50-fold로 평가했다.
+
+| arm | 변경 | best val CE | SEAL macro | v70 대비 | 판정 |
+|---|---|---:|---:|---:|---|
+| v70 | CV+DD, 8→32→1 | 0.1203 | 0.6715 | — | 이전 baseline |
+| v71 | DD 제거, CV-only MLP | 0.2246 | 0.6667 | −0.0048 | DD 기여 확인, 기각 |
+| v72 | v70 + 1-hidden-layer nonlinear manifold | 0.1928 | 0.6709 | −0.0006 | 동률이나 승격 없음 |
+| v73 | v70 + full-1536 Magnitude Distance | 0.1201 | 0.6473 | −0.0242 | 1/10 상승, 기각 |
+| **v74** | **v70 + Composition Token** | **0.1197** | **0.6731** | **+0.0016** | **활성 baseline** |
+
+v73은 synthetic validation이 v70보다 좋았지만 실제 macro가 크게 하락했다. CV가 이미 raw
+bag mean을 포함하는 데다 synthetic mean-shift를 relation head가 과신한 결과로 해석한다.
+Magnitude branch는 앞으로 baseline에 포함하지 않는다.
+
+v72는 생성 manifold를 `latent→128→GELU→1536`으로 바꿔도 macro가 사실상 같았다.
+nonlinear 생성이 해롭지는 않았지만 이득도 없어, baseline synthetic task는 단순하고 빠른
+orthogonal linear를 유지한다.
+
+### 88-2. CT(Composition Token) 계약
+
+CT는 각 bag에서 최대 64 cells를 균등 샘플링하고 support cells를 context-only coordinate
+standardization한다. 원본 1,536 dimensions는 유지하며 projection하지 않는다. label을 보지
+않는 deterministic farthest-point selection으로 후보 token 16개를 만든다. 각 bag의 token
+soft abundance를 계산한 뒤에만 support label을 사용한다.
+
+    S_j = (mean(h_j|y=0) - mean(h_j|y=1)) / pooled_standard_error_j
+    j0 = argmax_j S_j
+    j1 = argmin_j S_j
+
+`j0/j1`은 label 0/1에 가장 enriched된 cell-state token이다. query에서는 standardized
+abundance `q0,q1`과 `q0-q1, SEP_CT`만 읽는다. query label은 사용하지 않으며 label swap 시
+`q0,q1`이 교환되고 separation은 유지된다.
+
+최종 v74 입력은
+`[CV0,CV1,CV1-CV0,SEP_CV,D0,D1,D1-D0,SEP_DD,q0,q1,q0-q1,SEP_CT]`,
+head는 12→32→1 GELU, trainable **449 parameters**다. 구현 class는
+`CovarianceMeanDDCTMLPModel` architecture v52.
+
+### 88-3. v74 task별 결과와 재현
+
+| task | v70 | v74 | delta |
+|---|---:|---:|---:|
+| er_status | 0.7002 | 0.7045 | +0.0043 |
+| grade | 0.7081 | 0.7070 | −0.0011 |
+| her2_status | 0.6657 | 0.6675 | +0.0018 |
+| brca PIK3CA | 0.5131 | 0.5142 | +0.0011 |
+| brca TP53 | 0.8146 | 0.8155 | +0.0009 |
+| luad EGFR | 0.7502 | 0.7517 | +0.0015 |
+| luad STK11 | 0.8692 | 0.8663 | −0.0029 |
+| luad TP53 | 0.6659 | 0.6632 | −0.0027 |
+| ccrcc BAP1 | 0.6054 | 0.6201 | +0.0147 |
+| ccrcc VHL | 0.4226 | 0.4210 | −0.0016 |
+| **macro** | **0.6715** | **0.6731** | **+0.0016** |
+
+v74가 6/10 task에서 상승했고 가장 큰 개선은 BAP1 +0.0147이다. 개선폭은 작으므로 seed
+반복 전 강한 우월성 주장은 하지 않지만, 큰 regression 없이 composition 정보를 추가했으므로
+사용자 결정으로 앞으로의 활성 baseline으로 확정한다. 역사적 전체 최고 v41_K128 0.6940은
+별도 비교 기준으로 유지한다.
+
+- config: `configs/train_v74_cv_dd_ct_mlp_1pop_linear_1536.yaml`
+- best: `checkpoints/20260811_172825/v74_cv_dd_ct_mlp_1pop_linear/epoch=049-val_ce_loss=0.1197.ckpt`
+- logs: `logs/20260811_172825/v74_cv_dd_ct_mlp_1pop_linear.out`
+- eval tag: `v74_ct_e49`
+- 검증: 관련 37 tests, 전체 **135 tests** 통과.
+- 다음: 새 arm은 v74에서 한 요소만 바꾸며, 공식 10-task macro와 v74 task별 결과로 판정한다.

@@ -1,0 +1,13 @@
+# v72 — v70 frozen CV+DD relation head trained on a nonlinear manifold.
+# Synthetic generator: scalar response, one responsive population, single
+# label rule, episode-wise one-hidden-layer MLP (latent -> 128 -> 1536, GELU).
+base_config: train_v70_cv_dd_mlp_1pop_linear_1536.yaml
+
+data_overrides:
+  dataset_kwargs:
+    manifold_mode: nonlinear
+    mlp_hidden_dim: 128
+    mlp_num_layers: 2
+
+logger_overrides:
+  experiment_name: v72_cv_dd_mlp_1pop_mlp1
