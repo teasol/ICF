@@ -3408,6 +3408,8 @@ learnable P와 CV/DD/CT head에 `ridge_log_lambda`, `ridge_log_scale` 두 스칼
 - config: `configs/train_v76_hard_ridge_calibration_1536.yaml`
 - runner: `scripts/run_v76_hard_ridge_calibration.py`, GPU 0–3, DDP4/bf16/50 epochs,
   validation-best 후 공식 SEAL 10-task 평가
+- active runner PID/PGID `1952961` (parent PID 1, fully detached); DDP rank 4개와 GPU 0–3,
+  epoch 0 정상 진행(약 15.6 step/s)을 확인했다.
 - artifacts: `checkpoints/20260812_v76_hard_ridge_calibration/`,
   `logs/20260812_v76_hard_ridge_calibration/`, tag `v76_hard_ridge_calibration_best`
 - trainable: 197,057 → **197,059**; λ=1.0, logit scale=2.0에서 시작한다.
