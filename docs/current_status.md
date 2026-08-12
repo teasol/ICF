@@ -3388,6 +3388,8 @@ MLP-bank sweep은 M=128/512/1024/2048/4096에서 SEAL macro
 - config: `configs/train_v76_hard_mixed_linear_mlpbank1024_1536.yaml`
 - runner: `scripts/run_v76_hard_mixed_linear_mlpbank1024.py`, GPU 0–3, DDP4/bf16/50 epochs,
   validation-best 후 공식 SEAL 10-task 평가
+- active runner PID/PGID `1922296` (parent PID 1, fully detached); DDP rank 4개와 GPU 0–3 사용,
+  epoch 0 정상 진입(약 16.2 step/s)을 확인했다.
 - artifacts: `checkpoints/20260812_v76_hard_mixed_linear_mlpbank1024/`,
   `logs/20260812_v76_hard_mixed_linear_mlpbank1024/`, task tag
   `v76_hard_mixed50_mlpbank1024_best`
