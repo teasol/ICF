@@ -5,9 +5,13 @@
 > SEAL **0.6873**)이다. 이전에 Hard v76이라 부르던 실험을 공식 v77로 승격했다.
 > centered cells를 learnable orthogonal P(1536×128)에 사영해 만든 covariance를 CV와 DD가
 > 공유하고, CT와 함께 12개 relation feature를 만들어 12→32→1 MLP가 읽는다.
-> 학습 파라미터는 P 196,608개 + head 449개 = **197,057개**다. P는 CV ridge 경로로만
-> 학습되며 DD/CT는 training-free다. ridge-calibration arm은 두 스칼라를 추가했으나
+> 학습 파라미터는 P 196,608개 + head 449개 = **197,057개**다. 기본 v77에서 P는 CV ridge
+> 경로로만 학습되며 DD/CT는 training-free다. ridge-calibration arm은 두 스칼라를 추가했으나
 > SEAL 0.6840으로 baseline을 넘지 못했다.
+>
+> **v78 (`train_dd_projection`)이 실행 중이다** — DD에도 P 설계 발언권을 준다. 단 DD의 rank-1
+> 방향은 **어느 arm에서도 미분하지 않는다**(eigh backward의 `1/(λ_i−λ_j)`, argmax 불연속).
+> 계약은 Active-2, 판정은 fold-paired Δ + CI(§99).
 
 리포에는 활성 relation 계보와 역사적 비교 계보 두 개가 있다. relation 계보와 Encoder 계보는
 `src/models/set_transformer_ridge.py`에 있고, 역사적 CV-only는 `src/models/baseline.py`에 있다.
@@ -312,6 +316,9 @@ attention은 에피소드당 2.7e10 쌍이라 불가"였는데, **쌍의 개수�
 
 - `configs/data/default.yaml`은 `per_bag_cardinality: true`: 한 episode 안에서도 각 bag이
   `[1,8192]`(arm override 시 `[1,16384]`)에서 독립적으로 cell 수를 뽑는다.
+  ⚠️ **이 `[1,8192]`은 group default이고 활성 v77/v78 arm은 `[256,8192]`
+  (`num_cells_log_uniform_power: 2.0`)로 override한다** — Active-3 표가 활성 값이다.
+  실측 확인은 `merge_train_config(Path("configs/train_v77_hard_orthogonal_1536.yaml"))`.
 - training collator는 4,096개를 초과한 bag을 매번 `randperm`으로 4,096개까지 subsample한 뒤
   batch 최대 길이(상한 4,096)까지 zero-padding하고 `cell_mask`/`bag_mask`를 반환한다.
   batch 크기 1도 반드시 이 dense masked 경로를 탄다. validation/test는 결정성을 위해 생성된
@@ -322,8 +329,19 @@ attention은 에피소드당 2.7e10 쌍이라 불가"였는데, **쌍의 개수�
 
 ## D. 주요 손잡이
 
+활성 계보(v77/v78)의 손잡이가 먼저다. `A`/`B`는 역사적 비교군 전용이다.
+
 | key | 기본 | 계보 | 의미 |
 |---|---|---|---|
+| `covariance_sketch_dim` (K) | 128 | **Active** | learnable P의 열 수. descriptor = K(K+1)/2 + 1,536 |
+| `train_dd_projection` | `false` | **Active** | **v78**. DD 이차형식만 backward에 남겨 P가 DD 목적도 반영. 방향은 미분하지 않는다(§100) |
+| `dd_projection_gradient_weight` | `1.0` | **Active** | v78 arm은 **0.02**. 무가중이면 DD가 CV의 52배로 P를 지배한다 |
+| `train_ridge_calibration` | `false` | **Active** | `ridge_log_lambda`/`ridge_log_scale` 동결 해제(197,057 → 197,059). SEAL 0.6840으로 기각 |
+| `dd_shrinkage` | 0.25 | **Active** | DD whitening의 shrinkage. ⚠️ backward의 고윳값 **간격은 바꾸지 않는다** |
+| `ct_num_tokens` / `ct_cells_per_bag` | 16 / 64 | **Active** | CT 후보 token 수 / bag당 샘플 cell 수 |
+| `class_separation` | `[0.2, 0.8]` | **Active** | 합성 난이도. Hard가 현재 최고(§91) |
+| `manifold_mode` | `orthogonal` | **Active** | `mlp_bank`·`mixed_linear_mlp_bank`는 전부 기각(Active-3) |
+| `data.ragged_training` | `false` | **Active** | `episode_batch_size=1` 전용. Active-5 참조 |
 | `aggregator_covariance_sketch_dim` (K) | 64 | A | 사영 차원. sketch = K(K+1)/2 |
 | `aggregator_covariance_matrix_dim` | 32 | A | CV-2가 보는 차원. `null` = K 연동 |
 | `aggregator_covariance_slopes` | `null` | A | `[a, b]`. `null` = 역사적 (0.019, 0.011) |
@@ -336,13 +354,22 @@ attention은 에피소드당 2.7e10 쌍이라 불가"였는데, **쌍의 개수�
 
 ## E. Source of Truth
 
-- 모델 A: `src/models/baseline.py` (2,224줄)
-- 모델 B: `src/models/set_transformer_ridge.py`
+- **활성 모델 (v77/v78)**: `src/models/set_transformer_ridge.py` —
+  `CovarianceMeanLearnablePDDCTMLPModel`. DD 방향 격리는 `_dd_direction`, gradient 균형은
+  `_ScaleGradient`.
+- 역사적 모델 A: `src/models/baseline.py` (2,317줄)
+- 역사적 모델 B: `src/models/set_transformer_ridge.py` — `SetTransformerRidgeModel`
 - 평가: `scripts/eval_seal_tasks.sh` → `scripts/test_pathobench.py`
-- 테스트: `tests/test_ridge_ablation.py`, `test_cvonly_golden.py`,
-  `test_paired_relation_head.py`, `test_set_transformer_ridge.py`,
+- **arm 비교(필수)**: `scripts/compare_arms_paired.py` — fold-paired Δ + bootstrap CI.
+  점추정 macro끼리 빼서 판정하지 않는다(§99).
+- canonical config/checkpoint: `configs/train_v77_hard_orthogonal_1536.yaml` /
+  `checkpoints/20260812_v76_classsep_sweep/hard/epoch=048-val_ce_loss=0.1697.ckpt`
+- 테스트: `tests/test_set_transformer_ridge.py`(v78 계약 5개 포함 — forward 동일성,
+  `_dd_direction`이 autograd 밖, P gradient 도달, weight 선형성, strict-load 양방향),
+  `test_ridge_ablation.py`, `test_cvonly_golden.py`, `test_paired_relation_head.py`,
   `test_training_uses_dense_path.py`, `test_per_bag_cardinality_padding.py`,
-  `test_config_numeric_types.py`
+  `test_config_numeric_types.py`, `test_precision_contract.py`
+- ⚠️ 기존 실패 1건: `tests/test_mlp_manifold_bank.py`가 BagPFN env에 없는 `pytest`를 import한다.
 
 ## F. Canonical CV branch 계약 (2026-08-11, §86)
 
