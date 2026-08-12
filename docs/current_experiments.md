@@ -266,3 +266,7 @@ M=128/512/1024/2048/4096을 각각 v76, Hard ClassSep, DDP4, bf16, 50 epochs로 
 validation-best checkpoint 하나를 SEAL 10-task로 평가한다. MLP weight를 bank 전체로 저장하지
 않고 선택된 member만 deterministic regeneration하여 bank 크기에 따른 host/GPU memory 차이를
 제거한다.
+
+후속 50:50 혼합 arm은 각 episode에서 fresh orthogonal linear 또는 MLP-1024 member 하나를
+동일 확률로 선택한다. 두 mapping을 한 episode/cell feature 안에서 합산하지 않으므로 branch별
+distribution과 label semantics가 섞이지 않는다. 나머지 Hard/v76 학습·평가 조건은 동일하다.

@@ -103,6 +103,7 @@ class SyntheticManifoldGenerator:
         manifold_mode: str = "nonlinear",
         manifold_seed: int = 0,
         manifold_bank_size: int = 1,
+        manifold_linear_probability: float = 0.5,
         manifold_max_condition_number: float = 3.0,
         balanced: bool = True,
     ) -> None:
@@ -279,8 +280,8 @@ class SyntheticManifoldGenerator:
         if output_norm_eps <= 0:
             raise ValueError("output_norm_eps must be positive.")
         valid_manifold_modes = {
-            "nonlinear", "shared_nonlinear", "mlp_bank", "orthogonal",
-            "bounded_linear",
+            "nonlinear", "shared_nonlinear", "mlp_bank",
+            "mixed_linear_mlp_bank", "orthogonal", "bounded_linear",
         }
         if manifold_mode not in valid_manifold_modes:
             raise ValueError(
@@ -290,6 +291,8 @@ class SyntheticManifoldGenerator:
             raise ValueError("manifold_max_condition_number must be at least 1.")
         if manifold_bank_size < 1:
             raise ValueError("manifold_bank_size must be at least 1.")
+        if not 0.0 <= manifold_linear_probability <= 1.0:
+            raise ValueError("manifold_linear_probability must be in [0, 1].")
 
         self.num_bags = tuple(num_bags)
         self.num_cells = tuple(num_cells)
@@ -336,6 +339,7 @@ class SyntheticManifoldGenerator:
         self.manifold_mode = manifold_mode
         self.manifold_seed = int(manifold_seed)
         self.manifold_bank_size = int(manifold_bank_size)
+        self.manifold_linear_probability = float(manifold_linear_probability)
         self.manifold_max_condition_number = float(manifold_max_condition_number)
         self.balanced = balanced
 
@@ -1110,6 +1114,12 @@ class SyntheticManifoldGenerator:
         device: torch.device,
     ) -> torch.Tensor:
         mode = self.manifold_mode
+        if mode == "mixed_linear_mlp_bank":
+            use_linear = bool(
+                torch.rand((), device=device, generator=generator).item()
+                < self.manifold_linear_probability
+            )
+            mode = "orthogonal" if use_linear else "mlp_bank"
         if mode == "mlp_bank":
             bank_index = int(
                 torch.randint(

@@ -3375,3 +3375,23 @@ class에는 동일한 bank member가 적용된다.
 판정은 M별 SEAL 10-task macro와 task별 변화로 한다. 같은 bank에서의 synthetic validation은
 checkpoint 선택에만 쓰며 실제 일반화 판정은 unseen real SEAL task가 담당한다. 후속 실험에서
 필요하면 M=1과 fresh-per-episode(M≈∞), 별도 unseen synthetic bank를 control로 추가한다.
+
+## 94. 2026-08-12 — Active: Hard 50:50 infinite-linear + MLP-1024
+
+MLP-bank sweep은 M=128/512/1024/2048/4096에서 SEAL macro
+0.6697/0.6726/**0.6779**/0.6751/0.6649로 M=1024가 최고였지만 Hard orthogonal 0.6873에는
+미치지 못했다. infinite fresh linear의 orientation 일반화와 반복 가능한 nonlinear manifold
+학습을 결합하기 위해 episode별 50:50 혼합 arm을 실행한다.
+
+- mode: `mixed_linear_mlp_bank`; 매 episode 50% fresh orthogonal linear, 50% fixed MLP-1024.
+  episode 내부 모든 bag/population/class는 하나의 동일 mapping을 공유한다.
+- config: `configs/train_v76_hard_mixed_linear_mlpbank1024_1536.yaml`
+- runner: `scripts/run_v76_hard_mixed_linear_mlpbank1024.py`, GPU 0–3, DDP4/bf16/50 epochs,
+  validation-best 후 공식 SEAL 10-task 평가
+- artifacts: `checkpoints/20260812_v76_hard_mixed_linear_mlpbank1024/`,
+  `logs/20260812_v76_hard_mixed_linear_mlpbank1024/`, task tag
+  `v76_hard_mixed50_mlpbank1024_best`
+- 검증: config merge, 두 branch/replay, 10,000 RNG draw 중 linear 4,992회, py_compile,
+  diff check, CUDA `[6,32,1536]` 4 episodes finite smoke(peak 38.0 MiB) 통과.
+
+판정 기준은 Hard orthogonal 0.6873과 MLP-1024 0.6779 대비 SEAL macro 및 task별 변화다.
