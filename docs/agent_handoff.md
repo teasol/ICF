@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-12` — 활성 baseline은 v76 learnable-P CV+DD+CT+MLP (SEAL 0.6748)로 유지한다. ClassSep sweep은 Hard `[0.2,0.8]` 0.6873이 후보 최고이며 seed 반복 전 승격하지 않는다. 진행 상태는 §91.
+**Last updated**: `2026-08-12` — 활성 baseline은 v76 learnable-P CV+DD+CT+MLP (SEAL 0.6748)로 유지한다. Hard orthogonal `[0.2,0.8]` 0.6873이 단일-seed 후보 최고이며, ridge λ/logit scale opt-in 학습 arm이 실행 중이다. 진행 상태는 `current_status.md` §96.
 
 > [!IMPORTANT]
 > **활성 baseline: v76 learnable-P CV+DD+CT relation head (§89)**
@@ -20,6 +20,14 @@
 > `checkpoints/20260811_200356/v76_cv_learnable_p_dd_ct_mlp_1pop_linear/epoch=046-val_ce_loss=0.1201.ckpt`.
 > 공식 SEAL macro **0.6748**. v74는 fixed-P control 0.6731, v70은 재현 control, v71(CV+MLP) 0.6667,
 > v72(nonlinear manifold) 0.6709, v73(+Magnitude) 0.6473으로 승격하지 않는다.
+
+> [!IMPORTANT]
+> **v76 ridge calibration 계약 (2026-08-12)**
+>
+> 기본 v76은 `ridge_log_lambda=log(1)`, `ridge_log_scale=log(2)`를 동결해 P와 relation head만
+> 학습한다. `train_ridge_calibration: true`인 전용 arm에서만 두 scalar를 동결 해제하며
+> trainable parameter는 197,057→197,059가 된다. 기존 config/checkpoint 의미는 유지된다.
+> 현재 Hard orthogonal 전용 config는 `train_v76_hard_ridge_calibration_1536.yaml`이다.
 
 > [!IMPORTANT]
 > **Canonical CV branch 계약 (§86, 2026-08-11)**

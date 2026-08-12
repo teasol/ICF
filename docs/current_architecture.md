@@ -1,25 +1,114 @@
-# Current architecture — 두 계보 (2026-08-11)
+# Current architecture — 활성 relation 계보와 역사적 비교군 (2026-08-12)
 
 > [!IMPORTANT]
-> **활성 실험 baseline은 v76** (`CovarianceMeanLearnablePDDCTMLPModel`)이다.
+> **활성 baseline은 v76** (`CovarianceMeanLearnablePDDCTMLPModel`, SEAL 0.6748)이고,
+> 동일 구조의 Hard `[0.2,0.8]` 단일-seed 후보는 **0.6873**이다.
 > centered cells를 learnable orthogonal P(1536×128)에 사영해 만든 covariance를 CV와 DD가
 > 공유하고, CT와 함께 12개 relation feature를 만들어 12→32→1 MLP가 읽는다.
 > 학습 파라미터는 P 196,608개 + head 449개 = **197,057개**다. P는 CV ridge 경로로만
-> 학습되며 DD/CT는 training-free다. 아래 A/B는 이 경로의 역사적 구성요소와 비교 계보다.
+> 학습되며 DD/CT는 training-free다. 현재 실행 중인 opt-in ridge-calibration arm은
+> `ridge_log_lambda`, `ridge_log_scale` 두 스칼라를 추가해 **197,059개**를 학습한다.
 
-리포에 **서로 독립인 모델 2개**가 있다. 공유하는 코드는 ridge 솔버
-(`solve_ridge_system`) 하나뿐이다.
+리포에는 활성 relation 계보와 역사적 비교 계보 두 개가 있다. relation 계보와 Encoder 계보는
+`src/models/set_transformer_ridge.py`에 있고, 역사적 CV-only는 `src/models/baseline.py`에 있다.
+공통 핵심 유틸리티는 episode-local ridge의 `solve_ridge_system`이다.
 
-| | A. CV-only | B. Encoder+Ridge |
-|---|---|---|
-| 파일 | `src/models/baseline.py` | `src/models/set_transformer_ridge.py` |
-| 클래스 | `BaseModel` | `SetTransformerRidgeModel` |
-| bag 기술자 | **고정** 사영 → 공분산 sketch | **학습되는** Transformer |
-| 학습 파라미터 | 229개 | 5,010,946개 |
-| SEAL 10개 최고 | **0.6940** (v41_K128) | 0.6619 (v52) / 0.6526 (v53) |
-| 상태 | **현행 최고** | **현재 형태로는 기각** (§79-6) |
+| | Active. Relation v76 | A. CV-only | B. Encoder+Ridge |
+|---|---|---|---|
+| 파일 | `set_transformer_ridge.py` | `baseline.py` | `set_transformer_ridge.py` |
+| 클래스 | `CovarianceMeanLearnablePDDCTMLPModel` | `BaseModel` | `SetTransformerRidgeModel` |
+| bag 기술자 | learnable P covariance + raw mean | fixed P covariance | learned Transformer |
+| readout | CV/DD/CT 12→32→1 | CV-1 ridge + CV-2 | episode-local ridge |
+| 학습 파라미터 | 197,057 (calibration arm 197,059) | 229 | 5,010,946 |
+| SEAL 10개 최고 | Hard 후보 0.6873 | **0.6940** (v41_K128) | 0.6619 / 0.6526 |
+| 상태 | **활성** | 역사적 전체 최고 | 기각 |
 
 이전 세대(v34~v39의 6-분기)는 **소스에서 삭제**됐다(§73). 필요하면 git `8caa96c`.
+
+---
+
+# Active. v76 learnable-P CV+DD+CT relation model
+
+## Active-1. Forward 경로
+
+```text
+bag cells x_b (N_b × 1536)
+  ├─ raw mean μ_b ----------------------------------------------------┐
+  └─ centered x_b − μ_b                                              │
+       → P_eff = thin_QR(P), P ∈ R^(1536×128)                        │
+       → covariance upper triangle (8,256)                           │
+       └──────────────────────┬───────────────────────────────────────┘
+                              → canonical descriptor (9,792)
+
+context descriptor + support label
+  → class-balanced episode-local dual ridge → CV0, CV1, margin, SEP_CV
+  → generalized dispersion direction       → D0, D1, margin, SEP_DD
+
+raw support/query cells
+  → bag당 최대 64 cell → farthest-point 후보 16개
+  → support label로 class-discriminative token 2개 대칭 선택
+  → query abundance 관계                     → q0, q1, margin, SEP_CT
+
+[CV 4, DD 4, CT 4] = 12 features
+  → Linear(12,32) → GELU → Linear(32,1)
+  → symmetric binary logits [-margin/2, +margin/2]
+```
+
+CV ridge coefficient는 real/synthetic episode의 support label로 매번 다시 푼다. 학습 checkpoint가
+고정 classifier weight를 저장하는 구조가 아니다. raw mean과 covariance block은 context-only로
+각각 center/scalar-RMS 정규화한다.
+
+## Active-2. Gradient와 학습 계약
+
+기본 v76에서 학습되는 것은 다음뿐이다.
+
+| 파라미터 | 개수 | gradient 경로 |
+|---|---:|---|
+| `_covariance_projection` P | 196,608 | CV ridge solve를 통과 |
+| `cv_dd_ct_head` | 449 | 12개 relation feature |
+| **합계** | **197,057** | |
+
+- 매 forward에서 thin QR로 `P_effᵀP_eff=I`를 보장해 임의 scale/conditioning 변화를 차단한다.
+- DD는 현재 P로 만든 covariance를 읽지만 DD→P gradient는 차단된다. CT 선택/특징도 training-free다.
+- 기본 `ridge_log_lambda=log(1)`, `ridge_log_scale=log(2)`는 v74/v76에서 동결된다.
+- `train_ridge_calibration: true`는 이 두 scalar만 동결 해제한다. 이 opt-in arm은 197,059개이며
+  기존 checkpoint/config의 학습 계약은 바꾸지 않는다.
+
+## Active-3. 현재 synthetic data 계약
+
+Hard 실험의 공통 조건은 다음과 같다.
+
+| 항목 | 값 |
+|---|---|
+| bags/episode | 60–100 |
+| raw cells/bag | 256–8,192, bag별 독립 log-uniform(power 2.0) |
+| 실제 training cap | 4,096; 초과 시 매 step random subsample |
+| latent/output | 32 / 1,536 |
+| shared populations | 4–10, fraction 0.82–0.96 |
+| response tasks | composition/state/covariance/interaction/combined 동일 확률 |
+| ClassSep | **Hard `[0.2,0.8]`** |
+| observation noise | 0.005 |
+| training | DDP4 GPU 0–3, bf16, 50 epochs |
+
+`manifold_mode`은 실험 축이다.
+
+- `orthogonal`: episode마다 fresh isometric linear map. Hard 0.6873으로 현재 데이터 후보 최고.
+- `mlp_bank`: 고정 3-layer MLP를 bank ID seed로 재생성. M=128/512/1024/2048/4096 결과는
+  0.6697/0.6726/**0.6779**/0.6751/0.6649.
+- `mixed_linear_mlp_bank`: episode마다 mapping 하나를 선택한다. 50% fresh linear + 50% MLP-1024는
+  synthetic val CE 0.2218로 좋아졌지만 SEAL은 0.6755로 하락해 기각했다.
+
+중요한 역사적 차이: v40/v41 데이터는 episode-level cardinality `[1,16384]`, cap 없이 fresh
+3-layer nonlinear MLP를 썼다. 현재 Hard는 per-bag cardinality와 4,096 cap을 쓰므로 v41과 v76의
+성능 차이를 아키텍처만의 차이로 해석하면 안 된다.
+
+## Active-4. 현재 실험과 판정
+
+- 활성 실행: Hard orthogonal + learned ridge λ/logit scale, runner PID/PGID `1952961`.
+- control: 동일 Hard orthogonal v76 **0.6873**.
+- 판정: validation-best 하나의 공식 SEAL 10-task macro와 task별 regression. synthetic val 지표는
+  checkpoint 선택에만 사용한다.
+- GPU 정책: ICF는 GPU 0–3만 사용하고 4–7은 사용하지 않는다.
 
 ---
 

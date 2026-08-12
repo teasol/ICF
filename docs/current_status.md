@@ -1,10 +1,10 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-12` (§92 — Hard latent 2/4/8/16 sweep 실행 중)
+**Last updated**: `2026-08-12` (§96 — architecture SSOT 갱신, ridge-calibration 실행 중)
 
-**한 줄**: Hard `[0.2,0.8]`를 고정한 latent dimension ablation에서 L2/L4는 완료됐고, L8→L16을 GPU 0–3에서 순차 재실행한다(§92).
+**한 줄**: MLP-bank와 50:50 혼합은 Hard orthogonal을 넘지 못했고, 동일 Hard 데이터에서 ridge λ/logit scale 두 scalar만 복원한 arm을 GPU 0–3에서 실행한다(§93–§96).
 
-**Status**: **활성 baseline v76(0.6748), Hard L32 후보 0.6873. L2/L4 완료, L8→L16을 GPU 0–3에서 순차 재실행.**
+**Status**: **활성 baseline v76(0.6748), Hard orthogonal 후보 0.6873. Ridge-calibration arm 50 epochs 실행 중.**
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
   현행 최고 **v41_K128 = SEAL 10개 0.6940** (ABMIL 0.727에 −0.033).
@@ -25,7 +25,7 @@
 현행 아키텍처 명세는 [`current_architecture.md`](current_architecture.md),
 실험 절차·결과표·금지사항은 [`current_experiments.md`](current_experiments.md).
 
-**지금 돌아가는 것 (2026-08-12)**: `scripts/run_v76_hard_latent_sweep.py`가 L8→L16을 GPU 0–3에서 각 4-GPU로 순차 재실행한다(§92).
+**지금 돌아가는 것 (2026-08-12)**: `scripts/run_v76_hard_ridge_calibration.py`가 Hard orthogonal에서 ridge λ/logit scale만 동결 해제해 GPU 0–3, DDP4로 학습한다. PID/PGID `1952961`; 종료 후 SEAL 10-task 자동 평가(§95–§96).
 
 결과 재확인:
 ```bash
@@ -3417,3 +3417,18 @@ learnable P와 CV/DD/CT head에 `ridge_log_lambda`, `ridge_log_scale` 두 스칼
   Hard/orthogonal config merge, py_compile, diff check 통과.
 
 판정은 동일 데이터 control Hard orthogonal 0.6873 대비 SEAL macro와 task별 변화로 한다.
+
+## 96. 2026-08-12 — architecture/handoff SSOT 정리
+
+`current_architecture.md`의 2026-08-11 두-계보 중심 서술을 현재 코드와 실험에 맞게 갱신했다.
+활성 relation v76을 첫 계보로 승격해 forward, gradient, trainable parameter, canonical descriptor,
+Hard cardinality/cap, manifold mode와 ridge-calibration opt-in 계약을 Source of Truth로 기록했다.
+역사적 CV-only(v41 0.6940)와 Encoder+Ridge는 비교군 상세로 유지했다.
+
+완료 결과도 반영했다: latent L2/L4/L8/L16/L32는 0.6775/0.6781/0.6771/0.6662/0.6873,
+MLP bank M=128/512/1024/2048/4096은 0.6697/0.6726/0.6779/0.6751/0.6649,
+50:50 linear+MLP-1024는 0.6755다. nonlinear bank 계열은 Hard orthogonal을 넘지 못해 기각한다.
+
+현재 `scripts/run_v76_hard_ridge_calibration.py` PID/PGID `1952961`이 GPU 0–3에서 실행 중이다.
+artifact/checkpoint mtime과 DDP rank 4개를 확인했으며 문서 갱신 시점 epoch 5였다. 완료 후
+`logs/official50/*_v76_hard_ridge_calibration_best.log` 10개와 macro를 우선 확인한다.
