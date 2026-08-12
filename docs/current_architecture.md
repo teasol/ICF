@@ -116,6 +116,8 @@ Hard 실험의 공통 조건은 다음과 같다.
 list-of-bags를 padding tensor로 바꾸지 않고 그대로 모델의 ragged forward에 전달한다. 기본값은
 false이므로 기존 dense masked training 계약은 유지된다. 현재 large-bag arm은 bag별
 `[2048,16384]`, `per_bag_max_cells: 16384`를 사용해 4,096 cap을 제거한다.
+대형 CUDA generator buffer와 ragged forward의 중첩을 피하기 위해 이 arm은
+`cuda_prefetch: false`를 사용한다.
 
 이 arm은 scratch가 아니라 동일 Hard orthogonal v76 best checkpoint
 `checkpoints/20260812_v76_classsep_sweep/hard/epoch=048-val_ce_loss=0.1697.ckpt`를

@@ -3449,6 +3449,9 @@ artifact/checkpoint mtime과 DDP rank 4개를 확인했으며 문서 갱신 시�
   `v76_hard_ragged_2k_16k_warmstart_best`
 - 검증: ragged preserve/batch-size guard, 기존 ragged training path, exact warm-start load,
   2,048-cell CUDA forward/backward, py_compile/diff check 통과. VRAM guard worst-case 81.61 GiB.
+- 첫 launch(PGID `1989505`)는 CUDA prefetch가 다음 대형 generator buffer와 현재 ragged forward를
+  겹쳐 GPU 3 **180.5/183.4 GiB**까지 사용해 즉시 종료했다. 데이터 의미는 유지하고 이 arm만
+  `cuda_prefetch: false`로 변경해 재실행한다.
 
 판정은 warm-start 이전 Hard 0.6873 대비 SEAL macro와 task별 변화다. ragged Python bag loop와
 총 cell 수 증가 때문에 기존 dense arm보다 학습은 상당히 느릴 수 있다.

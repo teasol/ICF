@@ -4,6 +4,8 @@ base_config: train_v76_classsep_hard_1536.yaml
 data_overrides:
   episode_batch_size: 1
   ragged_training: true
+  # Avoid overlapping the next large generator buffer with ragged forward.
+  cuda_prefetch: false
   dataset_kwargs:
     num_cells: [2048, 16384]
     num_cells_log_uniform: true
