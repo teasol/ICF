@@ -1,0 +1,9 @@
+# Hard orthogonal v76 with v41-style trainable ridge lambda and logit scale.
+base_config: train_v76_classsep_hard_1536.yaml
+
+model_overrides:
+  kwargs:
+    train_ridge_calibration: true
+
+logger_overrides:
+  experiment_name: v76_hard_ridge_calibration

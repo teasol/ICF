@@ -598,6 +598,32 @@ class CovarianceMeanAblationTest(unittest.TestCase):
         self.assertTrue(torch.isfinite(gradient).all())
         self.assertGreater(float(gradient.abs().max()), 0.0)
 
+    def test_learnable_p_can_train_ridge_calibration(self):
+        model = CovarianceMeanLearnablePDDCTMLPModel(
+            **self._kwargs(), ct_num_tokens=4, ct_cells_per_bag=8,
+            train_ridge_calibration=True,
+        ).train()
+        trainable = {
+            name: value for name, value in model.named_parameters()
+            if value.requires_grad
+        }
+        self.assertEqual(
+            set(trainable),
+            {
+                "_covariance_projection", "ridge_log_lambda", "ridge_log_scale",
+                "cv_dd_ct_head.0.weight", "cv_dd_ct_head.0.bias",
+                "cv_dd_ct_head.2.weight", "cv_dd_ct_head.2.bias",
+            },
+        )
+        x, y, query = _episode(cells=12)
+        loss = torch.nn.functional.cross_entropy(model(x, y, query), y[query])
+        loss.backward()
+        for name in ("ridge_log_lambda", "ridge_log_scale"):
+            gradient = trainable[name].grad
+            self.assertIsNotNone(gradient)
+            self.assertTrue(torch.isfinite(gradient).all())
+            self.assertGreater(float(gradient.abs()), 0.0)
+
     def test_learnable_p_starts_from_v74_outputs(self):
         torch.manual_seed(17)
         baseline = CovarianceMeanDDCTMLPModel(

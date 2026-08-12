@@ -270,3 +270,7 @@ validation-best checkpoint 하나를 SEAL 10-task로 평가한다. MLP weight를
 후속 50:50 혼합 arm은 각 episode에서 fresh orthogonal linear 또는 MLP-1024 member 하나를
 동일 확률로 선택한다. 두 mapping을 한 episode/cell feature 안에서 합산하지 않으므로 branch별
 distribution과 label semantics가 섞이지 않는다. 나머지 Hard/v76 학습·평가 조건은 동일하다.
+
+Hard ridge-calibration arm은 mixed manifold를 사용하지 않는다. 기존 Hard fresh orthogonal
+control과 완전히 같은 데이터에서 `ridge_log_lambda`와 `ridge_log_scale`만 동결 해제한다.
+따라서 결과 차이는 projection/head/data 변화가 아니라 두 scalar meta-parameter의 효과다.

@@ -1074,10 +1074,14 @@ class CovarianceMeanLearnablePDDCTMLPModel(CovarianceMeanDDCTMLPModel):
 
     architecture_version = 54
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, train_ridge_calibration=False, **kwargs):
         super().__init__(*args, **kwargs)
         initial_projection = self._buffers.pop("_covariance_projection")
         self._covariance_projection = nn.Parameter(initial_projection.clone())
+        self.train_ridge_calibration = bool(train_ridge_calibration)
+        if self.train_ridge_calibration:
+            self.ridge_log_lambda.requires_grad_(True)
+            self.ridge_log_scale.requires_grad_(True)
         self._architecture_version.fill_(self.architecture_version)
 
     def _effective_covariance_projection(self):

@@ -3397,3 +3397,21 @@ MLP-bank sweep은 M=128/512/1024/2048/4096에서 SEAL macro
   diff check, CUDA `[6,32,1536]` 4 episodes finite smoke(peak 38.0 MiB) 통과.
 
 판정 기준은 Hard orthogonal 0.6873과 MLP-1024 0.6779 대비 SEAL macro 및 task별 변화다.
+
+## 95. 2026-08-12 — Active: Hard orthogonal + learned ridge calibration
+
+v41_K128의 강점 중 현재 v76에서 빠져 있던 ridge meta-calibration을 직접 복원한다. 데이터는
+최고 후보인 Hard `[0.2,0.8]` + fresh orthogonal manifold를 그대로 유지하고, v76의 기존
+learnable P와 CV/DD/CT head에 `ridge_log_lambda`, `ridge_log_scale` 두 스칼라만 추가 학습한다.
+기존 v76 기본 동작은 `train_ridge_calibration: false`로 보존한다.
+
+- config: `configs/train_v76_hard_ridge_calibration_1536.yaml`
+- runner: `scripts/run_v76_hard_ridge_calibration.py`, GPU 0–3, DDP4/bf16/50 epochs,
+  validation-best 후 공식 SEAL 10-task 평가
+- artifacts: `checkpoints/20260812_v76_hard_ridge_calibration/`,
+  `logs/20260812_v76_hard_ridge_calibration/`, tag `v76_hard_ridge_calibration_best`
+- trainable: 197,057 → **197,059**; λ=1.0, logit scale=2.0에서 시작한다.
+- 검증: 기존 freeze contract, opt-in trainable contract, 두 scalar의 finite/nonzero gradient,
+  Hard/orthogonal config merge, py_compile, diff check 통과.
+
+판정은 동일 데이터 control Hard orthogonal 0.6873 대비 SEAL macro와 task별 변화로 한다.
