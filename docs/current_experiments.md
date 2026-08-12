@@ -87,7 +87,18 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 | **v41_K128** | A | **0.6940** | **현행 최고**. K=128, CV-2=128, `a=0.85π/K` |
 | **v77 Hard orthogonal ep49** | relation | **0.6880** | **활성 baseline** (`v77_hard_ep49`, §104) |
 | v77 Hard orthogonal val-best | relation | 0.6873 | 같은 run의 `epoch=048`. 역사적 표기 |
+| **ClassSep Medium ep49** | relation | **0.6881** | `[0.5,1.4]`. **Hard와 동률** (+0.0001 [−0.0022,+0.0024]). ⚠️ §91의 0.6823은 오기 (§105-3) |
+| ClassSep Mild ep49 | relation | 0.6854 | `[0.8,1.7]`. Hard 대비 −0.0026, 판정 불가 |
+| ClassSep Very-hard ep49 | relation | 0.6843 | `[0.1,0.5]`. Hard 대비 −0.0037, 게이트 미만 |
+| v78 balanced ep49 | relation | 0.6879 | −0.0001. 동률 |
+| v78 무가중 ep49 | relation | 0.6841 | −0.0039. 게이트 미만 — 단정 불가 |
+| ridge calibration ep49 | relation | 0.6870 | −0.0010 [−0.0021,+0.0002]. **기각 철회 → 판정 불가** |
+| v79 dual projection ep49 | relation | 0.6768 | −0.0112. **기각 유지** |
+| v76 learnable P ep49 | relation | 0.6735 | v74(0.6731) 대비 **+0.0004 [−0.0030,+0.0038] → 승격 근거 없음** (§105-4) |
 | v80 shallow MLP (4 seed 평균) | relation | 0.6722 | infinite MLP `mlp_num_layers=2`, Δ −0.0158 기각 (§104) |
+| mlpbank ep49 (M=128~4096) | relation | 0.6734/0.6730/0.6780/0.6776/0.6678 | 1024·2048 고원 + 4096 −0.0102. M→∞ 하강은 실재 (§105-5) |
+| latent ep49 (2/4/8/16/32) | relation | 0.6775/0.6776/0.6759/0.6665/0.6880 | L16 딥은 학습량 artifact가 아니다 (§105-5) |
+| ⚠️ v43_notanh / v44_lowT | A | 0.6770 / 0.6763 | **artifact 없음** — `logs/official50`·`predictions/`에 산출물이 없어 재확인 불가 (§105-6) |
 | v77 large-ragged warm-start | relation | 0.6885 | 파생 실험; +0.0012라 미승격 |
 | v77 ridge calibration | relation | 0.6840 | λ/logit scale 학습, 기각 |
 | v76 learnable P (easy predecessor) | relation | 0.6748 | 이전 baseline |

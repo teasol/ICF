@@ -119,8 +119,10 @@ Hard 실험의 공통 조건은 다음과 같다.
 
 - `orthogonal`: episode마다 fresh isometric linear map. **Hard epoch 49 = 0.6880**으로 현재
   데이터 후보 최고(val-best 채점은 0.6873, §104).
-- `mlp_bank`: 고정 3-layer MLP를 bank ID seed로 재생성. M=128/512/1024/2048/4096 결과는
-  0.6697/0.6726/**0.6779**/0.6751/0.6649.
+- `mlp_bank`: 고정 3-layer MLP를 bank ID seed로 재생성. **epoch 49 통일 후**
+  M=128/512/1024/2048/4096 = 0.6734/0.6730/**0.6780**/**0.6776**/0.6678 —
+  1024·2048이 고원이고 4096에서 −0.0102 하강한다(§105-5). 재채점 전 값은
+  0.6697/0.6726/0.6779/0.6751/0.6649였고 2048·4096이 epoch 28·27에서 채점된 탓이었다.
 - `nonlinear`: episode마다 fresh MLP (= bank size 무한). **Hard에서 기각** — `mlp_num_layers: 2`
   (`[32→96→1536]`, GELU 1개, 가장 얕은 진짜 MLP)로 4 seed 평균 **0.6722**, Δ −0.0158 (§104-6).
   ClassSep baseline 시절 v72(3-layer)의 0.6709와 방향이 같다. ⚠️ `mlp_num_layers: 1`은
@@ -416,7 +418,7 @@ attention은 에피소드당 2.7e10 쌍이라 불가"였는데, **쌍의 개수�
 | `train_ridge_calibration` | `false` | **Active** | `ridge_log_lambda`/`ridge_log_scale` 동결 해제(197,057 → 197,059). SEAL 0.6840으로 기각 |
 | `dd_shrinkage` | 0.25 | **Active** | DD whitening의 shrinkage. ⚠️ backward의 고윳값 **간격은 바꾸지 않는다** |
 | `ct_num_tokens` / `ct_cells_per_bag` | 16 / 64 | **Active** | CT 후보 token 수 / bag당 샘플 cell 수 |
-| `class_separation` | `[0.2, 0.8]` | **Active** | 합성 난이도. Hard가 현재 최고(§91) |
+| `class_separation` | `[0.2, 0.8]` | **Active** | 합성 난이도. 조이면 +0.011~+0.015이나 **Medium `[0.5,1.4]` 0.6881과 Hard 0.6880은 동률** — "Hard가 최적"은 성립하지 않는다(§105-3) |
 | `manifold_mode` | `orthogonal` | **Active** | `mlp_bank`·`mixed_linear_mlp_bank`·`nonlinear` 전부 기각(Active-3, §104) |
 | `mlp_num_layers` | 3 | **Active** | `orthogonal`에서는 미사용. `nonlinear`/`mlp_bank`에서만 유효하고 **weight 행렬 개수**다(1은 활성 없음 = MLP 아님) |
 | `data.ragged_training` | `false` | **Active** | `episode_batch_size=1` 전용. Active-5 참조 |

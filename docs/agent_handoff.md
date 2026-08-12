@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-12` — 활성 baseline은 **v77 Hard orthogonal의 `epoch 49` checkpoint**이고 SEAL macro는 **0.6880**이다(§104, 사용자 결정). **v78·v79·v80 모두 기각**이고 **CV/DD·사영 배선 축은 소진**으로 본다. 판정은 **fold-paired Δ + CI**(§99)를 **macro seed std 0.0051**과 함께 읽고(게이트 ≈0.010), **task별 CI는 판정 근거로 쓰지 않는다**(§104-5). 진행 상태는 `current_status.md` §104.
+**Last updated**: `2026-08-12` — 활성 baseline은 **v77 Hard orthogonal의 `epoch 49` checkpoint**이고 SEAL macro는 **0.6880**이다(§104, 사용자 결정). **§105에서 과거 판정 36건을 감사하고 27개 arm을 epoch 49로 재채점했다 — 계보의 두 승격(v74→v76 learnable P: +0.0004, Hard vs Medium: +0.0001)이 모두 판정 불가로 내려갔다.** **v78·v79·v80 모두 기각**이고 **CV/DD·사영 배선 축은 소진**으로 본다. 판정은 **fold-paired Δ + CI**(§99)를 **macro seed std 0.0051**과 함께 읽고(게이트 ≈0.010), **task별 CI는 판정 근거로 쓰지 않는다**(§104-5). 진행 상태는 `current_status.md` §104.
 
 > [!IMPORTANT]
 > **baseline 숫자 계약 (§104, 2026-08-12) — 이것부터 읽을 것**
@@ -65,6 +65,18 @@
 > BAP1 large-bag 붕괴 조사 항목은 근거를 잃었다** — 다시 세우려면 arm마다 최소 3 seed다.
 >
 > **④ 채점은 epoch 49 고정.** validation-best는 val_ce가 평평한 arm에서 과소학습 지점을 고른다.
+> 과거 arm 27개는 `scripts/rescore_final_epoch.sh`로 재채점을 마쳤다(`_ep49` 태그, §105).
+> 재채점의 최대 변화는 +0.0037로 seed std보다 작았다 — 미완주 채점은 실재했지만 크기는 작다.
+>
+> **⑤ 계보의 두 승격은 미측정이다 (§105-4).** `v74 → v76`(learnable P) **+0.0004
+> [−0.0030,+0.0038]**, `v76 → v77`(Hard 대 Medium) **+0.0001 [−0.0022,+0.0024]**. 현행 baseline이
+> 틀렸다는 뜻은 아니지만 **"learnable P가 fixed P보다 낫다"·"Hard가 최적 난이도다"를 확정된
+> 사실로 쓰지 말 것.** 확정에는 arm당 3 seed가 필요하고, 우선순위는 v74 vs v76이다 —
+> 여기가 무효면 계보 전체가 fixed-P로 되돌아간다.
+>
+> **⑥ ClassSep 서술 규칙**: "`[1.0,2.0]`에서 조이면 +0.011~+0.015"까지만 쓴다. Medium `[0.5,1.4]`
+> 0.6881과 Hard `[0.2,0.8]` 0.6880은 동률이고 네 난이도의 폭 0.0038은 seed std 미만이다.
+> ⚠️ §91 표의 Medium 0.6823은 **오기**다(Very-hard 값 중복).
 
 > [!IMPORTANT]
 > **DD 계약 — 미분 금지 + gradient 개방 금지 (§100·§103, 2026-08-12)**
