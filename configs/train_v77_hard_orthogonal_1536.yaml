@@ -1,0 +1,7 @@
+# Canonical v77 baseline: v76 relation architecture trained on Hard synthetic data.
+# This promotion changes the experiment/data baseline name, not the tensor graph;
+# the model therefore retains internal architecture_version=54 for checkpoint compatibility.
+base_config: train_v76_classsep_hard_1536.yaml
+
+logger_overrides:
+  experiment_name: v77_hard_orthogonal

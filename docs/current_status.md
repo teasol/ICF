@@ -1,10 +1,10 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-12` (§96 — architecture SSOT 갱신, ridge-calibration 실행 중)
+**Last updated**: `2026-08-12` (§98 — Hard v76을 canonical v77 baseline으로 승격)
 
-**한 줄**: MLP-bank와 50:50 혼합은 Hard orthogonal을 넘지 못했고, 동일 Hard 데이터에서 ridge λ/logit scale 두 scalar만 복원한 arm을 GPU 0–3에서 실행한다(§93–§96).
+**한 줄**: 기존 Hard v76을 **v77**로 명확히 이름 붙이고 활성 baseline으로 승격했다. 동일 구조, Hard `[0.2,0.8]`, fresh orthogonal, SEAL macro **0.6873**이다.
 
-**Status**: **활성 baseline v76(0.6748), Hard orthogonal 후보 0.6873. Ridge-calibration arm 50 epochs 실행 중.**
+**Status**: **활성 baseline v77 Hard orthogonal 0.6873. 실행 중인 학습·평가 없음. 역사적 전체 최고는 v41_K128 0.6940.**
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
   현행 최고 **v41_K128 = SEAL 10개 0.6940** (ABMIL 0.727에 −0.033).
@@ -20,12 +20,12 @@
 * **CV-2는 더 파지 말 것** — margin activation(−0.017), subspace_rank(±0.001),
   head 구조(−0.0003) 셋 다 10개 평균을 못 움직였다. 병목이 아니다.
 * **판정은 SEAL 10개 macro 평균만** (§71-4). 합성 val_ce·val_AUROC는 신뢰하지 않는다.
-* **GPU 정책**: 현재 GPU 0–3 사용 허가. GPU 4–7은 별도 사용자 허락 후.
+* **GPU 정책**: ICF는 GPU 0–3만 사용한다. GPU 4–7은 사용하지 않는다.
 
 현행 아키텍처 명세는 [`current_architecture.md`](current_architecture.md),
 실험 절차·결과표·금지사항은 [`current_experiments.md`](current_experiments.md).
 
-**지금 돌아가는 것 (2026-08-12)**: `scripts/run_v76_hard_ridge_calibration.py`가 Hard orthogonal에서 ridge λ/logit scale만 동결 해제해 GPU 0–3, DDP4로 학습한다. PID/PGID `1952961`; 종료 후 SEAL 10-task 자동 평가(§95–§96).
+**지금 돌아가는 것 (2026-08-12)**: 없음. ridge-calibration과 large-ragged 평가까지 완료됐다(§98).
 
 결과 재확인:
 ```bash
@@ -38,12 +38,12 @@ done
 
 ---
 
-> **사용자 결정 (2026-08-05, 확정)**:
-> 1. **v30 S2가 정식 확정 baseline 유지.** v31 CCTS/CCER-v2는 정식 baseline으로 승격/채택하지 않음 (실험 후보 기록만 남김).
+> **사용자 결정 (2026-08-12, 최신)**:
+> 1. **Hard v76을 canonical v77 baseline으로 승격.** v30 S2 결정은 역사적 기록이다.
 > 2. **ICI는 기본 잠금 유지.** §50과 §86은 사용자 명시 해제에 따른 예외 평가.
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§92 (Hard latent-dimension sweep 실행 상태)**, §91 (ClassSep sweep 최종 결과와 Hard 비교), §90 (v77·난이도 축 설계), §89 (v76 learnable P 승격/학습 경계),
+**Read first if you are picking this up**: **§98 (v77 명명·baseline 승격)**, §97 (large-ragged), §96 (아키텍처 SSOT), §91 (Hard 선택), §89 (v76 구조/학습 경계),
 §88 (v74 baseline/CT/v71–v74 판정),
 §87 (DD/v70/synthetic 일반화),
 §86 (canonical CV+mean 계약), §85 (v62–v66), §71 (SEAL 판정), §73–§74
@@ -3246,11 +3246,11 @@ LUAD TP53 +0.0124, BAP1 −0.0414, VHL −0.0060이다. seed 반복 전 강한 �
 P 이동은 작지 않았다: raw relative Frobenius 0.479, projector relative Frobenius 0.614,
 principal angle 평균 25.5°/최대 33.7°. QR은 subspace 이동을 막지 않고 scale/shear만 제한한다.
 
-## 90. 2026-08-12 — v77 기각, synthetic 난이도 축 분해, ClassSep sweep 진행 중
+## 90. 2026-08-12 — provisional v77-pop-residual 기각, synthetic 난이도 축 분해
 
-### 90-1. v77 population-token residual
+### 90-1. Retired provisional v77-pop-residual
 
-v77은 frozen v76 위에 16개 population token별 abundance·거리 평균·거리 분산을 만들고,
+당시 임시 v77이라 부른 모델은 frozen v76 위에 16개 population token별 abundance·거리 평균·거리 분산을 만들고,
 class prototype까지의 대칭 거리 features를 `3→32→1` shared MLP로 읽는다. zero-init scalar
 gate로 v76 출력을 exact warm-start하며 학습 파라미터는 MLP 161개 + gate 1개 = **162개**다.
 gate는 e14 0.0161 → e50 0.0649로 열렸지만 SEAL macro는 e14 **0.6748**, e49 **0.6750**으로
@@ -3462,3 +3462,38 @@ artifact/checkpoint mtime과 DDP rank 4개를 확인했으며 문서 갱신 시�
 
 판정은 warm-start 이전 Hard 0.6873 대비 SEAL macro와 task별 변화다. ragged Python bag loop와
 총 cell 수 증가 때문에 기존 dense arm보다 학습은 상당히 느릴 수 있다.
+
+## 98. 2026-08-12 — Hard v76을 canonical v77 baseline으로 승격
+
+사용자 결정에 따라 지금까지 `Hard v76`이라 부른 실험을 **v77 Hard orthogonal**로 명확히
+이름 붙이고 활성 baseline으로 승격했다.
+
+- canonical config: `configs/train_v77_hard_orthogonal_1536.yaml`
+- canonical checkpoint:
+  `checkpoints/20260812_v76_classsep_sweep/hard/epoch=048-val_ce_loss=0.1697.ckpt`
+- data: ClassSep `[0.2,0.8]`, fresh orthogonal manifold, latent 32, per-bag 256–8,192,
+  training cap 4,096
+- model: `CovarianceMeanLearnablePDDCTMLPModel`, P(1536×128) + CV/DD/CT 12→32→1 head,
+  trainable **197,057**
+- official SEAL 10-task macro: **0.6873**
+
+이 승격은 **데이터/실험 baseline 버전**의 변경이지 텐서 graph 변경이 아니다. 따라서 모델의
+내부 `architecture_version=54`는 기존 checkpoint strict-load 호환을 위해 유지한다. 과거에
+v77이라 부른 `PopulationTokenResidualModel`은 성능 0.6750으로 기각됐으므로 앞으로
+**retired provisional v77-pop-residual**로 표기한다. 그 모델의 내부 version 55도 replay용으로
+유지한다.
+
+완료된 파생 실험은 다음처럼 판정한다.
+
+| arm | SEAL macro | Δ vs v77 | 판정 |
+|---|---:|---:|---|
+| **v77 Hard orthogonal** | **0.6873** | — | **active baseline** |
+| large-ragged 2k–16k warm-start (epoch 34) | 0.6885 | +0.0012 | 사실상 동률, 파생 실험 유지 |
+| learned ridge λ + logit scale | 0.6840 | −0.0033 | 기각 |
+| MLP bank best (M=1024) | 0.6779 | −0.0094 | 기각 |
+| 50:50 fresh-linear + MLP-1024 | 0.6755 | −0.0118 | 기각 |
+
+v41_K128 0.6940은 여전히 역사적 전체 최고지만 활성 개발 baseline은 사용자 결정에 따라
+v77 0.6873이다. 현재 ICF 학습·평가 프로세스는 없으며, 이후 모든 새 arm은 v77을 control로
+비교한다. 이번 갱신에서는 아직 열려 있는 최근 가설과 재현 근거가 상호 참조되므로 별도
+section archive는 하지 않았다.

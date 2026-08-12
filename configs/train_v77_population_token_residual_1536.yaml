@@ -1,4 +1,5 @@
-# v77 — frozen v76 plus a label-symmetric 16-token population residual.
+# RETIRED provisional v77-pop-residual — frozen v76 plus a label-symmetric residual.
+# Canonical v77 is configs/train_v77_hard_orthogonal_1536.yaml.
 # Warm-start P and the 12->32->1 baseline head from the promoted v76 checkpoint.
 base_config: train_v76_cv_learnable_p_dd_ct_mlp_1pop_linear_1536.yaml
 

@@ -1,37 +1,42 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-12` — 활성 baseline은 v76 learnable-P CV+DD+CT+MLP (SEAL 0.6748)로 유지한다. Hard orthogonal `[0.2,0.8]` 0.6873이 단일-seed 후보 최고이며, ridge λ/logit scale opt-in 학습 arm이 실행 중이다. 진행 상태는 `current_status.md` §96.
+**Last updated**: `2026-08-12` — 기존 Hard v76을 **canonical v77 baseline**으로 승격했다. Hard orthogonal `[0.2,0.8]`, SEAL macro **0.6873**이며 현재 실행 중인 실험은 없다. 진행 상태는 `current_status.md` §98.
 
 > [!IMPORTANT]
-> **활성 baseline: v76 learnable-P CV+DD+CT relation head (§89)**
+> **활성 baseline: v77 Hard learnable-P CV+DD+CT relation head (§98)**
 >
 > DD는 support label로 generalized covariance direction을 만들고 standardized dispersion
 > distances `D0,D1`을 계산한다. CT는 support cells에서 label-free farthest-point 후보
 > token 16개를 만든 뒤, bag-level abundance의 표준화 class 차이로 label-0/label-1
 > discriminative token을 대칭 선택한다. query label은 사용하지 않는다.
 >
-> v76 head 입력은 v74와 동일:
+> v77 head 입력은 v76과 동일:
 > `[CV0,CV1,CV1-CV0,SEP_CV,D0,D1,D1-D0,SEP_DD,q0,q1,q0-q1,SEP_CT]`
 > → 12→32→1. P(1536×128)와 head만 학습되어 **197,057 trainable parameters**다.
 > P는 CV ridge gradient로 학습되고 DD는 현재 P의 covariance를 읽되 DD→P gradient는 없다.
 > DD/CT 자체는 training-free다.
-> synthetic는 v70과 동일한 scalar/1-pop/single-label/orthogonal-linear, 50 epochs.
-> best checkpoint는
-> `checkpoints/20260811_200356/v76_cv_learnable_p_dd_ct_mlp_1pop_linear/epoch=046-val_ce_loss=0.1201.ckpt`.
-> 공식 SEAL macro **0.6748**. v74는 fixed-P control 0.6731, v70은 재현 control, v71(CV+MLP) 0.6667,
+> synthetic는 Hard ClassSep `[0.2,0.8]`, fresh orthogonal manifold, 50 epochs다. canonical config는
+> `configs/train_v77_hard_orthogonal_1536.yaml`, best checkpoint는
+> `checkpoints/20260812_v76_classsep_sweep/hard/epoch=048-val_ce_loss=0.1697.ckpt`.
+> 공식 SEAL macro **0.6873**. v76 easy predecessor는 0.6748, v74는 fixed-P control 0.6731,
+> v70은 재현 control, v71(CV+MLP) 0.6667,
 > v72(nonlinear manifold) 0.6709, v73(+Magnitude) 0.6473으로 승격하지 않는다.
+>
+> 이 v77은 데이터/실험 baseline 승격이며 텐서 구조는 v76과 같아 내부
+> `architecture_version=54`를 유지한다. 예전에 v77이라 부른 `PopulationTokenResidualModel`
+> (0.6750)은 **retired provisional v77-pop-residual**이며 내부 version 55는 replay용으로 보존한다.
 
 > [!IMPORTANT]
-> **v76 ridge calibration 계약 (2026-08-12)**
+> **v77 ridge calibration 계약 (2026-08-12)**
 >
 > 기본 v76은 `ridge_log_lambda=log(1)`, `ridge_log_scale=log(2)`를 동결해 P와 relation head만
 > 학습한다. `train_ridge_calibration: true`인 전용 arm에서만 두 scalar를 동결 해제하며
 > trainable parameter는 197,057→197,059가 된다. 기존 config/checkpoint 의미는 유지된다.
-> 현재 Hard orthogonal 전용 config는 `train_v76_hard_ridge_calibration_1536.yaml`이다.
+> Hard orthogonal arm 결과는 0.6840으로 v77 baseline보다 낮아 기각했다.
 
 > **Large ragged opt-in**: `data.ragged_training: true`는 batch 1 전용이며 training collator가
-> list-of-bags를 보존한다. 기본 dense/padded 경로는 바뀌지 않는다. 2k–16k arm은 Hard v76
-> best를 `--init-checkpoint`로 weight-only warm-start하며 상세 실행은 `current_status.md` §97.
+> list-of-bags를 보존한다. 기본 dense/padded 경로는 바뀌지 않는다. 2k–16k arm은 v77
+> best를 weight-only warm-start해 0.6885를 얻었으나 +0.0012라 파생 실험으로 유지한다(§97–§98).
 
 > [!IMPORTANT]
 > **Canonical CV branch 계약 (§86, 2026-08-11)**

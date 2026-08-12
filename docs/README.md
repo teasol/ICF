@@ -1,7 +1,7 @@
 # Documentation map
 
-**Last updated**: `2026-08-06`
-**Architecture Version**: `30` 확정 baseline (2026-08-04) — v24 + B1 `poolz_l2` 표현 + B2 cardinality-faithful 샘플링. v24(이전 확정)는 `configs/train_v24_medium_bag_proj_residual.yaml`로 보존.
+**Last updated**: `2026-08-12`
+**Active baseline**: **v77 Hard orthogonal relation model** (SEAL 10-task macro 0.6873).
 
 문서는 **새 대화 세션으로 접속하는 Agent가 최우선으로 읽는 Living 문서 5개와 현행 proposal 1개(`docs/` 루트)**, **과거 기록/딥다이브 분석서([`docs/history.md`](history.md))**로 이원화하여 관리합니다.
 
@@ -13,7 +13,7 @@
 
 1. [`agent_handoff.md`](agent_handoff.md): 새 세션 Agent 초기화 수칙, Git 기반 워크플로우, 실행 환경, 타임아웃, 테스트 검증, Docs/Config 정리 규칙
 2. [`current_status.md`](current_status.md): 개발 현황, 최신 실증 수치, v22 retrieval 제거 결정과 근거, 실험 전략(합성=결정 / ICI=최종 테스트), 평가 프로토콜, Next Action Plan (SSOT)
-3. [`current_architecture.md`](current_architecture.md): Architecture **v34** 모델 구조 (poolz_l2 표현, 40 structured token, anchor 구성, 40→1 사영, 6개 evidence 분기와 Logit Fusion 수식, **train/eval 실행 경로 차이**)
+3. [`current_architecture.md`](current_architecture.md): 활성 **v77 Hard** relation 구조와 역사적 CV-only/Encoder+Ridge 비교, 데이터·학습 계약
 4. [`current_experiments.md`](current_experiments.md): 실험 전략과 검정력, 평가 프로토콜, Stage 1~3 실행 명령어 및 실증 수치
 5. [`README.md`](README.md): 문서 맵 및 갱신/아카이빙 가이드라인
 6. `architecture_*_proposal.md`: 현재 활성 개선 proposal. 완료·폐기 시 핵심 결론을 `history.md`에 기록하고 원문은 git 이력에 보존. (**2026-08-09 현재 활성 proposal 없음**)

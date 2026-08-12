@@ -1,4 +1,4 @@
-# Current experiments (2026-08-11)
+# Current experiments (2026-08-12)
 
 CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 **그 문서의 판정 절차는 폐기됐다** — 합성 지표로 arm을 고르는 방식이 반복적으로 실패했다.
@@ -69,7 +69,10 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 | SEAL ABMIL (지도학습) | — | **0.727** | 비교 상대 |
 | SEAL MeanMIL (지도학습) | — | 0.713 | |
 | **v41_K128** | A | **0.6940** | **현행 최고**. K=128, CV-2=128, `a=0.85π/K` |
-| **v76 learnable P** | relation | **0.6748** | **활성 baseline**. v74 +0.0017, 6/10 상승 |
+| **v77 Hard orthogonal** | relation | **0.6873** | **활성 baseline**. 이전 Hard v76의 공식 명칭 |
+| v77 large-ragged warm-start | relation | 0.6885 | 파생 실험; +0.0012라 미승격 |
+| v77 ridge calibration | relation | 0.6840 | λ/logit scale 학습, 기각 |
+| v76 learnable P (easy predecessor) | relation | 0.6748 | 이전 baseline |
 | v74 fixed P + DD + CT | relation | 0.6731 | v76 control |
 | v45_paired | A | 0.6937 | paired_head + rank 4. 동률(−0.0003) |
 | v42_rank2 | A | 0.6944 | 동률 |

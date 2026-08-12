@@ -1,33 +1,40 @@
 # Current architecture — 활성 relation 계보와 역사적 비교군 (2026-08-12)
 
 > [!IMPORTANT]
-> **활성 baseline은 v76** (`CovarianceMeanLearnablePDDCTMLPModel`, SEAL 0.6748)이고,
-> 동일 구조의 Hard `[0.2,0.8]` 단일-seed 후보는 **0.6873**이다.
+> **활성 baseline은 v77 Hard orthogonal** (`CovarianceMeanLearnablePDDCTMLPModel`,
+> SEAL **0.6873**)이다. 이전에 Hard v76이라 부르던 실험을 공식 v77로 승격했다.
 > centered cells를 learnable orthogonal P(1536×128)에 사영해 만든 covariance를 CV와 DD가
 > 공유하고, CT와 함께 12개 relation feature를 만들어 12→32→1 MLP가 읽는다.
 > 학습 파라미터는 P 196,608개 + head 449개 = **197,057개**다. P는 CV ridge 경로로만
-> 학습되며 DD/CT는 training-free다. 현재 실행 중인 opt-in ridge-calibration arm은
-> `ridge_log_lambda`, `ridge_log_scale` 두 스칼라를 추가해 **197,059개**를 학습한다.
+> 학습되며 DD/CT는 training-free다. ridge-calibration arm은 두 스칼라를 추가했으나
+> SEAL 0.6840으로 baseline을 넘지 못했다.
 
 리포에는 활성 relation 계보와 역사적 비교 계보 두 개가 있다. relation 계보와 Encoder 계보는
 `src/models/set_transformer_ridge.py`에 있고, 역사적 CV-only는 `src/models/baseline.py`에 있다.
 공통 핵심 유틸리티는 episode-local ridge의 `solve_ridge_system`이다.
 
-| | Active. Relation v76 | A. CV-only | B. Encoder+Ridge |
+| | Active. Relation v77 | A. CV-only | B. Encoder+Ridge |
 |---|---|---|---|
 | 파일 | `set_transformer_ridge.py` | `baseline.py` | `set_transformer_ridge.py` |
 | 클래스 | `CovarianceMeanLearnablePDDCTMLPModel` | `BaseModel` | `SetTransformerRidgeModel` |
 | bag 기술자 | learnable P covariance + raw mean | fixed P covariance | learned Transformer |
 | readout | CV/DD/CT 12→32→1 | CV-1 ridge + CV-2 | episode-local ridge |
 | 학습 파라미터 | 197,057 (calibration arm 197,059) | 229 | 5,010,946 |
-| SEAL 10개 최고 | Hard 후보 0.6873 | **0.6940** (v41_K128) | 0.6619 / 0.6526 |
+| SEAL 10개 최고 | **0.6873** | **0.6940** (v41_K128) | 0.6619 / 0.6526 |
 | 상태 | **활성** | 역사적 전체 최고 | 기각 |
 
 이전 세대(v34~v39의 6-분기)는 **소스에서 삭제**됐다(§73). 필요하면 git `8caa96c`.
 
 ---
 
-# Active. v76 learnable-P CV+DD+CT relation model
+# Active. v77 Hard learnable-P CV+DD+CT relation model
+
+v77 승격은 **실험·데이터 baseline의 버전 승격**이다. 텐서 구조는 v76과 같으므로 모델 클래스의
+내부 `architecture_version=54`는 checkpoint strict-load 호환을 위해 유지한다. canonical config는
+`configs/train_v77_hard_orthogonal_1536.yaml`, canonical checkpoint는
+`checkpoints/20260812_v76_classsep_sweep/hard/epoch=048-val_ce_loss=0.1697.ckpt`다.
+과거 `PopulationTokenResidualModel`은 이제 **retired provisional v77-pop-residual**로만 부르며,
+그 클래스의 내부 version 55 역시 과거 checkpoint replay를 위해 유지한다.
 
 ## Active-1. Forward 경로
 
@@ -60,7 +67,7 @@ CV ridge coefficient는 real/synthetic episode의 support label로 매번 다시
 
 ## Active-2. Gradient와 학습 계약
 
-기본 v76에서 학습되는 것은 다음뿐이다.
+기본 v77에서 학습되는 것은 다음뿐이다.
 
 | 파라미터 | 개수 | gradient 경로 |
 |---|---:|---|
@@ -70,7 +77,7 @@ CV ridge coefficient는 real/synthetic episode의 support label로 매번 다시
 
 - 매 forward에서 thin QR로 `P_effᵀP_eff=I`를 보장해 임의 scale/conditioning 변화를 차단한다.
 - DD는 현재 P로 만든 covariance를 읽지만 DD→P gradient는 차단된다. CT 선택/특징도 training-free다.
-- 기본 `ridge_log_lambda=log(1)`, `ridge_log_scale=log(2)`는 v74/v76에서 동결된다.
+- 기본 `ridge_log_lambda=log(1)`, `ridge_log_scale=log(2)`는 v77에서 동결된다.
 - `train_ridge_calibration: true`는 이 두 scalar만 동결 해제한다. 이 opt-in arm은 197,059개이며
   기존 checkpoint/config의 학습 계약은 바꾸지 않는다.
 
@@ -104,8 +111,9 @@ Hard 실험의 공통 조건은 다음과 같다.
 
 ## Active-4. 현재 실험과 판정
 
-- 활성 실행: Hard orthogonal + learned ridge λ/logit scale, runner PID/PGID `1952961`.
-- control: 동일 Hard orthogonal v76 **0.6873**.
+- 활성 실행: 없음.
+- active baseline: v77 Hard orthogonal **0.6873**.
+- learned ridge λ/logit scale은 0.6840으로 기각했다.
 - 판정: validation-best 하나의 공식 SEAL 10-task macro와 task별 regression. synthetic val 지표는
   checkpoint 선택에만 사용한다.
 - GPU 정책: ICF는 GPU 0–3만 사용하고 4–7은 사용하지 않는다.
@@ -119,9 +127,11 @@ false이므로 기존 dense masked training 계약은 유지된다. 현재 large
 대형 CUDA generator buffer와 ragged forward의 중첩을 피하기 위해 이 arm은
 `cuda_prefetch: false`를 사용한다.
 
-이 arm은 scratch가 아니라 동일 Hard orthogonal v76 best checkpoint
+이 arm은 scratch가 아니라 동일 Hard orthogonal v77 best checkpoint
 `checkpoints/20260812_v76_classsep_sweep/hard/epoch=048-val_ce_loss=0.1697.ckpt`를
 `--init-checkpoint`로 weight-only load한다. optimizer/scheduler/epoch state는 새로 시작한다.
+epoch 34 best의 공식 SEAL macro는 **0.6885**로 baseline 대비 +0.0012에 그쳐, large-ragged
+파생 실험으로 유지하고 canonical baseline으로 승격하지 않는다.
 
 ---
 

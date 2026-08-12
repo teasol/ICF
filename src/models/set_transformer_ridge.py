@@ -1115,7 +1115,7 @@ class CovarianceMeanLearnablePDDCTMLPModel(CovarianceMeanDDCTMLPModel):
 
 
 class PopulationTokenResidualModel(CovarianceMeanLearnablePDDCTMLPModel):
-    """v77: frozen v76 plus a label-symmetric population-token residual."""
+    """Retired provisional v77-pop-residual experiment kept for replay."""
 
     architecture_version = 55
     init_checkpoint_new_parameter_prefixes = (
