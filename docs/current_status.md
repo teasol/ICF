@@ -3365,6 +3365,8 @@ class에는 동일한 bank member가 적용된다.
   공식 SEAL 10-task 평가, 다섯 arm 순차 실행
 - artifacts: `checkpoints/20260812_v76_hard_mlpbank_sweep/`,
   `logs/20260812_v76_hard_mlpbank_sweep/`, task tag `v76_hard_mlpbank{M}_best`
+- active runner PID `1799310`, PGID `1799310` (`setsid -f`, parent PID 1); M=128 epoch 0 진입과
+  DDP rank 4개, GPU 0–3 사용을 확인했다. 첫 step peak allocation은 10.68 GiB였다.
 - 검증: bank member replay/다양성/범위 assertion, 5개 config merge, py_compile, diff check 통과.
   CUDA smoke는 `[6,32,1536]`, finite, output mean norm 1.0, peak 36.8 MiB였다.
 - 예상 시간: 기존 arm당 학습+평가 약 17분 기준 약 85분. nonlinear data generation overhead로
