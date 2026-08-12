@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-12` — 활성 baseline은 **v77 Hard orthogonal**(SEAL macro **0.6873**)이다. **v78 DD-gradient arm은 단조 악화로 기각**되고 **v79 dual projection이 실행 중**이다. 판정은 반드시 **fold-paired Δ + CI**(§99)로 한다. 진행 상태는 `current_status.md` §103.
+**Last updated**: `2026-08-12` — 활성 baseline은 **v77 Hard orthogonal**(SEAL macro **0.6873**)이다. **v78·v79 모두 기각**이고 **CV/DD·사영 배선 축은 소진**으로 본다. 다음 작업은 **seed 반복이 선행 조건**이다. 판정은 반드시 **fold-paired Δ + CI**(§99)로 한다. 진행 상태는 `current_status.md` §103.
 
 > [!IMPORTANT]
 > **활성 baseline: v77 Hard learnable-P CV+DD+CT relation head (§98)**
@@ -45,7 +45,7 @@
 > `current_architecture.md` **G-0**, 명세 전체는 **G절**.
 
 > [!IMPORTANT]
-> **v79 dual projection 계약 (§103, 진행 중)**
+> **v79 dual projection 계약 (§103) — 기각됨 (Δ −0.0105 [−0.0137,−0.0074])**
 >
 > `DualProjectionCVDDCTMLPModel`, **`architecture_version = 56`** — v77 ckpt와 strict-load
 > **비호환**이다. CV는 learnable P를, **fixed-P CV와 DD는 고정 sin/cos 기저**를 쓰고 CT까지
@@ -57,6 +57,11 @@
 > `train_dd_projection`은 이 클래스에서 **ValueError로 거부**된다(조용한 no-op 방지).
 > fixed-P CV를 남기는 이유: fixed P는 **v41_K128이 0.6940을 낸 기저**이고 그것이 여전히 역사적
 > 전체 최고다 — 학습된 것이 고정된 것을 대체하는 게 아니라 head가 둘을 저울질하게 한다.
+>
+> ⚠️ **결과: 세 arm 중 가장 나빴다.** 과소학습이 아니다 — best val_ce 0.1687로 v77의 0.1697보다
+> **좋은데** SEAL이 떨어졌다(합성 개선 ↔ 실데이터 악화의 세 번째 사례). head는 네 block에 weight를
+> 거의 균등 분산시켰다(31/27/26/17%). **v78 balanced → 무가중 → v79가 −0.0004 → −0.0047 →
+> −0.0105로 단조 악화하므로 CV/DD·사영 배선 축은 소진으로 본다** — 이 축에서 새 arm을 설계하지 말 것.
 
 > [!IMPORTANT]
 > **v77 ridge calibration 계약 (2026-08-12)**

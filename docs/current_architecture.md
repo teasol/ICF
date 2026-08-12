@@ -13,9 +13,9 @@
 > 0.6873/0.6869/**0.6826**으로 **단조 악화**하고 무가중은 CI가 0을 제외한다(§103, G-5).
 > DD는 P를 실제로 움직이지만 그 방향이 해롭다. **되살리지 말 것.**
 >
-> **v79 (`DualProjectionCVDDCTMLPModel`, version 56)가 진행 중이다** — 중재 대신 **분리**.
-> CV는 learnable P를, **fixed-P CV와 DD는 고정 기저**를 쓰고 CT까지 4 branch·16 feature를
-> 16→32→1이 읽는다. 상세는 **Active-6**.
+> **v79 (`DualProjectionCVDDCTMLPModel`, version 56) — 기각.** 중재 대신 **분리**를 택했으나
+> Δ **−0.0105** [−0.0137, −0.0074]로 세 arm 중 가장 나빴다. 상세와 두 진단은 **Active-6**.
+> ⚠️ v78·v79가 함께 말하는 것: **headroom은 CV/DD·사영 배선에 없다**(Active-6 마지막 절).
 >
 > DD의 rank-1 방향은 **어느 arm에서도 미분하지 않는다** — 이유와 우회 방법은 **G-4**.
 
@@ -126,8 +126,9 @@ Hard 실험의 공통 조건은 다음과 같다.
 
 ## Active-4. 현재 실험과 판정
 
-- 활성 실행: **v79 dual projection** (Active-6, §103). GPU 0–3.
-- **v78은 기각**됐다 — weight 0/0.02/1.0에서 0.6873/0.6869/0.6826 단조 악화(G-5).
+- 활성 실행: 없음.
+- **v78·v79 모두 기각.** weight 0/0.02/1.0에서 0.6873/0.6869/0.6826(G-5), v79 분리는 0.6768
+  (Active-6). 세 방식 모두 지고 건드린 정도가 클수록 더 졌다 — 이 축은 소진으로 본다.
 - active baseline: v77 Hard orthogonal **0.6873**.
 - learned ridge λ/logit scale은 0.6840으로 기각했다.
 - 판정: validation-best 하나의 공식 SEAL 10-task macro와 task별 regression. synthetic val 지표는
@@ -150,7 +151,7 @@ false이므로 기존 dense masked training 계약은 유지된다. 현재 large
 epoch 34 best의 공식 SEAL macro는 **0.6885**로 baseline 대비 +0.0012에 그쳐, large-ragged
 파생 실험으로 유지하고 canonical baseline으로 승격하지 않는다.
 
-## Active-6. v79 dual projection — 진행 중 (`DualProjectionCVDDCTMLPModel`, version 56)
+## Active-6. v79 dual projection — **기각** (`DualProjectionCVDDCTMLPModel`, version 56)
 
 v77은 learnable P 하나를 CV와 DD가 공유하므로 subspace가 CV의 readout에 맞춰 최적화되고 DD는
 그것을 물려받는다. v78은 그 갈등을 **gradient weight로 중재**하려다 단조 악화로 기각됐다(G-5).
@@ -188,6 +189,25 @@ fixed-P CV를 **독립 evidence block으로 남기는 것**이 설계의 두 번
   불변**, ⓑ v79의 fixed block이 독립 `CovarianceMeanDDCTMLPModel`의 CV와 **수치적으로 동일**
   (재파라미터화가 아니라 진짜 v41-스타일 CV).
 - 판정은 v77 대비 fold-paired Δ + CI(§99). tag `v79_dual_projection_best`.
+
+**결과 — 기각 (§103-4).** SEAL macro **0.6768**, fold-paired Δ **−0.0105** [−0.0137, −0.0074],
+상승 3/10. PIK3CA −0.0518, VHL 0.4166(랜덤에서 더 멀어짐), er_status만 +0.0168.
+
+두 진단이 원인을 좁힌다.
+
+- **과소학습이 아니다 — 반대다.** v79 best val_ce **0.1687**로 v77의 0.1697보다 **좋다**. 합성
+  val이 개선되는 동안 SEAL이 떨어졌다. 이 리포의 대표 병리 세 번째 재현이다(v54 §79-6,
+  mixed manifold §94, v79). 새 16-input head 때문에 초반 val_ce가 높았던 것은 수렴 문제가 아니었다.
+- **head가 선택하지 않고 분산시켰다.** 학습된 head 1층의 block별 column norm share는
+  CV(learnable) 31.4% / CV(fixed) 26.7% / DD(fixed) 25.5% / CT 16.5%로 거의 균등하다. 두 CV
+  branch는 **mean block을 공유하고 covariance 정보도 중복**되는데 head가 16개 상관 입력에 weight를
+  퍼뜨렸다. ⚠️ column norm은 거친 대리 지표다(feature 스케일이 달라 곧 기여도가 아니다).
+
+> [!IMPORTANT]
+> **CV/DD·사영 배선 축은 소진으로 본다 (§103-5).** v78 balanced → 무가중 → v79가
+> **−0.0004 → −0.0047 → −0.0105**로 단조 악화한다. gradient 개방·무가중·완전 분리 세 방식 모두
+> 지고 **건드린 정도가 클수록 더 졌다.** 이 축에서 새 arm을 설계하지 말 것. 남은 레버는 task-side
+> (VHL 랜덤 이하, BAP1 large-bag 붕괴, branch reliability feature)와 **미측정 seed 노이즈**다.
 
 ---
 

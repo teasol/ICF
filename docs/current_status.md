@@ -1,15 +1,16 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-12` (§103 — v78 무가중 기각, v79 dual projection 진행 중)
+**Last updated**: `2026-08-12` (§103 — v78·v79 모두 기각, CV/DD 배선 축 소진)
 
 **한 줄**: 활성 baseline은 v77 Hard orthogonal(SEAL macro **0.6873**)이고, 앞으로 arm 판정은 점추정 macro 차이가 아니라 **fold-paired Δ + bootstrap CI**로 한다(§99).
 
-**Status**: **활성 baseline v77 Hard orthogonal 0.6873. v79 dual projection 실행 중(§103-3, PID 2329816). v78은 weight 0/0.02/1.0에서 단조 악화로 기각(§103-1). 역사적 전체 최고는 v41_K128 0.6940.**
+**Status**: **활성 baseline v77 Hard orthogonal 0.6873. 실행 중인 학습·평가 없음. v78(−0.0004/−0.0047)·v79(−0.0105) 모두 기각 — CV/DD 배선 축 소진(§103-5). 다음은 seed 반복이 선행(§103-6). 역사적 전체 최고는 v41_K128 0.6940.**
 
 > [!IMPORTANT]
 > **읽는 순서 (2026-08-12)**: 판정 방식이 §99에서 바뀌었다. arm을 비교하려면 §99를 먼저 읽고
 > `scripts/compare_arms_paired.py`를 쓸 것. §98 판정표 4건은 §99-1에서 fold-paired CI로
-> 재검증되어 전부 유지됐다. **v78**은 단조 악화로 기각(§103-1), **v79**가 실행 중이다(§103-3).
+> 재검증되어 전부 유지됐다. **v78·v79 모두 기각**이고 CV/DD 배선 축은 소진으로 본다(§103-5).
+> **다음 작업은 seed 반복이 선행 조건이다**(§103-6).
 > §2~§97 본문은 [`history.md`](history.md) §20–§23으로 아카이빙됐다(§101).
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
@@ -31,7 +32,7 @@
 현행 아키텍처 명세는 [`current_architecture.md`](current_architecture.md),
 실험 절차·결과표·금지사항은 [`current_experiments.md`](current_experiments.md).
 
-**지금 돌아가는 것 (2026-08-12)**: **v79 dual projection** — PID/PGID `2329816`, GPU 0–3 (§103-3).
+**지금 돌아가는 것 (2026-08-12)**: 없음. v79까지 완료·기각됐다(§103-4).
 
 결과 재확인:
 ```bash
@@ -101,7 +102,7 @@ G-2 제거 확정(§68에서 분기 통째 제거로 해소), E>1 노선(§68-5)
 역사적 전체 최고는 여전히 **v41_K128 CV-only 0.6940**(229 파라미터)이므로, 활성 baseline이
 사상 최고보다 낮은 상태다. 지도학습 ABMIL은 0.7266(−0.0393), 상회는 2/10 task.
 
-**지금 돌아가는 것**: **v79 dual projection** (§103-3). v78은 단조 악화로 기각됐다(§103-1).
+**지금 돌아가는 것**: 없음. v78·v79 모두 기각됐고 **CV/DD 배선 축은 소진**으로 본다(§103-5).
 
 **판정 방법이 §99에서 바뀌었다 — 이걸 모르면 arm 비교를 잘못한다.**
 점추정 macro끼리 빼지 말고 **fold-paired Δ + bootstrap CI**를 쓸 것. GPU 불필요:
@@ -993,11 +994,43 @@ DD 관련 서술이 여러 절에 흩어져 있고 "어느 P를 읽는지"가 �
 CUDA bf16 smoke(60 bags × 4,096 cells) loss 0.5056, P grad norm 1.78e-01 finite, peak 2.38 GiB.
 numeric-type·precision 계약 7개 통과.
 
-### 4. 다음 Action
+### 4. v79 결과 — 기각. 세 arm 중 가장 나쁘다
 
-1. **v79 완주 후 fold-paired 판정**:
-   `python scripts/compare_arms_paired.py --baseline v76_classsep_hard_best --arm v79_dual_projection_best`
-   v78 두 arm과 같은 표에 놓고 "분리"가 "중재"보다 나은지 본다.
-2. **G-6ⓐ 진단** — 학습된 P에서의 DD-only. 학습 불필요, v79의 전제 검증.
-3. **seed 반복** — 여전히 미측정이며 §102-6 그대로 가장 급하다. v78 balanced가 −0.0004,
-   v79도 소폭 차이로 나올 가능성이 높아 realization 노이즈 크기를 모르면 판정이 공허해진다.
+| arm | macro | Δ vs v77 | 95% CI | 상승 task |
+|---|---:|---:|---|---:|
+| v77 (baseline) | 0.6873 | — | — | — |
+| v78 balanced (0.02) | 0.6869 | −0.0004 | [−0.0021, +0.0013] | 5/10 |
+| v78 무가중 (1.0) | 0.6826 | −0.0047 | [−0.0082, −0.0013] | 3/10 |
+| **v79 dual projection** | **0.6768** | **−0.0105** | **[−0.0137, −0.0074]** | 3/10 |
+
+PIK3CA −0.0518은 이번 세션 단일 task 최대 하락이고 VHL은 0.4166으로 랜덤에서 더 멀어졌다.
+er_status만 또 +0.0168로 오른다(§71 패턴 세 번째).
+
+**진단 ⓐ — 과소학습이 아니다. 반대다.** v79 best val_ce **0.1687**(epoch 48)로 v77의 0.1697보다
+**좋다**. 즉 합성 val이 개선되는 동안 SEAL이 −0.0105 떨어졌다. 이 리포의 대표 병리가 세 번째로
+재현된 것이다 — v54(§79-6, 합성 최고 = SEAL 최저), mixed manifold(§94, val CE 0.2218 개선 /
+SEAL 0.6755 하락), 그리고 v79. **50 epoch이 부족한 게 아니라 합성에 더 잘 맞춘 것이 손해였다.**
+
+**진단 ⓑ — head가 선택하지 않고 분산시켰다.** 학습된 head 1층의 block별 column norm share는
+CV(learnable) 31.4% / CV(fixed) 26.7% / DD(fixed) 25.5% / CT 16.5%로 거의 균등하다. "fixed CV가
+learnable CV를 밀어낸다"가 아니라 **16개 상관된 입력에 weight가 퍼졌다** — 두 CV branch는 mean
+block을 공유하고 covariance 정보도 중복된다. ⚠️ column norm은 **거친 대리 지표**다(feature마다
+스케일이 달라 곧 기여도가 아니다). 방향성 증거로만 읽을 것.
+
+### 5. 이 축은 소진된 것으로 본다
+
+v78 balanced → 무가중 → v79가 **−0.0004 → −0.0047 → −0.0105**로 단조 악화한다. gradient 개방 /
+무가중 / 완전 분리 세 방식으로 CV·DD·사영 배선을 건드렸고 셋 다 졌으며 **건드린 정도가 클수록 더
+졌다**. headroom이 이 배선에 있지 않다는 결론이 세 방향에서 수렴한다. 새 arm을 이 축에서 더
+설계하지 말 것.
+
+### 6. 다음 Action
+
+1. **seed 반복 — 이제 선행 조건이다.** §99-3·§102-6·§103에서 세 번 미뤘다. 판정 대상 Δ가
+   −0.0004~−0.0105인데 realization 노이즈 크기를 모른다. v77 3 seed(약 51분)로 macro seed std를
+   먼저 확보하고, 겸해서 L8/L16/L32로 §99-3의 ⓐ/ⓑ를 가른다. **이것 없이는 다음 arm의 판정도
+   공허하다.**
+2. **G-6ⓐ 진단** — 학습된 P에서의 DD-only(학습 불필요). v79가 졌으므로 "DD가 CV의 학습된
+   subspace에서 손해를 보는가" 자체는 아직 답이 없다.
+3. **task-side 진단** — VHL 랜덤 이하(§0 열린 과제 2), BAP1 large-bag 붕괴(§99-2).
+   배선 축이 막혔으므로 남은 레버는 여기와 §99-2/§0의 reliability feature 쪽이다.
