@@ -1,16 +1,31 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-12` (§103 — v78·v79 모두 기각, CV/DD 배선 축 소진)
-
-**한 줄**: 활성 baseline은 v77 Hard orthogonal(SEAL macro **0.6873**)이고, 앞으로 arm 판정은 점추정 macro 차이가 아니라 **fold-paired Δ + bootstrap CI**로 한다(§99).
-
-**Status**: **활성 baseline v77 Hard orthogonal 0.6873. 실행 중인 학습·평가 없음. v78(−0.0004/−0.0047)·v79(−0.0105) 모두 기각 — CV/DD 배선 축 소진(§103-5). 다음은 seed 반복이 선행(§103-6). 역사적 전체 최고는 v41_K128 0.6940.**
+**Last updated**: `2026-08-12` (§104 — v77 baseline을 **epoch 49 = 0.6880**으로 확정, v80 기각, seed std 실측)
 
 > [!IMPORTANT]
-> **읽는 순서 (2026-08-12)**: 판정 방식이 §99에서 바뀌었다. arm을 비교하려면 §99를 먼저 읽고
-> `scripts/compare_arms_paired.py`를 쓸 것. §98 판정표 4건은 §99-1에서 fold-paired CI로
-> 재검증되어 전부 유지됐다. **v78·v79 모두 기각**이고 CV/DD 배선 축은 소진으로 본다(§103-5).
-> **다음 작업은 seed 반복이 선행 조건이다**(§103-6).
+> **활성 baseline은 v77 Hard orthogonal의 `epoch 49` checkpoint이고 SEAL 10-task macro는 0.6880이다.**
+> ```
+> checkpoints/20260812_v76_classsep_sweep/hard/periodic-epoch=049-val_ce_loss=0.1717.ckpt
+> tag: v77_hard_ep49        macro: 0.6880
+> ```
+> 이전에 쓰던 **0.6873은 같은 run의 `epoch=048` validation-best 값**이다(§98). 두 값의
+> fold-paired Δ는 **+0.0007 [+0.0000, +0.0014]** 로 사실상 같지만, **앞으로 모든 arm은
+> epoch 49 고정으로 채점하고 baseline 숫자는 0.6880을 쓴다**(사용자 결정, §104).
+> 이유는 §104-2 — val_ce 곡선이 평평한 arm에서 validation-best 선택이 과소학습 지점을
+> 고르는 것을 실측했다(v80 seed 43이 epoch 16에 걸려 −0.0089를 잃었다).
+
+**한 줄**: 활성 baseline은 v77 Hard orthogonal **epoch 49 = SEAL macro 0.6880**이고, arm 판정은 **fold-paired Δ + bootstrap CI**(§99)에 **macro seed std 0.0051**(§104-3)을 분모로 함께 읽는다.
+
+**Status**: **활성 baseline v77 Hard orthogonal epoch 49 = 0.6880 (val-best epoch 48은 0.6873). 실행 중인 학습·평가 없음. v78(−0.0004/−0.0047)·v79(−0.0105)·v80 shallow MLP(−0.0158, 4 seed) 모두 기각. macro seed std 0.0051 실측 → 판정 게이트 ≈ 0.010(2σ)이고 task별 CI는 판정 근거로 쓰지 않는다(§104). 역사적 전체 최고는 v41_K128 0.6940.**
+
+> [!IMPORTANT]
+> **읽는 순서 (2026-08-12)**: **§104를 먼저 읽을 것** — baseline 숫자(epoch 49 = 0.6880),
+> 채점 규칙(epoch 고정), 판정 게이트(seed std 0.0051), **task별 CI 사용 금지**가 모두 여기서
+> 정해졌다. 그다음 §99(fold-paired Δ + CI, `scripts/compare_arms_paired.py`).
+> §98 판정표 4건은 §99-1에서 fold-paired CI로 재검증되어 전부 유지됐으나, §104-4가 그중
+> 일부(ridge calibration −0.0033, v78 무가중 −0.0047)를 **seed 노이즈와 구분 불가**로 되돌렸다.
+> **v78·v79·v80 모두 기각**이고 CV/DD 배선 축은 소진으로 본다(§103-5).
+> **§103-6의 seed 반복 선행 조건은 §104-3에서 해소됐다.**
 > §2~§97 본문은 [`history.md`](history.md) §20–§23으로 아카이빙됐다(§101).
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
@@ -32,7 +47,7 @@
 현행 아키텍처 명세는 [`current_architecture.md`](current_architecture.md),
 실험 절차·결과표·금지사항은 [`current_experiments.md`](current_experiments.md).
 
-**지금 돌아가는 것 (2026-08-12)**: 없음. v79까지 완료·기각됐다(§103-4).
+**지금 돌아가는 것 (2026-08-12)**: 없음. v80 4-seed 학습·평가까지 완료·기각됐다(§104).
 
 결과 재확인:
 ```bash
@@ -46,11 +61,13 @@ done
 ---
 
 > **사용자 결정 (2026-08-12, 최신)**:
-> 1. **Hard v76을 canonical v77 baseline으로 승격.** v30 S2 결정은 역사적 기록이다.
-> 2. **ICI는 기본 잠금 유지.** §50과 §86은 사용자 명시 해제에 따른 예외 평가.
-> 3. **Musk 목표는 0.95 유지.**
+> 1. **v77 baseline은 `epoch 49` checkpoint이고 SEAL macro는 `0.6880`이다.** 앞으로 채점은
+>    epoch 49 고정으로 하고 validation-best 선택을 판정에 쓰지 않는다(§104).
+> 2. **Hard v76을 canonical v77 baseline으로 승격.** v30 S2 결정은 역사적 기록이다.
+> 3. **ICI는 기본 잠금 유지.** §50과 §86은 사용자 명시 해제에 따른 예외 평가.
+> 4. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§98 (v77 명명·baseline 승격)**, §97 (large-ragged), §96 (아키텍처 SSOT), §91 (Hard 선택), §89 (v76 구조/학습 경계),
+**Read first if you are picking this up**: **§104 (baseline epoch 49 = 0.6880, 판정 게이트, v80 기각)**, **§98 (v77 명명·baseline 승격)**, §97 (large-ragged), §96 (아키텍처 SSOT), §91 (Hard 선택), §89 (v76 구조/학습 경계),
 §88 (v74 baseline/CT/v71–v74 판정),
 §87 (DD/v70/synthetic 일반화),
 §86 (canonical CV+mean 계약), §85 (v62–v66), §71 (SEAL 판정), §73–§74
@@ -97,7 +114,9 @@ G-2 제거 확정(§68에서 분기 통째 제거로 해소), E>1 노선(§68-5)
 
 ## 0. 30초 요약 — 새 세션은 여기부터
 
-**활성 baseline: v77 Hard orthogonal, 공식 SEAL 10-task macro 0.6873** (§98).
+**활성 baseline: v77 Hard orthogonal `epoch 49`, 공식 SEAL 10-task macro 0.6880** (§104).
+ckpt `checkpoints/20260812_v76_classsep_sweep/hard/periodic-epoch=049-val_ce_loss=0.1717.ckpt`,
+tag `v77_hard_ep49`. (같은 run의 `epoch=048` validation-best는 0.6873 — §98의 역사적 표기다.)
 `CovarianceMeanLearnablePDDCTMLPModel`, 학습 파라미터 197,057개(P 196,608 + head 449).
 역사적 전체 최고는 여전히 **v41_K128 CV-only 0.6940**(229 파라미터)이므로, 활성 baseline이
 사상 최고보다 낮은 상태다. 지도학습 ABMIL은 0.7266(−0.0393), 상회는 2/10 task.
@@ -1034,3 +1053,184 @@ v78 balanced → 무가중 → v79가 **−0.0004 → −0.0047 → −0.0105**�
    subspace에서 손해를 보는가" 자체는 아직 답이 없다.
 3. **task-side 진단** — VHL 랜덤 이하(§0 열린 과제 2), BAP1 large-bag 붕괴(§99-2).
    배선 축이 막혔으므로 남은 레버는 여기와 §99-2/§0의 reliability feature 쪽이다.
+   ⚠️ **§104-5가 이 항목의 근거를 약화시켰다** — BAP1의 large-bag 붕괴 −0.0179는 시드만 바꿔도
+   나오는 크기(−0.0402)보다 작다.
+
+---
+
+## 104. 2026-08-12 — baseline을 epoch 49 = 0.6880으로 확정, v80 shallow MLP 기각, seed std 실측
+
+### 0. 이 절이 정한 것 (요약)
+
+| 항목 | 결정 |
+|---|---|
+| **활성 baseline checkpoint** | `checkpoints/20260812_v76_classsep_sweep/hard/periodic-epoch=049-val_ce_loss=0.1717.ckpt` |
+| **활성 baseline 수치** | **SEAL 10-task macro `0.6880`** (tag `v77_hard_ep49`) |
+| 이전 표기 0.6873의 정체 | 같은 run의 `epoch=048` **validation-best**. Δ +0.0007 [+0.0000, +0.0014] |
+| **채점 규칙** | **epoch 49 고정.** validation-best 선택은 판정에 쓰지 않는다 |
+| **macro seed std** | **0.0051** (epoch 고정, n=4) / 0.0023 (val-best 선택 시) |
+| **판정 게이트** | macro Δ **≈0.010(2σ)** 이상일 때만 단정. 그 미만은 "판정 불가" |
+| **task별 CI** | **판정 근거로 쓰지 않는다** (§104-5) |
+| v80 shallow MLP | **기각.** 4 seed 평균 0.6722, Δ −0.0158 |
+
+### 1. v80 arm — Hard에서 한 번도 안 돌린 칸이었다
+
+`manifold_mode`에서 이 리포의 "infinite"는 **bank size 무한 = episode마다 새로 뽑음**을 뜻한다.
+Hard `[0.2,0.8]`에서 돌린 manifold arm은 **유한 bank뿐**이었다(`mlp_bank` M=128~4096, `mixed` 50:50).
+`nonlinear`(fresh MLP per episode, M=∞)는 ClassSep baseline `[1.0,2.0]` 시절 v72(0.6709)가 마지막이고
+**Hard에서는 미측정**이었다. ClassSep이 유일하게 먹힌 레버였으므로 난이도별 manifold 순위는
+확립된 것이 아니었다.
+
+깊이는 사용자 지시로 **가장 얕은 진짜 MLP**를 썼다. `mlp_num_layers`는 weight 행렬 개수이고
+GELU는 마지막 층에 붙지 않는다(`_map_to_manifold`):
+
+| `mlp_num_layers` | 차원 | GELU | 판정 |
+|---|---|---:|---|
+| 1 | `[32→1536]` | **0** | MLP가 아니다. orthogonal의 비-isometric 열등판 — 쓰지 말 것 |
+| **2** | `[32→96→1536]` | **1** | **가장 얕은 진짜 MLP. v80이 이것** |
+| 3 | `[32→96→96→1536]` | 2 | bank sweep이 쓴 깊이 |
+
+config `configs/train_v80_hard_shallow_mlp_1536.yaml`(DDP4 정의) +
+`..._1gpu.yaml`(4-seed 배치용). v77 대비 바뀐 resolved 키는 **정확히 두 개**
+(`manifold_mode: orthogonal→nonlinear`, `mlp_num_layers: 3→2`)이고 타입도 int로 확인했다(§79 함정).
+사전 검증: weight shape `[(96,32),(1536,96)]`, superposition gap 0.3965(선형이면 0),
+episode마다 다른 맵. 셀 특징은 `synthetic_data.py:792`에서 L2 정규화되므로 nonlinear의 출력
+스케일 차이는 모델 입력에서 사라진다 — 스케일 confound 없음.
+
+### 2. 채점을 epoch 49로 고정한 이유 — validation-best가 과소학습 지점을 골랐다
+
+v80 4 seed의 validation-best epoch가 **44 / 16 / 11 / 49**로 흩어졌다. val_ce 스프레드가
+0.2276~0.2312(0.0036)뿐이어서 곡선이 거의 평평하고, 어느 epoch이 "best"로 뽑히는지가 사실상
+무작위였다. 사용자 지시로 전부 `periodic-epoch=049`로 다시 채점했다.
+
+| seed | ep49 macro | val-best macro | 차이 | val-best epoch |
+|---|---:|---:|---:|---:|
+| 42 | 0.6688 | 0.6667 | +0.0021 | 44 |
+| 43 | **0.6795** | 0.6706 | **+0.0089** | 16 |
+| 44 | 0.6686 | 0.6690 | −0.0004 | 11 |
+| 45 | 0.6720 | 0.6720 | ±0.0000 | 49 (동일 ckpt) |
+| 평균 | **0.6722** | 0.6696 | +0.0026 | |
+
+**seed 43이 결정적이다.** val_ce는 epoch 16(0.2276)이 epoch 49(0.2290)보다 0.0014 좋아 보였지만
+SEAL은 **−0.0089 손해**였다. §69-6("합성 지표는 평평한데 실제 task는 계속 오른다")이 이 arm에서
+재현됐고, val-best 선택이 seed 43을 과소학습 지점에서 잘라냈다.
+
+**baseline 쪽은 둔감했다**: v77 ep49 0.6880 vs val-best(epoch 48) 0.6873, Δ **+0.0007
+[+0.0000, +0.0014]**. 즉 baseline 숫자는 규칙을 바꿔도 흔들리지 않는다. v77의 val_ce는
+0.1697 부근에서 안정적이고 v80은 평평했다는 차이다.
+
+⚠️ **주의**: epoch 고정은 분산을 줄이지 않았다. 오히려 **늘렸다**(§104-3). validation-best 선택은
+각 시드가 자기 궤적의 최고점을 고르므로 시드 간 차이를 부분적으로 상쇄한다 — 대신 seed 43 같은
+편향을 만든다. 편향을 없애고 분산을 드러내는 쪽을 택한 것이다.
+
+### 3. macro seed std 실측 — §103-6의 선행 조건 해소
+
+동일 config·동일 50 epoch, `SEED`만 42/43/44/45로 바꾼 4 run(1-GPU, GPU 0–3 병렬):
+
+| 채점 규칙 | mean | **seed std** | range |
+|---|---:|---:|---:|
+| epoch 49 고정 | 0.6722 | **0.0051** | 0.0109 |
+| validation-best | 0.6696 | 0.0023 | 0.0053 |
+
+⚠️ **n=4라 std 추정 자체가 매우 불확실하다**(자유도 3이면 std의 95% 구간이 대략 0.6~2.9배).
+"epoch 고정이 std를 2.2배 늘렸다"는 방향성으로만 읽을 것.
+
+`SEED`는 `train.py`가 `seed_everything`으로 라우팅해 **모델 초기화와 training episode 스트림**을
+움직인다. training dataset은 `seed: null` 유지(`episode_dataset: true`라 CLI seed로 덮이지 않는다),
+val/test는 50042/60042 고정 — 네 시드가 **동일한 val/test episode**로 채점됐다.
+
+### 4. 판정 게이트가 엄격해졌다 — 기존 판정 3건이 "판정 불가"로 내려간다
+
+epoch-고정 seed std **0.0051**을 분모로 과거 Δ를 다시 읽으면:
+
+| arm | Δmacro | σ 배수 | 재해석 |
+|---|---:|---:|---|
+| v78 balanced (0.02) | −0.0004 | 0.1σ | 노이즈 (기존 "동률"과 일치) |
+| large-ragged warm-start | +0.0012 | 0.2σ | 노이즈 (미승격이 옳았다) |
+| ridge calibration | −0.0033 | 0.6σ | **판정 불가** — 기존 "CI 0 제외 → 기각"이 성립하지 않는다 |
+| v78 무가중 (1.0) | −0.0047 | 0.9σ | **판정 불가** — 같은 문제 |
+| MLP bank M=1024 | −0.0094 | 1.8σ | 경계 |
+| v79 dual projection | −0.0105 | 2.1σ | 겨우 유지 |
+| **v80 shallow MLP** | **−0.0158** | **3.1σ** | **기각 (4 seed)** |
+
+**§103-5의 논거가 좁아진다.** "v78 balanced → 무가중 → v79가 −0.0004 → −0.0047 → −0.0105로
+**단조 악화**하므로 축이 소진됐다"에서 중간 단계(−0.0047)가 seed 노이즈와 구분되지 않는다.
+소진 결론 자체는 v79의 −0.0105(2.1σ)가 버티므로 방향은 유지하지만, **"단조성"을 증거로 인용하지 말 것.**
+
+### 5. task별 fold-paired CI는 판정 근거로 쓸 수 없다 — 실측
+
+**시드만 다른 두 run**(v80 seed42 vs seed45, val-best 채점)을 fold-paired로 비교했더니
+**CI가 0을 제외하는 task가 6개** 나왔다. 처치는 없었다.
+
+| task | Δ (시드 차이뿐) | 95% CI |
+|---|---:|---|
+| **cptac_ccrcc BAP1** | **−0.0402** | [−0.0666, −0.0156] |
+| cptac_ccrcc VHL | +0.0324 | [+0.0089, +0.0570] |
+| cptac_brca PIK3CA | +0.0259 | [+0.0019, +0.0500] |
+| bc_therapy er_status | +0.0199 | [+0.0068, +0.0339] |
+| cptac_luad STK11 | +0.0119 | [+0.0014, +0.0225] |
+| bc_therapy grade | −0.0120 | [−0.0208, −0.0030] |
+| MACRO | +0.0053 | [−0.0001, +0.0107] (0 포함 — macro는 정직했다) |
+
+task별 seed std(val-best 채점, n=4)는 BAP1 0.0299 / PIK3CA 0.0237 / luad TP53 0.0225 /
+VHL 0.0214 / grade 0.0191이고 평균 **0.0161** — macro(0.0023)의 7배다. **평균이 노이즈를 지운다.**
+epoch-고정에서도 BAP1은 0.5461~0.6464(range 0.100)로 흔들린다.
+
+⚠️ **따라서 §99-2의 "large-ragged는 동률이 아니라 재분배다"는 성립하지 않는다.** 그 판정의
+근거는 task 6개의 CI 0 제외와 **BAP1 −0.0179**였는데, 시드만 바꿔도 같은 BAP1이 **−0.0402**
+(2.2배)로 움직인다. pairing은 fold 노이즈만 잡고 realization 노이즈는 그대로 남긴다 —
+§99-4가 한계로 적어둔 것이 실측된 것이다. **arm이 다른 두 run 사이의 task별 CI는 해석하지 말 것.**
+
+### 6. v80 최종 판정 — 기각
+
+epoch 49 규칙을 baseline에도 적용한 비교:
+
+| arm | macro | Δ vs v77 ep49 | 95% CI | 상승 task |
+|---|---:|---:|---|---:|
+| **v77 Hard orthogonal ep49** | **0.6880** | — | — | — |
+| v80 seed 42 | 0.6688 | −0.0192 | [−0.0240, −0.0142] | 3/10 |
+| v80 seed 43 | 0.6795 | −0.0085 | [−0.0134, −0.0036] | 5/10 |
+| v80 seed 44 | 0.6686 | −0.0194 | [−0.0241, −0.0149] | 2/10 |
+| v80 seed 45 | 0.6720 | −0.0160 | [−0.0210, −0.0111] | 3/10 |
+| **v80 평균** | **0.6722** | **−0.0158** | | |
+
+네 시드 모두 CI가 0을 제외한다. v80 seed SE 0.0025에 v77의 seed 노이즈를 v80과 같다고 가정해
+합성하면 SE≈0.0057, **t≈2.8**. ⚠️ **v77은 시드 1개뿐이므로 이 마진은 그 가정에 의존한다.**
+
+사전 증거와 방향이 일치한다: bank sweep M=1024→4096 하강(0.6779→0.6649)의 M→∞ 외삽, 그리고
+v72의 0.6709. **얕은 infinite MLP도 fresh orthogonal linear를 넘지 못한다 — Hard 난이도에서도
+manifold 순위는 뒤집히지 않았다.**
+
+⚠️ **남은 confound (판정을 뒤집을 정도는 아니나 명시해야 한다)**: v80은 **1-GPU**
+(1024 step/epoch, effective batch 1), v77 baseline은 **DDP4**(rank당 256 step/epoch,
+gradient 4개 평균)다. Lightning이 loader를 DistributedSampler로 감싸기 때문이다. 같은 LR에서
+optimizer step이 4배, gradient 노이즈가 4배다. **−0.0158 전부를 manifold 효과로 귀속할 수 없다.**
+순수 manifold 효과를 원하면 v77을 `..._1gpu` 레이아웃으로 4 seed 돌려야 한다(약 55분, 미실행).
+
+### 7. 산출물
+
+- 학습: `logs/20260812_v80_shallow_mlp_seeds/v80_shallow_mlp_seed4{2,3,4,5}.out`,
+  ckpt `checkpoints/20260812_v80_shallow_mlp_seeds/v80_shallow_mlp_seed4{2,3,4,5}/`
+  (4개 전부 `training completed successfully`). 1-GPU 4병렬로 학습 약 50분.
+- 평가 태그: `v80_shallow_mlp_seed4{2,3,4,5}_best`(val-best), `..._ep49`(epoch 고정),
+  `v77_hard_ep49`(baseline). 예측 90개 = 40+40+10, 로그 `logs/official50/*_<tag>.log`.
+- 재확인:
+  ```bash
+  for tag in v77_hard_ep49 v80_shallow_mlp_seed42_ep49 v80_shallow_mlp_seed43_ep49 \
+             v80_shallow_mlp_seed44_ep49 v80_shallow_mlp_seed45_ep49; do
+    printf "%-32s " $tag
+    grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_${tag}.log \
+      | awk '{s+=$1;k++} END{printf "%.4f (%d)\n", s/k, k}'
+  done
+  ```
+- ⚠️ v80 config 2개는 기각된 arm이므로 다음 정리에서 v78 두 개와 함께
+  `configs/archive/`로 이관할 것(§7 규칙).
+
+### 8. 다음 Action
+
+1. **v77 1-GPU 4 seed control** — v80의 batch-regime confound를 없애고, 동시에 baseline
+   자신의 seed std를 얻는다(현재 v77은 시드 1개다). 약 55분, GPU 0–3.
+2. **§99-2·§103-6의 task-side 항목 재검토** — BAP1 large-bag 붕괴와 VHL 랜덤 이하는 §104-5에
+   비추면 근거가 약하다. 다시 세우려면 **arm마다 최소 3 seed**가 필요하다.
+3. **판정 게이트 0.010을 넘길 만한 축을 찾을 것.** 지금까지의 arm은 대부분 이 게이트 아래에서
+   싸웠다 — 미세 배선이 아니라 큰 레버(ClassSep이 그랬던 것처럼)를 찾아야 한다.

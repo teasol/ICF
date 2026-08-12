@@ -1,6 +1,23 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-12` — 활성 baseline은 **v77 Hard orthogonal**(SEAL macro **0.6873**)이다. **v78·v79 모두 기각**이고 **CV/DD·사영 배선 축은 소진**으로 본다. 다음 작업은 **seed 반복이 선행 조건**이다. 판정은 반드시 **fold-paired Δ + CI**(§99)로 한다. 진행 상태는 `current_status.md` §103.
+**Last updated**: `2026-08-12` — 활성 baseline은 **v77 Hard orthogonal의 `epoch 49` checkpoint**이고 SEAL macro는 **0.6880**이다(§104, 사용자 결정). **v78·v79·v80 모두 기각**이고 **CV/DD·사영 배선 축은 소진**으로 본다. 판정은 **fold-paired Δ + CI**(§99)를 **macro seed std 0.0051**과 함께 읽고(게이트 ≈0.010), **task별 CI는 판정 근거로 쓰지 않는다**(§104-5). 진행 상태는 `current_status.md` §104.
+
+> [!IMPORTANT]
+> **baseline 숫자 계약 (§104, 2026-08-12) — 이것부터 읽을 것**
+>
+> ```
+> checkpoint: checkpoints/20260812_v76_classsep_sweep/hard/periodic-epoch=049-val_ce_loss=0.1717.ckpt
+> tag:        v77_hard_ep49
+> SEAL 10-task macro: 0.6880
+> ```
+> **활성 baseline은 `epoch 49`이고 값은 `0.6880`이다.** 문서 곳곳에 남아 있는 **0.6873은 같은
+> run의 `epoch=048` validation-best** 값이며(§98), 두 값의 fold-paired Δ는
+> **+0.0007 [+0.0000, +0.0014]** 로 사실상 동일하다. 혼동하지 말 것 — **새 arm은 전부
+> epoch 49 고정으로 채점하고 baseline은 0.6880과 비교한다.**
+>
+> **왜 epoch 고정인가**: val_ce 곡선이 평평한 arm에서 validation-best 선택이 **과소학습 지점을
+> 고르는 것을 실측**했다 — v80 seed 43은 val-best가 epoch 16을 골라 epoch 49 대비 **−0.0089**를
+> 잃었고, val_ce로는 epoch 16이 0.0014 더 좋아 보였다(§104-2). v77 자신은 이 선택에 둔감했다.
 
 > [!IMPORTANT]
 > **활성 baseline: v77 Hard learnable-P CV+DD+CT relation head (§98)**
@@ -16,15 +33,38 @@
 > P는 CV ridge gradient로 학습되고 DD는 현재 P의 covariance를 읽되 DD→P gradient는 없다.
 > DD/CT 자체는 training-free다.
 > synthetic는 Hard ClassSep `[0.2,0.8]`, fresh orthogonal manifold, 50 epochs다. canonical config는
-> `configs/train_v77_hard_orthogonal_1536.yaml`, best checkpoint는
-> `checkpoints/20260812_v76_classsep_sweep/hard/epoch=048-val_ce_loss=0.1697.ckpt`.
-> 공식 SEAL macro **0.6873**. v76 easy predecessor는 0.6748, v74는 fixed-P control 0.6731,
+> `configs/train_v77_hard_orthogonal_1536.yaml`이고 **판정용 checkpoint는 epoch 49**다:
+> `checkpoints/20260812_v76_classsep_sweep/hard/periodic-epoch=049-val_ce_loss=0.1717.ckpt`
+> → 공식 SEAL macro **0.6880** (tag `v77_hard_ep49`, §104).
+> 같은 run의 validation-best `epoch=048-val_ce_loss=0.1697.ckpt`는 **0.6873**이고 Δ는
+> +0.0007 [+0.0000, +0.0014]다 — 역사적 표기로만 남기고 **판정에는 0.6880을 쓴다**.
+> v76 easy predecessor는 0.6748, v74는 fixed-P control 0.6731,
 > v70은 재현 control, v71(CV+MLP) 0.6667,
 > v72(nonlinear manifold) 0.6709, v73(+Magnitude) 0.6473으로 승격하지 않는다.
+> **v80 shallow infinite MLP manifold도 4 seed 평균 0.6722(Δ −0.0158)로 기각**이다(§104-6).
 >
 > 이 v77은 데이터/실험 baseline 승격이며 텐서 구조는 v76과 같아 내부
 > `architecture_version=54`를 유지한다. 예전에 v77이라 부른 `PopulationTokenResidualModel`
 > (0.6750)은 **retired provisional v77-pop-residual**이며 내부 version 55는 replay용으로 보존한다.
+
+> [!IMPORTANT]
+> **판정 계약 (§104, 2026-08-12) — seed std가 실측됐다**
+>
+> **① macro seed std = 0.0051** (epoch 49 고정, 동일 config·`SEED`만 42~45, n=4).
+> validation-best 채점이면 0.0023이다. ⚠️ n=4라 std 추정의 95% 구간이 대략 0.6~2.9배 —
+> 방향성으로만 쓸 것.
+>
+> **② 판정 게이트 ≈ macro Δ 0.010(2σ).** 그 미만은 **"판정 불가"**로 적고 기각·승격을 단정하지
+> 않는다. 이 기준에서 과거 판정 2건이 내려간다 — ridge calibration(−0.0033, 0.6σ)과
+> **v78 무가중(−0.0047, 0.9σ)**. §103-5의 "단조 악화" 논거는 중간 단계를 잃었으므로
+> **인용하지 말 것**(축 소진 결론 자체는 v79 −0.0105가 지탱한다).
+>
+> **③ task별 fold-paired CI는 판정 근거가 아니다.** **시드만 다른 두 run**에서 task 6개의 CI가
+> 0을 제외했고 BAP1은 **−0.0402**였다(처치 없음). task별 seed std는 평균 0.0161로 macro의 7배다.
+> pairing은 fold 노이즈만 잡고 realization 노이즈는 남긴다. **§99-2의 "large-ragged는 재분배다"와
+> BAP1 large-bag 붕괴 조사 항목은 근거를 잃었다** — 다시 세우려면 arm마다 최소 3 seed다.
+>
+> **④ 채점은 epoch 49 고정.** validation-best는 val_ce가 평평한 arm에서 과소학습 지점을 고른다.
 
 > [!IMPORTANT]
 > **DD 계약 — 미분 금지 + gradient 개방 금지 (§100·§103, 2026-08-12)**

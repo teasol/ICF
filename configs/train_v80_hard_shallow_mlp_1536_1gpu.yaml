@@ -1,0 +1,24 @@
+# v80 shallow-MLP manifold, single-GPU layout for a 4-seed batch on GPUs 0-3.
+#
+# Only the trainer layout changes from train_v80_hard_shallow_mlp_1536.yaml. The
+# point of this file is that four seeds run concurrently, one per GPU, instead of
+# four DDP4 runs back to back.
+#
+# ⚠️ THIS IS NOT COMPARABLE TO THE v77 0.6873 NUMBER. Lightning wraps the loader in
+# a DistributedSampler, so DDP4 gives each rank 1024/4 = 256 episodes per epoch and
+# averages 4 gradients per step; one GPU gives 1024 steps per epoch at effective
+# batch 1. Same LR, 4x the optimizer steps, 4x noisier gradients. Judging v80 against
+# the DDP4 v77 checkpoint would confound the manifold change with the batch regime.
+# The matched control is v77 run through this same 1-GPU layout
+# (train_v77_hard_orthogonal_1536_1gpu.yaml), seed for seed.
+#
+# Seeds come from the launcher's SEED env var, which train.py routes into
+# seed_everything -- that moves model init and the training episode stream. The
+# training dataset keeps seed: null on purpose (episode_dataset: true), and
+# val/test stay pinned at 50042/60042, so all four seeds are validated and tested
+# on identical episodes.
+base_config: train_v80_hard_shallow_mlp_1536.yaml
+
+trainer_overrides:
+  devices: 1
+  strategy: auto

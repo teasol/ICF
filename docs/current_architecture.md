@@ -1,8 +1,11 @@
 # Current architecture — 활성 relation 계보와 역사적 비교군 (2026-08-12)
 
 > [!IMPORTANT]
-> **활성 baseline은 v77 Hard orthogonal** (`CovarianceMeanLearnablePDDCTMLPModel`,
-> SEAL **0.6873**)이다. 이전에 Hard v76이라 부르던 실험을 공식 v77로 승격했다.
+> **활성 baseline은 v77 Hard orthogonal의 `epoch 49` checkpoint**
+> (`CovarianceMeanLearnablePDDCTMLPModel`, SEAL **0.6880**, tag `v77_hard_ep49`)다 —
+> `checkpoints/20260812_v76_classsep_sweep/hard/periodic-epoch=049-val_ce_loss=0.1717.ckpt`.
+> 같은 run의 `epoch=048` validation-best는 **0.6873**이고 Δ +0.0007 [+0.0000, +0.0014]다;
+> 채점은 **epoch 49 고정**으로 통일한다(§104). 이전에 Hard v76이라 부르던 실험을 공식 v77로 승격했다.
 > centered cells를 learnable orthogonal P(1536×128)에 사영해 만든 covariance를 CV와 DD가
 > 공유하고, CT와 함께 12개 relation feature를 만들어 12→32→1 MLP가 읽는다.
 > 학습 파라미터는 P 196,608개 + head 449개 = **197,057개**다. 기본 v77에서 P는 CV ridge
@@ -30,8 +33,8 @@
 | bag 기술자 | learnable P covariance + raw mean | fixed P covariance | learned Transformer |
 | readout | CV/DD/CT 12→32→1 | CV-1 ridge + CV-2 | episode-local ridge |
 | 학습 파라미터 | 197,057 (calibration arm 197,059) | 229 | 5,010,946 |
-| SEAL 10개 최고 | **0.6873** | **0.6940** (v41_K128) | 0.6619 / 0.6526 |
-| 상태 | **활성 baseline** (v79 실험 중, Active-6) | 역사적 전체 최고 | 기각 |
+| SEAL 10개 최고 | **0.6880** (ep49) | **0.6940** (v41_K128) | 0.6619 / 0.6526 |
+| 상태 | **활성 baseline** (v79·v80 모두 기각, Active-6·§104) | 역사적 전체 최고 | 기각 |
 
 이전 세대(v34~v39의 6-분기)는 **소스에서 삭제**됐다(§73). 필요하면 git `8caa96c`.
 
@@ -114,9 +117,15 @@ Hard 실험의 공통 조건은 다음과 같다.
 
 `manifold_mode`은 실험 축이다.
 
-- `orthogonal`: episode마다 fresh isometric linear map. Hard 0.6873으로 현재 데이터 후보 최고.
+- `orthogonal`: episode마다 fresh isometric linear map. **Hard epoch 49 = 0.6880**으로 현재
+  데이터 후보 최고(val-best 채점은 0.6873, §104).
 - `mlp_bank`: 고정 3-layer MLP를 bank ID seed로 재생성. M=128/512/1024/2048/4096 결과는
   0.6697/0.6726/**0.6779**/0.6751/0.6649.
+- `nonlinear`: episode마다 fresh MLP (= bank size 무한). **Hard에서 기각** — `mlp_num_layers: 2`
+  (`[32→96→1536]`, GELU 1개, 가장 얕은 진짜 MLP)로 4 seed 평균 **0.6722**, Δ −0.0158 (§104-6).
+  ClassSep baseline 시절 v72(3-layer)의 0.6709와 방향이 같다. ⚠️ `mlp_num_layers: 1`은
+  GELU가 하나도 없어(`_map_to_manifold`가 마지막 층 활성을 건너뛴다) MLP가 아니라
+  비-isometric 선형사상이다 — arm으로 쓰지 말 것.
 - `mixed_linear_mlp_bank`: episode마다 mapping 하나를 선택한다. 50% fresh linear + 50% MLP-1024는
   synthetic val CE 0.2218로 좋아졌지만 SEAL은 0.6755로 하락해 기각했다.
 
@@ -129,9 +138,12 @@ Hard 실험의 공통 조건은 다음과 같다.
 - 활성 실행: 없음.
 - **v78·v79 모두 기각.** weight 0/0.02/1.0에서 0.6873/0.6869/0.6826(G-5), v79 분리는 0.6768
   (Active-6). 세 방식 모두 지고 건드린 정도가 클수록 더 졌다 — 이 축은 소진으로 본다.
-- active baseline: v77 Hard orthogonal **0.6873**.
-- learned ridge λ/logit scale은 0.6840으로 기각했다.
-- 판정: validation-best 하나의 공식 SEAL 10-task macro와 task별 regression. synthetic val 지표는
+- active baseline: v77 Hard orthogonal **epoch 49 = 0.6880** (val-best epoch 48은 0.6873, §104).
+- learned ridge λ/logit scale은 0.6840으로 기각했다. ⚠️ Δ −0.0033은 seed std 0.0051 미만이라
+  **§104-4에서 "판정 불가"로 내려갔다**.
+- v80 shallow infinite MLP manifold는 4 seed 평균 0.6722(Δ −0.0158)로 기각(§104-6).
+- 판정: **epoch 49 고정** checkpoint의 공식 SEAL 10-task macro. **task별 regression은 판정
+  근거로 쓰지 않는다**(시드만 달라도 task 6개 CI가 0을 제외한다, §104-5). synthetic val 지표는
   checkpoint 선택에만 사용한다. macro 비교는 점추정 차이가 아니라 **fold-paired Δ + bootstrap
   CI**로 한다 — `scripts/compare_arms_paired.py` (§99).
 - GPU 정책: ICF는 GPU 0–3만 사용하고 4–7은 사용하지 않는다.
@@ -405,7 +417,8 @@ attention은 에피소드당 2.7e10 쌍이라 불가"였는데, **쌍의 개수�
 | `dd_shrinkage` | 0.25 | **Active** | DD whitening의 shrinkage. ⚠️ backward의 고윳값 **간격은 바꾸지 않는다** |
 | `ct_num_tokens` / `ct_cells_per_bag` | 16 / 64 | **Active** | CT 후보 token 수 / bag당 샘플 cell 수 |
 | `class_separation` | `[0.2, 0.8]` | **Active** | 합성 난이도. Hard가 현재 최고(§91) |
-| `manifold_mode` | `orthogonal` | **Active** | `mlp_bank`·`mixed_linear_mlp_bank`는 전부 기각(Active-3) |
+| `manifold_mode` | `orthogonal` | **Active** | `mlp_bank`·`mixed_linear_mlp_bank`·`nonlinear` 전부 기각(Active-3, §104) |
+| `mlp_num_layers` | 3 | **Active** | `orthogonal`에서는 미사용. `nonlinear`/`mlp_bank`에서만 유효하고 **weight 행렬 개수**다(1은 활성 없음 = MLP 아님) |
 | `data.ragged_training` | `false` | **Active** | `episode_batch_size=1` 전용. Active-5 참조 |
 | `aggregator_covariance_sketch_dim` (K) | 64 | A | 사영 차원. sketch = K(K+1)/2 |
 | `aggregator_covariance_matrix_dim` | 32 | A | CV-2가 보는 차원. `null` = K 연동 |

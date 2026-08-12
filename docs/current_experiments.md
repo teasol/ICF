@@ -15,6 +15,17 @@ CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 > 대상은 `docs/seal_univ2_baseline_17tasks.csv`의 **`in_seal=yes` 10개**뿐이다 — SEAL과
 > **같은 코호트·같은 공식 50-fold**로 비교 가능한 행. 나머지 7개는 대응 수치가 없다.
 
+> [!IMPORTANT]
+> **baseline·채점 규칙·게이트 (§104, 2026-08-12)**
+>
+> - **baseline = v77 Hard orthogonal `epoch 49`, SEAL macro `0.6880`** (tag `v77_hard_ep49`,
+>   ckpt `checkpoints/20260812_v76_classsep_sweep/hard/periodic-epoch=049-val_ce_loss=0.1717.ckpt`).
+>   0.6873은 같은 run의 `epoch=048` validation-best다(Δ +0.0007 [+0.0000, +0.0014]).
+> - **채점은 epoch 49 고정.** validation-best 선택은 val_ce가 평평한 arm에서 과소학습 지점을
+>   고른다 — v80 seed 43이 epoch 16에 걸려 −0.0089를 잃었다.
+> - **macro seed std = 0.0051** (n=4) → **판정 게이트 ≈ macro Δ 0.010(2σ)**. 미만은 "판정 불가".
+> - **task별 CI로 판정하지 않는다** — 시드만 달라도 task 6개의 CI가 0을 제외한다(BAP1 −0.0402).
+
 **금지 사항 (전부 실측으로 무너진 판정 방식)**
 
 | 하지 말 것 | 근거 |
@@ -25,6 +36,10 @@ CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 | **단일 측정으로 단정** | 기저 요동 ±0.05, seed 반복 필수 (§69-3) |
 | **점추정 macro끼리 빼서 판정** | task 내 fold 산포가 ±0.09인데 판정 대상 Δ는 0.001~0.012다. 모든 arm이 같은 공식 fold를 쓰므로 **fold별로 먼저 뺀 뒤 평균**해 CI를 낼 것 — `scripts/compare_arms_paired.py` (§99) |
 | **ridge-only 진단치를 기대값으로** | K 64→128 예측 +0.016 vs 실측 +0.004 (§70-2) |
+| **task별 CI로 판정하기** | 시드만 다른 두 run에서 task 6개 CI가 0을 제외, BAP1 −0.0402. task별 seed std 평균 0.0161 = macro의 7배 (§104-5) |
+| **macro Δ 0.010 미만을 단정하기** | macro seed std 0.0051. ridge calibration(−0.0033)·v78 무가중(−0.0047)은 "판정 불가"로 내려갔다 (§104-4) |
+| **validation-best로 채점하기** | val_ce가 평평하면 과소학습 지점을 고른다. v80 seed 43이 epoch 16에 걸려 −0.0089 (§104-2). **epoch 49 고정으로 채점** |
+| **학습 레이아웃이 다른 arm 비교** | 1-GPU는 1024 step/epoch·batch 1, DDP4는 rank당 256 step·gradient 4개 평균. v80의 −0.0158에 이 confound가 남아 있다 (§104-6) |
 | **학습 길이가 다른 arm 비교** | control은 항상 같은 epoch 수로 새로 학습 (§42-43, §65) |
 | **값만 보고 config 검증** | `lr: 2e-05`는 YAML이 **문자열**로 읽는다. 출력하면 숫자처럼 보인다 — 타입을 볼 것 (§79) |
 
@@ -70,7 +85,9 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 | SEAL ABMIL (지도학습) | — | **0.727** | 비교 상대 |
 | SEAL MeanMIL (지도학습) | — | 0.713 | |
 | **v41_K128** | A | **0.6940** | **현행 최고**. K=128, CV-2=128, `a=0.85π/K` |
-| **v77 Hard orthogonal** | relation | **0.6873** | **활성 baseline**. 이전 Hard v76의 공식 명칭 |
+| **v77 Hard orthogonal ep49** | relation | **0.6880** | **활성 baseline** (`v77_hard_ep49`, §104) |
+| v77 Hard orthogonal val-best | relation | 0.6873 | 같은 run의 `epoch=048`. 역사적 표기 |
+| v80 shallow MLP (4 seed 평균) | relation | 0.6722 | infinite MLP `mlp_num_layers=2`, Δ −0.0158 기각 (§104) |
 | v77 large-ragged warm-start | relation | 0.6885 | 파생 실험; +0.0012라 미승격 |
 | v77 ridge calibration | relation | 0.6840 | λ/logit scale 학습, 기각 |
 | v76 learnable P (easy predecessor) | relation | 0.6748 | 이전 baseline |

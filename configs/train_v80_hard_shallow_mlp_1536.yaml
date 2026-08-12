@@ -1,0 +1,41 @@
+# v80: infinite (fresh-per-episode) MLP manifold, at the shallowest depth that is
+# still an MLP.
+#
+# The Hard manifold sweep only ever tested FINITE banks -- mlp_bank M=128/512/1024/
+# 2048/4096 gave 0.6697/0.6726/0.6779/0.6751/0.6649 and mixed 50:50 gave 0.6755
+# (docs SS93/SS94). `manifold_mode: nonlinear`, which redraws the map every episode
+# (M = infinity), was last run at ClassSep baseline [1.0,2.0] as v72 (0.6709 against
+# a 0.6748 predecessor). It has never been run at Hard [0.2,0.8], and ClassSep is the
+# one axis in this repo that ever moved SEAL, so the ordering of manifold modes is
+# not established at this difficulty.
+#
+# Depth: `mlp_num_layers` counts weight matrices and GELU is skipped on the last one
+# (`_map_to_manifold`), so
+#   1 -> [32->1536], no activation at all: a random non-isometric linear map, i.e. a
+#        strictly worse `orthogonal`. Not a valid MLP arm.
+#   2 -> [32->96->1536], one GELU: the shallowest genuine MLP. This arm.
+#   3 -> [32->96->96->1536], two GELUs: what the bank sweep used.
+# Hidden width stays 96 (> latent 32, so the single hidden layer is not a bottleneck)
+# to keep this a one-knob move off the bank sweep's geometry.
+#
+# Expectation is a loss: the bank sweep peaks at M=1024 and falls to 0.6649 by
+# M=4096, and extrapolating M -> infinity agrees with v72's 0.6709. The reason to
+# measure it anyway is that this is the DATA axis, not the CV/DD wiring axis declared
+# exhausted in SS103-5, and a fresh redraw differs qualitatively from a reproducible
+# bank member -- the bank's decline need not carry over.
+#
+# Data-only change: no new parameters, trainable stays 197,057, architecture_version
+# stays 54, and v77 checkpoints load strict both ways. The shared `dataset_kwargs`
+# block means train/val/test all move together, so val CE stays comparable within
+# this arm (but NOT against v77 -- different data distribution).
+# Control is v77 itself at the same 50 epochs and same DDP4 layout.
+# Judgment is fold-paired delta + bootstrap CI against v77 (docs SS99).
+base_config: train_v77_hard_orthogonal_1536.yaml
+
+data_overrides:
+  dataset_kwargs:
+    manifold_mode: nonlinear
+    mlp_num_layers: 2
+
+logger_overrides:
+  experiment_name: v80_hard_shallow_mlp
