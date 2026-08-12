@@ -29,6 +29,10 @@
 > trainable parameter는 197,057→197,059가 된다. 기존 config/checkpoint 의미는 유지된다.
 > 현재 Hard orthogonal 전용 config는 `train_v76_hard_ridge_calibration_1536.yaml`이다.
 
+> **Large ragged opt-in**: `data.ragged_training: true`는 batch 1 전용이며 training collator가
+> list-of-bags를 보존한다. 기본 dense/padded 경로는 바뀌지 않는다. 2k–16k arm은 Hard v76
+> best를 `--init-checkpoint`로 weight-only warm-start하며 상세 실행은 `current_status.md` §97.
+
 > [!IMPORTANT]
 > **Canonical CV branch 계약 (§86, 2026-08-11)**
 >

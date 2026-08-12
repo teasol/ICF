@@ -1,0 +1,15 @@
+# Fine-tune Hard v76 on large ragged bags without the 4096-cell padding cap.
+base_config: train_v76_classsep_hard_1536.yaml
+
+data_overrides:
+  episode_batch_size: 1
+  ragged_training: true
+  dataset_kwargs:
+    num_cells: [2048, 16384]
+    num_cells_log_uniform: true
+    num_cells_log_uniform_power: 1.5
+    per_bag_cardinality: true
+    per_bag_max_cells: 16384
+
+logger_overrides:
+  experiment_name: v76_hard_ragged_2k_16k_warmstart

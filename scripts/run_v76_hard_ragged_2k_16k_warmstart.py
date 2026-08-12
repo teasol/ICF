@@ -1,0 +1,68 @@
+"""Warm-start Hard v76 and fine-tune on 2k-16k ragged bags using GPUs 0-3."""
+
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+PYTHON = "/home/aibio_3/miniconda3/envs/BagPFN/bin/python"
+CONFIG = "configs/train_v76_hard_ragged_2k_16k_warmstart_1536.yaml"
+INIT = ROOT / "checkpoints/20260812_v76_classsep_sweep/hard/epoch=048-val_ce_loss=0.1697.ckpt"
+RUN_ROOT = ROOT / "checkpoints/20260812_v76_hard_ragged_2k_16k_warmstart"
+LOG_ROOT = ROOT / "logs/20260812_v76_hard_ragged_2k_16k_warmstart"
+GPUS = (0, 1, 2, 3)
+TASKS = (
+    "bc_therapy/er_status", "bc_therapy/grade", "bc_therapy/her2_status",
+    "cptac_brca/PIK3CA_mutation", "cptac_brca/TP53_mutation",
+    "cptac_ccrcc/BAP1_mutation", "cptac_ccrcc/VHL_mutation",
+    "cptac_luad/EGFR_mutation", "cptac_luad/STK11_mutation",
+    "cptac_luad/TP53_mutation",
+)
+
+
+def validation_best(directory: Path) -> Path:
+    candidates: list[tuple[float, Path]] = []
+    for path in directory.glob("epoch=*-val_ce_loss=*.ckpt"):
+        match = re.search(r"val_ce_loss=([0-9.]+)\.ckpt$", path.name)
+        if match:
+            candidates.append((float(match.group(1)), path))
+    if not candidates:
+        raise RuntimeError(f"No validation checkpoint found in {directory}")
+    return min(candidates, key=lambda item: item[0])[1]
+
+
+def main() -> None:
+    if not INIT.exists():
+        raise FileNotFoundError(INIT)
+    RUN_ROOT.mkdir(parents=True, exist_ok=True)
+    LOG_ROOT.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, GPUS))
+    print(f"=== TRAIN START ragged_2k_16k init={INIT.name} GPUs={GPUS}", flush=True)
+    with (LOG_ROOT / "train.out").open("w") as output:
+        subprocess.run(
+            [PYTHON, "scripts/train.py", "--config", CONFIG,
+             "--checkpoint-dir", str(RUN_ROOT), "--init-checkpoint", str(INIT)],
+            cwd=ROOT, env=env, stdout=output, stderr=subprocess.STDOUT, check=True,
+        )
+    checkpoint = validation_best(RUN_ROOT)
+    print(f"=== TRAIN END best={checkpoint.name}", flush=True)
+    groups = [TASKS[index::4] for index in range(4)]
+    workers = [
+        subprocess.Popen(
+            ["bash", "scripts/eval_seal_tasks.sh", str(gpu), str(checkpoint),
+             CONFIG, "v76_hard_ragged_2k_16k_warmstart_best", *tasks], cwd=ROOT,
+        )
+        for gpu, tasks in zip(GPUS, groups)
+    ]
+    codes = [worker.wait() for worker in workers]
+    if any(codes):
+        raise RuntimeError(f"SEAL evaluation failed: {codes}")
+    print("=== EVAL END ragged_2k_16k", flush=True)
+
+
+if __name__ == "__main__":
+    main()

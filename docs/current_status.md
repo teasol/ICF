@@ -3432,3 +3432,23 @@ MLP bank M=128/512/1024/2048/4096은 0.6697/0.6726/0.6779/0.6751/0.6649,
 현재 `scripts/run_v76_hard_ridge_calibration.py` PID/PGID `1952961`이 GPU 0–3에서 실행 중이다.
 artifact/checkpoint mtime과 DDP rank 4개를 확인했으며 문서 갱신 시점 epoch 5였다. 완료 후
 `logs/official50/*_v76_hard_ridge_calibration_best.log` 10개와 macro를 우선 확인한다.
+
+## 97. 2026-08-12 — Active: Hard v76 warm-start, 2k–16k ragged training
+
+사용자 지시로 large-cell 효과를 scratch가 아닌 Hard v76 best에서 fine-tune한다. bag별 cell 수는
+`[2048,16384]`, log-uniform power 1.5이며 4,096 cap을 제거한다. `ragged_training: true`와
+`episode_batch_size: 1`로 collator가 padding하지 않고 list-of-bags를 ragged forward에 넘긴다.
+
+- init: `checkpoints/20260812_v76_classsep_sweep/hard/epoch=048-val_ce_loss=0.1697.ckpt`
+  (`--init-checkpoint`; model weights만 load, optimizer/scheduler는 새로 시작)
+- config: `configs/train_v76_hard_ragged_2k_16k_warmstart_1536.yaml`
+- runner: `scripts/run_v76_hard_ragged_2k_16k_warmstart.py`, GPU 0–3, DDP4/bf16/50 epochs,
+  validation-best 후 공식 SEAL 10-task 평가
+- artifacts: `checkpoints/20260812_v76_hard_ragged_2k_16k_warmstart/`,
+  `logs/20260812_v76_hard_ragged_2k_16k_warmstart/`, tag
+  `v76_hard_ragged_2k_16k_warmstart_best`
+- 검증: ragged preserve/batch-size guard, 기존 ragged training path, exact warm-start load,
+  2,048-cell CUDA forward/backward, py_compile/diff check 통과. VRAM guard worst-case 81.61 GiB.
+
+판정은 warm-start 이전 Hard 0.6873 대비 SEAL macro와 task별 변화다. ragged Python bag loop와
+총 cell 수 증가 때문에 기존 dense arm보다 학습은 상당히 느릴 수 있다.

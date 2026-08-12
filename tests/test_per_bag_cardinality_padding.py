@@ -65,6 +65,19 @@ class TestPerBagCardinalityPadding(unittest.TestCase):
                 torch.count_nonzero(padded[0, bag_index, count:]).item(), 0
             )
 
+    def test_preserve_ragged_returns_the_single_episode_without_padding(self) -> None:
+        sample = _dataset()[0]
+        actual = collate_synthetic_training_episode(
+            [sample], preserve_ragged=True
+        )
+        self.assertIs(actual, sample)
+
+    def test_preserve_ragged_rejects_episode_batching(self) -> None:
+        with self.assertRaisesRegex(ValueError, "episode_batch_size=1"):
+            collate_synthetic_training_episode(
+                [_dataset()[0], _dataset()[1]], preserve_ragged=True
+            )
+
     def test_cap_is_applied_before_dense_episode_generation(self) -> None:
         generator = SyntheticManifoldGenerator(
             num_bags=2, num_cells=(256, 8192), num_cells_log_uniform=True,

@@ -110,6 +110,17 @@ Hard 실험의 공통 조건은 다음과 같다.
   checkpoint 선택에만 사용한다.
 - GPU 정책: ICF는 GPU 0–3만 사용하고 4–7은 사용하지 않는다.
 
+## Active-5. Large-bag ragged fine-tuning 계약
+
+`data.ragged_training: true`는 `episode_batch_size=1`에서만 허용되며, training collator가
+list-of-bags를 padding tensor로 바꾸지 않고 그대로 모델의 ragged forward에 전달한다. 기본값은
+false이므로 기존 dense masked training 계약은 유지된다. 현재 large-bag arm은 bag별
+`[2048,16384]`, `per_bag_max_cells: 16384`를 사용해 4,096 cap을 제거한다.
+
+이 arm은 scratch가 아니라 동일 Hard orthogonal v76 best checkpoint
+`checkpoints/20260812_v76_classsep_sweep/hard/epoch=048-val_ce_loss=0.1697.ckpt`를
+`--init-checkpoint`로 weight-only load한다. optimizer/scheduler/epoch state는 새로 시작한다.
+
 ---
 
 # A. CV-only (`BaseModel`)

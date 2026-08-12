@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 import torch
 from collections import deque
+from functools import partial
 
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data._utils.collate import default_collate
@@ -103,7 +104,10 @@ def _collate_ragged_batch(samples: list[Any]):
     return x, y, cell_mask, bag_mask
 
 
-def collate_synthetic_training_episode(samples: list[Any]):
+def collate_synthetic_training_episode(
+    samples: list[Any],
+    preserve_ragged: bool = False,
+):
     """Stack equal-shape episodes, or pad ragged (B2b) episodes.
 
     Equal-shape (B2) episodes stack into a dense [episodes, bags, cells, dim]
@@ -114,6 +118,10 @@ def collate_synthetic_training_episode(samples: list[Any]):
     if not samples:
         raise ValueError("A synthetic training batch cannot be empty.")
     if not isinstance(samples[0][0], torch.Tensor):
+        if preserve_ragged:
+            if len(samples) != 1:
+                raise ValueError("preserve_ragged requires episode_batch_size=1.")
+            return samples[0]
         return _collate_ragged_batch(samples)
     if len(samples) == 1:
         return samples[0]
@@ -287,10 +295,14 @@ class DataInterface(LightningDataModule):
 
     def train_dataloader(self) -> DataLoader[Any]:
         if self.hparams.get("episode_dataset", False):
+            collate_fn = partial(
+                collate_synthetic_training_episode,
+                preserve_ragged=self.hparams.get("ragged_training", False),
+            )
             return self._episode_dataloader(
                 self.train_dataset,
                 "train",
-                collate_synthetic_training_episode,
+                collate_fn,
             )
         shuffle: bool = self.hparams.get("train_shuffle", self.hparams.get("shuffle", True))
         return self._dataloader(
@@ -390,6 +402,8 @@ class DataInterface(LightningDataModule):
             self.hparams.get("persistent_workers", False) and num_workers > 0
         )
         batch_size = self.hparams.get("episode_batch_size", 1) if split == "train" else 1
+        if split == "train" and self.hparams.get("ragged_training", False) and batch_size != 1:
+            raise ValueError("ragged_training requires episode_batch_size=1.")
         use_prefetch = self.hparams.get("cuda_prefetch", True) and torch.cuda.is_available()
         loader_cls = (
             CudaPrefetchDataLoader
