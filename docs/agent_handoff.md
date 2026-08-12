@@ -112,6 +112,11 @@
 
 > **평가 기준 (§71, 필수)**: 판정은 **SEAL 10개 task macro 평균**
 > (`seal_univ2_baseline_17tasks.csv`의 `in_seal=yes`). **er_status 단일로 판정하지 말 것.**
+>
+> ⚠️ **점추정 macro끼리 빼서 판정하지 말 것 (§99, 2026-08-12 사용자 지시)**. task 내 fold 산포는
+> ±0.09인데 판정 대상 Δ는 0.001~0.012다. 모든 arm이 같은 공식 fold를 쓰므로 **fold별로 먼저 뺀
+> 뒤 평균**해 CI를 낸다 — `scripts/compare_arms_paired.py`. GPU 불필요, 저장된 예측만 읽는다.
+> realization(학습 seed) 노이즈는 pairing으로 줄일 수 없어 별도 seed 반복이 필요하다.
 > 평가기에는 모델 내부를 모르는 **generic 경로**가 있다(aggregator 없는 모델용).
 > `ICF_FORCE_GENERIC_EVAL=1`로 알려진 모델을 그 경로에 태워 검증할 수 있다.
 

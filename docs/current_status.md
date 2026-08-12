@@ -1,10 +1,15 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-12` (§98 — Hard v76을 canonical v77 baseline으로 승격)
+**Last updated**: `2026-08-12` (§99 — 판정 프로토콜을 fold-paired Δ + CI로 전환)
 
-**한 줄**: 기존 Hard v76을 **v77**로 명확히 이름 붙이고 활성 baseline으로 승격했다. 동일 구조, Hard `[0.2,0.8]`, fresh orthogonal, SEAL macro **0.6873**이다.
+**한 줄**: 활성 baseline은 v77 Hard orthogonal(SEAL macro **0.6873**)이고, 앞으로 arm 판정은 점추정 macro 차이가 아니라 **fold-paired Δ + bootstrap CI**로 한다(§99).
 
 **Status**: **활성 baseline v77 Hard orthogonal 0.6873. 실행 중인 학습·평가 없음. 역사적 전체 최고는 v41_K128 0.6940.**
+
+> [!IMPORTANT]
+> **읽는 순서 (2026-08-12)**: 판정 방식이 §99에서 바뀌었다. arm을 비교하려면 §99를 먼저 읽고
+> `scripts/compare_arms_paired.py`를 쓸 것. §98 판정표 4건은 §99-1에서 fold-paired CI로
+> 재검증되어 전부 유지됐다. 다음 Action은 §99-5.
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
   현행 최고 **v41_K128 = SEAL 10개 0.6940** (ABMIL 0.727에 −0.033).
@@ -3497,3 +3502,82 @@ v41_K128 0.6940은 여전히 역사적 전체 최고지만 활성 개발 baselin
 v77 0.6873이다. 현재 ICF 학습·평가 프로세스는 없으며, 이후 모든 새 arm은 v77을 control로
 비교한다. 이번 갱신에서는 아직 열려 있는 최근 가설과 재현 근거가 상호 참조되므로 별도
 section archive는 하지 않았다.
+
+## 99. 2026-08-12 — 판정 프로토콜: fold-paired Δ + bootstrap CI (사용자 지시)
+
+지금까지 arm 판정은 task별 `fold-mean AUROC` 점추정 10개를 평균한 macro끼리 빼서 했다. CI도
+pairing도 bootstrap도 없었다. §65 시절 er_status 단일 task에서는 fold-paired 20k bootstrap을
+썼으나, §71에서 판정 기준이 SEAL 10-task macro로 넓어질 때 **pairing과 CI가 함께 넘어오지
+않았다**. 문제는 크기다 — er_status가 `fold-mean 0.7023 ± 0.0903`인데 §98 판정표의 Δ는
+0.0012~0.0118로 fold 산포가 판정 대상 효과의 8~75배다.
+
+사용자 지시로 앞으로 모든 arm 비교는 **fold별 차이를 통계 단위로** 삼는다.
+
+- 도구: `scripts/compare_arms_paired.py` (신규). GPU 불필요, 재평가 불필요 —
+  `test_pathobench.py`가 이미 저장한 `predictions/pathobench_{task}_{tag}_official50_bf16.pt`를
+  읽는다.
+- 방법: `d_f = auroc_arm(f) − auroc_base(f)`. `d_f`가 이미 차분이므로 fold resample은 구성상
+  paired다. fold 20,000회 resample → percentile CI. macro는 task별로 독립 resample한 뒤
+  10개 평균을 replicate로 삼는다.
+- pairing은 가정하지 않고 **검증**한다: fold 수, `fold_indices`, fold별 `slide_id` 순서, label이
+  모두 일치해야 하며 어긋나면 unpaired 폴백이 아니라 `PairingError`다. AUROC는 양쪽을 같은
+  코드(`auroc_rows`)로 재계산하고 저장값과 교차검증한다.
+- 사용법: `python scripts/compare_arms_paired.py --baseline <TAG> --arm <TAG> [--arm <TAG> ...]`
+
+### 1. §98 판정표 재검증 — 4건 모두 유지
+
+macro 점추정은 §98과 정확히 재현됐다(0.6873 / 0.6885 / 0.6840 / 0.6779 / 0.6755).
+
+| arm | Δmacro | 95% CI | 상승 task | 재판정 |
+|---|---:|---|---:|---|
+| large-ragged 2k–16k warm-start | +0.0012 | [−0.0008, +0.0032] | 5/10 | CI가 0 포함 — 동률 확증 |
+| learned ridge λ + logit scale | −0.0033 | [−0.0058, −0.0010] | 5/10 | CI가 0 제외 — 기각 확증 |
+| MLP bank M=1024 | −0.0094 | [−0.0135, −0.0053] | 3/10 | CI가 0 제외 — 기각 확증 |
+| 50:50 fresh-linear + MLP-1024 | −0.0118 | [−0.0159, −0.0075] | 2/10 | CI가 0 제외 — 기각 확증 |
+
+CI 폭이 0.004~0.008로, fold 산포 ±0.09 대비 한 자릿수 배 이상 좁다. 점추정 판정이 결과적으로
+전부 옳았지만, 그건 사후에 확인된 것이고 그 판정 시점에는 근거가 없었다.
+
+### 2. large-ragged는 "동률"이 아니라 "재분배"다
+
+macro Δ는 0이지만 개별 task 6개의 CI가 0을 제외한다.
+
+| task | Δ | 95% CI | 이긴 fold |
+|---|---:|---|---:|
+| bc_therapy grade | +0.0111 | [+0.0068, +0.0157] | 37/50 |
+| cptac_ccrcc VHL | +0.0090 | [+0.0038, +0.0139] | 34/50 |
+| cptac_luad TP53 | +0.0074 | [+0.0023, +0.0123] | 34/50 |
+| cptac_brca TP53 | +0.0068 | [+0.0027, +0.0109] | 31/50 |
+| cptac_luad EGFR | +0.0053 | [+0.0020, +0.0086] | 31/50 |
+| **cptac_ccrcc BAP1** | **−0.0179** | [−0.0282, −0.0070] | 15/50 |
+
+5개 task를 실제로 올리고 BAP1 하나가 그것을 상쇄한다. "+0.0012라 파생 실험 유지"보다 정보량이
+크다. **대형 bag에서 BAP1만 무너지는 이유**가 별도 조사 대상이다.
+
+ridge calibration 기각의 주동인은 PIK3CA −0.0272 [−0.0407, −0.0160] (8/50)이며 STK11 −0.0093,
+EGFR −0.0059가 뒤따른다. er_status는 반대로 +0.0081이었다.
+
+### 3. latent sweep 비단조성은 fold 노이즈가 아니다
+
+| 비교 | Δmacro | 95% CI | 상승 task |
+|---|---:|---|---:|
+| L16 − L8 | −0.0108 | [−0.0154, −0.0063] | 4/10 |
+| L32 − L8 | +0.0103 | [+0.0054, +0.0151] | 9/10 |
+
+두 CI 모두 0을 제외하므로 L16의 딥은 **주어진 checkpoint 기준으로는 견고**하다. fold 노이즈가
+배제되었으니 남은 설명은 ⓐ latent_dim 효과가 실제로 들쭉날쭉하다, ⓑ realization(학습 seed)
+노이즈 둘뿐이다. ⓑ는 pairing으로 줄일 수 없는 축이다(두 학습 run에 공유 난수가 없어 상쇄할
+공통항이 없다). **L8/L16/L32 각 2 seed 추가**가 이 둘을 가른다.
+
+### 4. 한계 — CI를 하한으로 읽을 것
+
+- 50 fold가 166장 슬라이드를 겹쳐 쓰므로 fold를 독립 표본으로 보는 bootstrap은 분산을
+  **과소추정**할 가능성이 크다.
+- fold 노이즈만 다룬다. **학습 seed 노이즈**(arm당 checkpoint 1개)와 **task 선택 노이즈**(고정
+  10개)는 포함하지 않는다. 스크립트가 출력 말미에 이 한계를 명시한다.
+
+### 5. 다음 Action
+
+1. seed 반복 — v77 + L8/L16/L32. arm당 학습 약 15분 + 평가 1–2분. §3의 ⓐ/ⓑ를 가르고, macro
+   seed std를 얻어 앞으로의 +0.005 게이트에 분모를 준다.
+2. BAP1이 large-bag에서만 무너지는 원인 진단(§2).

@@ -115,7 +115,8 @@ Hard 실험의 공통 조건은 다음과 같다.
 - active baseline: v77 Hard orthogonal **0.6873**.
 - learned ridge λ/logit scale은 0.6840으로 기각했다.
 - 판정: validation-best 하나의 공식 SEAL 10-task macro와 task별 regression. synthetic val 지표는
-  checkpoint 선택에만 사용한다.
+  checkpoint 선택에만 사용한다. macro 비교는 점추정 차이가 아니라 **fold-paired Δ + bootstrap
+  CI**로 한다 — `scripts/compare_arms_paired.py` (§99).
 - GPU 정책: ICF는 GPU 0–3만 사용하고 4–7은 사용하지 않는다.
 
 ## Active-5. Large-bag ragged fine-tuning 계약
