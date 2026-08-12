@@ -3454,6 +3454,11 @@ artifact/checkpoint mtime과 DDP rank 4개를 확인했으며 문서 갱신 시�
   `cuda_prefetch: false`로 변경해 재실행한다.
 - 재실행 runner PID/PGID `1992117` (parent PID 1). DDP rank 4개와 epoch 0 진입을 확인했고,
   첫 step peak allocation은 27.01 GiB, 실시간 GPU 사용은 37–70 GiB로 안정화됐다.
+- warm-start 후 val CE는 init 0.1697에서 epoch 21 약 0.1583, epoch 34 **0.1581**까지 개선됐으나
+  epoch 35/36은 0.1582/0.1583으로 포화했다. 50 epochs는 불필요하다는 사용자 지적에 따라
+  epoch 36에서 PGID `1992117`을 종료하고 epoch 34 best로 SEAL 평가를 시작했다.
+- early-stop eval PGID `2036401`, GPU 0–3, tag는 기존
+  `v76_hard_ragged_2k_16k_warmstart_best`; 10-task 완료 후 macro를 집계한다.
 
 판정은 warm-start 이전 Hard 0.6873 대비 SEAL macro와 task별 변화다. ragged Python bag loop와
 총 cell 수 증가 때문에 기존 dense arm보다 학습은 상당히 느릴 수 있다.
