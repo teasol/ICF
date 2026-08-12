@@ -401,6 +401,129 @@
 - **다중 위치(연구실/집/노트북) 동기화**: 같은 테스트를 중복 구동해 load 72까지 급등한 사례 —
   세션마다 Living 문서 + `git log`만으로 이어받을 수 있게 기록(이 프로젝트의 SSOT 문화).
 
+## 20. CV-2 손잡이 소진과 계보 B(Encoder+Ridge)의 일반화 실패
+
+> 출처: `current_status.md` §72~§79 (2026-08-09/10).
+
+- **학습이 평가용 ragged 경로를 타고 있었다**: `_episode_losses`가 단일 에피소드도
+  `forward_episode_batch`(dense)로 보내야 한다. 이전에는 `self.model(...)`(bag마다 Python 루프)을
+  불러 74.2 → 31.3 ms/step, **2.4배 느렸다**. `tests/test_training_uses_dense_path.py`가 고정.
+  **범인이 아닌 것들**(전부 측정으로 배제): 로깅(이미 epoch 단위, 지표 계산 3%), CPU 비동기
+  생성(GPU 3.2 ms vs CPU 2,579 ms — **805배**), 프리페치 깊이(depth 1 > depth 3).
+- **소스 prune (−11,285줄)**: config로 끄기만 했던 5개 분기를 삭제해 `baseline.py`가
+  5,685 → 2,224줄. 근거는 v41_K128 ckpt의 파라미터별 gradient 실측 — 43,198,660개 중 gradient를
+  받는 것이 **229개**뿐이었다. ⚠️ **prune 이전 ckpt는 현재 트리로 strict 로드가 깨진다** —
+  `8caa96c` 고정 worktree `/NHNHOME/BASE/kimds/ICF_pre_prune` **유지 필수**.
+- **대규모 삭제 전에는 출력을 fixture로 녹화할 것**: `tests/fixtures/cvonly_golden.pt`가 실제로
+  1 ulp 차이를 잡아냈고, 추적 끝에 "수식은 동일, 텐서 정렬이 달라져 커널 선택이 바뀜"으로
+  규명됐다. fixture는 **도달 가능한 가중치만** 담을 것(전체는 691MB가 git에 들어간다).
+- **아키텍처에 대한 사실을 config 키에 두지 말 것**: VRAM 가드가 `meta_covariance_only`를 읽고
+  있었는데 그 키를 지우자 조용히 6층 추정으로 회귀해 가드가 무력화됐다. 이제 모델이
+  `vram_activation_layers`로 직접 선언한다.
+- **CV-2는 병목이 아니다 (§75·§76·§77)**: margin activation(identity −0.017),
+  subspace_rank(±0.001), head 구조(paired_head −0.0003) 셋 다 SEAL 10개 macro를 못 움직였다.
+  v43(T→34.0)과 v44(T→2.84)는 **10개 task 전부 셋째 자리까지 일치** — CV-2의 출력 스케일은
+  성능과 무관하다. 다만 `paired_head`는 **라벨 대칭성을 구성으로 보장**한다(`learned_head`는
+  4.4e-2로 깨져 있다). 그 대가로 출력단 bias는 `h(a,b,s)−h(b,a,s)`에서 상쇄돼 gradient를 받지
+  않는다(정상, 테스트가 명시적으로 고정).
+- **CV-1의 dual(kernel) ridge는 옳다 (§78)**: 이유는 "bag 수 ≪ 특징 수"이지 instance와 무관하다.
+  설계행렬이 (bag 60~133 × 8,256)이고, instance(N)와 임베딩 차원(1536)은 이미 공분산으로 요약돼
+  사라진 뒤라 "N > d니 kernel 불필요" 논리는 적용되지 않는다. 실측 dual 0.33 ms vs primal
+  9.8 ms — **30배**.
+- **계보 B (Encoder+Ridge) — 기각 (§79)**: label-free 사영 8종이 전부 0.68 천장이므로 **라벨을
+  보는 사영**이 유일한 미시험 축이었다. ⚠️ **v50~v52의 설계 오류를 반복하지 말 것** — 세포끼리
+  attend하지 않는 inducing-point 인코더였고, 근거는 "셀-셀 attention은 에피소드당 2.7e10 쌍이라
+  불가"였는데 **쌍의 개수를 실행 불가로 번역한 것이 오류**다(flash 계열 커널은 attention 행렬을
+  만들지 않아 메모리가 O(N), 최악 구성도 3.13 GiB). 그 오판이 bag 기술자를 256개 숫자로 좁혔다
+  (sketch는 8,256). **그러나 재설계도 SEAL을 올리지 못했다** — 셀 간 attention과 16,384차원으로
+  합성 val_auroc는 0.784 → 0.849로 올랐는데 SEAL은 **0.6619 → 0.6526으로 내려갔고**, 합성에서
+  가장 좋았던 v54가 SEAL에서 가장 나빴다(0.6219). **문제는 용량이나 구조가 아니라 일반화다.**
+- **attention 백엔드**: B200(sm_100)에서 **cuDNN이 flash보다 빠르다**(bag 85×2,836셀 6.5 vs
+  17.7 ms; 100×8,192셀 55.6 vs 145.3 ms). FlashAttention-3는 Hopper(sm_90) 타깃이라 사용 불가.
+
+## 21. 합성 데이터 축 — per-bag cardinality, factorized/XOR, manifold 교체
+
+> 출처: `current_status.md` §81~§85 (2026-08-10/11).
+
+- **per-bag cardinality + padding 계약 (§81)**: episode 안에서도 bag마다 cell 수를 독립 draw한다.
+  training collate는 4,096까지 zero-pad하고 초과 bag은 매번 `randperm` subsample한다. mask 밖
+  padding은 모델 통계/attention에서 제외해야 한다(`cell_mask`/`bag_mask`). batch 1도 반드시 이
+  dense masked 경로를 탄다. **분포가 달라졌으므로 이전 arm의 연장으로 비교하지 않는다.**
+- **factorized response / XOR arm 전수 기각 (§82·§83)**: `response_dim`,
+  `responsive_population_count`, `label_rule(single|xor)`, `random_causal_factors`,
+  `separate_nuisance_rng`를 추가했다. XOR label은 두 causal factor bit가 다를 때 1이며 각 단일
+  factor는 label과 marginally independent하다. 결과 v57 0.6127 / v58 0.5530 / v59 0.5616 /
+  v60 0.6090 / v61 orthogonal 0.6157 — **모두 v41 0.6940 미달**로 승격하지 않았다.
+  ⚠️ v41 CV-only로 잘못 시작한 `logs/20260810_143000/`은 폐기다.
+- **OOM 교훈 (§84)**: v62부터 per-bag raw cardinality를 `[256,8192]`(log-uniform power 2.0)로
+  하고 **4,096 cap을 dense episode 생성 전에** 적용한다. 이전에는 raw Nmax로 전 bag을 먼저 생성해
+  OOM이 났다.
+- **v62–v66 hybrid (§85)**: Linear-16 + CV-1 K128 등 hybrid arm과 4-pop DDP8을 완주했으나
+  canonical을 넘지 못했다. 이 시기에 branch 명칭(CV/DD/CT)이 확정됐다.
+
+## 22. Canonical CV / DD / CT와 relation head 계보 (v70~v77)
+
+> 출처: `current_status.md` §86~§89 (2026-08-11), 현행 스펙은 `current_architecture.md` F·G·H.
+
+- **canonical CV 승격 (§86)**: "CV branch"는 covariance 단독이 아니라 **fixed-projection centered
+  covariance upper triangle + 중심화 전 raw bag mean**이다(K128/1536-d에서 8,256+1,536=9,792).
+  두 block은 context-only로 각각 독립 center/scalar-RMS 정규화하고 padding을 제외한다.
+  covariance-only 0.6630 → CV 0.6667(+0.0037), ICI 5-seed 0.5381 → 0.5449(+0.0068)로 두 도메인
+  방향이 양수였다(ICI CI는 0.5를 포함하므로 실세계 통과 주장은 하지 않는다). v66은 기각.
+- **DD (§87)**: 같은 covariance에서 support label로 whitening한 rank-1 dispersion 방향을 만들고
+  bag을 그 방향의 log variance scalar로 줄여 standardized squared distance `D0,D1`을 만든다.
+  학습 파라미터가 없다. DD-only 0.5862, `0.5p_CV+0.5p_DD` 0.6441로 약했고 `(p_CV+0.1p_DD)/1.1`이
+  0.6688로 +0.0021이었으나 **고정 가중치는 task별 신뢰도 차이를 처리하지 못했다** — 그 답이
+  relation MLP(v70)다.
+- **v70~v74 (§88)**: feature extractor와 ridge/DD 계산을 모두 고정하고 마지막 MLP만 학습한다.
+  CT는 평균·covariance가 아니라 **판별적 cell-state의 bag-level abundance**를 측정한다 —
+  support cells에서 label-free farthest-point로 후보 16개를 만든 뒤 bag-level abundance의 표준화
+  class 차이로 label-0/1 token을 대칭 선택한다(query label은 어느 단계에서도 보지 않는다).
+  v71(CV+MLP) 0.6667, v72 0.6709, **v73(+full-dimensional Magnitude Distance) 0.6473으로 실패** —
+  Woodbury로 shrinkage Fisher direction을 정확히 계산했지만 raw bag mean이 이미 canonical CV에
+  포함되므로 Magnitude는 넣지 않는다. v74(CV+DD+CT, 449 params) 0.6731로 활성 baseline이 됐다.
+- **v76 learnable P (§89)**: P(1536×128)를 CV ridge gradient로 학습해 fixed-P v74 0.6731 →
+  0.6748. 매 forward thin-QR로 `PᵀP=I`를 보장한다. DD는 현재 P의 covariance를 읽되 **DD→P
+  gradient는 차단**된다(그 이유와 v78의 우회는 §23 참조).
+
+## 23. v77 파생 arm 전수 기각과 판정 프로토콜 전환
+
+> 출처: `current_status.md` §90~§100 (2026-08-12). 활성 baseline·판정 절차는
+> `current_status.md` §98/§99와 `current_architecture.md` Active 절이 SSOT.
+
+- **synthetic 난이도 축이 유일하게 먹힌 레버 (§90·§91)**: ClassSep을 baseline `[1.0,2.0]` 0.6748에서
+  Medium 0.6823 / Mild 0.6853 / **Hard `[0.2,0.8]` 0.6873** / Very-hard 0.6823으로 스윕했다.
+  이 축은 단봉·매끄러워 실효과로 읽힌다. 사용자 결정으로 Hard를 **canonical v77**로 승격했다
+  (§98). 이는 **데이터/실험 baseline 버전 승격이지 텐서 graph 변경이 아니므로** 내부
+  `architecture_version=54`를 유지한다. 과거 v77이라 부른 `PopulationTokenResidualModel`(0.6750)은
+  **retired provisional v77-pop-residual**로만 표기하고 내부 version 55는 replay용으로 보존한다.
+- **파생 arm 전수 기각 (§92~§98)**: latent 2/4/8/16/32 = 0.6775/0.6781/0.6771/0.6662/**0.6873**,
+  MLP bank M=128~4096 = 0.6697/0.6726/**0.6779**/0.6751/0.6649, 50:50 fresh-linear+MLP-1024
+  0.6755, learned ridge λ+logit scale 0.6840, large-ragged 2k–16k warm-start 0.6885.
+  nonlinear manifold 계열은 fresh orthogonal을 넘지 못한다. **infinite fresh linear의 orientation
+  일반화가 반복 가능한 nonlinear manifold 학습보다 낫다**는 것이 이 시기의 결론이다.
+  ⚠️ large-ragged 첫 launch는 CUDA prefetch가 다음 대형 generator buffer와 현재 ragged forward를
+  겹쳐 GPU 3을 180.5/183.4 GiB까지 밀어 즉시 죽었다 — 그 arm만 `cuda_prefetch: false`로 해결.
+- **판정 프로토콜 전환 (§99, 사용자 지시)**: §71에서 판정이 er_status 단일 → SEAL 10-task macro로
+  넓어질 때 **pairing과 CI가 함께 넘어오지 않아**, 이후 모든 arm이 점추정 macro끼리의 차이로
+  판정됐다. task 내 fold 산포가 ±0.09인데 판정 대상 Δ는 0.001~0.012다. 앞으로는 **fold별 차이를
+  통계 단위로** 삼는다(`scripts/compare_arms_paired.py`, GPU 불필요 — 저장된 예측만 읽는다).
+  이 방식으로 §98 판정 4건을 재검증해 **전부 유지**됐고 CI 폭은 0.004~0.008로 좁았다.
+  새로 드러난 것 둘: ⓐ large-ragged는 동률이 아니라 **재분배**(5개 task가 CI 0 제외로 상승,
+  BAP1 −0.0179가 상쇄), ⓑ latent sweep의 비단조성은 **fold 노이즈가 아니다**(L16−L8 −0.0108,
+  L32−L8 +0.0103, 둘 다 CI 0 제외) → 남은 후보는 학습 seed 노이즈이며 **pairing으로는 줄일 수
+  없다**(두 학습 run에 공유 난수가 없어 상쇄할 공통항이 없다).
+- **eigen 미분 금지 (§100)**: DD의 rank-1 방향은 **어느 arm에서도 미분하지 않는다**. eigh backward가
+  `1/(λ_i−λ_j)`를 갖고, `+shrinkage·trace·I`는 모든 고윳값을 **균일하게 밀어 간격을 바꾸지 않으며**
+  (forward `rsqrt`만 보호), 방향 선택은 hard argmax라 불연속이다. 게다가
+  `nonfinite_gradient_policy: zero` 때문에 이 실패는 **조용하다** — 학습이 완주하고 SEAL도 나오므로
+  §66의 함정("Δ≈0이 가설 기각인지 경로 미개방인지 구분 불가")이 재현된다. **gradient finite·nonzero를
+  테스트로 단정할 것.** v78은 방향을 고정하고 이차형식 `log(fᵀ C_b f)`만 미분한다. 무가중이면 DD가
+  P gradient를 CV의 **52배**(median, range 21–103)로 지배하고 거의 직교하므로
+  `dd_projection_gradient_weight`로 균형을 맞춘다.
+
+---
+
 ---
 
 ## 19. 다시 열면 안 되는 결론 / 재개 시 전제 (quick reference)

@@ -118,7 +118,7 @@ Hard 실험의 공통 조건은 다음과 같다.
 
 ## Active-4. 현재 실험과 판정
 
-- 활성 실행: 없음.
+- 활성 실행: **v78** (`train_dd_projection`, §100·§101). GPU 0–3.
 - active baseline: v77 Hard orthogonal **0.6873**.
 - learned ridge λ/logit scale은 0.6840으로 기각했다.
 - 판정: validation-best 하나의 공식 SEAL 10-task macro와 task별 regression. synthetic val 지표는
