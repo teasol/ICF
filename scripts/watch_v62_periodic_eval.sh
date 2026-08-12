@@ -5,7 +5,7 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
 CKPT_DIR="checkpoints/20260810_195208/v62_linear16_cv1_k128_capfirst"
-CONFIG="configs/train_v62_linear_hybrid_cv1_1536.yaml"
+CONFIG="configs/archive/v62_v68_hybrid/train_v62_linear_hybrid_cv1_1536.yaml"
 WATCH_LOG="logs/official50/watcher_v62_periodic.log"
 
 mkdir -p logs/official50 predictions

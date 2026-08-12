@@ -45,7 +45,7 @@ Example
 -------
     PY=/home/aibio_3/miniconda3/envs/BagPFN/bin/python
     $PY scripts/probe_slot_headroom.py \
-      --config configs/train_v34_phase0_largectx_1536.yaml \
+      --config configs/archive/v34_largectx/train_v34_phase0_largectx_1536.yaml \
       --checkpoint checkpoints/20260807_224559/v35_largebag/epoch=048-val_ce_loss=0.3469.ckpt \
       --official-folds /NHNHOME/BASE/kimds/Data/PathoBench/official/cptac_brca/PIK3CA_mutation \
       --num-slots 8 12 24 48 --device cuda:0 \

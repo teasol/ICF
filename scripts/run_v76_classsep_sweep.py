@@ -13,9 +13,9 @@ PYTHON = "/home/aibio_3/miniconda3/envs/BagPFN/bin/python"
 RUN_ROOT = ROOT / "checkpoints/20260812_v76_classsep_sweep"
 LOG_ROOT = ROOT / "logs/20260812_v76_classsep_sweep"
 ARMS = (
-    ("mild", "configs/train_v76_classsep_mild_1536.yaml"),
-    ("hard", "configs/train_v76_classsep_hard_1536.yaml"),
-    ("veryhard", "configs/train_v76_classsep_veryhard_1536.yaml"),
+    ("mild", "configs/archive/v69_v76_relation/train_v76_classsep_mild_1536.yaml"),
+    ("hard", "configs/archive/v69_v76_relation/train_v76_classsep_hard_1536.yaml"),
+    ("veryhard", "configs/archive/v69_v76_relation/train_v76_classsep_veryhard_1536.yaml"),
 )
 TASK_GROUPS = (
     ("0", "bc_therapy/er_status", "bc_therapy/grade", "bc_therapy/her2_status"),

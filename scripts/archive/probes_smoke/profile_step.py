@@ -5,7 +5,7 @@ CUDA synchronization, so we can see where the per-step wall-clock actually goes
 before deciding how to parallelize.
 
 Usage:
-    python scripts/profile_step.py [--steps 20] [--config configs/train_v33_phase0_armC_ddp8.yaml]
+    python scripts/profile_step.py [--steps 20] [--config configs/archive/v33/train_v33_phase0_armC_ddp8.yaml]
 """
 
 from __future__ import annotations

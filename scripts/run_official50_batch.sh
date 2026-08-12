@@ -17,7 +17,7 @@ cd "$PROJECT_ROOT"
 
 PY="${PYTHON_BIN:-/home/aibio_3/miniconda3/envs/BagPFN/bin/python}"
 CHECKPOINT="checkpoints/20260806_215800/v34_phase0_largectx_1536/epoch=048-val_ce_loss=0.4419.ckpt"
-CONFIG="configs/train_v34_phase0_largectx_1536.yaml"
+CONFIG="configs/archive/v34_largectx/train_v34_phase0_largectx_1536.yaml"
 FEATURES="/NHNHOME/BASE/kimds/Data/PathoBench/features"
 OFFICIAL="/NHNHOME/BASE/kimds/Data/PathoBench/official"
 OUTDIR="predictions"

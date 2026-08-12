@@ -65,8 +65,8 @@ run_seq() {
 # args all defaults run. e.g. `queue_phase1_rare.sh v24_musklike_easy_rare_mil`
 # trains only the MIL discriminator without re-running the baseline.
 declare -A RUN_CONFIGS=(
-  [v24_musklike_easy_rare_baseline]=configs/train_v24_musklike_easy_rare_baseline.yaml
-  [v24_musklike_easy_rare_mil]=configs/train_v24_musklike_easy_rare_mil.yaml
+  [v24_musklike_easy_rare_baseline]=configs/archive/ia_mil/train_v24_musklike_easy_rare_baseline.yaml
+  [v24_musklike_easy_rare_mil]=configs/archive/ia_mil/train_v24_musklike_easy_rare_mil.yaml
 )
 if [[ $# -gt 0 ]]; then
   RUNS=("$@")

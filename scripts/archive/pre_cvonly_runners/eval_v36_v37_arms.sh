@@ -22,16 +22,16 @@ for arm in "$@"; do
   case "$arm" in
     v36_baseline)
       CKPT="checkpoints/20260808_144323/v36_q1_baseline/epoch=049-val_ce_loss=0.3402.ckpt"
-      CFG="configs/train_v36_q1_baseline_1536.yaml" ;;
+      CFG="configs/archive/v35_v39_pre_cvonly/train_v36_q1_baseline_1536.yaml" ;;
     v36_structured)
       CKPT="checkpoints/20260808_144330/v36_q1_structured/epoch=049-val_ce_loss=0.3405.ckpt"
-      CFG="configs/train_v36_q1_structured_1536.yaml" ;;
+      CFG="configs/archive/v35_v39_pre_cvonly/train_v36_q1_structured_1536.yaml" ;;
     v37_baseline)
       CKPT="checkpoints/20260808_180137/v37_baseline/epoch=132-val_ce_loss=0.3354.ckpt"
-      CFG="configs/train_v37_baseline_1536.yaml" ;;
+      CFG="configs/archive/v35_v39_pre_cvonly/train_v37_baseline_1536.yaml" ;;
     v37_context_adaptive)
       CKPT="checkpoints/20260808_180145/v37_context_adaptive/epoch=088-val_ce_loss=0.3372.ckpt"
-      CFG="configs/train_v37_context_adaptive_1536.yaml" ;;
+      CFG="configs/archive/v35_v39_pre_cvonly/train_v37_context_adaptive_1536.yaml" ;;
     *) echo "unknown arm: $arm"; exit 2 ;;
   esac
 

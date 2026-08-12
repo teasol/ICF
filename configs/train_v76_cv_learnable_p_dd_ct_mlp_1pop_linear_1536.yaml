@@ -1,9 +1,0 @@
-# v76 — v74 with the shared CV/DD projection P made learnable.
-# P starts at v74's fixed K128 basis and is thin-QR orthogonalized each forward.
-# CT and every other data/model/training setting are unchanged from v74.
-base_config: train_v74_cv_dd_ct_mlp_1pop_linear_1536.yaml
-
-model: covariance_mean_learnable_p_dd_ct_mlp
-
-logger_overrides:
-  experiment_name: v76_cv_learnable_p_dd_ct_mlp_1pop_linear

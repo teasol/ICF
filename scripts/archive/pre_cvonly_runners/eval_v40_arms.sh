@@ -43,7 +43,7 @@ for arm in cv_only; do
   echo "    ckpt: $ckpt"
   CUDA_VISIBLE_DEVICES="$GPU" "$PY" scripts/test_pathobench.py \
       --checkpoint "$ckpt" \
-      --config "configs/train_v40_cv_only_1536.yaml" \
+      --config "configs/archive/v40_v45_cvonly/train_v40_cv_only_1536.yaml" \
       --official-folds "$TASK_DIR" \
       --features "$FEATURES" \
       --input-dim 1536 \

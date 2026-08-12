@@ -1,0 +1,100 @@
+# ARCHIVED 2026-08-12 — self-contained reproduction record.
+#
+# Inlined per agent_handoff SS7.3: archived configs keep no `base_config`, so a
+# relative path can never break after a move and the file always resolves without
+# reference validation. The original chained form is in git history
+# (`git log --follow -- configs/eval_v67_ici_cv_mean_512.yaml`).
+#
+# Original location: configs/eval_v67_ici_cv_mean_512.yaml
+# Active entry points now: train_v77_hard_orthogonal_1536.yaml (canonical),
+# train_v78_dd_projection_1536.yaml.
+seed: 42
+ckpt_path: null
+data:
+  dataset_src: base_data.ICIDataset
+  episode_dataset: false
+  num_workers: 2
+  pin_memory: true
+  drop_last: false
+  persistent_workers: false
+  train_shuffle: true
+  val_shuffle: false
+  test_shuffle: false
+  dataset_kwargs:
+    root_dir: data/ICI_CVOnly_scConcept_512
+    seed: 42
+    cv: 0
+    target_cells: -1
+    all_cell_mean: false
+    input_dim: 512
+    pad_mode: tile
+model:
+  model_src: src.models.set_transformer_ridge.CovarianceMeanRidgeModel
+  input_dim: 512
+  token_dim: 16
+  num_heads: 1
+  num_layers: 1
+  feedforward_dim: 16
+  num_summary_tokens: 1
+  max_cells: 8192
+  dropout: 0.0
+  covariance_sketch_dim: 128
+  covariance_slopes:
+  - 0.02086214
+  - 0.01529195
+  ridge_lambda: 1.0
+  ridge_logit_scale: 2.0
+  num_classes: 2
+optimizer:
+  optimizer_src: torch.optim.AdamW
+  optimizer_kwargs:
+    lr: 0.0001
+    betas:
+    - 0.9
+    - 0.999
+    eps: 1.0e-08
+    weight_decay: 0.01
+scheduler:
+  scheduler_src: src.utils.schedulers.WarmupReduceLROnPlateau
+  scheduler_kwargs:
+    warmup_epochs: 5
+    warmup_start_factor: 0.1
+    plateau_start_epoch: 5
+    step_epoch_interval: 1
+    plateau_check_interval: 1
+    mode: min
+    factor: 0.5
+    patience: 10
+    threshold: 1.0e-05
+    threshold_mode: rel
+    cooldown: 5
+    min_lr: 1.0e-06
+  monitor: val_ce_loss
+  interval: epoch
+  frequency: 1
+trainer:
+  max_epochs: 50
+  precision: bf16-mixed
+logger:
+  name: csv
+  save_dir: logs
+callbacks:
+  checkpoint:
+    enabled: true
+    dirpath: checkpoints
+    filename: '{epoch:03d}-{val_ce_loss:.4f}'
+    monitor: val_ce_loss
+    mode: min
+    save_top_k: 3
+    save_last: true
+  lr_monitor:
+    enabled: true
+    logging_interval: epoch
+model_kwargs:
+  training_targets_per_episode:
+  - 5
+  - 12
+  ranking_loss_weight: 0.1
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0
+  nonfinite_gradient_policy: zero

@@ -1,9 +1,0 @@
-# Hard ClassSep latent-subspace ablation: r=4.
-base_config: train_v76_classsep_hard_1536.yaml
-
-data_overrides:
-  dataset_kwargs:
-    latent_dim: 4
-
-logger_overrides:
-  experiment_name: v76_hard_latent4

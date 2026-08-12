@@ -24,7 +24,7 @@ cell selection varies.
 
 Usage:
     python scripts/diagnose_selection_gain_curve.py \\
-        --config configs/train_v22_medium.yaml --val-episodes 400
+        --config configs/archive/v22/train_v22_medium.yaml --val-episodes 400
 """
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def episode_bootstrap(values, samples=2000, seed=0):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=ROOT / "configs/train_v22_medium.yaml")
+    parser.add_argument("--config", type=Path, default=ROOT / "configs/archive/v22/train_v22_medium.yaml")
     parser.add_argument("--val-episodes", type=int, default=None)
     parser.add_argument("--bootstrap", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=0)

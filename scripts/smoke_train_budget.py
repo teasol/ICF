@@ -7,7 +7,7 @@ where per-episode cost scales with bag/cell counts.
 
 Usage:
     python scripts/smoke_train_budget.py \
-        --config configs/train_v34_phase0_largectx_512.yaml \
+        --config configs/archive/v34_largectx/train_v34_phase0_largectx_512.yaml \
         [--steps 16]
 """
 from __future__ import annotations

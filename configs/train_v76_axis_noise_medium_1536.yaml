@@ -1,9 +1,0 @@
-# One-axis difficulty ablation: raise observation noise to Medium level only.
-base_config: train_v76_cv_learnable_p_dd_ct_mlp_1pop_linear_1536.yaml
-
-data_overrides:
-  dataset_kwargs:
-    observation_noise: 0.01
-
-logger_overrides:
-  experiment_name: v76_axis_noise_medium

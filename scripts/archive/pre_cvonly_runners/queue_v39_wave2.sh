@@ -39,4 +39,4 @@ CUDA_DEVICES=0 NPROC_PER_NODE=1 \
 TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun \
 NETRC=/NHNHOME/BASE/kimds/.netrc \
 scripts/launch_interactive_training.sh v39_no_covariance \
-  configs/train_v39_no_covariance_1536.yaml
+  configs/archive/v35_v39_pre_cvonly/train_v39_no_covariance_1536.yaml

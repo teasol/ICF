@@ -32,7 +32,7 @@ INPUT_DIM = 32
 
 def _interface() -> ModelInterface:
     config = merge_train_config(
-        REPO_ROOT / "configs" / "train_v41_cvonly_K128_1536.yaml"
+        REPO_ROOT / "configs" / "archive" / "v40_v45_cvonly" / "train_v41_cvonly_K128_1536.yaml"
     )
     hparams = {**config["model"], **config.get("model_kwargs", {})}
     for key, value in (config.get("model_overrides") or {}).items():

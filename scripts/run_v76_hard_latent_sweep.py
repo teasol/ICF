@@ -12,8 +12,8 @@ PYTHON = "/home/aibio_3/miniconda3/envs/BagPFN/bin/python"
 RUN_ROOT = ROOT / "checkpoints/20260812_v76_hard_latent_sweep"
 LOG_ROOT = ROOT / "logs/20260812_v76_hard_latent_sweep"
 ARMS = (
-    ("latent8", "configs/train_v76_hard_latent8_1536.yaml", (0, 1, 2, 3)),
-    ("latent16", "configs/train_v76_hard_latent16_1536.yaml", (0, 1, 2, 3)),
+    ("latent8", "configs/archive/v69_v76_relation/train_v76_hard_latent8_1536.yaml", (0, 1, 2, 3)),
+    ("latent16", "configs/archive/v69_v76_relation/train_v76_hard_latent16_1536.yaml", (0, 1, 2, 3)),
 )
 TASKS = (
     "bc_therapy/er_status", "bc_therapy/grade", "bc_therapy/her2_status",

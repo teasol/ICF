@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = "/home/aibio_3/miniconda3/envs/BagPFN/bin/python"
-CONFIG = "configs/train_v76_hard_ridge_calibration_1536.yaml"
+CONFIG = "configs/archive/v69_v76_relation/train_v76_hard_ridge_calibration_1536.yaml"
 RUN_ROOT = ROOT / "checkpoints/20260812_v76_hard_ridge_calibration"
 LOG_ROOT = ROOT / "logs/20260812_v76_hard_ridge_calibration"
 GPUS = (0, 1, 2, 3)

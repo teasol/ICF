@@ -32,10 +32,10 @@ from src.utils.utils import merge_train_config  # noqa: E402
 # One config per distinct sketch geometry / CV-2 setting in flight, so the
 # fixture pins the knobs as well as the default path.
 CONFIGS = (
-    "configs/train_v41_cvonly_K128_1536.yaml",
-    "configs/train_v41_cvonly_K64_1536.yaml",
-    "configs/train_v42_rank2_1536.yaml",
-    "configs/train_v44_lowT_1536.yaml",
+    "configs/archive/v40_v45_cvonly/train_v41_cvonly_K128_1536.yaml",
+    "configs/archive/v40_v45_cvonly/train_v41_cvonly_K64_1536.yaml",
+    "configs/archive/v40_v45_cvonly/train_v42_rank2_1536.yaml",
+    "configs/archive/v40_v45_cvonly/train_v44_lowT_1536.yaml",
 )
 EPISODES = 6
 SEED = 42

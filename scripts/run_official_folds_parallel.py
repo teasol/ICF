@@ -12,7 +12,7 @@ Designed for the SEAL-comparable official 50-fold protocol (17 tasks).
 Usage:
     python scripts/run_official_folds_parallel.py \
         --checkpoint checkpoints/.../epoch=048-val_ce_loss=0.4419.ckpt \
-        --config configs/train_v34_phase0_largectx_1536.yaml \
+        --config configs/archive/v34_largectx/train_v34_phase0_largectx_1536.yaml \
         --task-dir /NHNHOME/BASE/kimds/Data/PathoBench/official/bc_therapy/er_status \
         --features /NHNHOME/BASE/kimds/Data/PathoBench/features \
         --workers 5 --output predictions/pathobench_bc_therapy_er_status_official50.pt

@@ -45,7 +45,7 @@ def main() -> None:
         dist.init_process_group(backend="nccl", device_id=device)
 
     try:
-        config = merge_train_config(PROJECT_ROOT / "configs/train_medium.yaml")
+        config = merge_train_config(PROJECT_ROOT / "configs/archive/v18_v19/train_medium.yaml")
         world_size = dist.get_world_size() if distributed else 1
         if int(config["trainer"]["devices"]) != world_size:
             raise RuntimeError(

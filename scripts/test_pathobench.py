@@ -21,7 +21,7 @@ different seeds to average over that subsampling randomness.
 Usage:
     python scripts/test_pathobench.py \
         --checkpoint checkpoints/20260806_145050/v33_phase0_armC_ddp8_batch2/epoch=125-val_ce_loss=0.5142.ckpt \
-        --config configs/train_v33_phase0_armC_ddp8_batch2.yaml \
+        --config configs/archive/v33/train_v33_phase0_armC_ddp8_batch2.yaml \
         --csv /NHNHOME/BASE/kimds/Data/PathoBench/csv/cptac_luad_tp53.csv \
         --features /NHNHOME/BASE/kimds/Data/PathoBench/features \
         --output predictions/pathobench_cptac_luad_tp53.pt
@@ -67,7 +67,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=PROJECT_ROOT / "configs/train_v33_phase0_armC_ddp8_batch2.yaml",
+        default=PROJECT_ROOT / "configs/archive/v33/train_v33_phase0_armC_ddp8_batch2.yaml",
     )
     parser.add_argument(
         "--csv",

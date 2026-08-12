@@ -9,9 +9,11 @@
 > 경로로만 학습되며 DD/CT는 training-free다. ridge-calibration arm은 두 스칼라를 추가했으나
 > SEAL 0.6840으로 baseline을 넘지 못했다.
 >
-> **v78 (`train_dd_projection`)이 실행 중이다** — DD에도 P 설계 발언권을 준다. 단 DD의 rank-1
-> 방향은 **어느 arm에서도 미분하지 않는다**(eigh backward의 `1/(λ_i−λ_j)`, argmax 불연속).
-> 계약은 Active-2, 판정은 fold-paired Δ + CI(§99).
+> **v78 (`train_dd_projection`) — 기각.** DD에도 P 설계 발언권을 주는 arm이었으나 fold-paired
+> Δ **−0.0004** [−0.0021, +0.0013]로 v77과 구별되지 않았다(§102-5). 기제가 P에 도달함을
+> 테스트로 단정하고 gradient 크기도 맞춰둔 상태였으므로 **가설 기각으로 읽는다**.
+> 플래그는 계약과 함께 남아 있다(Active-2). DD의 rank-1 방향은 **어느 arm에서도 미분하지
+> 않는다**(eigh backward의 `1/(λ_i−λ_j)`, argmax 불연속).
 
 리포에는 활성 relation 계보와 역사적 비교 계보 두 개가 있다. relation 계보와 Encoder 계보는
 `src/models/set_transformer_ridge.py`에 있고, 역사적 CV-only는 `src/models/baseline.py`에 있다.
@@ -122,7 +124,7 @@ Hard 실험의 공통 조건은 다음과 같다.
 
 ## Active-4. 현재 실험과 판정
 
-- 활성 실행: **v78** (`train_dd_projection`, §100·§101). GPU 0–3.
+- 활성 실행: 없음. **v78**(`train_dd_projection`)은 fold-paired Δ −0.0004 [−0.0021,+0.0013]로 기각(§102-5).
 - active baseline: v77 Hard orthogonal **0.6873**.
 - learned ridge λ/logit scale은 0.6840으로 기각했다.
 - 판정: validation-best 하나의 공식 SEAL 10-task macro와 task별 regression. synthetic val 지표는

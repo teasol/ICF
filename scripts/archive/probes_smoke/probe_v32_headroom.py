@@ -30,7 +30,7 @@ Usage
     python scripts/probe_v32_headroom.py \
         --checkpoint-ccerv2 checkpoints/20260805_123630/v31_ccer_v2/epoch=018-val_ce_loss=0.4438.ckpt \
         --checkpoint-v30 checkpoints/20260804_132334/v30_cardinality_poolz_l2/epoch=048-val_ce_loss=0.4442.ckpt \
-        --config configs/train_v31_ccer_v2.yaml \
+        --config configs/archive/v31/train_v31_ccer_v2.yaml \
         --output logs/probe_v32_headroom_20260805.csv
 """
 from __future__ import annotations
@@ -60,7 +60,7 @@ def parse_args() -> argparse.Namespace:
                         help="Config used to build the CCER-v2 model and the "
                              "shared evaluation stream.")
     parser.add_argument("--config-v30", type=Path,
-                        default=Path("configs/train_v30_cardinality_poolz_l2.yaml"),
+                        default=Path("configs/archive/v30/train_v30_cardinality_poolz_l2.yaml"),
                         help="Config used to build the v30 model (no CCER-v2).")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--seed", type=int, default=42)

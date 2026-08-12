@@ -21,7 +21,7 @@ INPUT_DIM = 96
 
 
 def _build(**over):
-    cfg = merge_train_config(REPO_ROOT / "configs" / "train_v34_phase0_largectx_1536.yaml")
+    cfg = merge_train_config(REPO_ROOT / "configs" / "archive" / "v34_largectx" / "train_v34_phase0_largectx_1536.yaml")
     kw = {**cfg["model"], **cfg["model_kwargs"]}
     kw.pop("model_src", None)
     kw["input_dim"] = INPUT_DIM
@@ -93,7 +93,7 @@ class TestMarginActivation(unittest.TestCase):
 
     def _grad_count(self, **relation):
         cfg = merge_train_config(
-            REPO_ROOT / "configs" / "train_v34_phase0_largectx_1536.yaml"
+            REPO_ROOT / "configs" / "archive" / "v34_largectx" / "train_v34_phase0_largectx_1536.yaml"
         )
         kw = {**cfg["model"], **cfg["model_kwargs"]}
         kw.pop("model_src", None)
@@ -152,7 +152,7 @@ class TestMarginActivation(unittest.TestCase):
     def test_temperature_parameter_only_exists_in_identity_mode(self) -> None:
         """Creating it unconditionally would break strict loads of old ckpts."""
         cfg = merge_train_config(
-            REPO_ROOT / "configs" / "train_v34_phase0_largectx_1536.yaml"
+            REPO_ROOT / "configs" / "archive" / "v34_largectx" / "train_v34_phase0_largectx_1536.yaml"
         )
         kw = {**cfg["model"], **cfg["model_kwargs"]}
         kw.pop("model_src", None)

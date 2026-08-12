@@ -17,7 +17,7 @@
 #   scripts/launch_ici_protocol.sh                      # scratch, all seeds
 #   PRETRAINED_CKPT=/abs/path.ckpt scripts/launch_ici_protocol.sh
 #   SEEDS="42 1234" scripts/launch_ici_protocol.sh      # subset
-#   CONFIG=configs/train_v22_ici_scratch.yaml scripts/launch_ici_protocol.sh
+#   CONFIG=configs/archive/v22/train_v22_ici_scratch.yaml scripts/launch_ici_protocol.sh
 
 set -euo pipefail
 
@@ -27,7 +27,7 @@ cd "${PROJECT_ROOT}"
 # Seed partitions present under data/ICI_CVOnly_scConcept_512/SEED*.
 SEEDS="${SEEDS:-42 1234 2026 271828 314159}"
 FOLDS="${FOLDS:-0 1 2 3 4}"
-CONFIG="${CONFIG:-configs/train_v22_ici_finetune.yaml}"
+CONFIG="${CONFIG:-configs/archive/v22/train_v22_ici_finetune.yaml}"
 TAG="${TAG:-v22_ici}"
 # Empty means train from scratch. Any pre-v22 checkpoint is rejected by
 # ModelInterface.on_load_checkpoint, so this must point at a v22 pretrain.

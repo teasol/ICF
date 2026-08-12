@@ -1,9 +1,0 @@
-# v74 — v70 plus support-selected discriminative Composition Tokens.
-# Candidate tokens are label-free; support labels only select the most
-# class-0- and class-1-enriched tokens. Only the 12->32->1 head is learned.
-base_config: train_v70_cv_dd_mlp_1pop_linear_1536.yaml
-
-model: covariance_mean_dd_ct_mlp
-
-logger_overrides:
-  experiment_name: v74_cv_dd_ct_mlp_1pop_linear

@@ -27,7 +27,7 @@ No model is loaded -- this is pure cell geometry on the val stream.
 
 Usage:
     python scripts/diagnose_component_selection_bound.py \
-        --config configs/train_v24_medium_bag_proj_residual.yaml \
+        --config configs/archive/v24/train_v24_medium_bag_proj_residual.yaml \
         --episodes 1000
 """
 from __future__ import annotations
@@ -110,7 +110,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--config", type=Path,
-        default=Path("configs/train_v24_medium_bag_proj_residual.yaml"),
+        default=Path("configs/archive/v24/train_v24_medium_bag_proj_residual.yaml"),
     )
     parser.add_argument("--episodes", type=int, default=1000)
     parser.add_argument("--splits", type=int, default=4)

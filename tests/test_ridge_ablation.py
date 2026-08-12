@@ -40,7 +40,7 @@ INPUT_DIM = 96
 
 def _build(**overrides) -> BaseModel:
     config = merge_train_config(
-        REPO_ROOT / "configs" / "train_v41_cvonly_K128_1536.yaml"
+        REPO_ROOT / "configs" / "archive" / "v40_v45_cvonly" / "train_v41_cvonly_K128_1536.yaml"
     )
     kwargs = dict(config["model"])
     kwargs.update(config["model_kwargs"])

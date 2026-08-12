@@ -1,15 +1,15 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-12` (§101 — 문서 압축, 3,652 → 811줄)
+**Last updated**: `2026-08-12` (§102 — configs 루트 67 → 2개, v78 기각)
 
 **한 줄**: 활성 baseline은 v77 Hard orthogonal(SEAL macro **0.6873**)이고, 앞으로 arm 판정은 점추정 macro 차이가 아니라 **fold-paired Δ + bootstrap CI**로 한다(§99).
 
-**Status**: **활성 baseline v77 Hard orthogonal 0.6873. v78 arm이 GPU 0–3에서 실행 중(§100·§101). 역사적 전체 최고는 v41_K128 0.6940.**
+**Status**: **활성 baseline v77 Hard orthogonal 0.6873. 실행 중인 학습·평가 없음 — v78은 Δ −0.0004 [−0.0021,+0.0013]로 기각(§102-5). 역사적 전체 최고는 v41_K128 0.6940.**
 
 > [!IMPORTANT]
 > **읽는 순서 (2026-08-12)**: 판정 방식이 §99에서 바뀌었다. arm을 비교하려면 §99를 먼저 읽고
 > `scripts/compare_arms_paired.py`를 쓸 것. §98 판정표 4건은 §99-1에서 fold-paired CI로
-> 재검증되어 전부 유지됐다. **v78**(§100)이 현재 GPU 0–3에서 실행 중이다(§101).
+> 재검증되어 전부 유지됐다. **v78**(§100)은 Δ −0.0004로 기각됐다(§102-5).
 > §2~§97 본문은 [`history.md`](history.md) §20–§23으로 아카이빙됐다(§101).
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
@@ -31,7 +31,7 @@
 현행 아키텍처 명세는 [`current_architecture.md`](current_architecture.md),
 실험 절차·결과표·금지사항은 [`current_experiments.md`](current_experiments.md).
 
-**지금 돌아가는 것 (2026-08-12)**: **v78 arm** — runner PID/PGID `2164419`, GPU 0–3 (§100·§101).
+**지금 돌아가는 것 (2026-08-12)**: 없음. v78까지 완료·기각됐다(§102-5).
 
 결과 재확인:
 ```bash
@@ -101,7 +101,7 @@ G-2 제거 확정(§68에서 분기 통째 제거로 해소), E>1 노선(§68-5)
 역사적 전체 최고는 여전히 **v41_K128 CV-only 0.6940**(229 파라미터)이므로, 활성 baseline이
 사상 최고보다 낮은 상태다. 지도학습 ABMIL은 0.7266(−0.0393), 상회는 2/10 task.
 
-**지금 돌아가는 것**: v78 arm 1개 (§100·§101). 그 외 실행 없음.
+**지금 돌아가는 것**: 없음. v78은 기각됐다(§102-5).
 
 **판정 방법이 §99에서 바뀌었다 — 이걸 모르면 arm 비교를 잘못한다.**
 점추정 macro끼리 빼지 말고 **fold-paired Δ + bootstrap CI**를 쓸 것. GPU 불필요:
@@ -843,3 +843,77 @@ median 에피소드에서 두 경로를 맞춘다. 비 자체가 5배 변동하�
 GPU 0–3, DDP rank 4개. 약 18초/epoch(기존 Hard arm과 동일), first-step peak allocated 10.68 GiB.
 epoch 26에서 val_ce 0.1717로 v77 best 0.1697에 근접 중이다. 완료 후 판정은 §100-5대로
 fold-paired Δ + CI다.
+
+## 102. 2026-08-12 — configs 정리: 루트 67개 → 2개
+
+§101이 부채로 기록만 해둔 config 정리를 실행했다. handoff §7의 "루트에는 활성 entry point만"
+규칙이 지켜지지 않아 루트에 종결된 v40~v76 arm이 67개 쌓여 있었다.
+
+### 1. 결과
+
+- **루트는 2개만 남는다**: `train_v77_hard_orthogonal_1536.yaml`(canonical),
+  `train_v78_dd_projection_1536.yaml`.
+- **v77을 자체 포함형으로 인라인**했다. 이전 체인
+  `v77 → v76_classsep_hard → v76_cv_learnable_p_dd_ct_mlp → v74 → v70 → v69`를 인라인해 그 6개를
+  아카이브해도 v77이 단독 실행된다 — v34가 §56에서 받은 처리와 같다.
+- 종결된 arm **64개**를 시대별로 이관하고 전부 `base_config` 없는 자체 포함형으로 변환했다
+  (§7.3): `v34_largectx/`(3), `v40_v45_cvonly/`(8), `v50_v54_encoder/`(5),
+  `v57_v61_data_arms/`(5), `v62_v68_hybrid/`(12), `v69_v76_relation/`(30), `v77_pop_residual/`(1).
+
+### 2. 검증 — merged 결과 동일성이 핵심 안전망이었다
+
+이동 전 **entry point 183개의 merged config 해시를 스냅샷**해두고 작업 후 대조했다.
+결과 **CHANGED: 0, MISSING: 0**. 전체 테스트는 149개, 실패는 기존 1건
+(`test_mlp_manifold_bank.py`의 `pytest` import)뿐이다.
+
+### 3. 참조 검증에서 배운 것 두 가지 (handoff §7에 반영)
+
+**ⓐ 문자열 검색만으로는 참조를 못 찾는다.** 여러 테스트가
+`REPO_ROOT / "configs" / "<name>.yaml"`처럼 경로를 **조립**하므로 `configs/<name>` 문자열이
+파일에 아예 없다. `configs/` prefix로만 grep해 1차 치환했더니 **테스트 5개에서 35 errors**가
+났다(`test_covariance_sketch_knobs`, `test_paired_relation_head`, `test_ridge_ablation`,
+`test_training_uses_dense_path`). **basename으로도 grep**해야 한다.
+
+**ⓑ fixture 내부에 config 경로가 저장돼 있다.** `tests/fixtures/cvonly_golden.pt`가 config
+경로를 키로 들고 있어 4개 subTest가 깨졌다. **fixture를 재생성하면 pre-prune 기록이 현재
+출력으로 대체돼 그 fixture의 존재 이유가 사라진다**(§73). 그래서 재생성하지 않고
+`test_cvonly_golden._resolve`가 기록된 경로가 없으면 basename으로 폴백하도록 고쳤다
+(단일 매치가 아니면 에러).
+
+### 4. 검증 명령의 구멍을 막았다
+
+handoff §7의 문서화된 검증 명령이 `if 'base_config' not in p.read_text(): continue`로 걸러서
+**삭제된 module fragment 때문에 깨진 config를 못 잡고 있었다**. 실제로
+`configs/archive/v18_v19/` 10개가 `a5dfcf8`에서 삭제된 `configs/data/learnability_*.yaml` 등을
+참조해 로드 불가인데 "failing: 0"을 통과했다. 그 줄을 없애고 module 조각 디렉터리만 제외하도록
+바꿨다.
+
+⚠️ **이 10개는 고치려다 되돌렸다.** fragment를 `a5dfcf8^`에서 복구해 인라인하면 10개가
+전부 로드되지만, 이 파일들은 **v19~v33 config 50개의 base**이고 인라인하면 group 참조가
+해석된 dict로 바뀌어 **자식의 group override 병합 의미가 달라져 그 50개의 merged 결과가 전부
+바뀐다**. 스냅샷 대조가 이것을 잡아냈다(`CHANGED: 50`). 따라서 **`failing: 10`이 정상
+기준선**이며, 새 작업이 이 수를 늘리지 않는지만 확인한다. 폐기된 v18/v19 아키텍처의 재현
+기록이므로 실사용 영향은 없다.
+
+### 5. v78 결과 (§100 판정)
+
+문서 정리 중 v78이 완주했다. 공식 SEAL 10-task macro **0.6869**, v77 대비 fold-paired
+**Δ −0.0004, 95% CI [−0.0021, +0.0013]** — **CI가 0을 포함해 구별 불가**, 상승 5/10 task다.
+
+| task | Δ | 95% CI |
+|---|---:|---|
+| bc_therapy her2_status | +0.0068 | [+0.0034, +0.0102] |
+| cptac_brca PIK3CA | −0.0098 | [−0.0202, −0.0021] |
+| cptac_luad TP53 | −0.0038 | [−0.0065, −0.0011] |
+
+**판정: 기각.** 그리고 이번에는 **가설 기각으로 읽을 수 있다** — 기제가 실제로 P에 도달함을
+테스트로 단정했고(control과 gradient가 다름) weight로 두 경로 크기를 맞춰뒀으므로, §66의
+"Δ≈0이 가설 기각인지 경로 미개방인지 구분 불가" 함정에 걸리지 않는다.
+**결론: DD에 P 설계 발언권을 줘도 subspace 품질이 개선되지 않는다.**
+
+### 6. 다음 Action
+
+1. **seed 반복** — 여전히 미측정이고 이제 더 급하다. v77/v78의 Δ가 −0.0004라 realization
+   노이즈 크기를 모르면 "동률"의 의미를 확정할 수 없다. L8/L16/L32 각 2 seed로 §99-3의
+   ⓐ/ⓑ를 가른다.
+2. BAP1 large-bag 붕괴 진단(§99-2), VHL 랜덤 이하 진단(§0 열린 과제 2).

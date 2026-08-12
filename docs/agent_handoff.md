@@ -334,7 +334,7 @@ support class prototype을 만들고, 기존 rare branch와 독립인 support/qu
 class-centered cell evidence를 계산한다. `Top-1`, `Top-4`, `mean` route는 총 `0.30`의
 floor를 가지며 별도 null gate는 없다. 최종 output head는 zero-init이므로 v30 weight-only
 초기화 직후 logits가 정확히 동일하다. 신규 module은 base LR, 공통 v30 backbone은 `0.05x`
-LR을 사용한다. Config는 `configs/train_v31_ccer_v2.yaml`, architecture marker는 `31`이다.
+LR을 사용한다. Config는 `configs/archive/v31/train_v31_ccer_v2.yaml`, architecture marker는 `31`이다.
 Seed 42 20-epoch 학습 best는 epoch 18 `val_ce_loss=0.443786`이었으나 synthetic AUROC
 `0.8514`, Musk `0.8470`으로 v30 Musk `0.8539`를 넘지 못했고 대형 bag은 `0.698`로
 동일했다. 따라서 미채택이며 재현용 코드만 보존한다. 상세는
@@ -363,7 +363,7 @@ six-task + B2)와 arm C(v30 + legacy + B2b) 데이터 컨트롤을 먼저 구현
 `SyntheticManifoldGenerator(per_bag_cardinality=True)`로 에피소드 내 per-bag
 `n_b ~ LogUniform[1,1024]`을 추첨해 ragged list-of-bags를 반환하는 새 데이터 경로다
 (collator/training_step ragged 분기, `episode_batch_size=1` 필요). config:
-`configs/train_v33_phase0_armB.yaml`·`armC.yaml`. 신규 테스트 `tests/test_b2b.py` 10개 포함
+`configs/archive/v33/train_v33_phase0_armB.yaml`·`armC.yaml`. 신규 테스트 `tests/test_b2b.py` 10개 포함
 기본 suite는 현재 **41 tests / 약 48초**다 (§59 기준). 학습: arm B는
 `logs/20260805_220642/`에서 BF16으로 기존 checkpoint를 복원해 계속 진행한다. 최초 arm C
 `logs/20260805_214751/`는 batch 1에서 4096 updates/epoch가 되어 중단했다. 해결 run은
@@ -375,7 +375,7 @@ Phase 0 결과 확인 후에만 구현한다.** 상세는
 
 **Active — arm C top-up, 8×A6000 DDP (2026-08-06)**: §42에서 arm C가 과소학습 편향
 (에피소드 8× 부족)으로 gate 미달이었으므로, 사용자 결정으로 **8×RTX A6000 DDP +
-에피소드-매치**로 재개했다. 새 config는 `configs/train_v33_phase0_armC_ddp8.yaml`
+에피소드-매치**로 재개했다. 새 config는 `configs/archive/v33/train_v33_phase0_armC_ddp8.yaml`
 (자체 포함형, medium 체인 미상속, `episodes_per_epoch: 4096`, devices 8 /
 `ddp_find_unused_parameters_false` / bf16-mixed / max_epochs 150)이고 `archive/v33_phase0_armC_bf16/last.ckpt`에서
 resume한다. **gnode5 필수**: 이 머신의 NCCL P2P/CUMEM 전송이 hang을 일으켜
@@ -531,18 +531,18 @@ scripts/launch_interactive_training.sh \
 
 1. **`configs/` 최상위 루트 유지 조건**:
    - 현재 활성 파이프라인에서 직접 사용하는 entry point config만 `configs/` 최상위에 유지합니다.
-   - 현재 `configs/` 최상위 유지 대상: **v34 — `train_v34_phase0_largectx_1536.yaml`
-     (PathoBench 보고용, 자체 포함형)**, `train_v34_phase0_largectx_512.yaml` (arm D),
-     `test_v34_phase0_largectx_1536_ici.yaml` (평가), **v35 —
-     `train_v35_phase0_largebag_1536.yaml`** (§59 데이터 단독 arm, group default 참조형). **v34 config는 `base_config` 없이 전체
-     base 체인(v30→v24→v22→v18_v19)과 named group을 인라인한 자체 포함형**이라 아카이브와
-     무관하게 단독 실행됩니다 (2026-08-07 §56).
+   - **현재 `configs/` 최상위 유지 대상은 2개뿐이다 (§102, 2026-08-12)**:
+     `train_v77_hard_orthogonal_1536.yaml` (canonical baseline, **자체 포함형**) 과
+     `train_v78_dd_projection_1536.yaml` (v77 참조 + override 2개).
+     v77은 이전 base 체인(v77→v76_classsep_hard→v76_cv_learnable_p_dd_ct_mlp→v74→v70→v69)을
+     인라인해 그 6개를 아카이브해도 단독 실행된다 — v34가 받았던 처리와 같다.
+   - 종결된 arm 64개는 시대별로 이관됐다: `configs/archive/` 아래 `v34_largectx/`,
+     `v40_v45_cvonly/`, `v50_v54_encoder/`, `v57_v61_data_arms/`, `v62_v68_hybrid/`,
+     `v69_v76_relation/`, `v77_pop_residual/`. 전부 `base_config` 없는 자체 포함형이다.
    - v30/v24/v22/eval_v30 체인은 `configs/archive/v30/`·`archive/v24/`·`archive/v22/`로 이관
-     (2026-08-07 §56 재아카이빙, base_config 상대경로는 `../` 로 보정해 재현 가능).
-   - 폐기 확정 config 이관: v23-A0/v24-A0/v24-B0(`train_v23_medium_bag_mean.yaml`,
-     `train_v24_medium_bag_proj.yaml`, `train_v24_medium_bag_proj_bottleneck.yaml`) →
-     `configs/archive/v23_v24_candidates/`; v25(`train_v25_medium_typed_bag.yaml`,
-     `train_v25_easy.yaml`) → `configs/archive/v25_typed_bag/`.
+     (2026-08-07 §56 재아카이빙).
+   - 폐기 확정 config 이관: v23-A0/v24-A0/v24-B0 → `configs/archive/v23_v24_candidates/`;
+     v25 → `configs/archive/v25_typed_bag/`.
    - ICI의 fold/seed는 config에 박지 않고 `--cv` / `--seed`로 주입합니다 (`scripts/launch_ici_protocol.sh`).
 2. **구버전 Config 아카이빙 조건**:
    - 구버전 아키텍처의 config는 `configs/archive/` 하위로 즉시 이관합니다: `archive/v18_v19/`, `archive/v20/`, `archive/v21_retrieval/`.
@@ -562,18 +562,35 @@ scripts/launch_interactive_training.sh \
    > `configs/<group>/`에서만 찾으므로, 모듈 config를 삭제하면 이를 참조하는 **아카이브** config가
    > 깨집니다. 실제로 2026-08-04까지 **모든** 아카이빙 커밋이 이 검증을 누락해 config 18개가
    > 로드 불가 상태였고 unittest 1건이 상시 실패했습니다 (복구 기록: [`current_status.md`](current_status.md) §26).
-   > **아카이빙/삭제 커밋 전 반드시 아래를 통과시킬 것** (활성 config만이 아니라 **전체**):
+   > **아카이빙/삭제 커밋 전 반드시 아래를 통과시킬 것** (활성 config만이 아니라 **전체**).
+   > ⚠️ **이전 판의 이 명령은 `if 'base_config' not in p.read_text(): continue`로 걸러서 삭제된
+   > module fragment 때문에 깨진 config를 못 잡았다** — 실제로 `configs/archive/v18_v19/` 10개가
+   > 그 상태로 "failing: 0"을 통과하고 있었다(§102). 그 줄을 없애고 module 조각 디렉터리만 제외한다:
    > ```bash
    > timeout 300s /home/aibio_3/miniconda3/envs/BagPFN/bin/python -c "
    > import sys; sys.path.insert(0,'.')
    > from pathlib import Path
    > from src.utils.utils import merge_train_config
+   > MODULES={'callbacks','data','logger','model','optimizer','scheduler','trainer'}
    > bad=[]
    > for p in sorted(Path('configs').rglob('*.yaml')):
-   >     if 'base_config' not in p.read_text(): continue
+   >     if p.parts[1] in MODULES: continue   # 조각은 entry point가 아니다
    >     try: merge_train_config(p)
    >     except Exception as e: bad.append((p, e))
    > print('failing:', len(bad)); [print(' ', p, e) for p, e in bad]"
    > ```
+   > ⚠️ **문자열 검색만으로 참조를 찾지 말 것 (§102 실측).** 여러 테스트가
+   > `REPO_ROOT / "configs" / "<name>.yaml"`처럼 경로를 **조립**하므로 `configs/<name>` 문자열이
+   > 파일에 아예 없다. `configs/` prefix로만 grep하면 테스트 5개·35 errors를 놓친다 —
+   > **basename으로도 grep**할 것. `tests/fixtures/cvonly_golden.pt`처럼 **fixture 내부에 config
+   > 경로가 저장**된 경우도 있다(그 fixture는 pre-prune 기록이라 재생성하면 의미가 사라지므로,
+   > 테스트가 basename으로 폴백해 해석하도록 고쳤다).
+   > ⚠️ **알려진 예외 — `failing: 10`이 정상 기준선이다 (§102).**
+   > `configs/archive/v18_v19/` 10개는 `a5dfcf8`에서 삭제된 module fragment를 참조해 그 이후로
+   > 로드 불가다(폐기된 v18/v19 아키텍처의 재현 기록). **인라인으로 고치려 시도했다가 되돌렸다** —
+   > 이 파일들은 v19~v33 config 50개의 base이고, 인라인하면 group 참조가 해석된 dict로 바뀌어
+   > **자식의 group override 병합 의미가 달라져 그 50개의 merged 결과가 전부 바뀐다**(스냅샷 대조로
+   > 검출). 원문이 필요하면 `git show a5dfcf8^:configs/data/<name>.yaml`로 fragment를 복구할 것.
+   > 새 작업이 이 10개를 늘리지 않는지만 확인하면 된다.
 4. **모듈형 Component 설정 분리**:
    - `callbacks/`, `data/`, `logger/`, `model/`, `optimizer/`, `scheduler/`, `trainer/` 등 모듈 조각은 해당 서브폴더에 구성합니다.

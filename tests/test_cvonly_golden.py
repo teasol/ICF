@@ -61,10 +61,32 @@ class CovarianceOnlyGoldenTest(unittest.TestCase):
         cls.golden = torch.load(FIXTURE, map_location="cpu", weights_only=False)
         cls.device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    @staticmethod
+    def _resolve(config_path: str) -> Path:
+        """Locate a recorded config even after it has been archived.
+
+        The fixture stores the config path as it stood when the recording was
+        made, but what it pins is the numerical output -- the path is only a
+        lookup key. Configs move (SS102 relocated the finished arms into
+        configs/archive/<era>/), and regenerating the fixture to update a path
+        would replace the pre-prune recording with current outputs, destroying
+        the very thing it guards. So fall back to the basename.
+        """
+        direct = REPO_ROOT / config_path
+        if direct.exists():
+            return direct
+        matches = sorted((REPO_ROOT / "configs").rglob(Path(config_path).name))
+        if len(matches) != 1:
+            raise FileNotFoundError(
+                f"{config_path}: expected exactly one match under configs/, "
+                f"found {len(matches)}: {matches}"
+            )
+        return matches[0]
+
     def test_forward_matches_pre_prune_recording(self) -> None:
         for config_path, recorded in self.golden["configs"].items():
             with self.subTest(config=config_path):
-                config = merge_train_config(REPO_ROOT / config_path)
+                config = merge_train_config(self._resolve(config_path))
                 model = build_model(config).to(self.device).eval()
 
                 # The fixture pins the weights the CV-only path can reach (the

@@ -44,7 +44,7 @@ def query_index(y: torch.Tensor) -> torch.Tensor:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=Path, default=ROOT / "configs/train_covariance_relation_e0.yaml")
+    parser.add_argument("--config", type=Path, default=ROOT / "configs/archive/v18_v19/train_covariance_relation_e0.yaml")
     parser.add_argument("--output", type=Path, default=ROOT / "logs/oracle_slot_alignment.csv")
     args = parser.parse_args()
     config = merge_train_config(args.config)

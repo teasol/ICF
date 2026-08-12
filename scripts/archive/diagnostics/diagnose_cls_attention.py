@@ -36,7 +36,7 @@ Metrics (cell level, 0.5 = random; cf. T1-A cell-selection ~0.50, oracle ~0.93)
 Usage:
     python scripts/diagnose_cls_attention.py \
         --checkpoint checkpoints/20260802_225848/v26_medium_cls_token_pool/last.ckpt \
-        --config configs/train_v26_medium_cls_token_pool.yaml \
+        --config configs/archive/v26/train_v26_medium_cls_token_pool.yaml \
         --episodes 1000
 """
 from __future__ import annotations

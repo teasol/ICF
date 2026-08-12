@@ -44,8 +44,14 @@
 - **Living 문서 유지**: `docs/` 최상위 루트에는 5개의 Living 문서와 현행 proposal 1개만 유지합니다.
 - **Git 커밋 동기화**: 세션 핸드오프 시 작업을 남김없이 커밋하고 커밋 내역/diff를 `agent_handoff.md` 및 `current_status.md`에 반영합니다.
 - **아카이빙 규칙**: 특정 버전 딥다이브 보고서나 계획 문서는 완료 시 **핵심 결론(ADR·트레이드오프·레슨)을 `docs/history.md`의 해당 시기 절에 추가**하고, 개별 원문 파일은 새로 만들지 않습니다(원문은 git 이력에 보존). `docs/` 루트를 단순하고 가독성 높게 유지합니다.
-- **Config 루트 관리**: 규칙은 `configs/` 루트에 **현재 활성 파이프라인의 entry point만** 두는 것이다(상세는 [`agent_handoff.md`](agent_handoff.md) §7). 현행 활성 entry point는 v77 canonical `train_v77_hard_orthogonal_1536.yaml`과 v78 `train_v78_dd_projection_1536.yaml`이다. 폐기 아키텍처 config는 `configs/archive/` 하위로 이관하고 자체 포함형(인라인)으로 보관한다. ICI의 fold/seed는 config가 아니라 `--cv`/`--seed`로 주입하므로 fold별 config를 만들지 않는다.
-  ⚠️ **2026-08-12 현재 이 규칙이 지켜지지 않고 있다** — 루트에 67개 yaml이 누적돼 있고 대부분은 종결된 v40~v76 arm이다. 별도 정리 작업이 필요하다(아직 미실시).
+- **Config 루트 관리**: `configs/` 루트에는 **현재 활성 파이프라인의 entry point만** 둔다
+  (상세는 [`agent_handoff.md`](agent_handoff.md) §7). **2026-08-12(§102) 기준 정확히 2개다** —
+  `train_v77_hard_orthogonal_1536.yaml`(canonical, 자체 포함형)과
+  `train_v78_dd_projection_1536.yaml`. 종결된 arm 64개는 `configs/archive/` 아래 시대별
+  폴더(`v34_largectx/`, `v40_v45_cvonly/`, `v50_v54_encoder/`, `v57_v61_data_arms/`,
+  `v62_v68_hybrid/`, `v69_v76_relation/`, `v77_pop_residual/`)로 이관하고 전부 `base_config` 없는
+  자체 포함형으로 보관한다. ICI의 fold/seed는 config가 아니라 `--cv`/`--seed`로 주입하므로
+  fold별 config를 만들지 않는다.
 - **단일 출처화**: 동일한 수치나 진행 상태를 중복해 기록하지 않으며, 상태는 `current_status.md`에만 기록합니다.
 - **자율 연속 실행과 추적성**: `current_status.md`에 다음 Action과 판정 기준이 명확하면 재확인 없이 실행합니다. 각 논리 단위의 결과·명령·로그/산출물 경로·판단·후속 Action을 SSOT에 기록하고 Git 커밋하여 다른 작업공간이 즉시 이어받을 수 있게 합니다.
 

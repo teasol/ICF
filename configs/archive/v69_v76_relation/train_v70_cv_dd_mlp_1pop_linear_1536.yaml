@@ -1,0 +1,183 @@
+# ARCHIVED 2026-08-12 — self-contained reproduction record.
+#
+# Inlined per agent_handoff SS7.3: archived configs keep no `base_config`, so a
+# relative path can never break after a move and the file always resolves without
+# reference validation. The original chained form is in git history
+# (`git log --follow -- configs/train_v70_cv_dd_mlp_1pop_linear_1536.yaml`).
+#
+# Original location: configs/train_v70_cv_dd_mlp_1pop_linear_1536.yaml
+# Active entry points now: train_v77_hard_orthogonal_1536.yaml (canonical),
+# train_v78_dd_projection_1536.yaml.
+seed: 42
+ckpt_path: null
+data:
+  dataset_src: synthetic_data.SyntheticEpisodeDataset
+  episode_dataset: true
+  episode_batch_size: 1
+  cuda_prefetch: true
+  num_workers: 0
+  pin_memory: false
+  persistent_workers: false
+  train_shuffle: true
+  val_shuffle: false
+  test_shuffle: false
+  dataset_kwargs:
+    episodes_per_epoch: 1024
+    seed: null
+    generation_device: cuda
+    shape_group_size: 8
+    difficulty_curriculum_episodes: 0
+    effect_scale_start:
+    - 0.9
+    - 2.1
+    effect_scale_end:
+    - 0.9
+    - 2.1
+    num_bags:
+    - 60
+    - 100
+    num_cells:
+    - 256
+    - 8192
+    per_bag_cardinality: true
+    latent_dim: 32
+    output_dim: 1536
+    mlp_hidden_dim: 96
+    mlp_num_layers: 3
+    class_separation:
+    - 1.0
+    - 2.0
+    latent_scale:
+    - 0.6
+    - 1.3
+    shared_component_probability: 1.0
+    num_shared_components:
+    - 4
+    - 10
+    shared_component_fraction:
+    - 0.82
+    - 0.96
+    donor_shift_scale: 0.35
+    donor_component_shift_scale: 0.12
+    donor_mixture_logit_scale: 0.65
+    shared_component_base_logit_scale: 0.7
+    donor_shared_component_logit_scale: 0.7
+    continuous_response_probability: 1.0
+    response_score_scale: 1.5
+    response_score_min_margin: 0.15
+    response_mixture_effect_scale: 2.5
+    response_state_effect_scale:
+    - 1.5
+    - 3.0
+    response_task_probabilities:
+    - 0.2
+    - 0.2
+    - 0.2
+    - 0.2
+    - 0.2
+    response_covariance_effect_scale:
+    - 1.0
+    - 2.0
+    rare_response_probability: 0.0
+    rare_response_fraction:
+    - 0.02
+    - 0.08
+    observation_noise: 0.005
+    normalize_output: true
+    output_norm_eps: 1.0e-08
+    balanced: false
+    return_task_metadata: true
+    num_cells_log_uniform: true
+    num_cells_log_uniform_power: 2.0
+    response_dim: 1
+    responsive_population_count: 1
+    label_rule: single
+    manifold_mode: orthogonal
+    per_bag_max_cells: 4096
+  val_dataset_kwargs:
+    episodes_per_epoch: 104
+    seed: 50042
+  test_dataset_kwargs:
+    episodes_per_epoch: 104
+    seed: 60042
+model:
+  model_src: src.models.set_transformer_ridge.CovarianceMeanDDMLPModel
+  input_dim: 1536
+  token_dim: 16
+  num_heads: 1
+  num_layers: 1
+  feedforward_dim: 16
+  num_summary_tokens: 1
+  max_cells: 8192
+  dropout: 0.0
+  covariance_sketch_dim: 128
+  covariance_slopes:
+  - 0.02086214
+  - 0.01529195
+  ridge_lambda: 1.0
+  ridge_logit_scale: 2.0
+  num_classes: 2
+  dd_shrinkage: 0.25
+  dd_eps: 1.0e-06
+  dd_head_hidden_dim: 32
+optimizer:
+  optimizer_src: torch.optim.AdamW
+  optimizer_kwargs:
+    lr: 0.0001
+    betas:
+    - 0.9
+    - 0.999
+    eps: 1.0e-08
+    weight_decay: 0.01
+scheduler:
+  scheduler_src: src.utils.schedulers.WarmupReduceLROnPlateau
+  scheduler_kwargs:
+    warmup_epochs: 5
+    warmup_start_factor: 0.1
+    plateau_start_epoch: 5
+    step_epoch_interval: 1
+    plateau_check_interval: 1
+    mode: min
+    factor: 0.5
+    patience: 10
+    threshold: 1.0e-05
+    threshold_mode: rel
+    cooldown: 5
+    min_lr: 1.0e-06
+  monitor: val_ce_loss
+  interval: epoch
+  frequency: 1
+trainer:
+  max_epochs: 50
+  precision: bf16-mixed
+  devices: 4
+  strategy: ddp_find_unused_parameters_false
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v70_cv_dd_mlp_1pop_linear
+callbacks:
+  checkpoint:
+    enabled: true
+    dirpath: checkpoints
+    filename: '{epoch:03d}-{val_ce_loss:.4f}'
+    monitor: val_ce_loss
+    mode: min
+    save_top_k: 3
+    save_last: true
+  periodic_checkpoint:
+    enabled: true
+    dirpath: checkpoints
+    filename: periodic-{epoch:03d}-{val_ce_loss:.4f}
+    every_n_epochs: 10
+  lr_monitor:
+    enabled: true
+    logging_interval: epoch
+model_kwargs:
+  training_targets_per_episode:
+  - 5
+  - 12
+  ranking_loss_weight: 0.1
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0
+  nonfinite_gradient_policy: zero

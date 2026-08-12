@@ -1,8 +1,0 @@
-# v73 — frozen canonical CV + rank-1 DD + full-dimensional magnitude distance.
-# Only the 12->32->1 relation head is learned; synthetic task matches v70.
-base_config: train_v70_cv_dd_mlp_1pop_linear_1536.yaml
-
-model: covariance_mean_dd_magnitude_mlp
-
-logger_overrides:
-  experiment_name: v73_cv_dd_magnitude_mlp_1pop_linear

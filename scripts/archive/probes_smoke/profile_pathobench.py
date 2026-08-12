@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=PROJECT_ROOT / "configs/train_v33_phase0_armC_ddp8_batch2.yaml",
+        default=PROJECT_ROOT / "configs/archive/v33/train_v33_phase0_armC_ddp8_batch2.yaml",
     )
     parser.add_argument("--csv", type=Path, required=True)
     parser.add_argument(

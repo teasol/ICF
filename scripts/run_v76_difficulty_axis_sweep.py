@@ -14,10 +14,10 @@ RUN_ROOT = ROOT / "checkpoints" / "20260812_v76_axis_sweep"
 LOG_ROOT = ROOT / "logs" / "20260812_v76_axis_sweep"
 
 ARMS = (
-    ("classsep", "configs/train_v76_axis_classsep_medium_1536.yaml"),
-    ("response", "configs/train_v76_axis_response_medium_1536.yaml"),
-    ("rare", "configs/train_v76_axis_rare_medium_1536.yaml"),
-    ("noise", "configs/train_v76_axis_noise_medium_1536.yaml"),
+    ("classsep", "configs/archive/v69_v76_relation/train_v76_axis_classsep_medium_1536.yaml"),
+    ("response", "configs/archive/v69_v76_relation/train_v76_axis_response_medium_1536.yaml"),
+    ("rare", "configs/archive/v69_v76_relation/train_v76_axis_rare_medium_1536.yaml"),
+    ("noise", "configs/archive/v69_v76_relation/train_v76_axis_noise_medium_1536.yaml"),
 )
 
 TASK_GROUPS = (

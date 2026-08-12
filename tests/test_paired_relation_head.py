@@ -38,7 +38,7 @@ INPUT_DIM = 32
 
 def _build(mode: str = "paired_head", rank: int = 2, seed: int = 0) -> BaseModel:
     config = merge_train_config(
-        REPO_ROOT / "configs" / "train_v41_cvonly_K128_1536.yaml"
+        REPO_ROOT / "configs" / "archive" / "v40_v45_cvonly" / "train_v41_cvonly_K128_1536.yaml"
     )
     kwargs = {**config["model"], **config["model_kwargs"]}
     for key, value in (config.get("model_overrides") or {}).items():
@@ -196,7 +196,7 @@ class PairedHeadTest(unittest.TestCase):
 def _build_multiclass() -> BaseModel:
     model = _build.__wrapped__ if hasattr(_build, "__wrapped__") else None
     config = merge_train_config(
-        REPO_ROOT / "configs" / "train_v41_cvonly_K128_1536.yaml"
+        REPO_ROOT / "configs" / "archive" / "v40_v45_cvonly" / "train_v41_cvonly_K128_1536.yaml"
     )
     kwargs = {**config["model"], **config["model_kwargs"]}
     for key, value in (config.get("model_overrides") or {}).items():

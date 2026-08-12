@@ -10,7 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = "/home/aibio_3/miniconda3/envs/BagPFN/bin/python"
-CONFIG = "configs/train_v76_combo_classsep_rare_noise_8gpu_1536.yaml"
+CONFIG = "configs/archive/v69_v76_relation/train_v76_combo_classsep_rare_noise_8gpu_1536.yaml"
 CHECKPOINT_DIR = ROOT / "checkpoints/20260812_v76_combo/classsep_rare_noise_8gpu"
 LOG_DIR = ROOT / "logs/20260812_v76_combo"
 TAG = "v76_combo_classsep_rare_noise_8gpu_best"

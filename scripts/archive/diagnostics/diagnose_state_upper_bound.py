@@ -53,7 +53,7 @@ ACCESS = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=ROOT / "configs/train_v22_medium.yaml")
+    parser.add_argument("--config", type=Path, default=ROOT / "configs/archive/v22/train_v22_medium.yaml")
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
     parser.add_argument("--output", type=Path, default=ROOT / "logs/v22_state_upper_bound.csv")
     parser.add_argument("--val-episodes", type=int, default=1000)

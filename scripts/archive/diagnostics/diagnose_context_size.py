@@ -46,7 +46,7 @@ def parse_sizes(value: str) -> tuple[int, ...]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=ROOT / "configs/train_v22_hard_realworld.yaml")
+    parser.add_argument("--config", type=Path, default=ROOT / "configs/archive/v22/train_v22_hard_realworld.yaml")
     parser.add_argument("--checkpoint", type=Path, default=DEFAULT_CHECKPOINT)
     parser.add_argument("--context-sizes", type=parse_sizes, default=parse_sizes("10,20,40,80,160"))
     parser.add_argument("--queries-per-class", type=int, default=10)

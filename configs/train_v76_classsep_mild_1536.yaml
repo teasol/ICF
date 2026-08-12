@@ -1,9 +1,0 @@
-# Class-separation difficulty sweep: mild reduction from [1.0, 2.0].
-base_config: train_v76_cv_learnable_p_dd_ct_mlp_1pop_linear_1536.yaml
-
-data_overrides:
-  dataset_kwargs:
-    class_separation: [0.8, 1.7]
-
-logger_overrides:
-  experiment_name: v76_classsep_mild

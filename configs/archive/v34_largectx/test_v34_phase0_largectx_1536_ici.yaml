@@ -1,0 +1,142 @@
+# ARCHIVED 2026-08-12 — self-contained reproduction record.
+#
+# Inlined per agent_handoff SS7.3: archived configs keep no `base_config`, so a
+# relative path can never break after a move and the file always resolves without
+# reference validation. The original chained form is in git history
+# (`git log --follow -- configs/test_v34_phase0_largectx_1536_ici.yaml`).
+#
+# Original location: configs/test_v34_phase0_largectx_1536_ici.yaml
+# Active entry points now: train_v77_hard_orthogonal_1536.yaml (canonical),
+# train_v78_dd_projection_1536.yaml.
+seed: 42
+data:
+  dataset_src: base_data.ICIDataset
+  episode_dataset: false
+  num_workers: 2
+  pin_memory: true
+  drop_last: false
+  persistent_workers: false
+  train_shuffle: true
+  val_shuffle: false
+  test_shuffle: false
+  dataset_kwargs:
+    root_dir: data/ICI_CVOnly_scConcept_512
+    seed: 42
+    cv: 0
+    target_cells: -1
+    all_cell_mean: false
+    input_dim: 1536
+    pad_mode: tile
+model:
+  model_src: src.models.baseline.BaseModel
+  input_dim: 1536
+  bag_centered_representation: true
+  global_summary: centered_spread
+  use_raw_mean_branch: false
+  aggregator_covariance_sketch_dim: 64
+  aggregator_covariance_mode: correlation
+  aggregator_covariance_shrinkage: 0.1
+  aggregator_num_slots: 12
+  aggregator_num_density_slots: 8
+  aggregator_context_samples_per_bag: 32
+  aggregator_assignment_temperature: 0.1
+  aggregator_density_refinement_steps: 4
+  aggregator_density_temperature: 0.15
+  aggregator_slot_rare_fraction: 0.05
+  aggregator_tail_fractions:
+  - 0.01
+  - 0.05
+  - 0.15
+  aggregator_min_tail_instances: 1
+  meta_hidden_dim: 256
+  meta_num_heads: 8
+  meta_num_set_layers: 1
+  meta_relation_hidden_dim: 256
+  meta_ridge_dim: 64
+  meta_ridge_lambda: 1.0
+  meta_ridge_logit_scale: 2.0
+  meta_attention_residual_scale: 0.1
+  meta_population_residual_scale: 0.25
+  meta_tail_residual_scale: 0.1
+  meta_minimum_population_residual_scale: 0.1
+  meta_minimum_tail_residual_scale: 0.05
+  meta_routing_temperature: 0.5
+  meta_class_memory_tokens: 8
+  meta_rare_evidence_fractions:
+  - 0.01
+  - 0.05
+  - 0.1
+  - 0.2
+  meta_fusion_residual_scale: 0.1
+  meta_covariance_ridge_logit_scale: 2.0
+  meta_covariance_residual_scale: 0.25
+  num_classes: 2
+  covariance_relation:
+    enabled: true
+    mode: learned_head
+    granularity: subspace
+    subspace_rank: 1
+    subspace_whiten: true
+    subspace_shrinkage: 0.25
+    diagnostic_only: false
+    residual_scale: 0.5
+    eps: 1.0e-06
+  project_structured_tokens: true
+  projection_bottleneck_dim: 64
+  projection_residual_mean: true
+  bag_representation: poolz_l2
+  aggregator_slot_latent_dim: 64
+  aggregator_slot_query_latent_dim: 128
+  aggregator_slot_affinity_dim: 512
+optimizer:
+  optimizer_src: torch.optim.AdamW
+  optimizer_kwargs:
+    lr: 0.0005
+    betas:
+    - 0.9
+    - 0.999
+    eps: 1.0e-08
+    weight_decay: 0.01
+scheduler:
+  scheduler_src: src.utils.schedulers.WarmupReduceLROnPlateau
+  scheduler_kwargs:
+    warmup_epochs: 5
+    warmup_start_factor: 0.1
+    plateau_start_epoch: 5
+    step_epoch_interval: 1
+    plateau_check_interval: 1
+    mode: min
+    factor: 0.5
+    patience: 10
+    threshold: 1.0e-05
+    threshold_mode: rel
+    cooldown: 5
+    min_lr: 1.0e-06
+  monitor: val_ce_loss
+  interval: epoch
+  frequency: 1
+trainer:
+  max_epochs: 50
+logger:
+  name: csv
+  save_dir: logs
+  experiment_name: v34_phase0_largectx_1536
+callbacks:
+  checkpoint:
+    enabled: true
+    dirpath: checkpoints
+    filename: '{epoch:03d}-{val_ce_loss:.4f}'
+    monitor: val_ce_loss
+    mode: min
+    save_top_k: 3
+    save_last: true
+  lr_monitor:
+    enabled: true
+    logging_interval: epoch
+model_kwargs:
+  training_targets_per_episode:
+  - 5
+  - 12
+  ranking_loss_weight: 0.1
+  routing_sparsity_weight: 0.0
+  routing_balance_weight: 0.0

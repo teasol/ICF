@@ -258,7 +258,7 @@ macro +0.0016이며 BAP1 +0.0147이 가장 크다.
 앞으로 relation-head arm의 control은 v74와 같은 scalar/1-pop/single-label/orthogonal-linear
 50-epoch 조건을 사용한다. best checkpoint는
 `checkpoints/20260811_172825/v74_cv_dd_ct_mlp_1pop_linear/epoch=049-val_ce_loss=0.1197.ckpt`,
-config는 `configs/train_v74_cv_dd_ct_mlp_1pop_linear_1536.yaml`, 평가 tag는
+config는 `configs/archive/v69_v76_relation/train_v74_cv_dd_ct_mlp_1pop_linear_1536.yaml`, 평가 tag는
 `v74_ct_e49`다. arm 판정은 공식 10-task macro와 task별 regression을 함께 본다.
 
 ## 10. Hard fixed nonlinear manifold-bank protocol (2026-08-12)
