@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-12` — 활성 baseline은 v76 learnable-P CV+DD+CT+MLP (SEAL 0.6748)로 유지한다. v77은 동률로 기각했고 ClassSep Medium `[0.5,1.4]` 0.6823이 후보 최고다. 진행 상태는 §90.
+**Last updated**: `2026-08-12` — 활성 baseline은 v76 learnable-P CV+DD+CT+MLP (SEAL 0.6748)로 유지한다. ClassSep sweep은 Hard `[0.2,0.8]` 0.6873이 후보 최고이며 seed 반복 전 승격하지 않는다. 진행 상태는 §91.
 
 > [!IMPORTANT]
 > **활성 baseline: v76 learnable-P CV+DD+CT relation head (§89)**

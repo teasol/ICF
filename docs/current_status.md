@@ -1,10 +1,10 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-12` (§90 — v77와 synthetic 난이도 축 실험, ClassSep sweep 진행 중)
+**Last updated**: `2026-08-12` (§91 — ClassSep sweep 완료, Hard 0.6873 후보 최고)
 
-**한 줄**: v77 population-token residual은 동률로 기각했고, ClassSep Medium `[0.5,1.4]`가 SEAL 0.6823으로 후보 최고다. 더 넓은 ClassSep sweep이 진행 중이다(§90).
+**한 줄**: ClassSep sweep이 완료됐고 Hard `[0.2,0.8]`가 SEAL 0.6873으로 후보 최고다. v76 대비 +0.0125지만 단일 seed이므로 승격 전 seed 반복이 필요하다(§91).
 
-**Status**: **활성 baseline은 v76(0.6748), 최고 난이도 후보는 ClassSep Medium(0.6823). Mild/Hard/Very-hard sweep 진행 중.**
+**Status**: **활성 baseline은 v76(0.6748), 최고 난이도 후보는 ClassSep Hard(0.6873). sweep 완료, Hard seed 반복 대기.**
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
   현행 최고 **v41_K128 = SEAL 10개 0.6940** (ABMIL 0.727에 −0.033).
@@ -25,7 +25,7 @@
 현행 아키텍처 명세는 [`current_architecture.md`](current_architecture.md),
 실험 절차·결과표·금지사항은 [`current_experiments.md`](current_experiments.md).
 
-**지금 돌아가는 것 (2026-08-12)**: `scripts/run_v76_classsep_sweep.py`가 GPU 0–3에서 Mild → Hard → Very-hard를 순차 학습·평가 중이다. 08:24 기준 Mild epoch 19 artifact와 worker 4개 생존을 확인했다.
+**지금 돌아가는 것 (2026-08-12)**: 없음. `scripts/run_v76_classsep_sweep.py`의 Mild → Hard → Very-hard 학습·평가는 모두 완료됐다(§91).
 
 결과 재확인:
 ```bash
@@ -43,7 +43,7 @@ done
 > 2. **ICI는 기본 잠금 유지.** §50과 §86은 사용자 명시 해제에 따른 예외 평가.
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§90 (v77·난이도 축 결과와 active ClassSep sweep)**, §89 (v76 learnable P 승격/학습 경계),
+**Read first if you are picking this up**: **§91 (ClassSep sweep 최종 결과와 Hard 비교)**, §90 (v77·난이도 축 설계), §89 (v76 learnable P 승격/학습 경계),
 §88 (v74 baseline/CT/v71–v74 판정),
 §87 (DD/v70/synthetic 일반화),
 §86 (canonical CV+mean 계약), §85 (v62–v66), §71 (SEAL 판정), §73–§74
@@ -3284,3 +3284,44 @@ ClassSep가 가장 건전했고 Rare/Noise는 BAP1 상승 의존도가 컸다. C
 
 다음 세션은 sweep 완료 여부와 세 신규 macro를 먼저 확인한다. ClassSep 승격 전 최소 seed 반복이
 필요하며, SEAL checkpoint 선택 편향을 피하기 위해 각 arm은 validation-best 하나로 판정한다.
+
+## 91. 2026-08-12 — ClassSep sweep 완료: Hard 0.6873, seed 반복 전 승격 보류
+
+`scripts/run_v76_classsep_sweep.py`가 GPU 0–3에서 Mild → Hard → Very-hard를 모두 50 epochs
+학습하고 각 validation-best checkpoint를 공식 SEAL 10-task로 평가했다. 09:07 Very-hard의
+마지막 artifact까지 생성됐고 runner/DDP/eval 프로세스는 모두 종료됐다. 산출물은
+`checkpoints/20260812_v76_classsep_sweep/`, 학습 로그는
+`logs/20260812_v76_classsep_sweep/`, task별 평가는 `logs/official50/*_v76_classsep_*_best.log`다.
+
+| ClassSep | 범위 | SEAL macro | Δ vs v76 |
+|---|---|---:|---:|
+| baseline | `[1.0,2.0]` | 0.6748 | — |
+| Medium | `[0.5,1.4]` | 0.6823 | +0.0075 |
+| Mild | `[0.8,1.7]` | 0.6853 | +0.0105 |
+| **Hard** | **`[0.2,0.8]`** | **0.6873** | **+0.0125** |
+| Very-hard | `[0.1,0.5]` | 0.6823 | +0.0075 |
+
+Hard와 동일 SEAL 50-fold 지도학습 baseline의 task별 비교는 다음과 같다.
+
+| task | Hard | ABMIL | Δ ABMIL | MeanMIL | Δ MeanMIL |
+|---|---:|---:|---:|---:|---:|
+| bc_therapy er_status | 0.7023 | 0.717 | −0.0147 | 0.712 | −0.0097 |
+| bc_therapy grade | 0.7227 | 0.770 | −0.0473 | 0.751 | −0.0283 |
+| bc_therapy her2 | 0.6908 | 0.663 | **+0.0278** | 0.684 | **+0.0068** |
+| cptac_brca PIK3CA | 0.5746 | 0.595 | −0.0204 | 0.544 | **+0.0306** |
+| cptac_brca TP53 | 0.8083 | 0.801 | **+0.0073** | 0.787 | **+0.0213** |
+| cptac_luad EGFR | 0.7714 | 0.830 | −0.0586 | 0.777 | −0.0056 |
+| cptac_luad STK11 | 0.8703 | 0.908 | −0.0377 | 0.873 | −0.0027 |
+| cptac_luad TP53 | 0.6621 | 0.751 | −0.0889 | 0.735 | −0.0729 |
+| cptac_ccrcc BAP1 | 0.6320 | 0.693 | −0.0610 | 0.720 | −0.0880 |
+| cptac_ccrcc VHL | 0.4385 | 0.538 | −0.0995 | 0.542 | −0.1035 |
+| **macro** | **0.6873** | **0.7266** | **−0.0393** | **0.7125** | **−0.0252** |
+
+Hard는 ABMIL을 2/10, MeanMIL을 3/10 task에서 상회한다. HER2와 BRCA TP53에서는 둘 다
+상회하고 PIK3CA에서는 MeanMIL을 상회하지만, LUAD TP53과 CCRCC BAP1/VHL이 큰 잔여 약점이다.
+ABMIL/MeanMIL은 task-label 지도학습이고 Hard는 in-context 모델이므로 직접 수치 비교 시 학습
+프로토콜 차이를 명시한다.
+
+**판정/다음 단계**: Hard는 현재 최고 ClassSep 후보이나 모든 arm이 seed 1회뿐이어서 활성 baseline은
+v76으로 유지한다. 다음 작업은 Hard `[0.2,0.8]`를 동일 50-epoch·validation-best·SEAL 10-task
+절차로 seed 반복하고, +0.0125 상승의 재현성과 task별 편차를 확인한 뒤 승격 여부를 정하는 것이다.
