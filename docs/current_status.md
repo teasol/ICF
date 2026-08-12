@@ -2,9 +2,9 @@
 
 **Last updated**: `2026-08-12` (§92 — Hard latent 2/4/8/16 sweep 실행 중)
 
-**한 줄**: Hard `[0.2,0.8]`를 고정하고 random orthogonal manifold의 latent dimension 2/4/8/16 ablation을 GPU 0–7에서 두 arm씩 실행 중이다(§92).
+**한 줄**: Hard `[0.2,0.8]`를 고정한 latent dimension ablation에서 L2/L4는 완료됐고, L8→L16을 GPU 0–3에서 순차 재실행한다(§92).
 
-**Status**: **활성 baseline v76(0.6748), Hard L32 후보 0.6873. latent L2/L4 wave 1 실행 중, 이후 L8/L16 자동 실행.**
+**Status**: **활성 baseline v76(0.6748), Hard L32 후보 0.6873. L2/L4 완료, L8→L16을 GPU 0–3에서 순차 재실행.**
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
   현행 최고 **v41_K128 = SEAL 10개 0.6940** (ABMIL 0.727에 −0.033).
@@ -25,7 +25,7 @@
 현행 아키텍처 명세는 [`current_architecture.md`](current_architecture.md),
 실험 절차·결과표·금지사항은 [`current_experiments.md`](current_experiments.md).
 
-**지금 돌아가는 것 (2026-08-12)**: `scripts/run_v76_hard_latent_sweep.py` PID 1505665. wave 1은 L2 GPU 0–3 + L4 GPU 4–7, wave 2는 L8 + L16이며 arm별 50 epochs 후 validation-best SEAL 10-task 평가를 자동 실행한다(§92).
+**지금 돌아가는 것 (2026-08-12)**: `scripts/run_v76_hard_latent_sweep.py`가 L8→L16을 GPU 0–3에서 각 4-GPU로 순차 재실행한다(§92).
 
 결과 재확인:
 ```bash
@@ -3331,11 +3331,11 @@ v76으로 유지한다. 다음 작업은 Hard `[0.2,0.8]`를 동일 50-epoch·va
 Hard `class_separation: [0.2,0.8]`와 v76의 나머지 설정을 모두 고정하고 random orthogonal
 manifold의 `latent_dim`만 2/4/8/16으로 바꾼다. 기존 Hard L32 SEAL 0.6873을 control로 재사용한다.
 각 arm은 4-GPU DDP, bf16, 50 epochs, validation-best checkpoint 하나를 공식 SEAL 10-task로
-평가한다. `scripts/run_v76_hard_latent_sweep.py`가 두 wave를 자동 실행한다.
+평가한다. `scripts/run_v76_hard_latent_sweep.py`가 실패한 L8과 L16을 GPU 0–3에서 순차 재실행한다.
 
-- wave 1: L2 GPU 0–3 + L4 GPU 4–7
-- wave 2: L8 GPU 0–3 + L16 GPU 4–7
-- runner PID: `1505665`
+- L2/L4: 완료, SEAL 0.6775/0.6781
+- L8/L16: 첫 병렬 시도는 NCCL/SIGKILL로 실패; GPU 0–3에서 순차 재실행
+- 첫 runner PID `1505665`는 wave 2 실패 후 종료. 재실행 runner는 새 PID 사용.
 - checkpoints: `checkpoints/20260812_v76_hard_latent_sweep/`
 - logs/runner: `logs/20260812_v76_hard_latent_sweep/`
 - task logs: `logs/official50/*_v76_hard_latent{2,4,8,16}_best.log`

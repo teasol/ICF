@@ -103,8 +103,8 @@
 > 모든 `train_*.yaml`을 검사한다. `optimizer_overrides`는 지원되지 않는다 —
 > LR 변형은 `configs/optimizer/*.yaml`을 만들어 연결한다.
 
-> **GPU 정책 (2026-08-12, 사용자 지시)**: 현재 latent-dimension sweep은 **GPU 0–7 전체 사용 허가**.
-> 두 개의 4-GPU arm을 병렬 실행한다. 이후 실험의 GPU 범위는 최신 사용자 지시를 따른다.
+> **GPU 정책 (2026-08-12, 사용자 지시)**: 앞으로 ICF 학습·평가는 **GPU 0–3만 사용**한다.
+> GPU 4–7은 사용하지 않는다. 4-GPU arm은 0–3에서 하나씩 순차 실행한다.
 
 > [!IMPORTANT]
 > **합성 response/cardinality 계약 (§81·§82, 2026-08-10)**

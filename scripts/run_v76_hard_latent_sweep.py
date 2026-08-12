@@ -1,22 +1,19 @@
-"""Run Hard latent-dimension ablations in two concurrent 4-GPU waves."""
+"""Run failed Hard latent-dimension ablations sequentially on GPUs 0-3."""
 
 from __future__ import annotations
 
 import os
 import re
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = "/home/aibio_3/miniconda3/envs/BagPFN/bin/python"
 RUN_ROOT = ROOT / "checkpoints/20260812_v76_hard_latent_sweep"
 LOG_ROOT = ROOT / "logs/20260812_v76_hard_latent_sweep"
-WAVES = (
-    (("latent2", "configs/train_v76_hard_latent2_1536.yaml", (0, 1, 2, 3)),
-     ("latent4", "configs/train_v76_hard_latent4_1536.yaml", (4, 5, 6, 7))),
-    (("latent8", "configs/train_v76_hard_latent8_1536.yaml", (0, 1, 2, 3)),
-     ("latent16", "configs/train_v76_hard_latent16_1536.yaml", (4, 5, 6, 7))),
+ARMS = (
+    ("latent8", "configs/train_v76_hard_latent8_1536.yaml", (0, 1, 2, 3)),
+    ("latent16", "configs/train_v76_hard_latent16_1536.yaml", (0, 1, 2, 3)),
 )
 TASKS = (
     "bc_therapy/er_status", "bc_therapy/grade", "bc_therapy/her2_status",
@@ -70,13 +67,8 @@ def run_arm(arm: str, config: str, gpus: tuple[int, ...]) -> None:
 def main() -> None:
     RUN_ROOT.mkdir(parents=True, exist_ok=True)
     LOG_ROOT.mkdir(parents=True, exist_ok=True)
-    for wave_index, wave in enumerate(WAVES, start=1):
-        print(f"=== WAVE {wave_index} START", flush=True)
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = [pool.submit(run_arm, *arm) for arm in wave]
-            for future in futures:
-                future.result()
-        print(f"=== WAVE {wave_index} END", flush=True)
+    for arm in ARMS:
+        run_arm(*arm)
 
 
 if __name__ == "__main__":
