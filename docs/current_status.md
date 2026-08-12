@@ -1,10 +1,10 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-12` (§91 — ClassSep sweep 완료, Hard 0.6873 후보 최고)
+**Last updated**: `2026-08-12` (§92 — Hard latent 2/4/8/16 sweep 실행 중)
 
-**한 줄**: ClassSep sweep이 완료됐고 Hard `[0.2,0.8]`가 SEAL 0.6873으로 후보 최고다. v76 대비 +0.0125지만 단일 seed이므로 승격 전 seed 반복이 필요하다(§91).
+**한 줄**: Hard `[0.2,0.8]`를 고정하고 random orthogonal manifold의 latent dimension 2/4/8/16 ablation을 GPU 0–7에서 두 arm씩 실행 중이다(§92).
 
-**Status**: **활성 baseline은 v76(0.6748), 최고 난이도 후보는 ClassSep Hard(0.6873). sweep 완료, Hard seed 반복 대기.**
+**Status**: **활성 baseline v76(0.6748), Hard L32 후보 0.6873. latent L2/L4 wave 1 실행 중, 이후 L8/L16 자동 실행.**
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
   현행 최고 **v41_K128 = SEAL 10개 0.6940** (ABMIL 0.727에 −0.033).
@@ -25,7 +25,7 @@
 현행 아키텍처 명세는 [`current_architecture.md`](current_architecture.md),
 실험 절차·결과표·금지사항은 [`current_experiments.md`](current_experiments.md).
 
-**지금 돌아가는 것 (2026-08-12)**: 없음. `scripts/run_v76_classsep_sweep.py`의 Mild → Hard → Very-hard 학습·평가는 모두 완료됐다(§91).
+**지금 돌아가는 것 (2026-08-12)**: `scripts/run_v76_hard_latent_sweep.py` PID 1505665. wave 1은 L2 GPU 0–3 + L4 GPU 4–7, wave 2는 L8 + L16이며 arm별 50 epochs 후 validation-best SEAL 10-task 평가를 자동 실행한다(§92).
 
 결과 재확인:
 ```bash
@@ -43,7 +43,7 @@ done
 > 2. **ICI는 기본 잠금 유지.** §50과 §86은 사용자 명시 해제에 따른 예외 평가.
 > 3. **Musk 목표는 0.95 유지.**
 
-**Read first if you are picking this up**: **§91 (ClassSep sweep 최종 결과와 Hard 비교)**, §90 (v77·난이도 축 설계), §89 (v76 learnable P 승격/학습 경계),
+**Read first if you are picking this up**: **§92 (Hard latent-dimension sweep 실행 상태)**, §91 (ClassSep sweep 최종 결과와 Hard 비교), §90 (v77·난이도 축 설계), §89 (v76 learnable P 승격/학습 경계),
 §88 (v74 baseline/CT/v71–v74 판정),
 §87 (DD/v70/synthetic 일반화),
 §86 (canonical CV+mean 계약), §85 (v62–v66), §71 (SEAL 판정), §73–§74
@@ -3325,3 +3325,27 @@ ABMIL/MeanMIL은 task-label 지도학습이고 Hard는 in-context 모델이므�
 **판정/다음 단계**: Hard는 현재 최고 ClassSep 후보이나 모든 arm이 seed 1회뿐이어서 활성 baseline은
 v76으로 유지한다. 다음 작업은 Hard `[0.2,0.8]`를 동일 50-epoch·validation-best·SEAL 10-task
 절차로 seed 반복하고, +0.0125 상승의 재현성과 task별 편차를 확인한 뒤 승격 여부를 정하는 것이다.
+
+## 92. 2026-08-12 — Active: Hard latent dimension 2/4/8/16 ablation, 8×GPU
+
+Hard `class_separation: [0.2,0.8]`와 v76의 나머지 설정을 모두 고정하고 random orthogonal
+manifold의 `latent_dim`만 2/4/8/16으로 바꾼다. 기존 Hard L32 SEAL 0.6873을 control로 재사용한다.
+각 arm은 4-GPU DDP, bf16, 50 epochs, validation-best checkpoint 하나를 공식 SEAL 10-task로
+평가한다. `scripts/run_v76_hard_latent_sweep.py`가 두 wave를 자동 실행한다.
+
+- wave 1: L2 GPU 0–3 + L4 GPU 4–7
+- wave 2: L8 GPU 0–3 + L16 GPU 4–7
+- runner PID: `1505665`
+- checkpoints: `checkpoints/20260812_v76_hard_latent_sweep/`
+- logs/runner: `logs/20260812_v76_hard_latent_sweep/`
+- task logs: `logs/official50/*_v76_hard_latent{2,4,8,16}_best.log`
+- 기존 Hard 실측 학습 약 15분 + 평가 1–2분. 동시 실행 경합을 포함한 예상은 wave당 18–22분,
+  전체 36–45분이다.
+
+시작 직후 L2/L4 launcher와 DDP rank 각 4개, GPU 0–7 사용을 확인했다. 첫 step peak allocation은
+약 10.6 GiB로 VRAM 여유가 크다. 설정 병합값은 네 arm 모두 Hard/4-device/bf16이며
+`test_config_numeric_types`와 `test_precision_contract` 7개가 통과했다.
+
+판정은 L32 대비 SEAL 10-task macro와 task별 방향으로 한다. 합성 val 지표는 checkpoint 선택에만
+쓰며 arm 판정 근거로 사용하지 않는다. 최고 arm이 L32보다 +0.005 이상이면 최고 arm과 L32의
+seed 반복으로 재현성을 확인한다.
