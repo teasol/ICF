@@ -33,6 +33,7 @@ from src.models.set_transformer_ridge import (  # noqa: E402
     CovarianceMeanDDMLPModel,
     CovarianceMeanDDCTMLPModel,
     CovarianceMeanLearnablePDDCTMLPModel,
+    DualProjectionCVDDCTMLPModel,
     PopulationTokenResidualModel,
     CovarianceMeanCV2DDCTMLPModel,
     CovarianceMeanDDMagnitudeMLPModel,
@@ -734,6 +735,106 @@ class CovarianceMeanAblationTest(unittest.TestCase):
         self.assertEqual(arm.architecture_version, control.architecture_version)
         arm.load_state_dict(control.state_dict(), strict=True)
         control.load_state_dict(arm.state_dict(), strict=True)
+
+    def _dual(self, seed, **extra):
+        torch.manual_seed(seed)
+        return DualProjectionCVDDCTMLPModel(
+            **self._kwargs(), ct_num_tokens=4, ct_cells_per_bag=8, **extra
+        ).train()
+
+    def test_v79_trainable_contract_and_rejected_flags(self):
+        model = self._dual(31)
+        self.assertEqual(model.architecture_version, 56)
+        self.assertEqual(int(model._architecture_version), 56)
+        trainable = {
+            name for name, value in model.named_parameters() if value.requires_grad
+        }
+        self.assertEqual(
+            trainable,
+            {
+                "_covariance_projection",
+                "dual_cv_dd_ct_head.0.weight", "dual_cv_dd_ct_head.0.bias",
+                "dual_cv_dd_ct_head.2.weight", "dual_cv_dd_ct_head.2.bias",
+            },
+        )
+        # The 12-wide head must be gone, not left dangling in the state dict.
+        self.assertFalse(hasattr(model, "cv_dd_ct_head"))
+        self.assertEqual(
+            model.descriptor_dim,
+            2 * model.covariance_descriptor_dim + model.mean_descriptor_dim,
+        )
+        # Fixed projection is a non-persistent buffer: reproducible from the
+        # deterministic basis, so it does not bloat every checkpoint.
+        self.assertNotIn("_fixed_covariance_projection", model.state_dict())
+        # DD reads that buffer, so there is no gradient path for v78's flag.
+        with self.assertRaises(ValueError):
+            self._dual(31, train_dd_projection=True)
+
+    def test_v79_fixed_branches_do_not_move_when_p_moves(self):
+        """The whole point of v79: DD and fixed-CV stop riding CV's subspace."""
+        model = self._dual(31).eval()
+        x, y, query = _episode(cells=12)
+        with torch.no_grad():
+            before = model._descriptors(x)
+            sizes = model._block_sizes()
+            learn_before, mean_before, fixed_before = before.split(sizes, dim=-1)
+            model._covariance_projection.add_(
+                torch.randn_like(model._covariance_projection) * 0.5
+            )
+            after = model._descriptors(x)
+            learn_after, mean_after, fixed_after = after.split(sizes, dim=-1)
+        # Learnable block must react to P.
+        self.assertGreater(float((learn_after - learn_before).abs().max()), 1e-4)
+        # Fixed covariance block and the projection-free mean must not.
+        torch.testing.assert_close(fixed_after, fixed_before)
+        torch.testing.assert_close(mean_after, mean_before)
+
+    def test_v79_fixed_branch_reproduces_the_canonical_fixed_p_cv(self):
+        """The fixed block is the v41-style CV, not a re-parameterisation of it."""
+        dual = self._dual(31).eval()
+        torch.manual_seed(31)
+        reference = CovarianceMeanDDCTMLPModel(
+            **self._kwargs(), ct_num_tokens=4, ct_cells_per_bag=8
+        ).eval()
+        torch.testing.assert_close(
+            dual._fixed_covariance_projection, reference._covariance_projection
+        )
+        x, y, query = _episode(cells=12)
+        context = torch.arange(6)
+        with torch.no_grad():
+            full = dual._descriptors(x)
+            sizes = dual._block_sizes()
+            _, mean, fixed = full.split(sizes, dim=-1)
+            fixed_descriptor = torch.cat((fixed, mean), dim=-1)
+            dual_cv0, dual_cv1, dual_sep = dual._cv_branch_features(
+                fixed_descriptor[context], y[context], fixed_descriptor[query]
+            )
+            reference_descriptor = reference._descriptors(x)
+            torch.testing.assert_close(reference_descriptor, fixed_descriptor)
+            reference_logits = CovarianceMeanRidgeModel._ridge_logits(
+                reference, reference_descriptor[context], y[context],
+                reference_descriptor[query],
+            )
+        reference_cv0, reference_cv1 = reference_logits.float().unbind(dim=-1)
+        torch.testing.assert_close(dual_cv0, reference_cv0)
+        torch.testing.assert_close(dual_cv1, reference_cv1)
+
+    def test_v79_forward_is_finite_and_gradient_reaches_p(self):
+        model = self._dual(31)
+        x, y, query = _episode(cells=12)
+        logits = model(x, y, query)
+        self.assertEqual(logits.shape, (query.numel(), 2))
+        self.assertTrue(torch.isfinite(logits).all())
+        torch.nn.functional.cross_entropy(logits, y[query]).backward()
+        gradient = model._covariance_projection.grad
+        self.assertIsNotNone(gradient)
+        self.assertTrue(torch.isfinite(gradient).all())
+        self.assertGreater(float(gradient.abs().max()), 0.0)
+        for parameter in model.dual_cv_dd_ct_head.parameters():
+            self.assertIsNotNone(parameter.grad)
+            self.assertTrue(torch.isfinite(parameter.grad).all())
+        # 16 features, not 12.
+        self.assertEqual(model.dual_cv_dd_ct_head[0].in_features, 16)
 
     def test_learnable_p_starts_from_v74_outputs(self):
         torch.manual_seed(17)

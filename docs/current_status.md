@@ -1,15 +1,15 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-12` (§102 — configs 루트 67 → 2개, v78 기각)
+**Last updated**: `2026-08-12` (§103 — v78 무가중 기각, v79 dual projection 진행 중)
 
 **한 줄**: 활성 baseline은 v77 Hard orthogonal(SEAL macro **0.6873**)이고, 앞으로 arm 판정은 점추정 macro 차이가 아니라 **fold-paired Δ + bootstrap CI**로 한다(§99).
 
-**Status**: **활성 baseline v77 Hard orthogonal 0.6873. 실행 중인 학습·평가 없음 — v78은 Δ −0.0004 [−0.0021,+0.0013]로 기각(§102-5). 역사적 전체 최고는 v41_K128 0.6940.**
+**Status**: **활성 baseline v77 Hard orthogonal 0.6873. v79 dual projection 실행 중(§103-3, PID 2329816). v78은 weight 0/0.02/1.0에서 단조 악화로 기각(§103-1). 역사적 전체 최고는 v41_K128 0.6940.**
 
 > [!IMPORTANT]
 > **읽는 순서 (2026-08-12)**: 판정 방식이 §99에서 바뀌었다. arm을 비교하려면 §99를 먼저 읽고
 > `scripts/compare_arms_paired.py`를 쓸 것. §98 판정표 4건은 §99-1에서 fold-paired CI로
-> 재검증되어 전부 유지됐다. **v78**(§100)은 Δ −0.0004로 기각됐다(§102-5).
+> 재검증되어 전부 유지됐다. **v78**은 단조 악화로 기각(§103-1), **v79**가 실행 중이다(§103-3).
 > §2~§97 본문은 [`history.md`](history.md) §20–§23으로 아카이빙됐다(§101).
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
@@ -31,7 +31,7 @@
 현행 아키텍처 명세는 [`current_architecture.md`](current_architecture.md),
 실험 절차·결과표·금지사항은 [`current_experiments.md`](current_experiments.md).
 
-**지금 돌아가는 것 (2026-08-12)**: 없음. v78까지 완료·기각됐다(§102-5).
+**지금 돌아가는 것 (2026-08-12)**: **v79 dual projection** — PID/PGID `2329816`, GPU 0–3 (§103-3).
 
 결과 재확인:
 ```bash
@@ -101,7 +101,7 @@ G-2 제거 확정(§68에서 분기 통째 제거로 해소), E>1 노선(§68-5)
 역사적 전체 최고는 여전히 **v41_K128 CV-only 0.6940**(229 파라미터)이므로, 활성 baseline이
 사상 최고보다 낮은 상태다. 지도학습 ABMIL은 0.7266(−0.0393), 상회는 2/10 task.
 
-**지금 돌아가는 것**: 없음. v78은 기각됐다(§102-5).
+**지금 돌아가는 것**: **v79 dual projection** (§103-3). v78은 단조 악화로 기각됐다(§103-1).
 
 **판정 방법이 §99에서 바뀌었다 — 이걸 모르면 arm 비교를 잘못한다.**
 점추정 macro끼리 빼지 말고 **fold-paired Δ + bootstrap CI**를 쓸 것. GPU 불필요:
@@ -917,3 +917,87 @@ handoff §7의 문서화된 검증 명령이 `if 'base_config' not in p.read_tex
    노이즈 크기를 모르면 "동률"의 의미를 확정할 수 없다. L8/L16/L32 각 2 seed로 §99-3의
    ⓐ/ⓑ를 가른다.
 2. BAP1 large-bag 붕괴 진단(§99-2), VHL 랜덤 이하 진단(§0 열린 과제 2).
+
+## 103. 2026-08-12 — v78 무가중 기각(단조 악화 확정), v79 dual projection 진행 중
+
+### 1. v78 weight 스윕 완결 — DD gradient의 방향이 해롭다
+
+사용자 지시로 `dd_projection_gradient_weight`를 제한하지 않은 arm을 돌렸다. 결과가 balanced와
+합쳐져 **단조 용량-반응**이 됐다.
+
+| weight | SEAL macro | fold-paired Δ vs v77 | 95% CI | 상승 task | 판정 |
+|---:|---:|---:|---|---:|---|
+| 0 (v77) | 0.6873 | — | — | — | baseline |
+| 0.02 (≈1/52) | 0.6869 | −0.0004 | [−0.0021, +0.0013] | 5/10 | 구별 불가 |
+| **1.0 (무가중)** | **0.6826** | **−0.0047** | **[−0.0082, −0.0013]** | 3/10 | **CI 0 제외 — 유의하게 나쁨** |
+
+두 arm 직접 비교도 **−0.0043 [−0.0075, −0.0013]**로 CI가 0을 제외한다. 세 점이 단조 감소하고
+그 감소가 통계적으로 실재한다.
+
+**해석이 확정됐다.** balanced가 null일 때 남아 있던 두 해석(ⓐ DD가 보탤 게 없다 / ⓑ 0.02가 너무
+조였다) 대신 **제3의 답**이다 — **DD는 P를 실제로 움직이며, 그 방향이 전체 readout에 해롭다.**
+`cos(grad_CV, grad_CV+DD) = −0.068`(거의 직교, 살짝 음수)과 부합한다. 기제가 P에 도달함을
+테스트로 단정하고 크기도 맞춰둔 상태였으므로 §66 함정에 걸리지 않는다 — **가설 기각**이다.
+
+⚠️ **task별로 보면 §71 패턴이 재현된다**: 무가중은 er_status만 **+0.0277**(44/50)로 크게 올리고
+PIK3CA −0.0349, grade −0.0093, STK11 −0.0079를 떨어뜨린다. er_status 단독으로 보면 "개선"으로
+오판할 arm이었다.
+
+**`train_dd_projection`은 되살리지 말 것.** 계약과 근거는 `current_architecture.md` **G-5**.
+
+### 2. DD 명세를 재정리했다 (current_architecture G절)
+
+DD 관련 서술이 여러 절에 흩어져 있고 "어느 P를 읽는지"가 명시되지 않아 arm 간 차이를 읽을 수
+없었다. G절을 DD 전용 명세로 다시 썼다.
+
+- **G-0 (신설)**: DD는 자기 사영을 갖지 않고 **CV가 만든 covariance를 재사용**한다. 따라서 "DD의
+  subspace"는 arm마다 다르다 — v74 fixed / **v77 CV가 학습한 P** / v78 같음+gradient 개방 /
+  **v79 fixed(분리)**. 표로 고정했다.
+- **G-4 (신설)**: rank-1 방향을 **어느 arm에서도 미분하지 않는 이유**. eigh backward의
+  `1/(λ_i−λ_j)`와 hard argmax 불연속, 그리고 ⚠️ **shrinkage `+0.25τI`가 고윳값을 균일하게 밀어
+  간격을 바꾸지 않으므로 backward를 전혀 보호하지 못한다**는 점. `nonfinite_gradient_policy: zero`
+  때문에 이 실패가 **조용하다**는 경고와, 미분 가능 우회(Newton–Schulz + `A²` power iteration,
+  미구현)도 적었다.
+- **G-5 (신설)**: 위 1절의 스윕 결과와 "되살리지 말 것".
+- **G-6 (신설)**: **미측정 항목 2건** — ⓐ **학습된 P에서의 DD-only 성능**(G-2의 0.5862는 fixed P
+  수치다). DD는 학습 파라미터가 없으므로 v77의 학습된 P로 DD-only를 채점하면 "DD가 CV의 학습된
+  subspace에서 손해를 보는가"를 **학습 없이** 확인할 수 있다 — v79의 전제를 값싸게 검증하는
+  진단이며 미실행이다. ⓑ DD 전용 learnable 사영(v79는 fixed로 되돌리기만 했다).
+
+### 3. v79 dual projection — 진행 중
+
+사용자 지시 설계: **learnable CV + fixed CV + fixed DD + CT → 16 feature MLP**. v78처럼 중재하지
+않고 **공유를 끊는다**.
+
+- 클래스 `DualProjectionCVDDCTMLPModel`, **`architecture_version = 56`** (v77 ckpt와 strict-load
+  **비호환**). 상세 명세는 `current_architecture.md` **Active-6**.
+- descriptor를 `[cov_learnable 8,256, mean 1,536, cov_fixed 8,256]` = **18,048**로 확장하고 세
+  block을 각각 독립 context-only center/scalar-RMS로 정규화한다. raw bag mean은 사영과 무관하므로
+  두 CV branch가 공유한다.
+- **fixed-P CV를 독립 evidence block으로 남긴 것**이 두 번째 요점이다. fixed P는 옛 기본값이
+  아니라 **v41_K128이 0.6940을 낸 기저**이고 그것이 여전히 역사적 전체 최고다. head가 학습된
+  subspace와 고정 subspace를 저울질하게 한다.
+- `train_dd_projection`은 **ValueError로 거부**한다 — DD가 buffer를 읽으니 조용한 no-op이 될 뿐이다.
+- trainable **197,185** (P 196,608 + head 577).
+- config `configs/train_v79_dual_projection_1536.yaml`, runner
+  `scripts/run_v79_dual_projection.py`, tag `v79_dual_projection_best`.
+- artifacts `checkpoints/20260812_v79_dual_projection/`, `logs/20260812_v79_dual_projection/`.
+- **runner PID/PGID `2329816`** (PPID 1, 완전 이탈), GPU 0–3, DDP rank 4개. first-step peak
+  allocated 10.69 GiB (v77/v78과 동일). 문서 갱신 시점 epoch 14, val_ce 0.2017.
+  ⚠️ 새 16-input head가 랜덤 초기화라 초반 val_ce가 v77보다 높다 — 판정 근거가 아니다.
+
+**검증**: 신규 테스트 4개 중 둘이 설계의 구조적 주장을 고정한다 — ⓐ P를 흔들어도 `cov_fixed`와
+`mean` block이 **정확히 불변**(DD가 CV의 subspace를 타지 않음), ⓑ v79의 fixed block이 독립
+`CovarianceMeanDDCTMLPModel`의 CV와 **수치적으로 동일**(재파라미터화가 아니라 진짜 v41-스타일 CV).
+전체 suite **153 tests**, 실패는 기존 1건(`test_mlp_manifold_bank.py`의 `pytest` import).
+CUDA bf16 smoke(60 bags × 4,096 cells) loss 0.5056, P grad norm 1.78e-01 finite, peak 2.38 GiB.
+numeric-type·precision 계약 7개 통과.
+
+### 4. 다음 Action
+
+1. **v79 완주 후 fold-paired 판정**:
+   `python scripts/compare_arms_paired.py --baseline v76_classsep_hard_best --arm v79_dual_projection_best`
+   v78 두 arm과 같은 표에 놓고 "분리"가 "중재"보다 나은지 본다.
+2. **G-6ⓐ 진단** — 학습된 P에서의 DD-only. 학습 불필요, v79의 전제 검증.
+3. **seed 반복** — 여전히 미측정이며 §102-6 그대로 가장 급하다. v78 balanced가 −0.0004,
+   v79도 소폭 차이로 나올 가능성이 높아 realization 노이즈 크기를 모르면 판정이 공허해진다.

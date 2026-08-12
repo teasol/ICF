@@ -1216,6 +1216,198 @@ class CovarianceMeanLearnablePDDCTMLPModel(CovarianceMeanDDCTMLPModel):
         return covariance[..., row, column].to(cells.dtype)
 
 
+class DualProjectionCVDDCTMLPModel(CovarianceMeanLearnablePDDCTMLPModel):
+    """v79: learnable-P CV and fixed-P CV as separate branches, DD back on fixed P.
+
+    v77 shares one learnable P between CV and DD, so the subspace is optimized for
+    CV's readout and DD just inherits it. v78 tried to fix that by letting DD's
+    gradient reach the shared P, and the weight sweep came back monotone the wrong
+    way -- 0.6873 (no DD gradient) / 0.6869 (weight 0.02) / 0.6826 (weight 1.0,
+    CI excluding 0). So DD does move P, and the direction it pushes is harmful.
+
+    This arm stops sharing instead of arbitrating. Four branches feed the head:
+
+        CV(learnable P)  CV0,CV1,CV1-CV0,SEP_CV     <- the only path reaching P
+        CV(fixed P)      CV0,CV1,CV1-CV0,SEP_CV     <- the v41 basis, training-free
+        DD(fixed P)      D0,D1,D1-D0,SEP_DD         <- no longer rides CV's subspace
+        CT               q0,q1,q0-q1,SEP_CT         <- unchanged, projection-free
+                                                    = 16 -> 32 -> 1
+
+    Keeping the fixed-P CV as its own evidence block matters because fixed P is not
+    merely the old default: v41_K128 scored 0.6940 on it, still the historical best.
+    The head gets to weigh a learned subspace and the fixed one instead of the
+    learned one replacing it.
+
+    The tensor graph changes (a second covariance block and a 16-wide head), so this
+    takes `architecture_version = 56` and does NOT strict-load a v77 checkpoint.
+    """
+
+    architecture_version = 56
+
+    def __init__(self, *args, dual_head_hidden_dim=32, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.train_dd_projection:
+            # DD reads a buffer here, so there is no gradient path to open. Failing
+            # loudly beats a flag that silently does nothing.
+            raise ValueError(
+                "train_dd_projection is meaningless in v79: DD reads the fixed "
+                "projection, so no gradient can reach a learnable P through it."
+            )
+        # Right after super().__init__ the learnable parameter still equals the
+        # deterministic sin/cos basis it was initialized from, so snapshotting it
+        # here captures exactly the fixed projection without rebuilding it.
+        self.register_buffer(
+            "_fixed_covariance_projection",
+            self._covariance_projection.detach().clone(),
+            persistent=False,
+        )
+        self.descriptor_dim = (
+            2 * self.covariance_descriptor_dim + self.mean_descriptor_dim
+        )
+        del self.cv_dd_ct_head
+        for parameter in self.parameters():
+            parameter.requires_grad_(False)
+        self.dual_cv_dd_ct_head = nn.Sequential(
+            nn.Linear(16, int(dual_head_hidden_dim)),
+            nn.GELU(),
+            nn.Linear(int(dual_head_hidden_dim), 1),
+        )
+        self._covariance_projection.requires_grad_(True)
+        if self.train_ridge_calibration:
+            self.ridge_log_lambda.requires_grad_(True)
+            self.ridge_log_scale.requires_grad_(True)
+        self._architecture_version.fill_(self.architecture_version)
+
+    def _fixed_covariance_descriptors(self, cells, cell_mask=None):
+        """Covariance upper triangle under the fixed sin/cos basis."""
+        values = cells.float()
+        if cell_mask is None:
+            centered = values - values.mean(dim=-2, keepdim=True)
+            count: int | torch.Tensor = values.shape[-2]
+        else:
+            count_tensor = cell_mask.sum(dim=-1, keepdim=True).clamp_min(1).float()
+            masked = values.masked_fill(~cell_mask.unsqueeze(-1), 0.0)
+            mean = masked.sum(dim=-2, keepdim=True) / count_tensor.unsqueeze(-1)
+            centered = (masked - mean).masked_fill(~cell_mask.unsqueeze(-1), 0.0)
+            count = count_tensor
+        projected = centered @ self._fixed_covariance_projection.float()
+        covariance = projected.transpose(-1, -2) @ projected
+        if isinstance(count, int):
+            covariance = covariance / count
+        else:
+            covariance = covariance / count.unsqueeze(-1)
+        row, column = self._covariance_triangle
+        return covariance[..., row, column].to(cells.dtype)
+
+    def _block_sizes(self):
+        return (
+            self.covariance_descriptor_dim,
+            self.mean_descriptor_dim,
+            self.covariance_descriptor_dim,
+        )
+
+    def _descriptors(self, cells, cell_mask=None):
+        return torch.cat(
+            (
+                self._covariance_descriptors(cells, cell_mask=cell_mask),
+                self._bag_means(cells, cell_mask=cell_mask),
+                self._fixed_covariance_descriptors(cells, cell_mask=cell_mask),
+            ),
+            dim=-1,
+        )
+
+    def _normalize_descriptors(self, context, query):
+        """Normalize per block, dispatching on width.
+
+        `_ridge_logits` normalizes internally, and this model runs it twice on
+        9,792-wide sub-descriptors carved out of the 18,048-wide full one. Both
+        widths therefore arrive here, and each block keeps its own context-only
+        center / scalar-RMS as the canonical CV contract requires.
+        """
+        if context.shape[-1] == self.descriptor_dim:
+            sizes = self._block_sizes()
+            context_blocks = list(context.split(sizes, dim=-1))
+            query_blocks = list(query.split(sizes, dim=-1))
+            for index in range(len(sizes)):
+                context_blocks[index], query_blocks[index] = self._normalize_block(
+                    context_blocks[index], query_blocks[index]
+                )
+            return (
+                torch.cat(context_blocks, dim=-1),
+                torch.cat(query_blocks, dim=-1),
+            )
+        expected = self.covariance_descriptor_dim + self.mean_descriptor_dim
+        if context.shape[-1] != expected:
+            raise ValueError(
+                f"Unexpected descriptor width {context.shape[-1]}; expected "
+                f"{self.descriptor_dim} (full) or {expected} (single CV branch)."
+            )
+        return CovarianceMeanRidgeModel._normalize_descriptors(self, context, query)
+
+    def _cv_branch_features(self, context, context_labels, query):
+        """CV0, CV1, CV1-CV0, SEP_CV for one [covariance, mean] descriptor pair."""
+        logits = CovarianceMeanRidgeModel._ridge_logits(
+            self, context, context_labels, query
+        )
+        normalized_context, _ = self._normalize_descriptors(context, query)
+        labels = context_labels.long()
+        prototypes = torch.stack([
+            normalized_context[labels == class_index].mean(dim=0)
+            for class_index in range(2)
+        ])
+        separation = (prototypes[1] - prototypes[0]).square().mean().sqrt()
+        cv0, cv1 = logits.float().unbind(dim=-1)
+        return cv0, cv1, separation.float()
+
+    def _relation_logits(
+        self, context, context_labels, query, context_bags, query_bags
+    ):
+        sizes = self._block_sizes()
+        context_learnable, context_mean, context_fixed = context.split(sizes, dim=-1)
+        query_learnable, query_mean, query_fixed = query.split(sizes, dim=-1)
+        learnable_context = torch.cat((context_learnable, context_mean), dim=-1)
+        learnable_query = torch.cat((query_learnable, query_mean), dim=-1)
+        fixed_context = torch.cat((context_fixed, context_mean), dim=-1)
+        fixed_query = torch.cat((query_fixed, query_mean), dim=-1)
+
+        # The only branch whose gradient reaches P.
+        cv0, cv1, cv_separation = self._cv_branch_features(
+            learnable_context, context_labels, learnable_query
+        )
+        # Fixed-P CV. Not wrapped in no_grad because the optional ridge-calibration
+        # scalars are shared with the learnable branch and must keep their gradient.
+        fixed_cv0, fixed_cv1, fixed_cv_separation = self._cv_branch_features(
+            fixed_context, context_labels, fixed_query
+        )
+        # DD and CT are training-free. DD now reads the FIXED covariance -- the point
+        # of this arm -- so it no longer inherits whatever subspace CV settled on.
+        # CUDA eigh has no bf16 kernel and whitening must not lose small eigenvalues.
+        with torch.no_grad(), torch.autocast(
+            device_type=context.device.type, enabled=False
+        ):
+            distances, dd_separation = self._dd_distance_features(
+                self._covariance_matrices_from_triangle(fixed_context),
+                context_labels,
+                self._covariance_matrices_from_triangle(fixed_query),
+            )
+            q0, q1, ct_separation = self._ct_features(
+                context_bags, context_labels, query_bags
+            )
+        d0, d1 = distances.float().unbind(dim=-1)
+        features = torch.stack(
+            (
+                cv0, cv1, cv1 - cv0, cv_separation.expand_as(cv0),
+                fixed_cv0, fixed_cv1, fixed_cv1 - fixed_cv0,
+                fixed_cv_separation.expand_as(cv0),
+                d0, d1, d1 - d0, dd_separation.float().expand_as(cv0),
+                q0, q1, q0 - q1, ct_separation.float().expand_as(cv0),
+            ),
+            dim=-1,
+        )
+        margin = self.dual_cv_dd_ct_head(features).squeeze(-1)
+        return torch.stack((-0.5 * margin, 0.5 * margin), dim=-1)
+
+
 class PopulationTokenResidualModel(CovarianceMeanLearnablePDDCTMLPModel):
     """Retired provisional v77-pop-residual experiment kept for replay."""
 

@@ -9,11 +9,15 @@
 > 경로로만 학습되며 DD/CT는 training-free다. ridge-calibration arm은 두 스칼라를 추가했으나
 > SEAL 0.6840으로 baseline을 넘지 못했다.
 >
-> **v78 (`train_dd_projection`) — 기각.** DD에도 P 설계 발언권을 주는 arm이었으나 fold-paired
-> Δ **−0.0004** [−0.0021, +0.0013]로 v77과 구별되지 않았다(§102-5). 기제가 P에 도달함을
-> 테스트로 단정하고 gradient 크기도 맞춰둔 상태였으므로 **가설 기각으로 읽는다**.
-> 플래그는 계약과 함께 남아 있다(Active-2). DD의 rank-1 방향은 **어느 arm에서도 미분하지
-> 않는다**(eigh backward의 `1/(λ_i−λ_j)`, argmax 불연속).
+> **v78 (`train_dd_projection`) — 기각, 그리고 방향까지 확정됐다.** weight 0/0.02/1.0에서
+> 0.6873/0.6869/**0.6826**으로 **단조 악화**하고 무가중은 CI가 0을 제외한다(§103, G-5).
+> DD는 P를 실제로 움직이지만 그 방향이 해롭다. **되살리지 말 것.**
+>
+> **v79 (`DualProjectionCVDDCTMLPModel`, version 56)가 진행 중이다** — 중재 대신 **분리**.
+> CV는 learnable P를, **fixed-P CV와 DD는 고정 기저**를 쓰고 CT까지 4 branch·16 feature를
+> 16→32→1이 읽는다. 상세는 **Active-6**.
+>
+> DD의 rank-1 방향은 **어느 arm에서도 미분하지 않는다** — 이유와 우회 방법은 **G-4**.
 
 리포에는 활성 relation 계보와 역사적 비교 계보 두 개가 있다. relation 계보와 Encoder 계보는
 `src/models/set_transformer_ridge.py`에 있고, 역사적 CV-only는 `src/models/baseline.py`에 있다.
@@ -27,7 +31,7 @@
 | readout | CV/DD/CT 12→32→1 | CV-1 ridge + CV-2 | episode-local ridge |
 | 학습 파라미터 | 197,057 (calibration arm 197,059) | 229 | 5,010,946 |
 | SEAL 10개 최고 | **0.6873** | **0.6940** (v41_K128) | 0.6619 / 0.6526 |
-| 상태 | **활성** | 역사적 전체 최고 | 기각 |
+| 상태 | **활성 baseline** (v79 실험 중, Active-6) | 역사적 전체 최고 | 기각 |
 
 이전 세대(v34~v39의 6-분기)는 **소스에서 삭제**됐다(§73). 필요하면 git `8caa96c`.
 
@@ -84,12 +88,10 @@ CV ridge coefficient는 real/synthetic episode의 support label로 매번 다시
 - 매 forward에서 thin QR로 `P_effᵀP_eff=I`를 보장해 임의 scale/conditioning 변화를 차단한다.
 - DD는 현재 P로 만든 covariance를 읽지만 기본 v77에서 DD→P gradient는 차단된다. CT 선택/특징은
   어느 arm에서든 training-free다.
-- **v78 opt-in (`train_dd_projection`, §100)**: DD의 이차형식 `log(fᵀ C_b f)`만 그래프에 남겨 P가
-  DD 목적도 반영하게 한다. rank-1 방향 `f`는 **어느 arm에서든 미분하지 않는다** —
-  `_dd_direction`이 이유를 문서화한다(eigh backward의 `1/(λ_i−λ_j)`, shrinkage는 간격을 안 바꿈,
-  argmax의 불연속). 무가중 시 DD가 P gradient를 CV의 **52배**로 지배하므로
-  `dd_projection_gradient_weight`(v78 arm 0.02)로 균형을 맞춘다. 파라미터 0개 추가·shape 보존이라
-  version 54와 strict-load 호환이 양방향 유지된다.
+- **v78 opt-in (`train_dd_projection`) — 기각됨.** DD의 이차형식만 그래프에 남겨 P가 DD 목적도
+  반영하게 하는 플래그다. 파라미터 0개 추가·shape 보존이라 version 54와 strict-load 호환은
+  양방향 유지되지만, weight 스윕이 **단조 악화**로 끝났다(G-5). 되살리지 말 것.
+  rank-1 방향 `f`를 왜 미분할 수 없는지는 **G-4**.
 - 기본 `ridge_log_lambda=log(1)`, `ridge_log_scale=log(2)`는 v77에서 동결된다.
 - `train_ridge_calibration: true`는 이 두 scalar만 동결 해제한다. 이 opt-in arm은 197,059개이며
   기존 checkpoint/config의 학습 계약은 바꾸지 않는다.
@@ -124,7 +126,8 @@ Hard 실험의 공통 조건은 다음과 같다.
 
 ## Active-4. 현재 실험과 판정
 
-- 활성 실행: 없음. **v78**(`train_dd_projection`)은 fold-paired Δ −0.0004 [−0.0021,+0.0013]로 기각(§102-5).
+- 활성 실행: **v79 dual projection** (Active-6, §103). GPU 0–3.
+- **v78은 기각**됐다 — weight 0/0.02/1.0에서 0.6873/0.6869/0.6826 단조 악화(G-5).
 - active baseline: v77 Hard orthogonal **0.6873**.
 - learned ridge λ/logit scale은 0.6840으로 기각했다.
 - 판정: validation-best 하나의 공식 SEAL 10-task macro와 task별 regression. synthetic val 지표는
@@ -146,6 +149,45 @@ false이므로 기존 dense masked training 계약은 유지된다. 현재 large
 `--init-checkpoint`로 weight-only load한다. optimizer/scheduler/epoch state는 새로 시작한다.
 epoch 34 best의 공식 SEAL macro는 **0.6885**로 baseline 대비 +0.0012에 그쳐, large-ragged
 파생 실험으로 유지하고 canonical baseline으로 승격하지 않는다.
+
+## Active-6. v79 dual projection — 진행 중 (`DualProjectionCVDDCTMLPModel`, version 56)
+
+v77은 learnable P 하나를 CV와 DD가 공유하므로 subspace가 CV의 readout에 맞춰 최적화되고 DD는
+그것을 물려받는다. v78은 그 갈등을 **gradient weight로 중재**하려다 단조 악화로 기각됐다(G-5).
+v79는 중재하지 않고 **공유를 끊는다**. branch 4개가 각각 4개 feature를 낸다.
+
+```text
+                                       gradient
+CV(learnable P)  CV0,CV1,CV1-CV0,SEP_CV   → P (유일한 경로)
+CV(fixed P)      CV0,CV1,CV1-CV0,SEP_CV   없음 (training-free)
+DD(fixed P)      D0,D1,D1-D0,SEP_DD       없음 — CV의 subspace를 더 이상 타지 않는다
+CT               q0,q1,q0-q1,SEP_CT       없음 (사영 자체가 없음)
+                                    = 16 → 32 → 1
+```
+
+fixed-P CV를 **독립 evidence block으로 남기는 것**이 설계의 두 번째 요점이다. fixed P는 단순히
+옛 기본값이 아니라 **v41_K128이 0.6940을 낸 기저**이고 그것이 여전히 역사적 전체 최고다. head가
+학습된 subspace와 고정 subspace를 **저울질**하게 하는 것이지, 학습된 것이 고정된 것을 대체하게
+하는 것이 아니다.
+
+| 항목 | 값 |
+|---|---|
+| descriptor | `[cov_learnable 8,256, mean 1,536, cov_fixed 8,256]` = **18,048** |
+| 정규화 | 세 block 각각 독립 context-only center/scalar-RMS (canonical CV 계약) |
+| raw bag mean | 사영과 무관하므로 두 CV branch가 **공유** |
+| trainable | P 196,608 + head 577 = **197,185** |
+| `architecture_version` | **56** — v77 ckpt와 strict-load **비호환** |
+| config / runner | `train_v79_dual_projection_1536.yaml` / `run_v79_dual_projection.py` |
+
+- fixed 사영은 `_fixed_covariance_projection` **buffer**(`persistent=False`)다. `super().__init__`
+  직후 learnable Parameter가 아직 sin/cos 기저와 같으므로 그 시점에 snapshot한다 — 재생성 불필요,
+  ckpt 용량 증가 없음.
+- `train_dd_projection`은 **ValueError로 거부**한다. DD가 buffer를 읽으므로 그 플래그는 조용한
+  no-op이 될 뿐이다(G-4의 "조용한 실패"를 만들지 않기 위한 가드).
+- 구조적 주장 두 개를 테스트가 고정한다: ⓐ P를 흔들어도 `cov_fixed`·`mean` block이 **정확히
+  불변**, ⓑ v79의 fixed block이 독립 `CovarianceMeanDDCTMLPModel`의 CV와 **수치적으로 동일**
+  (재파라미터화가 아니라 진짜 v41-스타일 CV).
+- 판정은 v77 대비 fold-paired Δ + CI(§99). tag `v79_dual_projection_best`.
 
 ---
 
@@ -336,8 +378,9 @@ attention은 에피소드당 2.7e10 쌍이라 불가"였는데, **쌍의 개수�
 | key | 기본 | 계보 | 의미 |
 |---|---|---|---|
 | `covariance_sketch_dim` (K) | 128 | **Active** | learnable P의 열 수. descriptor = K(K+1)/2 + 1,536 |
-| `train_dd_projection` | `false` | **Active** | **v78**. DD 이차형식만 backward에 남겨 P가 DD 목적도 반영. 방향은 미분하지 않는다(§100) |
-| `dd_projection_gradient_weight` | `1.0` | **Active** | v78 arm은 **0.02**. 무가중이면 DD가 CV의 52배로 P를 지배한다 |
+| `train_dd_projection` | `false` | **Active** | v78. ⚠️ **기각됨**(G-5) — 켜지 말 것. v79에서는 ValueError로 거부된다 |
+| `dd_projection_gradient_weight` | `1.0` | **Active** | v78 전용. 무가중이면 DD가 CV의 52배로 P를 지배한다(G-5) |
+| `dual_head_hidden_dim` | 32 | **v79** | 16→hidden→1 relation head의 폭 |
 | `train_ridge_calibration` | `false` | **Active** | `ridge_log_lambda`/`ridge_log_scale` 동결 해제(197,057 → 197,059). SEAL 0.6840으로 기각 |
 | `dd_shrinkage` | 0.25 | **Active** | DD whitening의 shrinkage. ⚠️ backward의 고윳값 **간격은 바꾸지 않는다** |
 | `ct_num_tokens` / `ct_cells_per_bag` | 16 / 64 | **Active** | CT 후보 token 수 / bag당 샘플 cell 수 |
@@ -356,9 +399,11 @@ attention은 에피소드당 2.7e10 쌍이라 불가"였는데, **쌍의 개수�
 
 ## E. Source of Truth
 
-- **활성 모델 (v77/v78)**: `src/models/set_transformer_ridge.py` —
-  `CovarianceMeanLearnablePDDCTMLPModel`. DD 방향 격리는 `_dd_direction`, gradient 균형은
-  `_ScaleGradient`.
+- **활성 baseline (v77)**: `src/models/set_transformer_ridge.py` —
+  `CovarianceMeanLearnablePDDCTMLPModel`. DD 방향 격리는 `_dd_direction`(G-4), v78의 gradient
+  균형은 `_ScaleGradient`(G-5, 기각).
+- **진행 중 (v79)**: 같은 파일 — `DualProjectionCVDDCTMLPModel`. fixed 사영은
+  `_fixed_covariance_projection` buffer, 두 CV branch는 `_cv_branch_features`가 공유한다.
 - 역사적 모델 A: `src/models/baseline.py` (2,317줄)
 - 역사적 모델 B: `src/models/set_transformer_ridge.py` — `SetTransformerRidgeModel`
 - 평가: `scripts/eval_seal_tasks.sh` → `scripts/test_pathobench.py`
@@ -396,13 +441,33 @@ ICI CI는 0.5를 포함하므로 실세계 통과 주장은 하지 않는다.
   LegacySTCVLPRidgeModel v43.
 - CovarianceOnlyRidgeModel v44는 §86 ablation control이며 canonical CV가 아니다.
 
-## G. Dispersion Distance와 learned relation head (2026-08-11, §87)
+## G. Dispersion Distance (DD) — 명세·미분 불가성·사영 축
+
+> [!IMPORTANT]
+> **DD를 건드리기 전에 G-4와 G-5를 먼저 읽을 것.** DD의 rank-1 방향은 **미분할 수 없고**
+> (G-4), DD의 gradient를 P에 흘리는 것은 **실측으로 해롭다**(G-5). 두 사실 모두 `Δ≈0`으로
+> 조용히 실패할 수 있는 형태다.
+
+### G-0. DD가 읽는 covariance는 어느 P에서 오는가 (arm마다 다르다)
+
+DD는 자기 사영을 갖지 않고 **CV가 만든 covariance를 재사용**한다. 따라서 "DD의 subspace"는
+그 arm이 CV에 무엇을 쓰는지에 따라 달라진다. 이 구분이 v77~v79의 차이 전부다.
+
+| arm | DD가 읽는 covariance | DD→P gradient |
+|---|---|---|
+| v74 | **fixed** P | 학습 P 자체가 없음 |
+| **v77 (활성 baseline)** | **CV가 학습한 P** | 차단 (`no_grad`) |
+| v78 (기각) | CV가 학습한 P | **개방**(이차형식만) + weight — G-5 |
+| **v79 (진행 중)** | **fixed** P — CV의 learnable P와 분리 | 구조적으로 불가(buffer를 읽음) |
+
+⚠️ v77에서 DD는 **자기 목적으로 최적화되지 않은 subspace를 물려받는다.** 이것이 v78·v79가
+겨냥한 문제다.
 
 ### G-1. DD는 무엇을 측정하는가
 
 DD(Dispersion Distance)는 canonical CV와 같은 centered projected covariance matrix
-`C_b ∈ R^(K×K)`를 사용하지만 upper triangle 전체에 ridge를 푸는 대신, support label로
-episode-specific한 rank-1 방향을 해석적으로 만든다.
+`C_b ∈ R^(K×K)`를 사용하지만(**어느 P에서 온 `C_b`인지는 G-0**) upper triangle 전체에 ridge를
+푸는 대신, support label로 episode-specific한 rank-1 방향을 해석적으로 만든다.
 
     C̄_c = mean(C_b | y_b=c)              Δ = C̄_1 - C̄_0
     C_pool = mean_b C_b                   τ = tr(C_pool)/K
@@ -411,7 +476,8 @@ episode-specific한 rank-1 방향을 해석적으로 만든다.
     f = W u,  where |λ| is maximal
 
 `f ∈ R^K`는 전체 pooled dispersion으로 whitening한 뒤 두 클래스의 within-bag variance
-차이가 가장 큰 cell projection 방향이다. 원래 1,536-d embedding 공간에서는 `P f`다.
+차이가 가장 큰 cell projection 방향이다. 원래 1,536-d embedding 공간에서는 **`P f`**이며,
+여기서 `P`는 **그 arm이 CV에 쓰는 사영**이다(G-0) — v77은 학습된 P, v79는 fixed P다.
 각 bag은 이 방향의 log variance scalar로 줄어든다.
 
     z_b = log(fᵀ C_b f) = log Var((X_b - mean(X_b)) P f)
@@ -451,6 +517,60 @@ confidence이고 query label은 보지 않는다. CV ridge lambda=1/logit scale=
 v70 architecture는 CovarianceMeanDDMLPModel v49다. v71 ablation은 DD의 방향·거리·separation을
 모두 제거하고 `[CV0,CV1,CV1-CV0,SEP_CV] -> 4→32→1`만 학습하는
 CovarianceMeanCVMLPModel v50이다.
+
+### G-4. ⚠️ DD의 rank-1 방향은 어느 arm에서도 미분하지 않는다
+
+`_dd_direction`(`set_transformer_ridge.py`)이 G-1의 방향 계산 전체를 `no_grad`에 가둔다.
+**이건 보수적 선택이 아니라 미분이 성립하지 않기 때문이다.** 두 가지가 독립적으로 깨진다.
+
+1. **`eigh` backward의 `1/(λ_i − λ_j)`.** G-1에는 eigh가 두 번 있다(`S^(-1/2)` whitening과
+   `A = WΔW`의 고유분해). 고유벡터 항의 gradient가 고윳값 간격의 역수를 포함하므로 근축퇴에서
+   발산한다. ⚠️ **`S = 0.75 C_pool + 0.25 τ I`의 shrinkage가 이걸 막아주지 못한다** —
+   항등행렬 배수는 모든 고윳값을 **같은 양만큼 밀어 간격을 그대로 둔다**. `clamp_min`도
+   forward의 `rsqrt`를 지킬 뿐이다. K=128 pooled covariance는 스펙트럼 꼬리에 촘촘한 군집이
+   사실상 항상 있다.
+2. **hard argmax.** `f = W u where |λ| is maximal`의 선택 자체에 gradient가 없고, 상위 2개
+   `|λ|`가 교차하면 `f`가 **점프**한다. 1번을 고쳐도 남는다.
+
+**그리고 이 실패는 조용하다.** `nonfinite_gradient_policy: zero`가 non-finite gradient를 0으로
+치환하므로 학습이 완주하고 SEAL 수치도 나온다 — §66의 함정("Δ≈0이 가설 기각인지 경로
+미개방인지 구분 불가")이 그대로 재현된다. **DD 경로를 손대면 P의 gradient가 finite·nonzero이고
+control과 다른지를 테스트로 단정할 것**(`tests/test_set_transformer_ridge.py`가 고정한다).
+
+미분 가능한 판본이 필요하면 eigh를 우회한다 — whitening은 **Newton–Schulz**, 최대 `|λ|`
+고유벡터는 **`A²`에 대한 k회 전개 power iteration**(`A²`의 최대 고유벡터가 `A`의 `argmax|λ|`와
+일치하므로 부호 불명확 문제도 없다). 둘 다 matmul·normalize뿐이라 축퇴에서도 backward가 정의된다.
+**아직 구현하지 않았다.**
+
+### G-5. DD gradient를 P에 흘리면 해롭다 (v78, 실측 기각)
+
+v78은 방향을 고정한 채 **이차형식 `z_b = log(fᵀ C_b f)`만** 그래프에 남겨 P가 DD 목적도
+반영하게 했다(`train_dd_projection`). 무가중이면 DD가 P의 gradient를 CV의 **52배**(median,
+6 에피소드 range 21–103)로 지배하고 방향이 거의 직교(`cos = −0.068`)하므로
+`dd_projection_gradient_weight`로 균형을 맞춘다. weight를 스윕한 결과는 **단조**다.
+
+| weight | SEAL macro | fold-paired Δ vs v77 | 95% CI | 판정 |
+|---:|---:|---:|---|---|
+| 0 (v77) | 0.6873 | — | — | baseline |
+| 0.02 (≈1/52) | 0.6869 | −0.0004 | [−0.0021, +0.0013] | 구별 불가 |
+| 1.0 (무가중) | 0.6826 | −0.0047 | [−0.0082, −0.0013] | **CI 0 제외 — 유의하게 나쁨** |
+
+두 arm 직접 비교도 −0.0043 [−0.0075, −0.0013]로 CI가 0을 제외한다. 즉 **DD는 P를 실제로
+움직이며, 그 방향은 전체 readout에 해롭고, 발언권을 줄수록 단조롭게 나빠진다.** 기제가 P에
+도달함을 테스트로 단정하고 크기도 맞춰둔 상태였으므로 이것은 **가설 기각**이다(경로 미개방이
+아니다). ⚠️ 무가중 arm은 er_status만 +0.0277(44/50)로 크게 올리고 PIK3CA −0.0349, grade
+−0.0093, STK11 −0.0079를 떨어뜨린다 — §71이 경고한 "er_status 단독으로 보면 오판" 패턴이다.
+
+**따라서 `train_dd_projection`은 되살리지 말 것.** v79는 중재가 아니라 **분리**를 택했다
+(Active-6).
+
+### G-6. 아직 측정되지 않은 것
+
+- **학습된 P에서의 DD-only 성능.** G-2의 DD-only 0.5862는 **fixed P** 수치다(§87). v77의 학습된
+  P로 DD-only를 채점하면 "DD가 CV의 학습된 subspace에서 손해를 보는가"를 **학습 없이** 직접
+  확인할 수 있다(DD는 학습 파라미터가 없다). v79의 전제를 값싸게 검증하는 진단이며 미실행이다.
+- **DD 전용 learnable 사영.** DD가 자기 사영을 갖고 G-4의 우회 구현으로 학습하는 판본. v79는
+  DD를 fixed로 되돌리기만 했고 DD 전용 학습 사영은 시험하지 않았다.
 
 ## H. 활성 baseline v74: Composition Token branch
 

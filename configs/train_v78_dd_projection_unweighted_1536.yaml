@@ -1,0 +1,32 @@
+# v78 unweighted: the DD gradient path opened with no balancing at all.
+#
+# The balanced arm (dd_projection_gradient_weight 0.02 ~ 1/52) came back a clean
+# null -- fold-paired delta -0.0004 [-0.0021, +0.0013] vs v77 (docs SS102-5). Two
+# readings survive that: DD genuinely has nothing to add to the subspace P learns,
+# or 0.02 throttled it to irrelevance. This arm removes the throttle entirely and
+# is the control that separates them.
+#
+# What weight 1.0 means, measured at 1536-d/K=128 over 6 episodes: DD's
+# contribution to P's gradient is ~52x the CV ridge's (range 21..103) and nearly
+# orthogonal to it (cos -0.068). So P is effectively handed to DD and the CV-driven
+# learning that earned v77 its +0.0142 over fixed-P (v74 0.6731 -> v77 0.6873) gets
+# overwritten. The expectation is therefore a loss, not a gain -- but an informative
+# one, because it brackets the weight axis from the other side.
+#
+# The rank-1 dispersion direction is still NOT differentiated (see `_dd_direction`):
+# both eigh backwards carry 1/(lambda_i - lambda_j), the shrinkage leaves those gaps
+# untouched, and the argmax selection is discontinuous. Only the quadratic form
+# log(f^T C_b f) is in the graph. Unweighted refers to the balance knob alone.
+#
+# Adds no parameters and changes no shape: trainable stays 197,057,
+# architecture_version stays 54, v77 checkpoints load strict both ways.
+# Judgment is fold-paired delta + bootstrap CI against the v77 control (docs SS99).
+base_config: train_v77_hard_orthogonal_1536.yaml
+
+model_overrides:
+  kwargs:
+    train_dd_projection: true
+    dd_projection_gradient_weight: 1.0
+
+logger_overrides:
+  experiment_name: v78_dd_projection_unweighted

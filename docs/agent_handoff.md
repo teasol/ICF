@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-12` — 기존 Hard v76을 **canonical v77 baseline**으로 승격했다. Hard orthogonal `[0.2,0.8]`, SEAL macro **0.6873**이며 현재 실행 중인 실험은 없다. 진행 상태는 `current_status.md` §98.
+**Last updated**: `2026-08-12` — 활성 baseline은 **v77 Hard orthogonal**(SEAL macro **0.6873**)이다. **v78 DD-gradient arm은 단조 악화로 기각**되고 **v79 dual projection이 실행 중**이다. 판정은 반드시 **fold-paired Δ + CI**(§99)로 한다. 진행 상태는 `current_status.md` §103.
 
 > [!IMPORTANT]
 > **활성 baseline: v77 Hard learnable-P CV+DD+CT relation head (§98)**
@@ -27,16 +27,36 @@
 > (0.6750)은 **retired provisional v77-pop-residual**이며 내부 version 55는 replay용으로 보존한다.
 
 > [!IMPORTANT]
-> **v78 DD gradient 계약 (§100, 2026-08-12)**
+> **DD 계약 — 미분 금지 + gradient 개방 금지 (§100·§103, 2026-08-12)**
 >
-> `train_dd_projection: true`는 DD의 이차형식 `log(fᵀ C_b f)`만 backward에 남겨 P가 DD 목적도
-> 반영하게 한다. **rank-1 방향 f는 어느 arm에서든 미분하지 않는다** — eigh backward가
-> `1/(λ_i−λ_j)`를 갖고, `+shrinkage·trace·I`는 고윳값을 균일하게 밀어 **간격을 바꾸지 않으며**
-> (forward `rsqrt`만 보호), 방향 선택은 hard argmax라 불연속이다. `nonfinite_gradient_policy: zero`
-> 때문에 이 실패는 **조용하다** — 반드시 gradient finite·nonzero를 테스트로 단정할 것.
-> 무가중이면 DD가 P gradient를 CV의 **52배**(median, range 21–103)로 지배하고 거의 직교하므로
-> `dd_projection_gradient_weight`(v78 arm **0.02**)로 균형을 맞춘다.
-> 파라미터 0개 추가·shape 보존 → trainable 197,057, version 54, strict-load 양방향 호환.
+> **① rank-1 방향은 어느 arm에서도 미분하지 않는다.** eigh backward가 `1/(λ_i−λ_j)`를 갖고,
+> `+shrinkage·trace·I`는 고윳값을 **균일하게 밀어 간격을 바꾸지 않으며**(forward `rsqrt`만 보호),
+> 방향 선택은 hard argmax라 불연속이다. `nonfinite_gradient_policy: zero` 때문에 이 실패는
+> **조용하다** — DD 경로를 손대면 **P의 gradient가 finite·nonzero이고 control과 다른지를 테스트로
+> 단정할 것.** 미분 가능 우회(Newton–Schulz + `A²` power iteration)는 미구현이다.
+>
+> **② `train_dd_projection`은 기각됐다 — 되살리지 말 것.** weight 0/0.02/1.0에서 SEAL macro가
+> 0.6873/0.6869/**0.6826**으로 **단조 악화**하고 무가중은 fold-paired Δ −0.0047
+> [−0.0082, −0.0013]로 CI가 0을 제외한다. DD는 P를 실제로 움직이지만 **그 방향이 해롭다.**
+> 무가중은 er_status만 +0.0277로 올려 단독으로 보면 오판하게 만든다(§71 패턴).
+>
+> **③ DD가 어느 P를 읽는지는 arm마다 다르다** — v74 fixed / v77 CV가 학습한 P / v79 fixed(분리).
+> DD는 자기 사영을 갖지 않고 CV의 covariance를 재사용한다. 상세 표는
+> `current_architecture.md` **G-0**, 명세 전체는 **G절**.
+
+> [!IMPORTANT]
+> **v79 dual projection 계약 (§103, 진행 중)**
+>
+> `DualProjectionCVDDCTMLPModel`, **`architecture_version = 56`** — v77 ckpt와 strict-load
+> **비호환**이다. CV는 learnable P를, **fixed-P CV와 DD는 고정 sin/cos 기저**를 쓰고 CT까지
+> 4 branch × 4 feature = **16 → 32 → 1**이다. descriptor는
+> `[cov_learnable 8,256, mean 1,536, cov_fixed 8,256]` = **18,048**이며 세 block을 각각 독립
+> context-only center/scalar-RMS로 정규화한다(raw bag mean은 두 CV branch가 공유).
+> trainable **197,185** (P 196,608 + head 577). fixed 사영은 `_fixed_covariance_projection`
+> buffer(`persistent=False`)로 `super().__init__` 직후 snapshot한다.
+> `train_dd_projection`은 이 클래스에서 **ValueError로 거부**된다(조용한 no-op 방지).
+> fixed-P CV를 남기는 이유: fixed P는 **v41_K128이 0.6940을 낸 기저**이고 그것이 여전히 역사적
+> 전체 최고다 — 학습된 것이 고정된 것을 대체하는 게 아니라 head가 둘을 저울질하게 한다.
 
 > [!IMPORTANT]
 > **v77 ridge calibration 계약 (2026-08-12)**
@@ -531,9 +551,12 @@ scripts/launch_interactive_training.sh \
 
 1. **`configs/` 최상위 루트 유지 조건**:
    - 현재 활성 파이프라인에서 직접 사용하는 entry point config만 `configs/` 최상위에 유지합니다.
-   - **현재 `configs/` 최상위 유지 대상은 2개뿐이다 (§102, 2026-08-12)**:
-     `train_v77_hard_orthogonal_1536.yaml` (canonical baseline, **자체 포함형**) 과
-     `train_v78_dd_projection_1536.yaml` (v77 참조 + override 2개).
+   - **현재 `configs/` 최상위 유지 대상 (§102·§103, 2026-08-12)**:
+     `train_v77_hard_orthogonal_1536.yaml` (canonical baseline, **자체 포함형**),
+     `train_v79_dual_projection_1536.yaml` (실행 중), 그리고 v78 두 arm
+     (`train_v78_dd_projection_1536.yaml`, `..._unweighted_1536.yaml`).
+     ⚠️ **v78 두 개는 기각된 arm이므로 다음 정리에서 `configs/archive/v78_dd_gradient/`로 이관할
+     것** — 결과 재현 근거로만 남아 있다.
      v77은 이전 base 체인(v77→v76_classsep_hard→v76_cv_learnable_p_dd_ct_mlp→v74→v70→v69)을
      인라인해 그 6개를 아카이브해도 단독 실행된다 — v34가 받았던 처리와 같다.
    - 종결된 arm 64개는 시대별로 이관됐다: `configs/archive/` 아래 `v34_largectx/`,

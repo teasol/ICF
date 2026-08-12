@@ -45,9 +45,9 @@
 - **Git 커밋 동기화**: 세션 핸드오프 시 작업을 남김없이 커밋하고 커밋 내역/diff를 `agent_handoff.md` 및 `current_status.md`에 반영합니다.
 - **아카이빙 규칙**: 특정 버전 딥다이브 보고서나 계획 문서는 완료 시 **핵심 결론(ADR·트레이드오프·레슨)을 `docs/history.md`의 해당 시기 절에 추가**하고, 개별 원문 파일은 새로 만들지 않습니다(원문은 git 이력에 보존). `docs/` 루트를 단순하고 가독성 높게 유지합니다.
 - **Config 루트 관리**: `configs/` 루트에는 **현재 활성 파이프라인의 entry point만** 둔다
-  (상세는 [`agent_handoff.md`](agent_handoff.md) §7). **2026-08-12(§102) 기준 정확히 2개다** —
-  `train_v77_hard_orthogonal_1536.yaml`(canonical, 자체 포함형)과
-  `train_v78_dd_projection_1536.yaml`. 종결된 arm 64개는 `configs/archive/` 아래 시대별
+  (상세는 [`agent_handoff.md`](agent_handoff.md) §7). **2026-08-12(§103) 기준 4개다** —
+  `train_v77_hard_orthogonal_1536.yaml`(canonical, 자체 포함형),
+  `train_v79_dual_projection_1536.yaml`(실행 중), v78 두 arm(기각, 다음 정리에서 이관 예정). 종결된 arm 64개는 `configs/archive/` 아래 시대별
   폴더(`v34_largectx/`, `v40_v45_cvonly/`, `v50_v54_encoder/`, `v57_v61_data_arms/`,
   `v62_v68_hybrid/`, `v69_v76_relation/`, `v77_pop_residual/`)로 이관하고 전부 `base_config` 없는
   자체 포함형으로 보관한다. ICI의 fold/seed는 config가 아니라 `--cv`/`--seed`로 주입하므로
