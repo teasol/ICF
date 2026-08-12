@@ -27,6 +27,18 @@
 > (0.6750)은 **retired provisional v77-pop-residual**이며 내부 version 55는 replay용으로 보존한다.
 
 > [!IMPORTANT]
+> **v78 DD gradient 계약 (§100, 2026-08-12)**
+>
+> `train_dd_projection: true`는 DD의 이차형식 `log(fᵀ C_b f)`만 backward에 남겨 P가 DD 목적도
+> 반영하게 한다. **rank-1 방향 f는 어느 arm에서든 미분하지 않는다** — eigh backward가
+> `1/(λ_i−λ_j)`를 갖고, `+shrinkage·trace·I`는 고윳값을 균일하게 밀어 **간격을 바꾸지 않으며**
+> (forward `rsqrt`만 보호), 방향 선택은 hard argmax라 불연속이다. `nonfinite_gradient_policy: zero`
+> 때문에 이 실패는 **조용하다** — 반드시 gradient finite·nonzero를 테스트로 단정할 것.
+> 무가중이면 DD가 P gradient를 CV의 **52배**(median, range 21–103)로 지배하고 거의 직교하므로
+> `dd_projection_gradient_weight`(v78 arm **0.02**)로 균형을 맞춘다.
+> 파라미터 0개 추가·shape 보존 → trainable 197,057, version 54, strict-load 양방향 호환.
+
+> [!IMPORTANT]
 > **v77 ridge calibration 계약 (2026-08-12)**
 >
 > 기본 v76은 `ridge_log_lambda=log(1)`, `ridge_log_scale=log(2)`를 동결해 P와 relation head만

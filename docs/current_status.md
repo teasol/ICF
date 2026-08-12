@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-12` (§99 — 판정 프로토콜을 fold-paired Δ + CI로 전환)
+**Last updated**: `2026-08-12` (§100 — v78 DD gradient path 구현, 미실행)
 
 **한 줄**: 활성 baseline은 v77 Hard orthogonal(SEAL macro **0.6873**)이고, 앞으로 arm 판정은 점추정 macro 차이가 아니라 **fold-paired Δ + bootstrap CI**로 한다(§99).
 
@@ -9,7 +9,7 @@
 > [!IMPORTANT]
 > **읽는 순서 (2026-08-12)**: 판정 방식이 §99에서 바뀌었다. arm을 비교하려면 §99를 먼저 읽고
 > `scripts/compare_arms_paired.py`를 쓸 것. §98 판정표 4건은 §99-1에서 fold-paired CI로
-> 재검증되어 전부 유지됐다. 다음 Action은 §99-5.
+> 재검증되어 전부 유지됐다. 다음 대기 arm은 **v78**(§100, 구현 완료·미실행)이다.
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
   현행 최고 **v41_K128 = SEAL 10개 0.6940** (ABMIL 0.727에 −0.033).
@@ -3581,3 +3581,78 @@ EGFR −0.0059가 뒤따른다. er_status는 반대로 +0.0081이었다.
 1. seed 반복 — v77 + L8/L16/L32. arm당 학습 약 15분 + 평가 1–2분. §3의 ⓐ/ⓑ를 가르고, macro
    seed std를 얻어 앞으로의 +0.005 게이트에 분모를 준다.
 2. BAP1이 large-bag에서만 무너지는 원인 진단(§2).
+
+## 100. 2026-08-12 — v78: DD quadratic-form gradient path (구현 완료, 미실행)
+
+v77은 P를 **CV ridge 목적으로만** 학습하는데 DD는 그 P가 만든 covariance를 읽는다. subspace가
+한 소비자에 맞춰 최적화되고 다른 소비자는 그것을 물려받는 구조다. v78은 DD에도 P 설계
+발언권을 준다.
+
+### 1. eigen 미분은 하지 않는다 — 사용자 지적이 옳았다
+
+`_dd_distance_features`의 방향 계산에는 문제가 둘 있어서 `no_grad`를 그냥 벗기면 안 된다.
+
+1. **`eigh` backward의 `1/(λ_i − λ_j)`**. eigh가 두 번([L730/L734] 구 기준) 있고 고유벡터 항이
+   고윳값 간격의 역수를 갖는다. ⚠️ **기존 shrinkage가 이걸 막지 못한다** —
+   `+ dd_shrinkage · trace · I`는 모든 고윳값을 같은 양 밀어 **간격을 그대로 둔다**. `clamp_min`도
+   forward `rsqrt`를 지킬 뿐이다. 128×128 pooled covariance는 스펙트럼 어딘가에 반드시 촘촘한
+   군집이 있다.
+2. **hard argmax**. `eigenvectors[:, eigenvalues.abs().argmax()]`는 선택에 gradient가 없고, 상위
+   2개 `|λ|`가 교차하면 방향이 **점프**한다.
+
+게다가 이 실패는 **조용하다** — `nonfinite_gradient_policy: zero`가 non-finite를 0으로 치환하므로
+학습이 완주하고 SEAL도 나온다. §66의 함정("Δ≈0이 가설 기각인지 경로 미개방인지 구분 불가")이
+그대로 재현된다.
+
+**따라서 v78은 방향을 미분하지 않는다.** 방향 계산을 `_dd_direction`으로 분리해 항상 `no_grad`에
+두고(어느 arm에서든), gradient는 그 방향을 소비하는 **이차형식** `z_b = log(fᵀ C_b f)`로만 P에
+도달한다. f는 에피소드별 상수다. `∂f/∂P`를 버린 부분 gradient이며 방향을 현재값에 고정한
+alternating 스킴이다. 이 리팩터는 forward 값을 바꾸지 않는다(`no_grad`는 수치 무관).
+
+### 2. 필수였던 발견 — 무가중 DD는 CV를 대체해버린다
+
+1536-d/K=128에서 6 에피소드 측정한 P gradient 기여도:
+
+| episode | 0 | 1 | 2 | 3 | 4 | 5 | median |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| DD/CV norm 비 | 90.5 | 75.6 | 21.0 | 23.3 | 102.9 | 29.2 | **52.4** |
+
+`cos(grad_CV, grad_CV+DD) = −0.068`로 거의 직교하며 부호도 음수 쪽이다. 즉 flag를 그냥 켜면
+"DD에 발언권을 준다"가 아니라 **P를 DD에 넘기고 CV 신호를 덮어쓴다** — v77이 fixed-P(v74
+0.6731)보다 +0.0142 얻은 그 학습을 지우는 것이다. 그 상태로 지면 §66 함정에 다시 걸린다.
+
+그래서 `dd_projection_gradient_weight`를 도입했다. `_ScaleGradient`(forward 정확한 identity,
+backward에 weight 곱)를 DD로 들어가는 covariance에 적용한다. **v78 arm은 0.02 ≈ 1/52**로
+median 에피소드에서 두 경로를 맞춘다. 비 자체가 5배 변동하므로 모든 에피소드를 맞출 수는
+없다.
+
+### 3. 계약
+
+- config: `configs/train_v78_dd_projection_1536.yaml` (v77 canonical 상속, Hard `[0.2,0.8]`,
+  orthogonal, DDP4 GPU 0–3, bf16, 50 epochs)
+- runner: `scripts/run_v78_dd_projection.py`, tag `v78_dd_projection_best`
+- **파라미터 추가 0개, shape 변경 0개** → trainable 197,057 유지, `architecture_version=54` 유지,
+  v77 checkpoint와 strict-load **양방향** 호환. flag는 backward 그래프만 넓힌다.
+- 기본값 `train_dd_projection: false` → v77 동작 보존. v74는 학습 P가 없으므로 클래스 속성으로
+  opt-out 고정.
+
+### 4. 검증
+
+- 신규 테스트 5개 (`tests/test_set_transformer_ridge.py`): ⓐ 기본 off + flag on/off **forward
+  동일**, ⓑ `_dd_direction`이 두 arm 모두에서 `requires_grad=False`·`grad_fn=None`
+  (eigh가 backward에 없음), ⓒ P gradient가 finite·nonzero이고 **control과 다름**(조용한 null
+  방지), ⓓ weight 0.25/0.5의 DD 기여가 정확히 선형이고 weight 0은 control과 일치, 음수는
+  ValueError, ⓔ 파라미터 수 동일 + strict-load 양방향.
+- 전체 suite **149 tests** (신규 5개 포함). 실패 1건은 **기존** 실패로 이 변경과 무관 —
+  `tests/test_mlp_manifold_bank.py`(`7de8b70`)가 BagPFN env에 없는 `pytest`를 import한다.
+- config: 전체 `base_config` 참조 검증 141개 통과(failing 0), numeric-type·precision 계약 7개 통과.
+- CUDA bf16 smoke (60 bags × 4,096 cells, GPU 0): logits finite, loss 0.5859, P grad finite·nonzero
+  (norm 3.99e-01), head grad finite, peak allocation **2.37 GiB**.
+
+### 5. 다음 Action
+
+1. v78 실행 후 **fold-paired Δ + CI**로 v77 대비 판정(§99):
+   `python scripts/compare_arms_paired.py --baseline v76_classsep_hard_best --arm v78_dd_projection_best`
+2. Δ가 양수이고 CI가 0을 제외하면 seed 반복으로 config 수준 주장으로 승격. 음수여도 이번에는
+   weight로 두 경로를 맞춰뒀으므로 "DD가 P를 잡으면 안 된다"는 해석이 성립한다.
+3. 미실행 상태다. 실행 전 working tree의 mode 변경 16개를 정리할 것.

@@ -624,6 +624,117 @@ class CovarianceMeanAblationTest(unittest.TestCase):
             self.assertTrue(torch.isfinite(gradient).all())
             self.assertGreater(float(gradient.abs()), 0.0)
 
+    def _learnable_p(self, seed, **extra):
+        torch.manual_seed(seed)
+        return CovarianceMeanLearnablePDDCTMLPModel(
+            **self._kwargs(), ct_num_tokens=4, ct_cells_per_bag=8, **extra
+        ).train()
+
+    def test_dd_projection_defaults_off_and_is_forward_identical(self):
+        """v78 widens the backward graph only -- forward values must not move."""
+        control = self._learnable_p(31)
+        arm = self._learnable_p(31, train_dd_projection=True)
+        self.assertFalse(control.train_dd_projection)
+        self.assertTrue(arm.train_dd_projection)
+        # v74 has no learnable projection, so it must stay opted out.
+        self.assertFalse(
+            CovarianceMeanDDCTMLPModel(
+                **self._kwargs(), ct_num_tokens=4, ct_cells_per_bag=8
+            ).train_dd_projection
+        )
+        x, y, query = _episode(cells=12)
+        torch.testing.assert_close(control(x, y, query), arm(x, y, query))
+
+    def test_dd_direction_never_enters_the_autograd_graph(self):
+        """The eigh/argmax block must stay out of backward in every arm.
+
+        Both eigh backwards carry 1/(lambda_i - lambda_j) and the argmax
+        selection is discontinuous, so v78 holds the direction constant and only
+        differentiates the quadratic form that consumes it.
+        """
+        for flag in (False, True):
+            with self.subTest(train_dd_projection=flag):
+                model = self._learnable_p(31, train_dd_projection=flag)
+                x, y, _ = _episode(cells=12)
+                triangle = model._covariance_descriptors(x).float()
+                triangle.requires_grad_(True)
+                covariance = model._covariance_matrices_from_triangle(triangle)
+                self.assertTrue(covariance.requires_grad)
+                direction = model._dd_direction(covariance, y)
+                self.assertFalse(direction.requires_grad)
+                self.assertIsNone(direction.grad_fn)
+
+    def test_dd_projection_actually_reaches_p_and_changes_its_gradient(self):
+        """Guard against a silent null.
+
+        `nonfinite_gradient_policy: zero` would let a broken DD path train to
+        completion while contributing nothing, so assert the gradient is finite,
+        non-zero, AND different from the control's -- otherwise a Delta of ~0 in
+        the arm cannot be read as the hypothesis failing.
+        """
+        x, y, query = _episode(cells=12)
+        gradients = {}
+        for flag in (False, True):
+            model = self._learnable_p(31, train_dd_projection=flag)
+            loss = torch.nn.functional.cross_entropy(model(x, y, query), y[query])
+            loss.backward()
+            gradient = model._covariance_projection.grad
+            self.assertIsNotNone(gradient)
+            self.assertTrue(torch.isfinite(gradient).all())
+            self.assertGreater(float(gradient.abs().max()), 0.0)
+            gradients[flag] = gradient.clone()
+        self.assertFalse(
+            torch.allclose(gradients[False], gradients[True]),
+            "train_dd_projection did not change P's gradient -- the DD path is "
+            "not actually reaching the projection",
+        )
+
+    def test_dd_projection_gradient_weight_scales_only_the_dd_path(self):
+        """The weight must be exact identity forward and linear in backward.
+
+        Unweighted, DD reaches P with ~52x the CV path's gradient magnitude at
+        1536-d/K=128, so this knob is what keeps v78 a controlled change.
+        """
+        x, y, query = _episode(cells=12)
+        control = self._learnable_p(31)
+        control_logits = control(x, y, query)
+        torch.nn.functional.cross_entropy(control_logits, y[query]).backward()
+        cv_only = control._covariance_projection.grad.clone()
+
+        contributions = {}
+        for weight in (0.25, 0.5):
+            model = self._learnable_p(
+                31, train_dd_projection=True, dd_projection_gradient_weight=weight
+            )
+            logits = model(x, y, query)
+            torch.testing.assert_close(logits, control_logits)
+            torch.nn.functional.cross_entropy(logits, y[query]).backward()
+            contributions[weight] = (
+                model._covariance_projection.grad - cv_only
+            ).clone()
+        torch.testing.assert_close(
+            contributions[0.5], contributions[0.25] * 2.0, atol=1e-6, rtol=1e-4
+        )
+        # Zero weight must reduce to the control exactly.
+        zero = self._learnable_p(
+            31, train_dd_projection=True, dd_projection_gradient_weight=0.0
+        )
+        torch.nn.functional.cross_entropy(zero(x, y, query), y[query]).backward()
+        torch.testing.assert_close(zero._covariance_projection.grad, cv_only)
+        with self.assertRaises(ValueError):
+            self._learnable_p(31, dd_projection_gradient_weight=-1.0)
+
+    def test_dd_projection_adds_no_parameters_and_loads_strict_both_ways(self):
+        control = self._learnable_p(31)
+        arm = self._learnable_p(31, train_dd_projection=True)
+        for model in (control, arm):
+            self.assertEqual(
+                sum(v.numel() for v in model.parameters() if v.requires_grad), 641
+            )
+        self.assertEqual(arm.architecture_version, control.architecture_version)
+        arm.load_state_dict(control.state_dict(), strict=True)
+        control.load_state_dict(arm.state_dict(), strict=True)
+
     def test_learnable_p_starts_from_v74_outputs(self):
         torch.manual_seed(17)
         baseline = CovarianceMeanDDCTMLPModel(

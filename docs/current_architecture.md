@@ -76,7 +76,14 @@ CV ridge coefficient는 real/synthetic episode의 support label로 매번 다시
 | **합계** | **197,057** | |
 
 - 매 forward에서 thin QR로 `P_effᵀP_eff=I`를 보장해 임의 scale/conditioning 변화를 차단한다.
-- DD는 현재 P로 만든 covariance를 읽지만 DD→P gradient는 차단된다. CT 선택/특징도 training-free다.
+- DD는 현재 P로 만든 covariance를 읽지만 기본 v77에서 DD→P gradient는 차단된다. CT 선택/특징은
+  어느 arm에서든 training-free다.
+- **v78 opt-in (`train_dd_projection`, §100)**: DD의 이차형식 `log(fᵀ C_b f)`만 그래프에 남겨 P가
+  DD 목적도 반영하게 한다. rank-1 방향 `f`는 **어느 arm에서든 미분하지 않는다** —
+  `_dd_direction`이 이유를 문서화한다(eigh backward의 `1/(λ_i−λ_j)`, shrinkage는 간격을 안 바꿈,
+  argmax의 불연속). 무가중 시 DD가 P gradient를 CV의 **52배**로 지배하므로
+  `dd_projection_gradient_weight`(v78 arm 0.02)로 균형을 맞춘다. 파라미터 0개 추가·shape 보존이라
+  version 54와 strict-load 호환이 양방향 유지된다.
 - 기본 `ridge_log_lambda=log(1)`, `ridge_log_scale=log(2)`는 v77에서 동결된다.
 - `train_ridge_calibration: true`는 이 두 scalar만 동결 해제한다. 이 opt-in arm은 197,059개이며
   기존 checkpoint/config의 학습 계약은 바꾸지 않는다.

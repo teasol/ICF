@@ -64,6 +64,24 @@ except ImportError:  # pragma: no cover
     _ATTENTION_BACKEND = contextlib.nullcontext
 
 
+class _ScaleGradient(torch.autograd.Function):
+    """Identity in the forward pass, gradient multiplied by `weight` backward.
+
+    Used to balance the DD path against the CV ridge path when both reach the
+    same learnable projection (v78). Forward being exact identity is what keeps
+    `train_dd_projection` from moving any model output.
+    """
+
+    @staticmethod
+    def forward(ctx, tensor, weight):
+        ctx.gradient_weight = weight
+        return tensor
+
+    @staticmethod
+    def backward(ctx, gradient):
+        return gradient * ctx.gradient_weight, None
+
+
 class EncoderLayer(nn.Module):
     """Pre-norm transformer layer whose attention runs on a chosen backend.
 
@@ -706,33 +724,70 @@ class CovarianceMeanDDRidgeModel(CovarianceMeanRidgeModel):
         ) / denominator
         return probabilities
 
+    @staticmethod
+    def _scale_gradient(tensor, weight):
+        """Identity forward, scaled backward.
+
+        The DD quadratic form and the CV ridge reach P with very different
+        gradient magnitudes (measured 31x in DD's favour at 1536-d/K=128, nearly
+        orthogonal), so opening the DD path unweighted replaces CV's signal
+        rather than adding to it. This keeps the arm a controlled change.
+        """
+        return _ScaleGradient.apply(tensor, float(weight))
+
+    def _dd_direction(self, context_covariance, context_labels):
+        """Episode-specific rank-1 dispersion direction, held out of autograd.
+
+        This stays under `no_grad` in every arm, including v78, and the reason is
+        not conservatism -- differentiating this block is unsound twice over:
+
+        1. Both `eigh` backwards carry `1/(lambda_i - lambda_j)` eigenvector
+           terms, so near-degenerate eigenvalues blow the gradient up. The
+           `+ shrinkage * trace * I` term does NOT protect against this: adding a
+           multiple of the identity shifts every eigenvalue equally and leaves
+           every gap unchanged. It conditions the forward `rsqrt` (together with
+           `clamp_min`), not the backward. A 128x128 pooled covariance
+           reliably has a dense cluster somewhere in its spectrum.
+        2. The direction is picked by a hard `argmax` over |lambda|. The
+           selection carries no gradient of its own, and it jumps
+           discontinuously when the top two magnitudes cross.
+
+        v78 (`train_dd_projection`) therefore holds this direction constant per
+        episode and lets gradient reach P only through the quadratic form that
+        consumes it -- see `_dd_distance_features`.
+        """
+        labels = context_labels.long()
+        with torch.no_grad():
+            class_means = []
+            for class_index in range(2):
+                members = context_covariance[labels == class_index]
+                if members.numel() == 0:
+                    raise ValueError("Every class must occur in the context set.")
+                class_means.append(members.mean(dim=0))
+
+            delta = class_means[1] - class_means[0]
+            pooled = context_covariance.mean(dim=0)
+            trace_scale = pooled.diagonal().mean().clamp_min(self.dd_eps)
+            identity = torch.eye(
+                self.covariance_sketch_dim, device=pooled.device, dtype=pooled.dtype
+            )
+            shrunk = (
+                (1.0 - self.dd_shrinkage) * pooled
+                + self.dd_shrinkage * trace_scale * identity
+            )
+            values, vectors = torch.linalg.eigh(shrunk)
+            safe_values = values.clamp_min(self.dd_eps)
+            whitening = (vectors * safe_values.rsqrt().unsqueeze(0)) @ vectors.T
+            operator = whitening @ delta @ whitening
+            eigenvalues, eigenvectors = torch.linalg.eigh(operator)
+            direction = whitening @ eigenvectors[:, eigenvalues.abs().argmax()]
+        return direction
+
     def _dd_distance_features(
         self, context_covariance, context_labels, query_covariance
     ):
         labels = context_labels.long()
-        class_means = []
-        for class_index in range(2):
-            members = context_covariance[labels == class_index]
-            if members.numel() == 0:
-                raise ValueError("Every class must occur in the context set.")
-            class_means.append(members.mean(dim=0))
-
-        delta = class_means[1] - class_means[0]
-        pooled = context_covariance.mean(dim=0)
-        trace_scale = pooled.diagonal().mean().clamp_min(self.dd_eps)
-        identity = torch.eye(
-            self.covariance_sketch_dim, device=pooled.device, dtype=pooled.dtype
-        )
-        shrunk = (
-            (1.0 - self.dd_shrinkage) * pooled
-            + self.dd_shrinkage * trace_scale * identity
-        )
-        values, vectors = torch.linalg.eigh(shrunk)
-        safe_values = values.clamp_min(self.dd_eps)
-        whitening = (vectors * safe_values.rsqrt().unsqueeze(0)) @ vectors.T
-        operator = whitening @ delta @ whitening
-        eigenvalues, eigenvectors = torch.linalg.eigh(operator)
-        direction = whitening @ eigenvectors[:, eigenvalues.abs().argmax()]
+        direction = self._dd_direction(context_covariance, context_labels)
 
         context_variance = torch.einsum(
             "d,bdk,k->b", direction, context_covariance, direction
@@ -847,6 +902,12 @@ class CovarianceMeanDDCTMLPModel(CovarianceMeanDDRidgeModel):
     """Frozen CV + DD + support-selected Composition Tokens -> learned head."""
 
     architecture_version = 52
+
+    # v74 has no learnable projection, so there is nothing for a DD gradient to
+    # reach. Only the v78 subclass opts in; the attributes live here because
+    # `_relation_logits` is shared.
+    train_dd_projection = False
+    dd_projection_gradient_weight = 1.0
 
     def __init__(
         self,
@@ -979,19 +1040,41 @@ class CovarianceMeanDDCTMLPModel(CovarianceMeanDDRidgeModel):
         cv_separation = (
             (cv_prototypes[1] - cv_prototypes[0]).square().mean().sqrt()
         )
-        # DD reads covariance produced by the current projection P, but remains
-        # training-free: P is optimized only through the CV ridge path.
+        # CT is training-free in every arm: its candidate generation and its
+        # class-discriminative selection are both non-differentiable.
         with torch.no_grad(), torch.autocast(
             device_type=context.device.type, enabled=False
         ):
-            distances, dd_separation = self._dd_distance_features(
-                self._covariance_matrices_from_triangle(context),
-                context_labels,
-                self._covariance_matrices_from_triangle(query),
-            )
             q0, q1, ct_separation = self._ct_features(
                 context_bags, context_labels, query_bags
             )
+        # DD reads covariance produced by the current projection P. By default
+        # (v77) it is fully training-free and P is optimized only through the CV
+        # ridge path. With `train_dd_projection` (v78) the rank-1 direction is
+        # still held constant -- `_dd_direction` documents why differentiating it
+        # is unsound -- but the quadratic form that consumes it stays in the
+        # graph, so DD gets a say in the subspace P learns.
+        # CUDA eigh has no bf16 implementation, and whitening should not lose
+        # small eigenvalues to mixed precision in any case.
+        with torch.autocast(device_type=context.device.type, enabled=False):
+            if self.train_dd_projection:
+                weight = self.dd_projection_gradient_weight
+                distances, dd_separation = self._dd_distance_features(
+                    self._scale_gradient(
+                        self._covariance_matrices_from_triangle(context), weight
+                    ),
+                    context_labels,
+                    self._scale_gradient(
+                        self._covariance_matrices_from_triangle(query), weight
+                    ),
+                )
+            else:
+                with torch.no_grad():
+                    distances, dd_separation = self._dd_distance_features(
+                        self._covariance_matrices_from_triangle(context),
+                        context_labels,
+                        self._covariance_matrices_from_triangle(query),
+                    )
         cv0, cv1 = cv_logits.float().unbind(dim=-1)
         d0, d1 = distances.float().unbind(dim=-1)
         features = torch.stack(
@@ -1070,11 +1153,26 @@ class CovarianceMeanDDCTMLPModel(CovarianceMeanDDRidgeModel):
 
 
 class CovarianceMeanLearnablePDDCTMLPModel(CovarianceMeanDDCTMLPModel):
-    """v76: v74 with one learnable projection shared by CV and DD."""
+    """v76/v77: v74 with one learnable projection shared by CV and DD.
+
+    `train_dd_projection` is the v78 arm. P is otherwise optimized only by the CV
+    ridge path even though DD reads the same covariance, so the subspace is
+    shaped for one consumer and inherited by the other. Turning the flag on adds
+    no parameters and changes no shape -- checkpoints load strict in both
+    directions, and `architecture_version` stays 54 -- it only widens the
+    backward graph.
+    """
 
     architecture_version = 54
 
-    def __init__(self, *args, train_ridge_calibration=False, **kwargs):
+    def __init__(
+        self,
+        *args,
+        train_ridge_calibration=False,
+        train_dd_projection=False,
+        dd_projection_gradient_weight=1.0,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         initial_projection = self._buffers.pop("_covariance_projection")
         self._covariance_projection = nn.Parameter(initial_projection.clone())
@@ -1082,6 +1180,10 @@ class CovarianceMeanLearnablePDDCTMLPModel(CovarianceMeanDDCTMLPModel):
         if self.train_ridge_calibration:
             self.ridge_log_lambda.requires_grad_(True)
             self.ridge_log_scale.requires_grad_(True)
+        if dd_projection_gradient_weight < 0.0:
+            raise ValueError("dd_projection_gradient_weight must be non-negative.")
+        self.train_dd_projection = bool(train_dd_projection)
+        self.dd_projection_gradient_weight = float(dd_projection_gradient_weight)
         self._architecture_version.fill_(self.architecture_version)
 
     def _effective_covariance_projection(self):
