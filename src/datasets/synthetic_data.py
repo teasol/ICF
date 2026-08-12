@@ -102,6 +102,7 @@ class SyntheticManifoldGenerator:
         output_norm_eps: float = 1e-8,
         manifold_mode: str = "nonlinear",
         manifold_seed: int = 0,
+        manifold_bank_size: int = 1,
         manifold_max_condition_number: float = 3.0,
         balanced: bool = True,
     ) -> None:
@@ -278,7 +279,8 @@ class SyntheticManifoldGenerator:
         if output_norm_eps <= 0:
             raise ValueError("output_norm_eps must be positive.")
         valid_manifold_modes = {
-            "nonlinear", "shared_nonlinear", "orthogonal", "bounded_linear"
+            "nonlinear", "shared_nonlinear", "mlp_bank", "orthogonal",
+            "bounded_linear",
         }
         if manifold_mode not in valid_manifold_modes:
             raise ValueError(
@@ -286,6 +288,8 @@ class SyntheticManifoldGenerator:
             )
         if manifold_max_condition_number < 1:
             raise ValueError("manifold_max_condition_number must be at least 1.")
+        if manifold_bank_size < 1:
+            raise ValueError("manifold_bank_size must be at least 1.")
 
         self.num_bags = tuple(num_bags)
         self.num_cells = tuple(num_cells)
@@ -331,6 +335,7 @@ class SyntheticManifoldGenerator:
         self.output_norm_eps = float(output_norm_eps)
         self.manifold_mode = manifold_mode
         self.manifold_seed = int(manifold_seed)
+        self.manifold_bank_size = int(manifold_bank_size)
         self.manifold_max_condition_number = float(manifold_max_condition_number)
         self.balanced = balanced
 
@@ -1089,6 +1094,15 @@ class SyntheticManifoldGenerator:
         """Return a reproducible generator without advancing the episode RNG."""
         return torch.Generator(device=device).manual_seed(self.manifold_seed)
 
+    def _manifold_bank_generator(
+        self,
+        bank_index: int,
+        device: torch.device,
+    ) -> torch.Generator:
+        """Recreate one fixed bank member without storing all bank weights."""
+        seed = (self.manifold_seed + 1_000_003 * int(bank_index)) % (2**63 - 1)
+        return torch.Generator(device=device).manual_seed(seed)
+
     def _map_episode_manifold(
         self,
         z: torch.Tensor,
@@ -1096,6 +1110,18 @@ class SyntheticManifoldGenerator:
         device: torch.device,
     ) -> torch.Tensor:
         mode = self.manifold_mode
+        if mode == "mlp_bank":
+            bank_index = int(
+                torch.randint(
+                    self.manifold_bank_size,
+                    (),
+                    device=device,
+                    generator=generator,
+                ).item()
+            )
+            parameter_generator = self._manifold_bank_generator(bank_index, device)
+            weights, biases = self._sample_mlp(parameter_generator, device)
+            return self._map_to_manifold(z, weights, biases)
         parameter_generator = (
             self._manifold_generator(device) if mode == "shared_nonlinear" else generator
         )

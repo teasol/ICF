@@ -3349,3 +3349,27 @@ manifold의 `latent_dim`만 2/4/8/16으로 바꾼다. 기존 Hard L32 SEAL 0.687
 판정은 L32 대비 SEAL 10-task macro와 task별 방향으로 한다. 합성 val 지표는 checkpoint 선택에만
 쓰며 arm 판정 근거로 사용하지 않는다. 최고 arm이 L32보다 +0.005 이상이면 최고 arm과 L32의
 seed 반복으로 재현성을 확인한다.
+
+## 93. 2026-08-12 — Active: Hard fixed 3-layer MLP-bank sweep
+
+latent dimension 자체보다 latent를 관측 공간으로 보내는 nonlinear map family의 복잡도와 유한한
+재사용 횟수가 일반화를 좌우한다는 가설을 검증한다. Hard `[0.2,0.8]`, latent 32, v76 모델과
+학습 조건은 고정하고 manifold만 3-layer MLP bank로 변경한다. 한 episode의 모든 population과
+class에는 동일한 bank member가 적용된다.
+
+- arms: `M=128,512,1024,2048,4096`
+- 구현: `manifold_mode: mlp_bank`; `manifold_seed + 1,000,003 × bank_id`로 weight를 결정론적으로
+  재생성하므로 4096개 MLP를 메모리에 상주시켜 worker/DDP마다 복제하지 않는다.
+- configs: `configs/train_v76_hard_mlpbank{128,512,1024,2048,4096}_1536.yaml`
+- runner: `scripts/run_v76_hard_mlpbank_sweep.py`, GPU 0–3, arm별 4-GPU/50 epochs 후 validation-best
+  공식 SEAL 10-task 평가, 다섯 arm 순차 실행
+- artifacts: `checkpoints/20260812_v76_hard_mlpbank_sweep/`,
+  `logs/20260812_v76_hard_mlpbank_sweep/`, task tag `v76_hard_mlpbank{M}_best`
+- 검증: bank member replay/다양성/범위 assertion, 5개 config merge, py_compile, diff check 통과.
+  CUDA smoke는 `[6,32,1536]`, finite, output mean norm 1.0, peak 36.8 MiB였다.
+- 예상 시간: 기존 arm당 학습+평가 약 17분 기준 약 85분. nonlinear data generation overhead로
+  더 길어질 수 있으므로 첫 arm 실측 후 갱신한다.
+
+판정은 M별 SEAL 10-task macro와 task별 변화로 한다. 같은 bank에서의 synthetic validation은
+checkpoint 선택에만 쓰며 실제 일반화 판정은 unseen real SEAL task가 담당한다. 후속 실험에서
+필요하면 M=1과 fresh-per-episode(M≈∞), 별도 unseen synthetic bank를 control로 추가한다.

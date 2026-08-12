@@ -256,3 +256,13 @@ macro +0.0016이며 BAP1 +0.0147이 가장 크다.
 `checkpoints/20260811_172825/v74_cv_dd_ct_mlp_1pop_linear/epoch=049-val_ce_loss=0.1197.ckpt`,
 config는 `configs/train_v74_cv_dd_ct_mlp_1pop_linear_1536.yaml`, 평가 tag는
 `v74_ct_e49`다. arm 판정은 공식 10-task macro와 task별 regression을 함께 본다.
+
+## 10. Hard fixed nonlinear manifold-bank protocol (2026-08-12)
+
+`mlp_bank`는 latent 32를 `32→128→128→1536`의 3-layer MLP(GELU hidden activation)로
+mapping한다. bank 크기 M만 바꾸며 bank member는 `manifold_seed`와 member ID로 고정된다.
+episode마다 ID를 uniform sampling하고 episode 내부 모든 bag/population/class에 같은 map을 쓴다.
+M=128/512/1024/2048/4096을 각각 v76, Hard ClassSep, DDP4, bf16, 50 epochs로 학습하며,
+validation-best checkpoint 하나를 SEAL 10-task로 평가한다. MLP weight를 bank 전체로 저장하지
+않고 선택된 member만 deterministic regeneration하여 bank 크기에 따른 host/GPU memory 차이를
+제거한다.
