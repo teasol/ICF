@@ -24,7 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = "/home/aibio_3/miniconda3/envs/BagPFN/bin/python"
-CONFIG = "configs/train_v79_dual_projection_1536.yaml"
+CONFIG = "configs/archive/v79_dual_projection/train_v79_dual_projection_1536.yaml"
 RUN_ROOT = ROOT / "checkpoints/20260812_v79_dual_projection"
 LOG_ROOT = ROOT / "logs/20260812_v79_dual_projection"
 TAG = "v79_dual_projection_best"

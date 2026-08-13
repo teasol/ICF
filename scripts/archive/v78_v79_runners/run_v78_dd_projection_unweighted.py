@@ -1,14 +1,17 @@
-"""Train/evaluate v78 (DD quadratic-form gradient path) on GPUs 0-3.
+"""Train/evaluate v78 UNWEIGHTED (dd_projection_gradient_weight 1.0) on GPUs 0-3.
 
-v77 learns P only through the CV ridge while DD reads the covariance that same P
-produces. This arm lets DD shape P as well, with the rank-1 direction still held
-outside autograd -- see `_dd_direction` for why differentiating it is unsound.
+The balanced arm (weight 0.02) was a clean null vs v77 -- fold-paired delta -0.0004
+[-0.0021, +0.0013] (docs SS102-5). That leaves two readings: DD has nothing to add,
+or 0.02 throttled it to irrelevance. This removes the throttle, so DD's contribution
+to P's gradient runs at ~52x the CV ridge's and nearly orthogonal to it. Expect a
+loss; the value is bracketing the weight axis, not winning.
 
-Judgment is fold-paired delta + bootstrap CI against the v77 control, not a
-point-estimate macro difference (docs SS99):
+The rank-1 direction is still not differentiated -- see `_dd_direction`.
+
+Judgment is fold-paired delta + bootstrap CI against the v77 control (docs SS99):
 
     python scripts/compare_arms_paired.py \
-      --baseline v76_classsep_hard_best --arm v78_dd_projection_best
+      --baseline v76_classsep_hard_best --arm v78_dd_projection_unweighted_best
 """
 
 from __future__ import annotations
@@ -20,10 +23,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = "/home/aibio_3/miniconda3/envs/BagPFN/bin/python"
-CONFIG = "configs/train_v78_dd_projection_1536.yaml"
-RUN_ROOT = ROOT / "checkpoints/20260812_v78_dd_projection"
-LOG_ROOT = ROOT / "logs/20260812_v78_dd_projection"
-TAG = "v78_dd_projection_best"
+CONFIG = "configs/archive/v78_dd_gradient/train_v78_dd_projection_unweighted_1536.yaml"
+RUN_ROOT = ROOT / "checkpoints/20260812_v78_dd_projection_unweighted"
+LOG_ROOT = ROOT / "logs/20260812_v78_dd_projection_unweighted"
+TAG = "v78_dd_projection_unweighted_best"
 GPUS = (0, 1, 2, 3)
 TASKS = (
     "bc_therapy/er_status", "bc_therapy/grade", "bc_therapy/her2_status",
@@ -50,7 +53,7 @@ def main() -> None:
     LOG_ROOT.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, GPUS))
-    print(f"=== TRAIN START v78_dd_projection GPUs={GPUS}", flush=True)
+    print(f"=== TRAIN START v78_dd_projection_unweighted GPUs={GPUS}", flush=True)
     with (LOG_ROOT / "train.out").open("w") as output:
         subprocess.run(
             [PYTHON, "scripts/train.py", "--config", CONFIG,
@@ -70,7 +73,7 @@ def main() -> None:
     codes = [worker.wait() for worker in workers]
     if any(codes):
         raise RuntimeError(f"SEAL evaluation failed: {codes}")
-    print("=== EVAL END v78_dd_projection", flush=True)
+    print("=== EVAL END v78_dd_projection_unweighted", flush=True)
 
 
 if __name__ == "__main__":

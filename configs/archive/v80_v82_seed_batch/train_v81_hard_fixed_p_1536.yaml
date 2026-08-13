@@ -1,45 +1,43 @@
-# CANONICAL BASELINE (2026-08-13, user decision SS107): v82 Medium ClassSep
-# [0.5,1.4] + fresh orthogonal manifold, single-GPU layout, judged at 4 seeds.
+# ARCHIVED (docs SS107, 2026-08-13): rejected arm, kept only as reproduction
+# evidence. Inlined self-contained per agent_handoff SS7.3 -- no base_config, so this
+# file stays loadable no matter what moves in configs/. Verified byte-identical to
+# the chained form via merge_train_config output sha256.
 #
-# Official number: SEAL 10-task macro 0.6835 = mean over SEED 42/43/44/45 at
-# epoch 49 (0.6846 / 0.6870 / 0.6821 / 0.6802), seed std 0.0029.
-# checkpoints: checkpoints/20260813_v82_medium_seeds/seed4{2..5}/
-# tags:        v82_medium_seed4{2..5}_ep49
+# The judging regime moved to 1-GPU x 4 seeds against the v82 Medium baseline
+# (docs SS107). Numbers from this arm predate or belong to that transition -- read
+# its section before reusing them.
 #
-# Why this replaced v77 Hard (SS106): with all four arms finally in one regime,
-# Medium beats Hard by +0.0053 seed-paired (4/4 seeds positive, t=3.0). The
-# earlier "Hard is optimal" came from a single-seed sweep whose Medium row was a
-# transcription error (SS91 -> SS105-3), and the corrected tie (+0.0001) was
-# itself inside the noise. v77's own 4-seed mean in this layout is 0.6781.
+# v81: v77 with the learnable projection replaced by the fixed one. Nothing else moves.
 #
-# Why 1-GPU is the judging regime (user decision SS107): the 4-seed evidence
-# exists here and nowhere else. DDP4 has one seed per arm, which cannot resolve
-# a 0.005 effect against a 0.003-0.005 seed std. This layout scores about
-# -0.0098 lower than DDP4 in absolute terms (SS106-4), so DDP4-era numbers --
-# v77 0.6880, v41_K128 0.6940 -- are NOT comparable to numbers from this config.
-# Judge arms only against 1-GPU 4-seed controls scored the same way.
+# Why this arm exists (SS105-4): the v74 -> v76 promotion that introduced the
+# learnable P was measured at +0.0004 [-0.0030, +0.0038] once both arms were
+# scored at epoch 49 -- indistinguishable. So "learnable P beats fixed P" is
+# unmeasured, and it sits at the root of the whole v74 -> v76 -> v77 lineage. If
+# it is false, the lineage should fall back to fixed P, where v41_K128 still
+# holds the all-time best 0.6940 on 229 parameters.
 #
-# SELF-CONTAINED: the former base chain
-#   v82_1gpu -> v82 -> v77 -> v76_classsep_hard -> v76_cv_learnable_p_dd_ct_mlp
-#             -> v74 -> v70 -> v69
-# is inlined so the canonical baseline stands alone no matter what gets archived
-# (agent_handoff SS7.1/SS7.3, the treatment v34 and v77 each got). The merged
-# result is byte-identical to the chained form -- verified by comparing
-# merge_train_config output hashes before and after
-# (sha256 1b9ed13aec4b60ed78525e06b1874db05143b1d44bf54801fd954aab38335cc5).
+# The old comparison also confounded difficulty: v74 (fixed P) ran at ClassSep
+# [1.0,2.0] while v77 (learnable P) runs at Hard [0.2,0.8]. The Hard x fixed-P
+# cell has never been run. This is that cell.
 #
-# Promotion is of the experiment/data baseline, not the tensor graph: the model
-# keeps internal architecture_version=54 and 197,057 trainable parameters, so
-# v77 checkpoints strict-load against this arm unchanged. Only class_separation
-# differs from v77.
+# Mechanism: v77's class (CovarianceMeanLearnablePDDCTMLPModel) pops the
+# _covariance_projection buffer and re-registers it as an nn.Parameter, then
+# re-orthonormalizes it every forward via QR. Its parent
+# (CovarianceMeanDDCTMLPModel = v74's class) keeps the same matrix as a
+# persistent=False buffer. That buffer is already orthonormal -- it is
+# QR(sin/cos directions).Q built deterministically from covariance_slopes -- and
+# it is exactly what v77's P is initialized to. So switching model_src to the
+# parent freezes P at v77's initialization and changes nothing else: same K=128
+# subspace family, same DD, same CT, same 12 -> 32 -> 1 head, same data.
 #
-# Seeds come from the launcher's SEED env var. The training dataset keeps
-# seed: null (episode_dataset: true) while val/test stay pinned at 50042/60042,
-# so every seed is validated and tested on identical episodes.
+# trainable: head only, 449 parameters (v77 is 197,057). DD and CT stay
+# training-free, and there is no learnable P for a DD gradient to reach, so
+# train_dd_projection is not applicable here.
 #
-# WARNING: val_ce is NOT comparable to v77's 0.1717 -- an easier ClassSep lowers
-# the loss on its own. Judgment is SEAL macro only, epoch 49, seed-paired across
-# 4 seeds (scripts/compare_arms_paired.py per seed, docs SS99/SS107).
+# architecture_version drops to v74's value, so this does NOT strict-load a v77
+# checkpoint -- it is trained from scratch, same 50 epochs, same schedule.
+# Judgment: fold-paired delta + bootstrap CI against a v77 arm run in the SAME
+# device layout, seed for seed (SS104-3, SS105-4).
 seed: 42
 ckpt_path: null
 data:
@@ -77,8 +75,8 @@ data:
     mlp_hidden_dim: 96
     mlp_num_layers: 3
     class_separation:
-    - 0.5
-    - 1.4
+    - 0.2
+    - 0.8
     latent_scale:
     - 0.6
     - 1.3
@@ -133,7 +131,7 @@ data:
     episodes_per_epoch: 104
     seed: 60042
 model:
-  model_src: src.models.set_transformer_ridge.CovarianceMeanLearnablePDDCTMLPModel
+  model_src: src.models.set_transformer_ridge.CovarianceMeanDDCTMLPModel
   input_dim: 1536
   token_dim: 16
   num_heads: 1
@@ -186,12 +184,12 @@ scheduler:
 trainer:
   max_epochs: 50
   precision: bf16-mixed
-  devices: 1
-  strategy: auto
+  devices: 4
+  strategy: ddp_find_unused_parameters_false
 logger:
   name: csv
   save_dir: logs
-  experiment_name: v82_medium_classsep
+  experiment_name: v81_hard_fixed_p
 callbacks:
   checkpoint:
     enabled: true

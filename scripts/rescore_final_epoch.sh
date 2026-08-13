@@ -28,9 +28,9 @@ TASKS=(bc_therapy/er_status bc_therapy/grade bc_therapy/her2_status
 # tag | checkpoint glob | config
 JOBS=(
 "v76_hard_ridge_calibration_ep49|checkpoints/20260812_v76_hard_ridge_calibration/periodic-epoch=049-*.ckpt|$ARCH/train_v76_hard_ridge_calibration_1536.yaml"
-"v78_dd_projection_ep49|checkpoints/20260812_v78_dd_projection/periodic-epoch=049-*.ckpt|configs/train_v78_dd_projection_1536.yaml"
-"v78_dd_projection_unweighted_ep49|checkpoints/20260812_v78_dd_projection_unweighted/periodic-epoch=049-*.ckpt|configs/train_v78_dd_projection_unweighted_1536.yaml"
-"v79_dual_projection_ep49|checkpoints/20260812_v79_dual_projection/periodic-epoch=049-*.ckpt|configs/train_v79_dual_projection_1536.yaml"
+"v78_dd_projection_ep49|checkpoints/20260812_v78_dd_projection/periodic-epoch=049-*.ckpt|configs/archive/v78_dd_gradient/train_v78_dd_projection_1536.yaml"
+"v78_dd_projection_unweighted_ep49|checkpoints/20260812_v78_dd_projection_unweighted/periodic-epoch=049-*.ckpt|configs/archive/v78_dd_gradient/train_v78_dd_projection_unweighted_1536.yaml"
+"v79_dual_projection_ep49|checkpoints/20260812_v79_dual_projection/periodic-epoch=049-*.ckpt|configs/archive/v79_dual_projection/train_v79_dual_projection_1536.yaml"
 "v76_hard_latent2_ep49|checkpoints/20260812_v76_hard_latent_sweep/latent2/periodic-epoch=049-*.ckpt|$ARCH/train_v76_hard_latent2_1536.yaml"
 "v76_hard_latent4_ep49|checkpoints/20260812_v76_hard_latent_sweep/latent4/periodic-epoch=049-*.ckpt|$ARCH/train_v76_hard_latent4_1536.yaml"
 "v76_hard_latent8_ep49|checkpoints/20260812_v76_hard_latent_sweep/latent8/periodic-epoch=049-*.ckpt|$ARCH/train_v76_hard_latent8_1536.yaml"
