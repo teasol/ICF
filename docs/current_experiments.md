@@ -120,6 +120,7 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 | **v83 linear head** | (**활성 baseline**, §109) | **0.6880** | 0.0074 | head `12→32→1`(GELU) → `Linear(12,1)`, tags `v83_linear_head_seed4{2..5}_ep49` |
 | v82 Medium | head `Linear(12,1)` → `12→32→1`(GELU) | 0.6835 | 0.0029 | v83 기준 −0.0045 (t≈−1.15, 3/4) **미판정** — 직전 baseline(§107) |
 | v84 deep head | head `12→32→1`(GELU) → `12→32→32→1`(GELU×2) | 0.6777 | 0.0018 | v82 기준 −0.0057 (t=−3.63, 4/4) / v83 기준 −0.0102 (t=−3.61, 4/4) **기각, 양쪽** (§110) |
+| v86 noise | `observation_noise` 0.005 → 0.01 (데이터만) | 0.6884 | 0.0072 | v83 기준 +0.0004 (t=0.71, 3/4) **완전 무효과(null)** — §105-6 옛 레버 재현 안 됨 (§112) |
 | v77 Hard | ClassSep `[0.5,1.4]` → `[0.2,0.8]` (v82 기준) | 0.6781 | 0.0053 | v82 기준 −0.0053 (t=−3.0, 4/4) |
 | v81 fixed P | learnable P → fixed P (197,057 → 449, v77 기준) | 0.6734 | 0.0018 | Hard 기준 −0.0048 (t=−1.5) **미판정** |
 | v80 shallow MLP | orthogonal manifold → shallow MLP (v77 기준) | 0.6722 | 0.0051 | Hard 기준 −0.0059 (t=−2.7) **기각** |
@@ -239,6 +240,11 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
    재기획 중이다.
 4c. ~~**relation head 깊이 축**~~ **해소됨 (§110)**: v84(심화)가 양쪽 baseline 기준 모두 4/4 +
    |t|>3.6으로 기각됐다. §108(얕게, 미판정)과 종합해 이 축은 소진 — 더 파지 말 것.
+4d. ~~**noise 축 재검증**~~ **해소됨, null (§112)**: `observation_noise` 0.005→0.01은 v83 기준
+   +0.0004(t=0.71, 3/4)로 완전 무효과. §105-6의 옛 +0.0104는 재현 안 됨 — 이 값에서는 더 파지
+   말 것(더 큰 step은 별도 판단).
+4e. **rare 축 재검증 (다음)** — §105-6에서 noise와 비슷한 크기(+0.0103)였다. `rare_response_probability`
+   0.0→0.15(옛 스윕과 동일 스텝)로 v83 기준 재측정할 계획.
 5. **병목이 표현이 아닐 가능성** — CV-1 단독 0.9052 vs 전체 0.9199. 그 위에 얹은 모든
    시도(v36·v37·v42·v43·v44·v45)가 Δ≈0이었다. task 자체의 정보 한계일 수 있다.
 6. **새 합성 cardinality arm** — 기본 데이터가 bag별 독립 cell 수 + zero-padding/mask로

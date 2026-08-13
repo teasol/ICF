@@ -1,8 +1,9 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-13` (§111 — **§107-6(fixed P × Medium, v85) 취소**, 사용자 결정, 새 실험
-재기획 중; §110 — **v84 deep-head 기각**으로 relation head 깊이 축 마감; §109 — **baseline을
-v83 linear head로 승격**, §107-3 판정 게이트 미달 상태에서의 사용자 결정)
+**Last updated**: `2026-08-13` (§112 — **v86 noise 재검증 null** — §105-6의 옛 노이즈 레버가
+현재 baseline/레짐에서 재현되지 않음; §111 — **§107-6(fixed P × Medium, v85) 취소**, 사용자 결정;
+§110 — **v84 deep-head 기각**으로 relation head 깊이 축 마감; §109 — **baseline을 v83 linear
+head로 승격**, §107-3 판정 게이트 미달 상태에서의 사용자 결정)
 
 > [!IMPORTANT]
 > **활성 baseline은 v83 linear head(§109)이고 공식 SEAL 10-task macro는 1-GPU 4 seed 평균 0.6880이다.**
@@ -1600,6 +1601,58 @@ config는 한 번도 실행되지 않은 채 리포에서 삭제했다(재현 �
 `configs/archive/`로 옮기지 않고 그냥 지웠다 — v84처럼 실행 후 기각된 arm과는 다르다).
 
 **바뀌는 것**: §107-6은 더 이상 열린 과제가 아니다. §107이 남긴 다른 열린 항목(learnable P
-미판정 §107-8, CV/DD·사영 배선 축 소진 §103-5)은 이 취소와 무관하게 그대로 유지된다.
+미판정 §107-8, CV/DD·사영 축 소진 §103-5)은 이 취소와 무관하게 그대로 유지된다.
 
-**다음**: 새 실험 방향을 재기획한다 — 아직 미정.
+**다음**: 데이터 생성기 축(§105-6이 남겨둔 noise/rare 레버)을 재기획한다 — §112.
+
+## 112. 2026-08-13 — v86 noise 재검증: 옛 효과가 재현되지 않는다 (null)
+
+_Recorded by: nhn-NEXGEM-claude — 2026-08-13 20:23_
+
+**질문**: §105-6 axis sweep(2026-08-12, DDP4 1seed, 옛 v74/v76-era baseline 0.6735)에서
+`observation_noise: 0.005 → 0.01`(관측 노이즈 2배)이 **+0.0104**로 ClassSep 조이기(+0.0146)와
+비슷한 크기의 레버였다. 그 이후 재확인도, 현재 baseline·레짐으로의 이관도 없이 방치돼 있었다 —
+이 arm이 그 gap을 메운다.
+
+**메커니즘** (`src/datasets/synthetic_data.py`): manifold로 만든 cell embedding에
+`x = x + observation_noise * randn_like(x)`로 순수 가우시안 노이즈를 더한다(정규화 직전).
+`class_separation`(class-conditional 평균 간 거리)과는 독립적인 축이다.
+
+**변경**: v83 기준 `observation_noise` 0.005 → 0.01만 바꿈(옛 스윕과 동일한 스텝). 모델·head·P는
+v83과 byte-identical(architecture_version=54, trainable 196,621) — 데이터만 다르다.
+
+**산출물**:
+```
+config: configs/train_v86_noise_1536_1gpu.yaml   (self-contained)
+ckpts:  checkpoints/20260813_191148/v86_noise_seed4{2..5}/  (epoch 49)
+tags:   v86_noise_seed4{2..5}_ep49
+macro:  0.6896 / 0.6902 / 0.6775 / 0.6962  →  mean 0.6884, seed std 0.0072
+```
+
+**baseline(v83, 0.6905/0.6896/0.6774/0.6944, mean 0.6880) 대비 seed-paired Δ**:
+
+| seed | v83 | v86 | Δ(v86−v83) |
+|---|---:|---:|---:|
+| 42 | 0.6905 | 0.6896 | −0.0009 |
+| 43 | 0.6896 | 0.6902 | +0.0006 |
+| 44 | 0.6774 | 0.6775 | +0.0001 |
+| 45 | 0.6944 | 0.6962 | +0.0018 |
+| 평균 | 0.6880 | 0.6884 | **+0.0004** |
+
+SD(Δ) ≈ 0.0011, SE ≈ 0.0006, **t ≈ 0.71**. 3/4 시드만 양수.
+
+**판정 (§107-3 기준)**: **완전 무효과(null)** — 미판정보다 더 명확하다. 4/4 부호 일치도 못
+채우고 `|t|`가 게이트(2.5)의 3분의 1에도 못 미친다. §105-6의 +0.0104는 **지금 baseline·레짐에서
+재현되지 않는다.**
+
+**해석**: 두 가능성이 있다 — ① 그 옛 결과 자체가 DDP4 단일 시드의 요행이었을 가능성(realization
+노이즈 ≈0.005 규모를 감안하면 +0.0104는 이례적으로 크긴 하지만 n=1이라 배제 못 함), ② 그때
+baseline(ClassSep `[1.0,2.0]`, GELU head, 다른 response 파라미터 조합)과 지금 baseline(v83,
+ClassSep `[0.5,1.4]`, linear head)이 달라 레버 자체가 baseline-dependent일 가능성. 어느 쪽이든
+**observation_noise 0.005→0.01 스텝은 현재 baseline에서 쓸 수 있는 레버가 아니다.**
+
+**바뀌지 않는 것**: v83 baseline·판정 레짐은 그대로다. §105-6의 나머지 축(rare, response,
+classsep)에 대한 재검증 여부는 각각 별도로 판단할 것 — 이 null이 그것들의 재현성까지 부정하지
+않는다.
+
+**다음**: rare 축(§105-6에서 +0.0103, noise와 비슷한 크기) 재검증을 계획 중이다.
