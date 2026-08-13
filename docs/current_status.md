@@ -1,9 +1,9 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-13` (§112 — **v86 noise 재검증 null** — §105-6의 옛 노이즈 레버가
-현재 baseline/레짐에서 재현되지 않음; §111 — **§107-6(fixed P × Medium, v85) 취소**, 사용자 결정;
-§110 — **v84 deep-head 기각**으로 relation head 깊이 축 마감; §109 — **baseline을 v83 linear
-head로 승격**, §107-3 판정 게이트 미달 상태에서의 사용자 결정)
+**Last updated**: `2026-08-13` (§113 — **v87 rare 재검증도 null**, VHL/BAP1 타겟 가설도 반증 —
+데이터 생성기 축(noise·rare) 소진; §112 — **v86 noise 재검증 null**; §111 — **§107-6(fixed P ×
+Medium, v85) 취소**, 사용자 결정; §110 — **v84 deep-head 기각**으로 relation head 깊이 축 마감;
+§109 — **baseline을 v83 linear head로 승격**, §107-3 판정 게이트 미달 상태에서의 사용자 결정)
 
 > [!IMPORTANT]
 > **활성 baseline은 v83 linear head(§109)이고 공식 SEAL 10-task macro는 1-GPU 4 seed 평균 0.6880이다.**
@@ -1656,3 +1656,69 @@ classsep)에 대한 재검증 여부는 각각 별도로 판단할 것 — 이 n
 않는다.
 
 **다음**: rare 축(§105-6에서 +0.0103, noise와 비슷한 크기) 재검증을 계획 중이다.
+
+## 113. 2026-08-13 — v87 rare 재검증: 역시 재현 안 됨, 타겟 task(VHL/BAP1)도 무효 (null)
+
+_Recorded by: nhn-NEXGEM-claude — 2026-08-13 21:37_
+
+**질문**: §112(v86, noise)와 짝을 이루는 arm. §105-6에서 `rare_response_probability: 0.0 → 0.15`가
++0.0103으로 noise와 비슷한 크기였다. noise와 달리 rare는 실제로 지금 깨져 있는 두 task —
+**cptac_ccrcc VHL(랜덤 이하)**과 **BAP1(large-bag에서만 붕괴)** — 와 메커니즘이 맞아떨어질
+가능성이 있었다: 둘 다 "신호를 가진 세포가 소수"인 상황에서 못 찾는 패턴이고,
+`rare_response_probability`는 정확히 그 상황(반응 세포 비율 1~8%)을 훈련에 주입한다.
+
+**메커니즘** (`src/datasets/synthetic_data.py`): 에피소드별로 `rare_response_probability`
+확률로 반응 세포 비율을 `shared_component_fraction`(기본, ~4~18%) 대신
+`rare_response_fraction`(0.01~0.08, 1~8%)에서 뽑는다. 0.15면 학습 에피소드 약 7개 중 1개가
+이 극소수-신호 모드로 생성된다.
+
+**변경**: v83 기준 `rare_response_probability` 0.0 → 0.15만 바꿈(옛 스윕과 동일 스텝). 모델·head·P는
+v83과 byte-identical(architecture_version=54, trainable 196,621) — 데이터만 다르다.
+
+**산출물**:
+```
+config: configs/train_v87_rare_1536_1gpu.yaml   (self-contained)
+ckpts:  checkpoints/20260813_203144/v87_rare_seed4{2..5}/  (epoch 49)
+tags:   v87_rare_seed4{2..5}_ep49
+macro:  0.6872 / 0.6904 / 0.6802 / 0.6887  →  mean 0.6866, seed std 0.0043
+```
+
+**baseline(v83, 0.6905/0.6896/0.6774/0.6944, mean 0.6880) 대비 seed-paired Δ (macro)**:
+
+| seed | v83 | v87 | Δ(v87−v83) |
+|---|---:|---:|---:|
+| 42 | 0.6905 | 0.6872 | −0.0033 |
+| 43 | 0.6896 | 0.6904 | +0.0008 |
+| 44 | 0.6774 | 0.6802 | +0.0028 |
+| 45 | 0.6944 | 0.6887 | −0.0057 |
+| 평균 | 0.6880 | 0.6866 | **−0.0013** |
+
+SD(Δ) ≈ 0.0037, SE ≈ 0.0018, **t ≈ −0.70**. 2/4만 부호 일치.
+
+**타겟 task 개별 확인 (VHL, BAP1)** — macro가 안 움직여도 이 둘은 따로 좋아질 수 있다는 가설을
+직접 검정:
+
+| seed | VHL v83 | VHL v87 | Δ | BAP1 v83 | BAP1 v87 | Δ |
+|---|---:|---:|---:|---:|---:|---:|
+| 42 | 0.4699 | 0.4589 | −0.0110 | 0.6246 | 0.6021 | −0.0225 |
+| 43 | 0.4142 | 0.4222 | +0.0080 | 0.6619 | 0.6678 | +0.0059 |
+| 44 | 0.4374 | 0.4301 | −0.0073 | 0.6082 | 0.6396 | +0.0314 |
+| 45 | 0.4224 | 0.4090 | −0.0134 | 0.6795 | 0.6727 | −0.0068 |
+| 평균 | 0.4360 | 0.4300 | **−0.0059** (t≈−1.23, 1/4) | 0.6436 | 0.6455 | **+0.0020** (t≈0.18, 2/4) |
+
+**판정 (§107-3 기준)**: **완전 무효과(null)**, macro도 타겟 task도. macro는 4/4는커녕 2/4
+부호 일치에 `|t|`가 게이트의 4분의 1 수준이다. **VHL은 오히려 약하게 반대 방향**(1/4만 양수) —
+rare-episode 학습이 VHL을 돕는다는 가설과 맞지 않는다. BAP1은 seed마다 부호·크기가 요동해
+방향성 자체가 없다(−0.0225~+0.0314).
+
+**해석**: §112(noise)와 같은 결론 — §105-6 축 스윕의 효과들이 지금 baseline(v83)·레짐에서
+재현되지 않는다. rare의 경우 추가로, **VHL/BAP1의 실패가 "훈련 데이터에 rare-abundance 신호가
+부족해서"라는 가설도 반증됐다** — 이 메커니즘으로는 두 task를 못 고친다. 두 task의 실패는
+데이터 생성기 축이 아니라 다른 원인(레이블 자체, 코호트 특성, 구조적 문제)일 가능성이 높다.
+
+**바뀌지 않는 것**: v83 baseline·판정 레짐은 그대로다. §105-6의 남은 축(response, classsep)은
+이 두 null과 별개로 각자 판단할 것 — 다만 classsep은 이미 baseline에 반영돼 있어 재검증 대상이
+아니다(§107).
+
+**다음**: 데이터 생성기 축(noise·rare)은 여기서 소진으로 본다. VHL/BAP1 문제는 별도 조사가
+필요하다 — 다음 실험 방향은 재기획 중.
