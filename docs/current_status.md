@@ -1722,3 +1722,91 @@ rare-episode 학습이 VHL을 돕는다는 가설과 맞지 않는다. BAP1은 s
 
 **다음**: 데이터 생성기 축(noise·rare)은 여기서 소진으로 본다. VHL/BAP1 문제는 별도 조사가
 필요하다 — 다음 실험 방향은 재기획 중.
+
+## 114. 2026-08-14 — v88 PA(label-conditioned population branch): 명확히 기각, VHL/BAP1도 개선 없음
+
+_Recorded by: nhn-NEXGEM-claude — 2026-08-14 02:11_
+
+**질문**: 지금까지의 relation source는 전부 **per-cell 레이블을 fit에 넣지 않는다** — CV는 bag
+descriptor 위의 ridge, DD는 label-free 분산 방향, CT는 label-free farthest-point 토큰을 뽑아
+**그 다음에** 레이블로 점수만 매긴다. §65가 "미검정 레버"로 남겨둔 마지막 항목이 그것,
+즉 **support 레이블을 보고 "이 population이 0/1을 가르는 데 중요한가"를 직접 학습**하는 분기다.
+v88(PA, population attention)은 그 분기를 처음으로 구현한 arm이다.
+
+**메커니즘** (`CovarianceMeanLearnablePDDCTPAMLPModel`, architecture_version=57):
+1. context bag마다 `pa_cells_per_bag: 64` 세포를 샘플하고, **각 세포에 자기 bag의 레이블을
+   상속**시킨다 — 노이즈 레이블이다(대부분의 세포는 공유 배경이고 소수만 판별적이다).
+2. 그 세포 전체에 대해 **한 번의 ridge 회귀**를 풀어 방향 `w`와 절편을 얻는다
+   (`_pa_cell_direction`, `solve_ridge_system`). "세포 하나를 이 축에 투영하면 label-1스러움
+   점수가 나온다"는 축이다.
+3. bag마다 **양쪽 방향의 soft abundance를 독립적으로** 잰다 —
+   `abundance1 = sigmoid((z−τ)/T).mean()`, `abundance0 = sigmoid((−z−τ)/T).mean()`.
+   ⚠️ 초기 설계는 같은 signed 축의 top-k-mean/bottom-k-mean이었는데, 그 둘은 거의 서로의
+   거울상이어서 심어놓은 신호를 **우연 수준(8/16)으로만** 잡아냈다. 독립 abundance로 바꾼 뒤
+   90~100%가 됐다(`tests/test_population_attention.py::PopulationAttentionAliveTest`).
+   §62-2가 역사적으로 죽였던 population attention의 실패 모드와 **정확히 같은 종류**다.
+4. 기존 12개 feature에 (PA0, PA1, PA1−PA0, SEP_PA) 4개가 붙어 head가 16-wide로 재구성된다.
+   PA 계산 자체는 CT/DD와 마찬가지로 training-free(`no_grad`)고, 학습되는 건 P(196,608)와
+   head(577)뿐 — **trainable 197,185**.
+
+**GPU를 쓰기 전에 구현 버그 3개를 자체 테스트로 잡았다** (이게 이 절의 부수적 성과다):
+- P의 gradient가 `None`이었다 — 내 freeze 루프가 부모가 learnable로 만든 `_covariance_projection`을
+  다시 얼렸다. 해제 후 정상(§100 계약).
+- 위의 top/bottom-k-mean 설계 결함(우연 수준).
+- `train_dd_projection=True` 경로가 PA의 무조건 `no_grad` 안에 갇혀 조용히 죽었다 — scoping
+  수정 + regression 테스트 추가.
+
+**산출물**:
+```
+model:  src/models/set_transformer_ridge.py  CovarianceMeanLearnablePDDCTPAMLPModel (arch=57)
+tests:  tests/test_population_attention.py   (9 tests, 전부 통과)
+config: configs/train_v88_population_attention_1536_1gpu.yaml   (self-contained)
+ckpts:  checkpoints/20260813_224003/v88_population_attention_seed4{2..5}/  (epoch 49)
+tags:   v88_population_attention_seed4{2..5}_ep49
+macro:  0.6803 / 0.6782 / 0.6700 / 0.6790  →  mean 0.6769, seed std 0.0047
+```
+⚠️ v83 checkpoint와 **strict-load 불가**(head 12 vs 16 in_features, arch 54 vs 57).
+
+**baseline(v83, mean 0.6880) 대비 seed-paired Δ (macro)**:
+
+| seed | v83 | v88 | Δ(v88−v83) |
+|---|---:|---:|---:|
+| 42 | 0.6905 | 0.6803 | −0.0102 |
+| 43 | 0.6896 | 0.6782 | −0.0114 |
+| 44 | 0.6774 | 0.6700 | −0.0074 |
+| 45 | 0.6944 | 0.6790 | −0.0154 |
+| 평균 | 0.6880 | 0.6769 | **−0.0111** |
+
+SD(Δ) ≈ 0.0033, SE ≈ 0.0017, **t ≈ −6.69**, **4/4 시드 부호 일치**.
+
+**타겟 task 개별 확인 (VHL, BAP1)** — PA를 만든 동기가 "소수 population을 못 찾아서 깨지는
+두 task"였으므로 §113과 같은 방식으로 직접 검정:
+
+| seed | VHL v83 | VHL v88 | Δ | BAP1 v83 | BAP1 v88 | Δ |
+|---|---:|---:|---:|---:|---:|---:|
+| 42 | 0.4699 | 0.4267 | −0.0432 | 0.6246 | 0.6308 | +0.0062 |
+| 43 | 0.4142 | 0.4408 | +0.0266 | 0.6619 | 0.6368 | −0.0251 |
+| 44 | 0.4374 | 0.3657 | −0.0717 | 0.6082 | 0.6051 | −0.0031 |
+| 45 | 0.4224 | 0.3946 | −0.0278 | 0.6795 | 0.6209 | −0.0586 |
+| 평균 | 0.4360 | 0.4070 | **−0.0290** (t≈−1.41, 1/4) | 0.6436 | 0.6234 | **−0.0202** (t≈−1.40, 1/4) |
+
+**판정 (§107-3 기준)**: **기각**. macro가 4/4 부호 일치 + |t|=6.69로 게이트를 기각 방향으로
+확실히 넘는다 — 이 세션에서 관측된 가장 강한 기각이다(v84의 |t|=3.61보다 크다). 타겟 task
+쪽은 게이트에 미달해 확정 판정은 아니지만 **둘 다 1/4만 양수로 방향이 가설과 반대**다.
+
+**해석**: PA는 죽지 않았다 — 합성 planted-signal 테스트에서 90~100%로 신호를 잡는다. 그런데
+실제 SEAL에서는 head에 **노이즈만 추가한** 셈이 됐다. 두 가지로 읽을 수 있다: (a) 12개
+CV/DD/CT feature가 이미 이 정보를 담고 있어 4개가 중복·잡음으로만 작용, (b) bag 레이블을
+세포에 상속시키는 근사가 실제 데이터에서는 신호 대비 노이즈가 너무 크다(합성 데이터는
+판별 세포 비율이 깨끗하게 심어져 있지만 실제 코호트는 그렇지 않다). 어느 쪽이든 **"레이블을
+fit에 직접 넣는" 축은 이 형태로는 안 된다**.
+
+**추가로 확정된 것**: VHL/BAP1의 실패는 §113(rare 데이터 주입)으로도, §114(레이블 조건
+population 분기)로도 고쳐지지 않는다. "소수 판별 population을 못 찾아서"라는 **메커니즘 가설이
+두 방향에서 반증**됐다 — 원인은 표현/구조가 아니라 레이블·코호트 쪽일 가능성이 더 커졌다.
+
+**바뀌지 않는 것**: baseline은 v83(0.6880), 판정 레짐도 §107-3 그대로다. v88 코드는 기각됐지만
+**삭제하지 않고 남긴다** — 테스트가 §62-2 실패 모드에 대한 살아있는 probe 역할을 하고,
+"레이블 조건 분기를 이미 해봤다"는 음성 결과의 근거이기 때문이다.
+
+**다음**: §65의 미검정 레버가 이걸로 소진됐다. 남은 방향은 재기획이 필요하다.

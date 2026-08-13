@@ -15,18 +15,23 @@
 > 여러 노드가 같은 공유 문서에 동시에 쓸 수 있어서, 서명이 없으면 어느 항목을 어느 노드가
 > 기록했는지 구분할 수 없다.
 
-**Last updated**: `2026-08-13` — 활성 baseline은 **v83 linear head**(relation head를 32-hidden GELU에서 bare `Linear(12,1)`로 축소)이고 공식 SEAL macro는 **1-GPU 4 seed 평균 0.6880**다(§109, **사용자 결정 — §107-3 판정 게이트 미달**). v82 대비 seed-paired Δ는 +0.0045, t≈1.15로 **4/4 시드 부호 일치도 |t|≥2.5도 충족하지 못한 채 승격**됐다(§108). §108의 반대 방향인 **v84(head를 `12→32→32→1`로 심화)는 §110에서 양쪽 baseline(v82·v83) 기준 모두 명확히 기각**됐다(4/4 시드, |t|>3.6) — relation head 깊이 축은 이걸로 소진이다. §107-6(fixed P × Medium)은 **취소**됐다(§111, 사용자
+**Last updated**: `2026-08-14` (nhn-NEXGEM-claude 02:11) — 활성 baseline은 **v83 linear head**(relation head를 32-hidden GELU에서 bare `Linear(12,1)`로 축소)이고 공식 SEAL macro는 **1-GPU 4 seed 평균 0.6880**다(§109, **사용자 결정 — §107-3 판정 게이트 미달**). v82 대비 seed-paired Δ는 +0.0045, t≈1.15로 **4/4 시드 부호 일치도 |t|≥2.5도 충족하지 못한 채 승격**됐다(§108). §108의 반대 방향인 **v84(head를 `12→32→32→1`로 심화)는 §110에서 양쪽 baseline(v82·v83) 기준 모두 명확히 기각**됐다(4/4 시드, |t|>3.6) — relation head 깊이 축은 이걸로 소진이다. §107-6(fixed P × Medium)은 **취소**됐다(§111, 사용자
 결정 — 한 번도 실행되지 않은 채 config 삭제). 데이터 생성기 축 재검증으로 넘어가 **v86(observation_noise
 0.005→0.01)과 v87(rare_response_probability 0.0→0.15)을 v83 기준으로 재측정한 결과 둘 다 완전
 무효과**였다(v86: +0.0004 t=0.71 3/4 — §112; v87: −0.0013 t=−0.70 2/4 — §113). §105-6의 옛
 +0.0104/+0.0103은 지금 baseline/레짐에서 재현되지 않는다. v87은 추가로 VHL/BAP1 개별 확인까지
 했으나 "rare 학습이 두 task를 돕는다"는 가설도 반증됐다(VHL은 오히려 약한 반대 방향). **noise·rare
-축은 여기서 소진** — 새 실험 방향은 재기획 중이다. 직전 baseline **v82 Medium**(1-GPU 4 seed
-0.6835)은 historical. ⚠️ v83의
+축은 여기서 소진**이다. 그 다음으로 §65가 남겨둔 마지막 미검정 레버 — **support 레이블을 fit에
+직접 넣는 population 분기(v88 PA, arch 57)** — 를 구현해 검정했고 **명확히 기각**됐다(§114):
+v83 기준 Δ **−0.0111**, **t=−6.69**, **4/4 시드** — 이 레짐에서 관측된 가장 강한 기각이다.
+분기 자체는 죽지 않았고(합성 planted-signal 90~100%) 실제 데이터에서 노이즈로만 작용했다.
+VHL/BAP1도 각각 −0.0290/−0.0202로 동기가 반증돼, §113과 합쳐 **"VHL/BAP1은 소수 population
+탐지 실패 때문"이라는 가설이 두 방향에서 반증**됐다. 새 실험 방향은 재기획 중이다.
+직전 baseline **v82 Medium**(1-GPU 4 seed 0.6835)은 historical. ⚠️ v83의
 0.6880은 옛 v77 DDP4 baseline(§104)의 0.6880과 **숫자만 같은 별개 레짐의 값**이다 — 혼동하지 말 것.
 **판정 레짐 자체(1-GPU 4 seed, seed-paired Δ+t, §107-3)는 그대로 유지**되고, 이전 DDP4 숫자(v77
 0.6880, v41_K128 0.6940, §105 재채점표 27개)와는 여전히 **직접 비교 불가**다(§107-2). 진행 상태는
-`current_status.md` §108–§112.
+`current_status.md` §108–§114.
 
 > [!IMPORTANT]
 > **baseline 숫자 계약 (§109, 2026-08-13) — 이것부터 읽을 것**
@@ -191,6 +196,22 @@
 > **⑩ relation head 깊이 축은 소진이다 (§110, 2026-08-13)**: v84(`12→32→32→1`)는 v82·v83 양쪽
 > 기준 모두 4/4 시드 부호 일치 + |t|>3.6으로 **기각**됐다. §108(얕게, 미판정)과 종합하면 head
 > 구조 축은 얕음·기본·깊음 세 지점이 다 나왔다 — **더 파지 말 것.**
+>
+> **⑪ "레이블을 fit에 직접 넣는" 축도 소진이다 (§114, 2026-08-14)**: v88 PA(context 세포에 bag
+> 레이블을 상속시켜 세포 단위 ridge를 풀고, bag별 양방향 soft abundance를 feature로 추가 —
+> 12→16, `CovarianceMeanLearnablePDDCTPAMLPModel`, arch 57)는 v83 기준 Δ−0.0111, **t=−6.69,
+> 4/4**로 **이 레짐에서 가장 강하게 기각**됐다. 코드·config·테스트는 **삭제하지 않고 남겨둔다**
+> — `tests/test_population_attention.py`가 §62-2 dead-branch 실패 모드에 대한 살아있는 probe이고,
+> 음성 결과의 근거이기 때문이다. **이 형태로 다시 시도하지 말 것.** 또한 §113과 합쳐 **VHL/BAP1의
+> 실패를 "소수 population 탐지 실패"로 설명하는 가설은 반증**됐다 — 데이터 주입(§113)도, 전용
+> 분기(§114)도 못 고쳤다.
+>
+> **⑫ 새 relation 분기를 만들 때는 GPU 전에 planted-signal probe를 먼저 쓸 것 (§114)**: v88
+> 개발 중 실제 버그 3개가 이 방식으로 잡혔다 — ① 내 freeze 루프가 부모가 learnable로 만든
+> `_covariance_projection`을 다시 얼려 P gradient가 `None`이 됐다, ② 분기 설계가 우연 수준
+> (같은 signed 축의 top-k/bottom-k-mean이 서로 거울상)이었다, ③ `train_dd_projection=True`
+> 경로가 무조건 `no_grad` 안에 갇혀 조용히 죽었다. 셋 다 `nonfinite_gradient_policy: zero`
+> 아래에서는 **학습이 정상처럼 보인다** — 테스트 없이는 GPU 시간만 태운다.
 
 > [!IMPORTANT]
 > **DD 계약 — 미분 금지 + gradient 개방 금지 (§100·§103, 2026-08-12)**

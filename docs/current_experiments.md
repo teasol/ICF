@@ -122,6 +122,7 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 | v84 deep head | head `12→32→1`(GELU) → `12→32→32→1`(GELU×2) | 0.6777 | 0.0018 | v82 기준 −0.0057 (t=−3.63, 4/4) / v83 기준 −0.0102 (t=−3.61, 4/4) **기각, 양쪽** (§110) |
 | v86 noise | `observation_noise` 0.005 → 0.01 (데이터만) | 0.6884 | 0.0072 | v83 기준 +0.0004 (t=0.71, 3/4) **완전 무효과(null)** — §105-6 옛 레버 재현 안 됨 (§112) |
 | v87 rare | `rare_response_probability` 0.0 → 0.15 (데이터만) | 0.6866 | 0.0043 | v83 기준 −0.0013 (t=−0.70, 2/4) **완전 무효과(null)** — VHL/BAP1 타겟 가설도 반증 (§113) |
+| v88 PA | relation feature 12 → 16 (label-conditioned population 분기 추가, arch 57) | 0.6769 | 0.0047 | v83 기준 −0.0111 (t=−6.69, 4/4) **기각 — 이 레짐 최강 기각**. VHL −0.0290, BAP1 −0.0202 (둘 다 1/4) (§114) |
 | v77 Hard | ClassSep `[0.5,1.4]` → `[0.2,0.8]` (v82 기준) | 0.6781 | 0.0053 | v82 기준 −0.0053 (t=−3.0, 4/4) |
 | v81 fixed P | learnable P → fixed P (197,057 → 449, v77 기준) | 0.6734 | 0.0018 | Hard 기준 −0.0048 (t=−1.5) **미판정** |
 | v80 shallow MLP | orthogonal manifold → shallow MLP (v77 기준) | 0.6722 | 0.0051 | Hard 기준 −0.0059 (t=−2.7) **기각** |
@@ -132,6 +133,8 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 |t|>3.6으로 기각. §108(얕게, 미판정)과 종합하면 이 축에서 새 arm을 더 설계하지 말 것.
 ⚠️ **§107-6(fixed P × Medium, v85)은 취소됐다 (2026-08-13, 사용자 결정)** — 진행할 필요가 없다고
 판단해 config(`train_v85_medium_fixed_p_1536_1gpu.yaml`, 한 번도 실행되지 않았다)를 삭제했다.
+⚠️ **"레이블을 fit에 직접 넣는" 축은 §114로 소진됐다** — v88 PA는 4/4 + |t|=6.69로 기각(이 레짐
+최강 기각)이고, 동기였던 VHL/BAP1도 개선되지 않았다. 코드·테스트는 음성 결과의 근거로 남겨둔다.
 새 실험 방향은 재기획 중이다.
 
 ### 3-2. 역사적 표 — DDP4 1 seed (SEAL 10개 macro 평균)
@@ -249,6 +252,13 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
    방향(1/4 양수), BAP1은 방향성 없음 — "rare 학습이 두 task를 돕는다"는 가설도 반증됐다.
    §105-6의 noise·rare 축은 §112·§113으로 **소진** — 이 두 레버는 더 파지 말 것. VHL/BAP1
    문제는 별도 원인(레이블·코호트) 조사가 필요하다.
+4f. ~~**label-conditioned population 분기 (§65 미검정 레버)**~~ **해소됨, 기각 (§114)**: v88 PA
+   (context 세포에 bag 레이블 상속 → 세포 단위 ridge → bag별 양방향 soft abundance, feature
+   12→16)는 v83 기준 −0.0111(t=−6.69, 4/4)로 **이 레짐에서 가장 강한 기각**이다. 분기 자체는
+   살아있다(합성 planted-signal 90~100%) — 실제 데이터에서 노이즈로만 작용한 것이다. VHL/BAP1도
+   각각 −0.0290/−0.0202(둘 다 1/4)로 동기가 반증됐다. **이 형태의 레이블 조건 분기는 더 파지
+   말 것**. §113과 합쳐 "VHL/BAP1은 소수 population 탐지 실패 때문"이라는 가설은 **두 방향에서
+   반증**됐다.
 5. **병목이 표현이 아닐 가능성** — CV-1 단독 0.9052 vs 전체 0.9199. 그 위에 얹은 모든
    시도(v36·v37·v42·v43·v44·v45)가 Δ≈0이었다. task 자체의 정보 한계일 수 있다.
 6. **새 합성 cardinality arm** — 기본 데이터가 bag별 독립 cell 수 + zero-padding/mask로

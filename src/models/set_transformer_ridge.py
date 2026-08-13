@@ -963,16 +963,17 @@ class CovarianceMeanDDCTMLPModel(CovarianceMeanDDRidgeModel):
         return widths
 
     @staticmethod
-    def _build_relation_head(hidden_dims):
-        """12 relation features -> scalar margin, through `hidden_dims` widths.
+    def _build_relation_head(hidden_dims, in_features=12):
+        """`in_features` relation features -> scalar margin, through `hidden_dims`.
 
         Built in the same module order as the historical hard-coded head, so for
         the default `[32]` the state_dict keys stay `cv_dd_ct_head.{0,2}.*` and
         the init draws are identical -- verified in
-        `tests/test_relation_head_depth.py`.
+        `tests/test_relation_head_depth.py`. `in_features` defaults to 12 (the
+        historical CV/DD/CT feature count); subclasses that add branches (e.g.
+        PA) pass a wider value to build their own head with the same helper.
         """
         layers = []
-        in_features = 12
         for width in hidden_dims:
             layers.append(nn.Linear(in_features, width))
             layers.append(nn.GELU())
@@ -1255,6 +1256,292 @@ class CovarianceMeanLearnablePDDCTMLPModel(CovarianceMeanDDCTMLPModel):
             covariance = covariance / count.unsqueeze(-1)
         row, column = self._covariance_triangle
         return covariance[..., row, column].to(cells.dtype)
+
+
+class CovarianceMeanLearnablePDDCTPAMLPModel(CovarianceMeanLearnablePDDCTMLPModel):
+    """v88: v83/v77 lineage plus a support-label-conditioned population branch (PA).
+
+    Every existing relation source is either label-free by construction (CT's
+    farthest-point tokens, chosen without looking at labels, only *scored*
+    against labels afterward) or a single global direction (DD's rank-1
+    dispersion axis over the whole covariance). Neither ever fits anything
+    directly against per-cell labels. PA does: every context cell inherits its
+    own bag's label (a noisy label -- most cells in a bag are shared background,
+    not the discriminative minority), and a single ridge regression is fit over
+    ALL of them at once. Most cells contribute contradictory, cancelling
+    evidence; a consistently-placed discriminative minority is what a
+    least-squares fit is exactly built to keep despite that.
+
+    This is not `PopulationTokenResidualModel` (retired provisional
+    v77-pop-residual, architecture_version=55, SS90): that arm reused CT's
+    label-free tokens and compared per-token distance-to-class-prototype, i.e.
+    still discovered its population structure without labels and only used
+    labels to compare against it afterward -- the same category of thing CT and
+    DD already do. PA's ridge fit is the first branch where labels enter before
+    any population/cluster structure is discovered, not after.
+
+    PA is training-free like DD and CT (`torch.no_grad` throughout) -- the
+    ridge system is solved fresh every episode from a fixed `pa_ridge_lambda`,
+    not learned across episodes, so there is no gradient-instability question
+    (SS100's eigh/argmax ban does not apply here; this is a plain, well-posed
+    least-squares solve with no discontinuous selection step).
+
+    Adds 4 features (PA0, PA1, PA1-PA0, SEP_PA) to the existing 12, so the head
+    is rebuilt 16-wide -- NOT strict-load compatible with v83 checkpoints (head
+    shape differs, same category of break as v83 vs v82). `architecture_version`
+    is 57 (56 is taken by v79's `DualProjectionCVDDCTMLPModel`).
+    """
+
+    architecture_version = 57
+
+    def __init__(
+        self,
+        *args,
+        pa_cells_per_bag=64,
+        pa_threshold=1.0,
+        pa_temperature=0.5,
+        pa_ridge_lambda=1.0,
+        pa_eps=1e-6,
+        pa_head_hidden_dims=(32,),
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        if pa_cells_per_bag < 1:
+            raise ValueError("pa_cells_per_bag must be positive.")
+        if pa_threshold < 0.0:
+            raise ValueError("pa_threshold must be non-negative.")
+        if pa_temperature <= 0.0:
+            raise ValueError("pa_temperature must be positive.")
+        if pa_ridge_lambda <= 0.0:
+            raise ValueError("pa_ridge_lambda must be positive.")
+        if pa_eps <= 0.0:
+            raise ValueError("pa_eps must be positive.")
+        widths = [int(width) for width in pa_head_hidden_dims]
+        if any(width < 1 for width in widths):
+            raise ValueError("every pa_head_hidden_dims width must be positive.")
+        self.pa_cells_per_bag = int(pa_cells_per_bag)
+        self.pa_threshold = float(pa_threshold)
+        self.pa_temperature = float(pa_temperature)
+        self.pa_ridge_lambda = float(pa_ridge_lambda)
+        self.pa_eps = float(pa_eps)
+        self.pa_head_hidden_dims = widths
+        del self.cv_dd_ct_head
+        for parameter in self.parameters():
+            parameter.requires_grad_(False)
+        # The freeze loop above re-freezes `_covariance_projection` -- it was
+        # only made learnable moments ago, one level up in
+        # `CovarianceMeanLearnablePDDCTMLPModel.__init__`, which ran before
+        # this class's own parameters (the old head) existed to be frozen in
+        # the FIRST freeze loop (`CovarianceMeanDDCTMLPModel.__init__`). Same
+        # re-enable `DualProjectionCVDDCTMLPModel.__init__` needs for the same
+        # reason.
+        self._covariance_projection.requires_grad_(True)
+        if self.train_ridge_calibration:
+            self.ridge_log_lambda.requires_grad_(True)
+            self.ridge_log_scale.requires_grad_(True)
+        self.cv_dd_ct_pa_head = self._build_relation_head(
+            self.pa_head_hidden_dims, in_features=16
+        )
+        self._architecture_version.fill_(self.architecture_version)
+
+    def _pa_sample_bag(self, bag):
+        """Evenly subsample a bag's cells to at most `pa_cells_per_bag`.
+
+        Same recipe as `_ct_sample_bag` (deterministic `linspace` index, so
+        re-running with the same cells is reproducible) kept as its own method
+        rather than sharing CT's, so the two branches' cell budgets can be
+        tuned independently.
+        """
+        values = bag.float()
+        if values.shape[0] == 0:
+            raise ValueError("Every bag must contain at least one valid cell.")
+        if values.shape[0] <= self.pa_cells_per_bag:
+            return values
+        index = torch.linspace(
+            0, values.shape[0] - 1, self.pa_cells_per_bag, device=values.device,
+        ).round().long()
+        return values.index_select(0, index)
+
+    def _pa_cell_direction(self, sampled_context, context_labels):
+        """Ridge-fit direction separating context cells by their bag's label.
+
+        Primal form: the pooled cell count (up to ~num_bags * pa_cells_per_bag,
+        typically a few thousand) is larger than the 1536-d cell embedding, so
+        the 1536x1536 primal Gram is the cheap side -- the opposite of CV's bag
+        descriptor ridge, where the descriptor vastly outnumbers the bags.
+        """
+        labels = context_labels.long()
+        cell_counts = torch.tensor(
+            [bag.shape[0] for bag in sampled_context],
+            device=labels.device,
+        )
+        cell_labels = torch.repeat_interleave(labels, cell_counts)
+        design = torch.cat(sampled_context, dim=0)
+        targets = F.one_hot(cell_labels, num_classes=2).float()
+
+        cell_mean = design.mean(dim=0, keepdim=True)
+        target_mean = targets.mean(dim=0, keepdim=True)
+        centered_design = design - cell_mean
+        centered_targets = targets - target_mean
+
+        gram = centered_design.T @ centered_design
+        rhs = centered_design.T @ centered_targets
+        ridge_lambda = design.new_tensor(self.pa_ridge_lambda)
+        coefficients = solve_ridge_system(gram, rhs, ridge_lambda)
+        intercept = target_mean - cell_mean @ coefficients
+        return coefficients, intercept
+
+    @staticmethod
+    def _pa_cell_score(bag, coefficients, intercept):
+        scores = bag @ coefficients + intercept
+        return scores[:, 1] - scores[:, 0]
+
+    def _pa_population_summary(
+        self, bags, coefficients, intercept, score_center, score_scale
+    ):
+        """Per-bag (label-0-like, label-1-like) SOFT ABUNDANCE, not a mean.
+
+        Earlier draft used top-`k`-mean and bottom-`k`-mean of the same signed
+        cell score as PA0/PA1. That failed a synthetic sanity check (docs
+        SS114): for a 2-class ridge fit, `score[:,0]` and `score[:,1]` are
+        near-negatives of each other, so top-k and bottom-k of one signed axis
+        move together rather than carrying independent information, and
+        PA1-PA0 barely separated query bags by label better than chance even
+        with an obvious planted signal.
+
+        Abundance fixes this the way CT's abundance already does it for its
+        label-free tokens: count what fraction of a bag's cells clear a
+        threshold on EACH side independently (soft via sigmoid, no gradient
+        needed since this whole branch is training-free). A bag with a real
+        label-1-discriminative minority gets high PA1 without that saying
+        anything mechanical about PA0 -- the two counts are independent, not
+        two ends of one axis. Threshold and temperature are in units of the
+        context cell-score distribution's own std, computed once per episode
+        by the caller (`score_center`, `score_scale`) so they are shared
+        across every bag being summarized.
+        """
+        summaries = []
+        for bag in bags:
+            z = (self._pa_cell_score(bag, coefficients, intercept) - score_center) / score_scale
+            abundance1 = torch.sigmoid((z - self.pa_threshold) / self.pa_temperature).mean()
+            abundance0 = torch.sigmoid((-z - self.pa_threshold) / self.pa_temperature).mean()
+            summaries.append(torch.stack((abundance0, abundance1)))
+        return torch.stack(summaries)
+
+    def _pa_features(self, context_bags, context_labels, query_bags):
+        """PA0, PA1, PA1-PA0, SEP_PA -- see the class docstring for the idea."""
+        labels = context_labels.long()
+        sampled_context = [self._pa_sample_bag(bag) for bag in context_bags]
+        sampled_query = [self._pa_sample_bag(bag) for bag in query_bags]
+        pooled = torch.cat(sampled_context, dim=0)
+        center = pooled.mean(dim=0, keepdim=True)
+        scale = (pooled - center).square().mean(dim=0, keepdim=True).sqrt()
+        scale = scale.clamp_min(self.pa_eps)
+        standardized_context = [(bag - center) / scale for bag in sampled_context]
+        standardized_query = [(bag - center) / scale for bag in sampled_query]
+
+        coefficients, intercept = self._pa_cell_direction(standardized_context, labels)
+
+        context_scores = torch.cat(
+            [self._pa_cell_score(bag, coefficients, intercept) for bag in standardized_context]
+        )
+        score_center = context_scores.mean()
+        score_scale = context_scores.std().clamp_min(self.pa_eps)
+
+        context_summary = self._pa_population_summary(
+            standardized_context, coefficients, intercept, score_center, score_scale
+        )
+        query_summary = self._pa_population_summary(
+            standardized_query, coefficients, intercept, score_center, score_scale
+        )
+
+        pa0 = query_summary[:, 0]
+        pa1 = query_summary[:, 1]
+
+        context_diff = context_summary[:, 1] - context_summary[:, 0]
+        class_mean = torch.stack(
+            [context_diff[labels == class_index].mean() for class_index in range(2)]
+        )
+        class_variance = torch.stack(
+            [
+                (context_diff[labels == class_index] - class_mean[class_index])
+                .square()
+                .mean()
+                .clamp_min(self.pa_eps)
+                for class_index in range(2)
+            ]
+        )
+        standard_error = (
+            class_variance[0] / (labels == 0).sum().clamp_min(1)
+            + class_variance[1] / (labels == 1).sum().clamp_min(1)
+        ).sqrt().clamp_min(self.pa_eps)
+        separation = ((class_mean[1] - class_mean[0]) / standard_error).abs()
+        return pa0, pa1, separation.expand_as(pa0)
+
+    def _relation_logits(
+        self, context, context_labels, query, context_bags, query_bags
+    ):
+        # `_cv_branch_features` lives only on the v79 dual-projection subclass;
+        # this lineage computes CV directly, the same way
+        # `CovarianceMeanDDCTMLPModel._relation_logits` does.
+        cv_logits = CovarianceMeanRidgeModel._ridge_logits(
+            self, context, context_labels, query
+        )
+        normalized_context, _ = self._normalize_descriptors(context, query)
+        labels = context_labels.long()
+        cv_prototypes = torch.stack(
+            [normalized_context[labels == class_index].mean(dim=0) for class_index in range(2)]
+        )
+        cv_separation = (cv_prototypes[1] - cv_prototypes[0]).square().mean().sqrt()
+        cv0, cv1 = cv_logits.float().unbind(dim=-1)
+
+        # CT and PA are training-free unconditionally. DD is NOT wrapped in
+        # no_grad here when `train_dd_projection` is set -- that flag exists
+        # precisely so `_scale_gradient` can carry gradient into P through the
+        # quadratic form, and nesting it inside an unconditional no_grad would
+        # silently defeat that (the exact quiet-failure shape SS100 warns
+        # about). This mirrors `CovarianceMeanDDCTMLPModel._relation_logits`.
+        with torch.no_grad(), torch.autocast(
+            device_type=context.device.type, enabled=False
+        ):
+            q0, q1, ct_separation = self._ct_features(
+                context_bags, context_labels, query_bags
+            )
+            pa0, pa1, pa_separation = self._pa_features(
+                context_bags, context_labels, query_bags
+            )
+        with torch.autocast(device_type=context.device.type, enabled=False):
+            if self.train_dd_projection:
+                weight = self.dd_projection_gradient_weight
+                distances, dd_separation = self._dd_distance_features(
+                    self._scale_gradient(
+                        self._covariance_matrices_from_triangle(context), weight
+                    ),
+                    context_labels,
+                    self._scale_gradient(
+                        self._covariance_matrices_from_triangle(query), weight
+                    ),
+                )
+            else:
+                with torch.no_grad():
+                    distances, dd_separation = self._dd_distance_features(
+                        self._covariance_matrices_from_triangle(context),
+                        context_labels,
+                        self._covariance_matrices_from_triangle(query),
+                    )
+        d0, d1 = distances.float().unbind(dim=-1)
+        features = torch.stack(
+            (
+                cv0, cv1, cv1 - cv0, cv_separation.float().expand_as(cv0),
+                d0, d1, d1 - d0, dd_separation.float().expand_as(cv0),
+                q0, q1, q0 - q1, ct_separation.float().expand_as(cv0),
+                pa0.float(), pa1.float(), (pa1 - pa0).float(),
+                pa_separation.float().expand_as(cv0),
+            ),
+            dim=-1,
+        )
+        margin = self.cv_dd_ct_pa_head(features).squeeze(-1)
+        return torch.stack((-0.5 * margin, 0.5 * margin), dim=-1)
 
 
 class DualProjectionCVDDCTMLPModel(CovarianceMeanLearnablePDDCTMLPModel):
