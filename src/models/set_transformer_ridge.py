@@ -917,6 +917,7 @@ class CovarianceMeanDDCTMLPModel(CovarianceMeanDDRidgeModel):
         ct_temperature=0.5,
         ct_eps=1e-6,
         ct_head_hidden_dim=32,
+        ct_head_hidden_dims=None,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
@@ -930,14 +931,54 @@ class CovarianceMeanDDCTMLPModel(CovarianceMeanDDRidgeModel):
         self.ct_cells_per_bag = int(ct_cells_per_bag)
         self.ct_temperature = float(ct_temperature)
         self.ct_eps = float(ct_eps)
+        self.ct_head_hidden_dims = self._resolve_head_hidden_dims(
+            ct_head_hidden_dim, ct_head_hidden_dims
+        )
         for parameter in self.parameters():
             parameter.requires_grad_(False)
-        self.cv_dd_ct_head = nn.Sequential(
-            nn.Linear(12, int(ct_head_hidden_dim)),
-            nn.GELU(),
-            nn.Linear(int(ct_head_hidden_dim), 1),
-        )
+        self.cv_dd_ct_head = self._build_relation_head(self.ct_head_hidden_dims)
         self._architecture_version.fill_(self.architecture_version)
+
+    @staticmethod
+    def _resolve_head_hidden_dims(hidden_dim, hidden_dims):
+        """Normalise the two head-shape knobs into one list of hidden widths.
+
+        `ct_head_hidden_dims` is the general knob: a list of hidden widths, so
+        `[]` is a bare linear probe and `[32, 32]` is a two-hidden-layer MLP.
+        Leaving it None keeps the historical single-hidden-layer head described
+        by `ct_head_hidden_dim`, which every checkpoint up to v82 was trained
+        with -- that path must stay untouched so those checkpoints keep loading
+        strict.
+        """
+        if hidden_dims is None:
+            return [int(hidden_dim)]
+        if isinstance(hidden_dims, int):
+            raise ValueError(
+                "ct_head_hidden_dims must be a sequence of widths; pass [] for a "
+                "linear head or [w] for one hidden layer, not a bare int."
+            )
+        widths = [int(width) for width in hidden_dims]
+        if any(width < 1 for width in widths):
+            raise ValueError("every ct_head_hidden_dims width must be positive.")
+        return widths
+
+    @staticmethod
+    def _build_relation_head(hidden_dims):
+        """12 relation features -> scalar margin, through `hidden_dims` widths.
+
+        Built in the same module order as the historical hard-coded head, so for
+        the default `[32]` the state_dict keys stay `cv_dd_ct_head.{0,2}.*` and
+        the init draws are identical -- verified in
+        `tests/test_relation_head_depth.py`.
+        """
+        layers = []
+        in_features = 12
+        for width in hidden_dims:
+            layers.append(nn.Linear(in_features, width))
+            layers.append(nn.GELU())
+            in_features = width
+        layers.append(nn.Linear(in_features, 1))
+        return nn.Sequential(*layers)
 
     def _ct_sample_bag(self, bag, mask=None):
         values = bag.float()
