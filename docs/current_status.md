@@ -1442,7 +1442,7 @@ canonical config를 self-contained로 인라인할 때 **resolved 결과가 chai
 
 ## 108. 2026-08-13 — v83 linear-head ablation: GELU 제거해도 baseline과 통계적으로 구분되지 않음 (미판정)
 
-_Recorded by: nhn-kimds-claude — 2026-08-13 17:30_
+_Recorded by: nhn-SMC-claude — 2026-08-13 17:30_
 
 **질문**: relation head는 v70부터 12개 closed-form feature
 (`[CV0,CV1,CV1-CV0,SEP_CV, D0,D1,D1-D0,SEP_DD, q0,q1,q0-q1,SEP_CT]`)를 `12→32→1`에 GELU 하나를
@@ -1491,7 +1491,7 @@ cptac_ccrcc/BAP1 0.6246, VHL 0.4699. (seed43/44/45도 동일 10-task 순서로 �
 
 ## 109. 2026-08-13 — baseline을 v83 linear head로 승격 (사용자 결정, §107-3 게이트 미달)
 
-_Recorded by: nhn-kimds-claude — 2026-08-13 17:30_
+_Recorded by: nhn-SMC-claude — 2026-08-13 17:30_
 
 §108의 결과(Δ +0.0045, t≈1.15, 3/4 시드 양수)는 §107-3이 정한 판정 게이트(4/4 시드 부호 일치 +
 `|t| ≥ 2.5`)를 충족하지 못한다. 사용자가 이 수치를 검토한 뒤 "뚜렷하진 않아도 올랐다고 보는 게
@@ -1536,7 +1536,7 @@ v82와 v83의 모델 클래스·`architecture_version=54`는 동일하고 `class
 
 ## 110. 2026-08-13 — v84 deep-head ablation: 더 깊은 head는 명확히 손해 (기각)
 
-_Recorded by: nhn-nexgem-claude — 2026-08-13 18:15_
+_Recorded by: nhn-NEXGEM-claude — 2026-08-13 18:15_
 
 **질문(§108의 반대 방향)**: §108은 relation head의 GELU를 없앴을 때(`Linear(12,1)`)를 봤다 —
 미판정이었다. 나머지 절반은 head에 오히려 용량을 더 주면 어떻게 되는가다. `v84`는

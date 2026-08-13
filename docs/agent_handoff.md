@@ -7,7 +7,7 @@
 > 동시에 세션을 돌린다. `docs/` 아래 문서(`agent_handoff.md`, `current_status.md`,
 > `current_experiments.md`, `current_architecture.md`, `history.md`, `README.md`)를
 > 수정할 때는 **어느 노드의 세션이 기록했는지 명시**할 것 — 형식은 `nhn-<NODE>-claude`
-> (예: `nhn-EWHA-claude`, `nhn-nexgem-claude`, `nhn-SMC-claude`) + 날짜 및 시각(타임스탬프,
+> (예: `nhn-EWHA-claude`, `nhn-NEXGEM-claude`, `nhn-SMC-claude`) + 날짜 및 시각(타임스탬프,
 > `YYYY-MM-DD HH:MM`).
 >
 > 예: `_Recorded by: nhn-EWHA-claude — 2026-08-13 17:20_`
