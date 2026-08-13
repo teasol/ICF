@@ -46,13 +46,13 @@
 - **Git 커밋 동기화**: 세션 핸드오프 시 작업을 남김없이 커밋하고 커밋 내역/diff를 `agent_handoff.md` 및 `current_status.md`에 반영합니다.
 - **아카이빙 규칙**: 특정 버전 딥다이브 보고서나 계획 문서는 완료 시 **핵심 결론(ADR·트레이드오프·레슨)을 `docs/history.md`의 해당 시기 절에 추가**하고, 개별 원문 파일은 새로 만들지 않습니다(원문은 git 이력에 보존). `docs/` 루트를 단순하고 가독성 높게 유지합니다.
 - **Config 루트 관리**: `configs/` 루트에는 **현재 활성 파이프라인의 entry point만** 둔다
-  (상세는 [`agent_handoff.md`](agent_handoff.md) §7). **2026-08-13(§110) 기준 6개다** —
+  (상세는 [`agent_handoff.md`](agent_handoff.md) §7). **2026-08-13(§111) 기준 5개다** —
   `train_v83_linear_head_1536_1gpu.yaml`(**canonical baseline**, 자체 포함형, §109 사용자 결정),
   `train_v82_medium_classsep_1536_1gpu.yaml`(직전 baseline, 참고용),
   `train_v82_medium_classsep_1536.yaml`(v82의 DDP4 판본, 참고용),
-  `train_v77_hard_orthogonal_1536{,_1gpu}.yaml`(historical control),
-  `train_v85_medium_fixed_p_1536_1gpu.yaml`(§107-6, **미착수** — config만 존재, 실행 중인 노드
-  없음; "다른 노드에서 학습 중"이라는 이전 기록은 착오였다, 2026-08-13 정정 nhn-SMC-claude).
+  `train_v77_hard_orthogonal_1536{,_1gpu}.yaml`(historical control).
+  §107-6(fixed P × Medium, v85)은 한 번도 실행되지 않은 채 **취소**됐고 config도 삭제됐다
+  (2026-08-13 사용자 결정) — 새 실험 방향은 재기획 중이다.
   종결된 arm 72개는 `configs/archive/` 아래 시대별
   폴더(`v34_largectx/`, `v40_v45_cvonly/`, `v50_v54_encoder/`, `v57_v61_data_arms/`,
   `v62_v68_hybrid/`, `v69_v76_relation/`, `v77_pop_residual/`, `v78_dd_gradient/`,

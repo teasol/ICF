@@ -1,6 +1,8 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-13` (§110 — **v84 deep-head 기각**으로 relation head 깊이 축 마감; §109 — **baseline을 v83 linear head로 승격**, §107-3 판정 게이트 미달 상태에서의 사용자 결정)
+**Last updated**: `2026-08-13` (§111 — **§107-6(fixed P × Medium, v85) 취소**, 사용자 결정, 새 실험
+재기획 중; §110 — **v84 deep-head 기각**으로 relation head 깊이 축 마감; §109 — **baseline을
+v83 linear head로 승격**, §107-3 판정 게이트 미달 상태에서의 사용자 결정)
 
 > [!IMPORTANT]
 > **활성 baseline은 v83 linear head(§109)이고 공식 SEAL 10-task macro는 1-GPU 4 seed 평균 0.6880이다.**
@@ -30,7 +32,7 @@
 
 **한 줄**: 활성 baseline은 v83 linear head **1-GPU 4 seed 평균 = SEAL macro 0.6880**(§109, 사용자 결정 — §107-3 게이트 미달인 채로 승격), 새 arm 판정은 여전히 **같은 레짐·4 seed의 seed-paired Δ + t**(§107-3)로 하며 시드별 fold-paired CI(§99)는 보조 근거다.
 
-**Status**: **활성 baseline v83 linear head(relation head를 32-hidden GELU에서 bare `Linear(12,1)`로 축소, trainable 197,057 → 196,621), 1-GPU 4 seed 평균 epoch 49 = 0.6880 (seed std 0.0074). §109에서 사용자 결정으로 승격했으나 §107-3 판정 게이트(4/4 시드 부호 일치 + |t|≥2.5)는 충족하지 못한다 — v82 대비 seed-paired Δ +0.0045, t≈1.15, seed 44만 부호 반전(3/4 양수)(§108). 직전 baseline v82 Medium ClassSep `[0.5,1.4]` 1-GPU 4 seed 0.6835는 historical. ⚠️ v83의 1-GPU 4 seed macro 0.6880은 옛 v77 DDP4 baseline(§104)의 0.6880과 숫자만 같은 별개 수치다 — 혼동 주의. §107에서 판정 레짐이 DDP4 1 seed → 1-GPU 4 seed로 전환됐고 이전 DDP4 숫자(v77 0.6880 tag `v77_hard_ep49`, Medium 0.6881, v41_K128 0.6940)와는 직접 비교 불가다. 실행 중인 학습·평가 없음. §106에서 v77/v80/v81/v82를 각각 4 seed로 1-GPU 동일 레짐 비교 — Medium 0.6835 > Hard 0.6781 > fixed-P 0.6734 > shallow-MLP 0.6722. 난이도는 Medium이 이기고(+0.0053, t=3.0) learnable P는 여전히 미판정(+0.0048, t=1.5, seed 44 부호 반전)이다. §105에서 과거 판정 36건을 감사하고 27개 arm을 epoch 49로 재채점했다 — 계보의 두 승격(v74→v76 +0.0004, Hard vs Medium +0.0001)이 모두 "판정 불가"로 내려갔고 ridge calibration 기각은 철회됐다. ClassSep sweep의 Medium 값은 §91의 오기였다(0.6823 → 0.6881). v78(−0.0004/−0.0047)·v79(−0.0105)·v80 shallow MLP(−0.0158, 4 seed) 모두 기각. fixed P × Medium 4 seed 칸은 여전히 비어 있다(§107-6). §110에서 head를 `12→32→32→1`로 심화한 v84도 4 seed로 평가했다 — v82 기준 Δ−0.0057(t=−3.63)·v83 기준 Δ−0.0102(t=−3.61), 둘 다 4/4 시드 부호 일치로 **기각**되어 relation head 깊이 축은 얕음(미판정)·기본·깊음(기각) 세 지점이 다 나와 소진으로 본다. macro seed std 0.0051 실측 → 단일 시드 판정 게이트 ≈ 0.010(2σ)이고 task별 CI는 판정 근거로 쓰지 않는다(§104). 역사적 전체 최고는 v41_K128 0.6940(레짐 상이, 직접 비교 불가).**
+**Status**: **활성 baseline v83 linear head(relation head를 32-hidden GELU에서 bare `Linear(12,1)`로 축소, trainable 197,057 → 196,621), 1-GPU 4 seed 평균 epoch 49 = 0.6880 (seed std 0.0074). §109에서 사용자 결정으로 승격했으나 §107-3 판정 게이트(4/4 시드 부호 일치 + |t|≥2.5)는 충족하지 못한다 — v82 대비 seed-paired Δ +0.0045, t≈1.15, seed 44만 부호 반전(3/4 양수)(§108). 직전 baseline v82 Medium ClassSep `[0.5,1.4]` 1-GPU 4 seed 0.6835는 historical. ⚠️ v83의 1-GPU 4 seed macro 0.6880은 옛 v77 DDP4 baseline(§104)의 0.6880과 숫자만 같은 별개 수치다 — 혼동 주의. §107에서 판정 레짐이 DDP4 1 seed → 1-GPU 4 seed로 전환됐고 이전 DDP4 숫자(v77 0.6880 tag `v77_hard_ep49`, Medium 0.6881, v41_K128 0.6940)와는 직접 비교 불가다. 실행 중인 학습·평가 없음. §106에서 v77/v80/v81/v82를 각각 4 seed로 1-GPU 동일 레짐 비교 — Medium 0.6835 > Hard 0.6781 > fixed-P 0.6734 > shallow-MLP 0.6722. 난이도는 Medium이 이기고(+0.0053, t=3.0) learnable P는 여전히 미판정(+0.0048, t=1.5, seed 44 부호 반전)이다. §105에서 과거 판정 36건을 감사하고 27개 arm을 epoch 49로 재채점했다 — 계보의 두 승격(v74→v76 +0.0004, Hard vs Medium +0.0001)이 모두 "판정 불가"로 내려갔고 ridge calibration 기각은 철회됐다. ClassSep sweep의 Medium 값은 §91의 오기였다(0.6823 → 0.6881). v78(−0.0004/−0.0047)·v79(−0.0105)·v80 shallow MLP(−0.0158, 4 seed) 모두 기각. fixed P × Medium 4 seed(§107-6)는 **취소됐다**(§111, 사용자 결정 — 새 실험 재기획 중). §110에서 head를 `12→32→32→1`로 심화한 v84도 4 seed로 평가했다 — v82 기준 Δ−0.0057(t=−3.63)·v83 기준 Δ−0.0102(t=−3.61), 둘 다 4/4 시드 부호 일치로 **기각**되어 relation head 깊이 축은 얕음(미판정)·기본·깊음(기각) 세 지점이 다 나와 소진으로 본다. macro seed std 0.0051 실측 → 단일 시드 판정 게이트 ≈ 0.010(2σ)이고 task별 CI는 판정 근거로 쓰지 않는다(§104). 역사적 전체 최고는 v41_K128 0.6940(레짐 상이, 직접 비교 불가).**
 
 > [!IMPORTANT]
 > **읽는 순서 (2026-08-13)**: **§109를 먼저 읽을 것** — baseline이 **v83 linear head**로 바뀐 절이고,
@@ -82,12 +84,10 @@
 **지금 돌아가는 것 (2026-08-13)**: 없음, 어느 노드에서도. §108의 v83 4 seed 평가와 §110의 v84
 4 seed 평가가 모두 끝났다 — §109에서 baseline을 v83 linear head(1-GPU 4 seed 0.6880)로
 승격했고(사용자 결정, §107-3 게이트 미달), §110에서 v84(deep head)는 양쪽 baseline 기준 모두
-기각했다. **fixed P × Medium 4 seed(§107-6, v85)는 아직 미착수다** — config
-`configs/train_v85_medium_fixed_p_1536_1gpu.yaml`(449 trainable parameters, P 고정)는 존재하지만
-⚠️ **"nhn-SMC에서 진행 중"이라는 이전 기록은 착오였다**(2026-08-13 정정, nhn-SMC-claude) — 해당
-노드에서 GPU/프로세스를 직접 확인한 결과 실행 중인 학습이 없었다.
-이 승격의 통계적 근거를 보강하려면 `scripts/compare_arms_paired.py`로 fold-paired CI를
-확인하는 것도 다음 후보다.
+기각했다. **fixed P × Medium(§107-6, v85)은 취소됐다**(§111, 2026-08-13 사용자 결정) — 진행할
+필요가 없다고 판단해 실험 계획을 접었고 config(한 번도 실행되지 않음)도 삭제했다. 새 실험
+방향은 재기획 중이다. §109 승격의 통계적 근거를 보강하려면 `scripts/compare_arms_paired.py`로
+fold-paired CI를 확인하는 것도 다음 후보다.
 
 결과 재확인:
 ```bash
@@ -175,9 +175,8 @@ v82 Medium은 같은 1-GPU 4 seed 레짐에서 0.6835, v77 Hard는 0.6781이다(
 
 **지금 돌아가는 것**: 없음. §108(v83)·§110(v84) 4 seed 평가가 모두 끝났고 §109에서
 baseline을 v83으로 승격했다(사용자 결정). v84(head 심화)는 §110에서 기각 — head 깊이 축은
-소진. **fixed P × Medium 4 seed(§107-6, v85)는 아직 미착수다** — ⚠️ "nhn-SMC에서 진행 중"이라는
-이전 기록은 착오였다(2026-08-13 정정, nhn-SMC-claude: 해당 노드에서 직접 확인, 실행 중인 학습
-없음). §109 승격의 통계적 근거 보강도 후보다. CV/DD 배선 축은 소진으로 본다(§103-5).
+소진. **fixed P × Medium(§107-6, v85)은 취소됐다**(§111, 사용자 결정) — 새 실험 방향은 재기획
+중이다. §109 승격의 통계적 근거 보강도 후보다. CV/DD 배선 축은 소진으로 본다(§103-5).
 
 **판정 방법은 §107에서 정해진 그대로다 — baseline만 §109에서 v83으로 바뀌었다.**
 arm과 baseline(v83)을 각각 **1-GPU 4 seed(42–45)**로 돌려 **같은 시드끼리 뺀** 평균 Δ와 t로
@@ -1525,17 +1524,15 @@ v82와 v83의 모델 클래스·`architecture_version=54`는 동일하고 `class
 **바뀌지 않는 것**:
 - §107의 판정 레짐(1-GPU · SEED 42/43/44/45 · epoch 49)과 §107-3 판정 절차는 그대로 유지된다 —
   새 arm은 **v83 4 seed와 seed-paired**로 비교한다.
-- learnable P 미판정(§107-8), fixed P × Medium 4 seed 빈칸(§107-6), CV/DD·사영 배선 축 소진(§103-5)
-  등 §107이 정한 나머지 결론은 전부 유지된다. v83 promotion은 head 구조에 대한 것이고 이 결론들과
-  무관하다.
+- learnable P 미판정(§107-8), CV/DD·사영 배선 축 소진(§103-5) 등 §107이 정한 나머지 결론은
+  전부 유지된다. v83 promotion은 head 구조에 대한 것이고 이 결론들과 무관하다.
+- ⚠️ §107-6(fixed P × Medium 4 seed 빈칸)은 §111에서 **취소**됐다 — 더 이상 열린 과제가 아니다.
 
 **다음 Action**:
 1. 이 승격의 통계적 근거를 보강하려면 `scripts/compare_arms_paired.py`로 fold-paired CI를 뽑아
    task별 그림을 확인할 것 (§108은 macro만 계산했다).
 2. seed를 4개 더 늘려(46–49) 8 seed paired 비교를 하면 t가 안정화될 수 있다 — 지금 t≈1.15는
    n=4에서 흔들림이 크다(§107-1 참고, n=4 std 추정 구간이 0.6~2.9배).
-3. §107-6의 fixed P × Medium 4 seed는 여전히 비어 있고 우선순위가 높다 — v82/v83 중 어느 쪽을
-   다음 control로 쓸지도 이 측정과 함께 정리할 것.
 
 ## 110. 2026-08-13 — v84 deep-head ablation: 더 깊은 head는 명확히 손해 (기각)
 
@@ -1578,12 +1575,31 @@ v82 기준: SD(Δ) ≈ 0.0032, SE ≈ 0.0016, **t ≈ −3.63**. v83 기준: SD(
 것으로 보인다. 이 결과는 v83 promotion 결정(§109)을 뒤집지 않는다 — 오히려 "지금 head가 이미
 적정 크기"라는 그림과 일치한다.
 
-**바뀌지 않는 것**: 판정 레짐·baseline(v83, §109)·§107-6 fixed P × Medium의 우선순위는 그대로다.
-head 구조 축은 이제 얕음(미판정)·기본(baseline)·깊음(기각) 세 지점이 다 나와서 **소진으로
-본다** — 이 축에서 새 arm을 더 설계하지 말 것.
+**바뀌지 않는 것**: 판정 레짐·baseline(v83, §109)은 그대로다. head 구조 축은 이제 얕음(미판정)·
+기본(baseline)·깊음(기각) 세 지점이 다 나와서 **소진으로 본다** — 이 축에서 새 arm을 더 설계하지
+말 것. (§107-6 fixed P × Medium은 이후 §111에서 취소됐다.)
 
 **평가 방법**: `scripts/eval_seal_tasks.sh`로 GPU 0-3에 seed당 1개씩 올려 10-task 전부를 한
 GPU에서 순차 실행(각 checkpoint 독립 실행이라 2-GPU 분할 없이도 4 seed가 병렬로 끝난다).
 macro는 `logs/official50/*_v84_deep_head_seed{42,43,44,45}_ep49.log`의
 `fold-mean AUROC`를 집계한 값이다. fold-paired CI는 아직 안 돌렸다 — 필요하면
 `scripts/compare_arms_paired.py`로 추가 확인할 것.
+
+## 111. 2026-08-13 — §107-6(fixed P × Medium, v85) 취소 (사용자 결정)
+
+_Recorded by: nhn-NEXGEM-claude — 2026-08-13 19:05_
+
+§107-6은 v81(fixed P, Hard 난이도)을 현재 baseline 난이도(Medium)에서 다시 측정해 "baseline
+파라미터를 196,621 → 449로 줄여도 되는가"를 가르려는 계획이었다. config
+`train_v85_medium_fixed_p_1536_1gpu.yaml`을 만들고(§107-6, 449 trainable parameters 확인)
+다른 노드에 실행을 맡겼으나, 실제로는 어느 노드에서도 학습이 시작되지 않았다("진행 중"이라는
+이전 기록은 착오 — 정정됨).
+
+**사용자가 이 실험 자체가 필요 없다고 판단해 취소했다** — 굳이 지금 할 필요가 없다는 판단.
+config는 한 번도 실행되지 않은 채 리포에서 삭제했다(재현 증거로 보존할 학습 결과가 없으므로
+`configs/archive/`로 옮기지 않고 그냥 지웠다 — v84처럼 실행 후 기각된 arm과는 다르다).
+
+**바뀌는 것**: §107-6은 더 이상 열린 과제가 아니다. §107이 남긴 다른 열린 항목(learnable P
+미판정 §107-8, CV/DD·사영 배선 축 소진 §103-5)은 이 취소와 무관하게 그대로 유지된다.
+
+**다음**: 새 실험 방향을 재기획한다 — 아직 미정.

@@ -128,12 +128,9 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 "확정된 승격"으로 인용하지 말 것.
 ⚠️ **relation head 깊이 축은 §110으로 소진됐다** — v84(심화)는 양쪽 baseline 기준 모두 4/4 +
 |t|>3.6으로 기각. §108(얕게, 미판정)과 종합하면 이 축에서 새 arm을 더 설계하지 말 것.
-⚠️ **fixed P × Medium 칸은 여전히 비어 있다** — v81은 Hard에서만 돌았다(§107-6). v83이 baseline이
-된 지금은 "fixed P × Medium × linear-head" 조합도 미측정으로 남는다.
-⚠️ **정정 (2026-08-13, nhn-SMC-claude)**: "v85로 nhn-SMC에서 측정 진행 중"이라는 이전 기록은
-**착오였다** — nhn-SMC 노드에서 실제로 GPU/프로세스를 확인한 결과 v85 학습이 돌고 있지 않다.
-`train_v85_medium_fixed_p_1536_1gpu.yaml` config는 존재하지만 아직 아무 노드에서도 실행되지
-않았다. §107-6은 여전히 미착수 상태로 남는다.
+⚠️ **§107-6(fixed P × Medium, v85)은 취소됐다 (2026-08-13, 사용자 결정)** — 진행할 필요가 없다고
+판단해 config(`train_v85_medium_fixed_p_1536_1gpu.yaml`, 한 번도 실행되지 않았다)를 삭제했다.
+새 실험 방향은 재기획 중이다.
 
 ### 3-2. 역사적 표 — DDP4 1 seed (SEAL 10개 macro 평균)
 
@@ -237,10 +234,9 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 4a. **v83 linear-head 승격의 통계 근거 보강 (§109)** — Δ+0.0045, t≈1.15는 §107-3 게이트 미달인
    채로 baseline이 됐다. `scripts/compare_arms_paired.py`로 fold-paired CI를 확인하거나 seed를
    추가(46–49)해 재검증할 것.
-4b. **fixed P × Medium 4 seed** — 비어 있는 칸이자 baseline 파라미터를 196,621 → 449로 줄일 수
-   있는지 가르는 측정이다(§107-6). learnable P는 같은 난이도 4 seed에서도 t=1.5로 미판정이다.
-   ⚠️ config(`train_v85_medium_fixed_p_1536_1gpu.yaml`)는 있지만 **아직 어느 노드에서도 실행되지
-   않았다** — "다른 노드에서 진행 중"은 착오였다(2026-08-13 정정, nhn-SMC-claude). 미착수.
+4b. ~~**fixed P × Medium 4 seed**~~ **취소됨 (§107-6, 2026-08-13 사용자 결정)** — 진행할 필요가
+   없다고 판단해 실험 계획을 접었다(config는 한 번도 실행되지 않은 채 삭제됨). 새 실험 방향은
+   재기획 중이다.
 4c. ~~**relation head 깊이 축**~~ **해소됨 (§110)**: v84(심화)가 양쪽 baseline 기준 모두 4/4 +
    |t|>3.6으로 기각됐다. §108(얕게, 미판정)과 종합해 이 축은 소진 — 더 파지 말 것.
 5. **병목이 표현이 아닐 가능성** — CV-1 단독 0.9052 vs 전체 0.9199. 그 위에 얹은 모든
