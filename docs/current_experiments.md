@@ -1,4 +1,4 @@
-# Current experiments (2026-08-12)
+# Current experiments (2026-08-13)
 
 CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 **그 문서의 판정 절차는 폐기됐다** — 합성 지표로 arm을 고르는 방식이 반복적으로 실패했다.
@@ -16,23 +16,36 @@ CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 > **같은 코호트·같은 공식 50-fold**로 비교 가능한 행. 나머지 7개는 대응 수치가 없다.
 
 > [!IMPORTANT]
-> **baseline·채점 규칙·게이트 (§104, 2026-08-12)**
+> **baseline·채점 규칙·게이트 (§109, 2026-08-13) — 판정 단위가 4 seed다**
 >
-> - **baseline = v77 Hard orthogonal `epoch 49`, SEAL macro `0.6880`** (tag `v77_hard_ep49`,
->   ckpt `checkpoints/20260812_v76_classsep_sweep/hard/periodic-epoch=049-val_ce_loss=0.1717.ckpt`).
->   0.6873은 같은 run의 `epoch=048` validation-best다(Δ +0.0007 [+0.0000, +0.0014]).
+> - **baseline = v83 linear head, 1-GPU 4 seed 평균 `0.6880`**
+>   (config `configs/train_v83_linear_head_1536_1gpu.yaml`,
+>   ckpts `checkpoints/20260813_153750/v83_linear_head_seed4{2..5}/`,
+>   tags `v83_linear_head_seed4{2..5}_ep49`, 시드별 0.6905/0.6896/0.6774/0.6944, std 0.0074).
+> - **⚠️ 이 승격은 §107-3 게이트를 충족하지 못한 상태에서의 사용자 결정이다(§108→§109).** v82
+>   대비 seed-paired Δ +0.0045, t≈1.15, seed 44만 부호 반전(3/4 양수) — 4/4 부호 일치도
+>   `|t|≥2.5`도 아니다. 인용할 때 "미판정 상태의 승격"임을 밝힐 것.
+> - **⚠️ 0.6880은 옛 v77 DDP4 baseline(§104)의 0.6880과 숫자만 같은 별개 레짐의 값이다** —
+>   착시로 "제자리로 돌아왔다"고 읽지 말 것.
+> - **직전 baseline**: v82 Medium ClassSep `[0.5,1.4]`, 1-GPU 4 seed 0.6835(historical). 그 이전
+>   DDP4 baseline은 0.6880(`v77_hard_ep49`). **두 레짐의 숫자를 빼지 말 것** — 아래 §3-2 결과표는
+>   대부분 DDP4 1 seed 기록이다.
+> - **모든 arm은 1-GPU · SEED 42/43/44/45 · 50 epoch · epoch 49 채점**으로 돌리고 이제는 **v83**
+>   4 seed와 **seed-paired**로 비교한다. **판정 조건: 4/4 시드 부호 일치 + |t| ≥ 2.5**, 부호가
+>   갈리면 미판정 — 이 게이트 자체는 §109로 바뀌지 않았다.
+>   시드별 fold-paired CI(`scripts/compare_arms_paired.py`)는 보조 근거다.
 > - **채점은 epoch 49 고정.** validation-best 선택은 val_ce가 평평한 arm에서 과소학습 지점을
 >   고른다 — v80 seed 43이 epoch 16에 걸려 −0.0089를 잃었다.
-> - **macro seed std**는 arm마다 다르다(§106-1): fixed P 0.0018 / Medium 0.0030 / **Hard 0.0053** /
->   shallow MLP 0.0051. **단일 시드 비교의 게이트는 macro Δ ≈ 0.010(2σ)**이고 미만은 "판정 불가".
->   **4 seed seed-paired 설계에서는 SE가 0.002 안팎으로 줄어 +0.005도 판정할 수 있다** — 게이트는
->   시드 1개짜리 비교의 규칙이지 paired 설계에 그대로 적용하는 값이 아니다.
+> - **macro seed std**는 arm마다 다르다(§106-1): fixed P 0.0018 / Medium 0.0029 / **Hard 0.0053** /
+>   shallow MLP 0.0051 / **linear head(v83) 0.0074** — 학습되는 P를 가진 arm일수록 노이즈가
+>   크므로 SE는 arm마다 실측한다. 단일 시드 게이트 macro Δ ≈ 0.010(2σ)은 **이제 1 seed 비교에만**
+>   적용한다.
 > - **task별 CI로 판정하지 않는다** — 시드만 달라도 task 6개의 CI가 0을 제외한다(BAP1 −0.0402).
-> - **레이아웃을 섞지 않는다**(§106-4): 1-GPU는 DDP4보다 **−0.0098**이고 합성 val_ce는 반대로
->   좋아진다. control은 반드시 같은 레이아웃으로 돌린다.
-> - **4 arm × 4 seed 정면 비교 (1-GPU, epoch 49)**: Medium 0.6835 > Hard 0.6782 > fixed-P 0.6734 >
->   shallow-MLP 0.6722. **Medium−Hard +0.0053 (t=3.0, 4/4 seed)**, learnable−fixed P +0.0048
->   (t=1.5, seed 44 부호 반전 → **미판정**), shallow MLP −0.0059 (t=−2.7, 기각).
+> - **4 arm × 4 seed 정면 비교 (1-GPU, epoch 49, §106)**: Medium 0.6835 > Hard 0.6781 > fixed-P
+>   0.6734 > shallow-MLP 0.6722. **Medium−Hard +0.0053 (t=3.0, 4/4 seed)** → §107에서 baseline
+>   승격, learnable−fixed P +0.0048 (t=1.5, seed 44 부호 반전 → **미판정**), shallow MLP −0.0059
+>   (t=−2.7, 기각). **v83(linear head) vs Medium(v82)**: +0.0045 (t≈1.15, 3/4 seed → **미판정**,
+>   §108) → §109에서 사용자 결정으로 baseline 승격.
 
 **금지 사항 (전부 실측으로 무너진 판정 방식)**
 
@@ -55,15 +68,25 @@ CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 
 ## 2. 표준 실행
 
-**학습** (50 epoch. CV-only 약 28분, Encoder+Ridge 약 55분)
+**학습 — 4 seed 배치가 판정 단위다 (§107).** GPU 0–3에 시드 하나씩 올려 한 배치 약 28분.
 ```bash
-CUDA_DEVICES=<gpu> NPROC_PER_NODE=1 \
-TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun \
-NETRC=/NHNHOME/BASE/kimds/.netrc \
-bash scripts/launch_interactive_training.sh <RUN_NAME> <CONFIG>
+for i in 0 1 2 3; do
+  SEED=$((42+i)) CUDA_DEVICES=$i NPROC_PER_NODE=1 \
+  TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun \
+  NETRC=/NHNHOME/BASE/kimds/.netrc \
+  bash scripts/launch_interactive_training.sh <RUN_NAME>_seed$((42+i)) <CONFIG_1gpu> &
+done; wait
 ```
+⚠️ **1-GPU config를 쓸 것** — 판정 레짐이 1-GPU다(§107). DDP4 config로 돌린 숫자는 baseline
+4 seed와 비교할 수 없다(레이아웃 차이 −0.0098, §106-4).
 ⚠️ **50 epoch 유지** — 합성 지표는 평평해도 실제 task는 계속 오른다(§69-6).
 ⚠️ **`gradient_clip_val` 켜지 말 것** — er_status −0.0317 (§67).
+
+**baseline 4 seed** (비교 대상, §109):
+`configs/train_v83_linear_head_1536_1gpu.yaml`,
+tags `v83_linear_head_seed4{2..5}_ep49`, macro 0.6905/0.6896/0.6774/0.6944 (mean **0.6880**).
+직전 baseline은 `configs/train_v82_medium_classsep_1536_1gpu.yaml`,
+tags `v82_medium_seed4{2..5}_ep49`, mean **0.6835**(historical, §107).
 
 **평가** (SEAL 10개, 2 GPU 분할 약 5분)
 ```bash
@@ -86,16 +109,43 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 
 ---
 
-## 3. 결과표 (SEAL 10개 macro 평균)
+## 3. 결과표
+
+### 3-1. 현행 판정 레짐 — 1-GPU × 4 seed (§106·§107·§109)
+
+**새 arm은 이 표하고만 비교한다 — 현재 기준 arm은 v83이다.**
+
+| arm | baseline에서 바뀐 것 | 4 seed 평균 | seed std | 판정 |
+|---|---|---:|---:|---|
+| **v83 linear head** | (**활성 baseline**, §109) | **0.6880** | 0.0074 | head `12→32→1`(GELU) → `Linear(12,1)`, tags `v83_linear_head_seed4{2..5}_ep49` |
+| v82 Medium | head `Linear(12,1)` → `12→32→1`(GELU) | 0.6835 | 0.0029 | v83 기준 −0.0045 (t≈−1.15, 3/4) **미판정** — 직전 baseline(§107) |
+| v84 deep head | head `12→32→1`(GELU) → `12→32→32→1`(GELU×2) | 0.6777 | 0.0018 | v82 기준 −0.0057 (t=−3.63, 4/4) / v83 기준 −0.0102 (t=−3.61, 4/4) **기각, 양쪽** (§110) |
+| v77 Hard | ClassSep `[0.5,1.4]` → `[0.2,0.8]` (v82 기준) | 0.6781 | 0.0053 | v82 기준 −0.0053 (t=−3.0, 4/4) |
+| v81 fixed P | learnable P → fixed P (197,057 → 449, v77 기준) | 0.6734 | 0.0018 | Hard 기준 −0.0048 (t=−1.5) **미판정** |
+| v80 shallow MLP | orthogonal manifold → shallow MLP (v77 기준) | 0.6722 | 0.0051 | Hard 기준 −0.0059 (t=−2.7) **기각** |
+
+⚠️ **v83 승격은 §107-3 게이트(4/4 부호 일치 + |t|≥2.5) 미달 상태의 사용자 결정이다(§108·§109)** —
+"확정된 승격"으로 인용하지 말 것.
+⚠️ **relation head 깊이 축은 §110으로 소진됐다** — v84(심화)는 양쪽 baseline 기준 모두 4/4 +
+|t|>3.6으로 기각. §108(얕게, 미판정)과 종합하면 이 축에서 새 arm을 더 설계하지 말 것.
+⚠️ **fixed P × Medium 칸은 여전히 비어 있다** — v81은 Hard에서만 돌았다(§107-6). v83이 baseline이
+된 지금은 "fixed P × Medium × linear-head" 조합도 미측정으로 남는다. v85로 다른 노드(nhn-SMC)에서
+측정 진행 중.
+
+### 3-2. 역사적 표 — DDP4 1 seed (SEAL 10개 macro 평균)
+
+> [!WARNING]
+> **아래는 전부 DDP4 단일 시드 기록이라 §3-1과 직접 뺄 수 없다** (레이아웃 차이 −0.0098,
+> §106-4). 자기들끼리는 여전히 유효하다.
 
 | arm | 계보 | 평균 | 비고 |
 |---|---|---|---|
 | SEAL ABMIL (지도학습) | — | **0.727** | 비교 상대 |
 | SEAL MeanMIL (지도학습) | — | 0.713 | |
-| **v41_K128** | A | **0.6940** | **현행 최고**. K=128, CV-2=128, `a=0.85π/K` |
-| **v77 Hard orthogonal ep49** | relation | **0.6880** | **활성 baseline** (`v77_hard_ep49`, §104) |
+| **v41_K128** | A | **0.6940** | **역사적 전체 최고**. K=128, CV-2=128, `a=0.85π/K`. ⚠️ 레짐이 달라 v83 0.6880와 직접 비교 불가 (§107-2) |
+| v77 Hard orthogonal ep49 | relation | 0.6880 | **historical** (`v77_hard_ep49`, §104). §107에서 v82로, §109에서 v83으로 교체됨. ⚠️ v83의 1-GPU 4 seed 0.6880과 숫자만 같은 별개 레짐의 값 |
 | v77 Hard orthogonal val-best | relation | 0.6873 | 같은 run의 `epoch=048`. 역사적 표기 |
-| **ClassSep Medium ep49** | relation | **0.6881** | `[0.5,1.4]`. **Hard와 동률** (+0.0001 [−0.0022,+0.0024]). ⚠️ §91의 0.6823은 오기 (§105-3) |
+| ClassSep Medium ep49 | relation | 0.6881 | `[0.5,1.4]`. DDP4 1 seed로는 Hard와 동률(+0.0001)이었으나 **4 seed로는 +0.0053** (§106-2). ⚠️ §91의 0.6823은 오기 (§105-3) |
 | ClassSep Mild ep49 | relation | 0.6854 | `[0.8,1.7]`. Hard 대비 −0.0026, 판정 불가 |
 | ClassSep Very-hard ep49 | relation | 0.6843 | `[0.1,0.5]`. Hard 대비 −0.0037, 게이트 미만 |
 | v78 balanced ep49 | relation | 0.6879 | −0.0001. 동률 |
@@ -103,7 +153,7 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 | ridge calibration ep49 | relation | 0.6870 | −0.0010 [−0.0021,+0.0002]. **기각 철회 → 판정 불가** |
 | v79 dual projection ep49 | relation | 0.6768 | −0.0112. **기각 유지** |
 | v76 learnable P ep49 | relation | 0.6735 | v74(0.6731) 대비 **+0.0004 [−0.0030,+0.0038] → 승격 근거 없음** (§105-4) |
-| v80 shallow MLP (4 seed 평균) | relation | 0.6722 | infinite MLP `mlp_num_layers=2`, Δ −0.0158 기각 (§104) |
+| v80 shallow MLP | relation | (§3-1 참조) | ⚠️ 4 seed는 1-GPU 레짐이라 이 표가 아니다. §104의 Δ −0.0158은 레이아웃 confound로 부풀려진 값이고 정당한 control 대비 −0.0059다 (§106-4) |
 | mlpbank ep49 (M=128~4096) | relation | 0.6734/0.6730/0.6780/0.6776/0.6678 | 1024·2048 고원 + 4096 −0.0102. M→∞ 하강은 실재 (§105-5) |
 | latent ep49 (2/4/8/16/32) | relation | 0.6775/0.6776/0.6759/0.6665/0.6880 | L16 딥은 학습량 artifact가 아니다 (§105-5) |
 | ⚠️ v43_notanh / v44_lowT | A | 0.6770 / 0.6763 | **artifact 없음** — `logs/official50`·`predictions/`에 산출물이 없어 재확인 불가 (§105-6) |
@@ -178,7 +228,17 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 3. **증류/잔차** — CV-1을 teacher로 계보 B를 학습. ⚠️ **순수 증류로는 teacher를 넘을 수
    없다**(CV-1은 결정적 특징 맵이라 완벽 모방 = 0.6940). 출발점 이동이나 잔차 학습으로만
    의미가 있다.
-4. **seed 반복** — 지금까지 arm당 1 seed다.
+4. ~~**seed 반복** — 지금까지 arm당 1 seed다.~~ **해소됨 (§107)**: 판정 단위가 1-GPU × 4 seed로
+   바뀌었다. 남은 부채는 **과거 arm 전부가 DDP4 1 seed 기록**이라는 것 — 새 arm과 비교하려면
+   그 arm을 1-GPU 4 seed로 다시 돌려야 한다.
+4a. **v83 linear-head 승격의 통계 근거 보강 (§109)** — Δ+0.0045, t≈1.15는 §107-3 게이트 미달인
+   채로 baseline이 됐다. `scripts/compare_arms_paired.py`로 fold-paired CI를 확인하거나 seed를
+   추가(46–49)해 재검증할 것.
+4b. **fixed P × Medium 4 seed** — 비어 있는 칸이자 baseline 파라미터를 196,621 → 449로 줄일 수
+   있는지 가르는 측정이다(§107-6). learnable P는 같은 난이도 4 seed에서도 t=1.5로 미판정이다.
+   v85로 다른 노드에서 측정 진행 중.
+4c. ~~**relation head 깊이 축**~~ **해소됨 (§110)**: v84(심화)가 양쪽 baseline 기준 모두 4/4 +
+   |t|>3.6으로 기각됐다. §108(얕게, 미판정)과 종합해 이 축은 소진 — 더 파지 말 것.
 5. **병목이 표현이 아닐 가능성** — CV-1 단독 0.9052 vs 전체 0.9199. 그 위에 얹은 모든
    시도(v36·v37·v42·v43·v44·v45)가 Δ≈0이었다. task 자체의 정보 한계일 수 있다.
 6. **새 합성 cardinality arm** — 기본 데이터가 bag별 독립 cell 수 + zero-padding/mask로

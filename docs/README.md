@@ -1,7 +1,8 @@
 # Documentation map
 
-**Last updated**: `2026-08-12`
-**Active baseline**: **v77 Hard orthogonal relation model** (SEAL 10-task macro 0.6873). 실행 중: **v78** (§100·§101).
+**Last updated**: `2026-08-13`
+**Active baseline**: **v83 linear head relation model** (SEAL 10-task macro 1-GPU 4 seed 평균 0.6880, §109 —
+사용자 결정, §107-3 판정 게이트 미달 상태에서의 승격). 실행 중: 없음.
 
 문서는 **새 대화 세션으로 접속하는 Agent가 최우선으로 읽는 Living 문서 5개와 현행 proposal 1개(`docs/` 루트)**, **과거 기록/딥다이브 분석서([`docs/history.md`](history.md))**로 이원화하여 관리합니다.
 
@@ -13,7 +14,7 @@
 
 1. [`agent_handoff.md`](agent_handoff.md): 새 세션 Agent 초기화 수칙, Git 기반 워크플로우, 실행 환경, 타임아웃, 테스트 검증, Docs/Config 정리 규칙
 2. [`current_status.md`](current_status.md): 개발 현황, 최신 실증 수치, 판정 프로토콜(**fold-paired Δ + CI**, §99), 열린 과제, Next Action Plan (SSOT). §2~§97 본문은 `history.md` §20–§23으로 아카이빙되고 스텁+포인터만 남았다(§101)
-3. [`current_architecture.md`](current_architecture.md): 활성 **v77 Hard** relation 구조와 역사적 CV-only/Encoder+Ridge 비교, 데이터·학습 계약
+3. [`current_architecture.md`](current_architecture.md): 활성 **v83 linear head** relation 구조와 역사적 CV-only/Encoder+Ridge 비교, 데이터·학습 계약
 4. [`current_experiments.md`](current_experiments.md): 실험 전략과 검정력, 평가 프로토콜, Stage 1~3 실행 명령어 및 실증 수치
 5. [`README.md`](README.md): 문서 맵 및 갱신/아카이빙 가이드라인
 6. `architecture_*_proposal.md`: 현재 활성 개선 proposal. 완료·폐기 시 핵심 결론을 `history.md`에 기록하고 원문은 git 이력에 보존. (**2026-08-09 현재 활성 proposal 없음**)
@@ -45,11 +46,17 @@
 - **Git 커밋 동기화**: 세션 핸드오프 시 작업을 남김없이 커밋하고 커밋 내역/diff를 `agent_handoff.md` 및 `current_status.md`에 반영합니다.
 - **아카이빙 규칙**: 특정 버전 딥다이브 보고서나 계획 문서는 완료 시 **핵심 결론(ADR·트레이드오프·레슨)을 `docs/history.md`의 해당 시기 절에 추가**하고, 개별 원문 파일은 새로 만들지 않습니다(원문은 git 이력에 보존). `docs/` 루트를 단순하고 가독성 높게 유지합니다.
 - **Config 루트 관리**: `configs/` 루트에는 **현재 활성 파이프라인의 entry point만** 둔다
-  (상세는 [`agent_handoff.md`](agent_handoff.md) §7). **2026-08-12(§103) 기준 4개다** —
-  `train_v77_hard_orthogonal_1536.yaml`(canonical, 자체 포함형),
-  `train_v79_dual_projection_1536.yaml`(실행 중), v78 두 arm(기각, 다음 정리에서 이관 예정). 종결된 arm 64개는 `configs/archive/` 아래 시대별
+  (상세는 [`agent_handoff.md`](agent_handoff.md) §7). **2026-08-13(§110) 기준 6개다** —
+  `train_v83_linear_head_1536_1gpu.yaml`(**canonical baseline**, 자체 포함형, §109 사용자 결정),
+  `train_v82_medium_classsep_1536_1gpu.yaml`(직전 baseline, 참고용),
+  `train_v82_medium_classsep_1536.yaml`(v82의 DDP4 판본, 참고용),
+  `train_v77_hard_orthogonal_1536{,_1gpu}.yaml`(historical control),
+  `train_v85_medium_fixed_p_1536_1gpu.yaml`(§107-6, **진행 중** — 다른 노드에서 학습 중, 결론
+  나면 concluded로 이동).
+  종결된 arm 72개는 `configs/archive/` 아래 시대별
   폴더(`v34_largectx/`, `v40_v45_cvonly/`, `v50_v54_encoder/`, `v57_v61_data_arms/`,
-  `v62_v68_hybrid/`, `v69_v76_relation/`, `v77_pop_residual/`)로 이관하고 전부 `base_config` 없는
+  `v62_v68_hybrid/`, `v69_v76_relation/`, `v77_pop_residual/`, `v78_dd_gradient/`,
+  `v79_dual_projection/`, `v80_v82_seed_batch/`, `v84_deep_head/`)로 이관하고 전부 `base_config` 없는
   자체 포함형으로 보관한다. ICI의 fold/seed는 config가 아니라 `--cv`/`--seed`로 주입하므로
   fold별 config를 만들지 않는다.
 - **단일 출처화**: 동일한 수치나 진행 상태를 중복해 기록하지 않으며, 상태는 `current_status.md`에만 기록합니다.

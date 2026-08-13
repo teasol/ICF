@@ -1,16 +1,35 @@
-# Current architecture — 활성 relation 계보와 역사적 비교군 (2026-08-12)
+# Current architecture — 활성 relation 계보와 역사적 비교군 (2026-08-13)
 
 > [!IMPORTANT]
-> **활성 baseline은 v77 Hard orthogonal의 `epoch 49` checkpoint**
-> (`CovarianceMeanLearnablePDDCTMLPModel`, SEAL **0.6880**, tag `v77_hard_ep49`)다 —
-> `checkpoints/20260812_v76_classsep_sweep/hard/periodic-epoch=049-val_ce_loss=0.1717.ckpt`.
-> 같은 run의 `epoch=048` validation-best는 **0.6873**이고 Δ +0.0007 [+0.0000, +0.0014]다;
-> 채점은 **epoch 49 고정**으로 통일한다(§104). 이전에 Hard v76이라 부르던 실험을 공식 v77로 승격했다.
+> **활성 baseline은 v83 linear head의 4 seed × `epoch 49` checkpoint**
+> (`CovarianceMeanLearnablePDDCTMLPModel`, SEAL **0.6880** = 1-GPU 4 seed 평균, §109)다 —
+> `checkpoints/20260813_153750/v83_linear_head_seed4{2..5}/`, tags `v83_linear_head_seed4{2..5}_ep49`,
+> config `configs/train_v83_linear_head_1536_1gpu.yaml`.
+>
+> **⚠️ 이 승격은 §107-3 판정 게이트를 충족하지 못한 상태에서의 사용자 결정이다(§108→§109).**
+> v82 대비 seed-paired Δ +0.0045, t≈1.15 — seed 44가 부호 반전(3/4 양수)이라 4/4 부호 일치도
+> `|t|≥2.5`도 아니다. 인용할 때 "미판정 상태에서 승격됐다"고 밝힐 것.
+>
+> **⚠️ 모델은 v82/v77과 거의 같다 — 유일한 차이는 relation head 구조다.** `ct_head_hidden_dims: []`로
+> hidden layer와 GELU를 없애 head가 `12→32→1`(GELU)에서 bare **`Linear(12,1)`**로 줄었다.
+> 클래스·텐서 구조(head 제외)·`architecture_version=54`는 그대로이지만 **head shape가 달라
+> v82/v77 checkpoint는 strict-load되지 않는다** — 처음부터 학습했다. 이 문서의 모델 명세(head
+> 입력 12개 feature 등)는 v83에도 그대로 적용되고, head 자체의 구조만 아래처럼 다르다.
+>
+> **⚠️ 0.6880 < 이전 0.6880(v77 DDP4)은 숫자만 같은 별개 레짐의 값이다** — 착시로 "제자리로
+> 돌아왔다"고 읽지 말 것. 판정 레짐 자체(1-GPU 4 seed)는 §107에서 DDP4 1 seed로부터 전환된 그대로
+> 유지된다. 1-GPU는 같은 config에서 DDP4보다 −0.0098이고, 같은 레짐에서 v77 Hard는 0.6781,
+> v82 Medium(직전 baseline)은 **0.6835**다.
+> 옛 DDP4 baseline은 `v77_hard_ep49` 0.6880
+> (`checkpoints/20260812_v76_classsep_sweep/hard/periodic-epoch=049-val_ce_loss=0.1717.ckpt`,
+> val-best epoch 48은 0.6873)이며 **역사적 기록**이다.
+> 채점은 계속 **epoch 49 고정**이다(§104).
 > centered cells를 learnable orthogonal P(1536×128)에 사영해 만든 covariance를 CV와 DD가
-> 공유하고, CT와 함께 12개 relation feature를 만들어 12→32→1 MLP가 읽는다.
-> 학습 파라미터는 P 196,608개 + head 449개 = **197,057개**다. 기본 v77에서 P는 CV ridge
-> 경로로만 학습되며 DD/CT는 training-free다. ridge-calibration arm은 두 스칼라를 추가했으나
-> SEAL 0.6840으로 baseline을 넘지 못했다.
+> 공유하고, CT와 함께 12개 relation feature를 만들어 이제는 **bare `Linear(12,1)`**이 읽는다
+> (v82/v77은 `12→32→1` GELU였다).
+> 학습 파라미터는 P 196,608개 + head 13개 = **196,621개**(v82/v77은 head 449개, 합계 197,057개).
+> 기본 v77/v82에서 P는 CV ridge 경로로만 학습되며 DD/CT는 training-free다 — v83도 동일. ridge-calibration
+> arm은 두 스칼라를 추가했으나 SEAL 0.6840으로 baseline을 넘지 못했다(v82 기준 값, historical).
 >
 > **v78 (`train_dd_projection`) — 기각, 그리고 방향까지 확정됐다.** weight 0/0.02/1.0에서
 > 0.6873/0.6869/**0.6826**으로 **단조 악화**하고 무가중은 CI가 0을 제외한다(§103, G-5).
@@ -26,26 +45,34 @@
 `src/models/set_transformer_ridge.py`에 있고, 역사적 CV-only는 `src/models/baseline.py`에 있다.
 공통 핵심 유틸리티는 episode-local ridge의 `solve_ridge_system`이다.
 
-| | Active. Relation v77 | A. CV-only | B. Encoder+Ridge |
+| | Active. Relation v83 | A. CV-only | B. Encoder+Ridge |
 |---|---|---|---|
 | 파일 | `set_transformer_ridge.py` | `baseline.py` | `set_transformer_ridge.py` |
 | 클래스 | `CovarianceMeanLearnablePDDCTMLPModel` | `BaseModel` | `SetTransformerRidgeModel` |
 | bag 기술자 | learnable P covariance + raw mean | fixed P covariance | learned Transformer |
-| readout | CV/DD/CT 12→32→1 | CV-1 ridge + CV-2 | episode-local ridge |
-| 학습 파라미터 | 197,057 (calibration arm 197,059) | 229 | 5,010,946 |
-| SEAL 10개 최고 | **0.6880** (ep49) | **0.6940** (v41_K128) | 0.6619 / 0.6526 |
-| 상태 | **활성 baseline** (v79·v80 모두 기각, Active-6·§104) | 역사적 전체 최고 | 기각 |
+| readout | CV/DD/CT 12→1 (bare linear, §109) | CV-1 ridge + CV-2 | episode-local ridge |
+| 학습 파라미터 | 196,621 (v82/v77은 197,057) | 229 | 5,010,946 |
+| SEAL 10개 최고 | **0.6880** (1-GPU 4 seed, §109) | **0.6940** (v41_K128, DDP4 1 seed) | 0.6619 / 0.6526 |
+| 상태 | **활성 baseline** (§108·§109, 게이트 미달 상태의 사용자 결정) | 역사적 전체 최고 — 레짐이 달라 직접 비교 불가 | 기각 |
 
 이전 세대(v34~v39의 6-분기)는 **소스에서 삭제**됐다(§73). 필요하면 git `8caa96c`.
 
 ---
 
-# Active. v77 Hard learnable-P CV+DD+CT relation model
+# Active. v83 linear-head learnable-P CV+DD+CT relation model
 
-v77 승격은 **실험·데이터 baseline의 버전 승격**이다. 텐서 구조는 v76과 같으므로 모델 클래스의
-내부 `architecture_version=54`는 checkpoint strict-load 호환을 위해 유지한다. canonical config는
-`configs/train_v77_hard_orthogonal_1536.yaml`, canonical checkpoint는
-`checkpoints/20260812_v76_classsep_sweep/hard/epoch=048-val_ce_loss=0.1697.ckpt`다.
+v83 승격은 §109에서 사용자 결정으로 이뤄졌으며 **§107-3 판정 게이트(4/4 시드 부호 일치 +
+|t|≥2.5)를 충족하지 못한 상태의 승격**이다(§108: v82 대비 Δ+0.0045, t≈1.15) — 인용 시 이 점을
+함께 밝힐 것. v82에서 바뀐 것은 relation head 구조 하나뿐이다 — `ct_head_hidden_dims: []`로
+hidden layer와 GELU를 없애 head가 `12→32→1`(GELU)에서 bare `Linear(12,1)`로 줄었다
+(trainable 197,057 → 196,621). 텐서 구조(head 제외)는 v76 이후 동일하므로 모델 클래스의
+내부 `architecture_version=54`는 유지하지만, **head shape가 달라 v82/v77 checkpoint는
+strict-load되지 않는다**(`tests/test_relation_head_depth.py`가 이 실패를 pin한다) — 처음부터
+학습했다. canonical config는 `configs/train_v83_linear_head_1536_1gpu.yaml`(self-contained),
+canonical checkpoint는 **4 seed × epoch 49** `checkpoints/20260813_153750/v83_linear_head_seed4{2..5}/`다.
+직전 baseline v82의 canonical checkpoint는 `checkpoints/20260813_v82_medium_seeds/seed4{2..5}/`
+(1-GPU 4 seed 0.6835, historical)이고, 그 이전 v77의 canonical checkpoint는
+`checkpoints/20260812_v76_classsep_sweep/hard/periodic-epoch=049-val_ce_loss=0.1717.ckpt`다.
 과거 `PopulationTokenResidualModel`은 이제 **retired provisional v77-pop-residual**로만 부르며,
 그 클래스의 내부 version 55 역시 과거 checkpoint replay를 위해 유지한다.
 
@@ -80,13 +107,16 @@ CV ridge coefficient는 real/synthetic episode의 support label로 매번 다시
 
 ## Active-2. Gradient와 학습 계약
 
-기본 v77에서 학습되는 것은 다음뿐이다.
+활성 baseline v83에서 학습되는 것은 다음뿐이다.
 
 | 파라미터 | 개수 | gradient 경로 |
 |---|---:|---|
 | `_covariance_projection` P | 196,608 | CV ridge solve를 통과 |
-| `cv_dd_ct_head` | 449 | 12개 relation feature |
-| **합계** | **197,057** | |
+| `cv_dd_ct_head` (bare `Linear(12,1)`) | 13 | 12개 relation feature |
+| **합계** | **196,621** | |
+
+v82/v77(head `12→32→1`, GELU)은 head가 449개라 **합계 197,057**이었다 — 두 세대의 유일한 차이는
+head 파라미터 수뿐이고 P·gradient 경로는 동일하다.
 
 - 매 forward에서 thin QR로 `P_effᵀP_eff=I`를 보장해 임의 scale/conditioning 변화를 차단한다.
 - DD는 현재 P로 만든 covariance를 읽지만 기본 v77에서 DD→P gradient는 차단된다. CT 선택/특징은
@@ -101,7 +131,7 @@ CV ridge coefficient는 real/synthetic episode의 support label로 매번 다시
 
 ## Active-3. 현재 synthetic data 계약
 
-Hard 실험의 공통 조건은 다음과 같다.
+활성 baseline(v83 linear head, 데이터 계약은 v82 Medium과 동일) 실험의 공통 조건은 다음과 같다.
 
 | 항목 | 값 |
 |---|---|
@@ -111,14 +141,15 @@ Hard 실험의 공통 조건은 다음과 같다.
 | latent/output | 32 / 1,536 |
 | shared populations | 4–10, fraction 0.82–0.96 |
 | response tasks | composition/state/covariance/interaction/combined 동일 확률 |
-| ClassSep | **Hard `[0.2,0.8]`** |
+| ClassSep | **Medium `[0.5,1.4]`** (v82, §107). Hard `[0.2,0.8]`은 직전 baseline |
 | observation noise | 0.005 |
-| training | DDP4 GPU 0–3, bf16, 50 epochs |
+| training | **1-GPU × 4 seed(42–45)**, GPU 0–3에 하나씩, bf16, 50 epochs (§107) |
 
 `manifold_mode`은 실험 축이다.
 
-- `orthogonal`: episode마다 fresh isometric linear map. **Hard epoch 49 = 0.6880**으로 현재
-  데이터 후보 최고(val-best 채점은 0.6873, §104).
+- `orthogonal`: episode마다 fresh isometric linear map. **활성 baseline이 쓰는 값**이다 —
+  v83(linear head) Medium epoch 49 = **0.6880**(1-GPU 4 seed, §109). 직전 v82(GELU head)는
+  같은 데이터로 **0.6835**(§107). Hard DDP4 1 seed는 0.6880이었다(§104, 숫자만 같은 별개 레짐).
 - `mlp_bank`: 고정 3-layer MLP를 bank ID seed로 재생성. **epoch 49 통일 후**
   M=128/512/1024/2048/4096 = 0.6734/0.6730/**0.6780**/**0.6776**/0.6678 —
   1024·2048이 고원이고 4096에서 −0.0102 하강한다(§105-5). 재채점 전 값은
@@ -140,7 +171,11 @@ Hard 실험의 공통 조건은 다음과 같다.
 - 활성 실행: 없음.
 - **v78·v79 모두 기각.** weight 0/0.02/1.0에서 0.6873/0.6869/0.6826(G-5), v79 분리는 0.6768
   (Active-6). 세 방식 모두 지고 건드린 정도가 클수록 더 졌다 — 이 축은 소진으로 본다.
-- active baseline: v77 Hard orthogonal **epoch 49 = 0.6880** (val-best epoch 48은 0.6873, §104).
+- active baseline: **v83 linear head orthogonal, 1-GPU 4 seed 평균 epoch 49 = 0.6880** (§109).
+  ⚠️ **§107-3 게이트를 충족하지 못한 상태의 사용자 결정 승격이다** — v82 대비 Δ+0.0045, t≈1.15,
+  3/4 시드 양수(§108). 직전 v82 Medium(GELU head)은 같은 레짐에서 0.6835, v77 Hard는 0.6781,
+  DDP4 1 seed로는 0.6880이었다 — **레짐이 다른 숫자를 빼지 말 것**(§107-1). v83의 0.6880과 v77
+  DDP4의 0.6880은 숫자만 같은 별개 값이다.
 - learned ridge λ/logit scale은 0.6840으로 기각했다. ⚠️ Δ −0.0033은 seed std 0.0051 미만이라
   **§104-4에서 "판정 불가"로 내려갔다**.
 - v80 shallow infinite MLP manifold는 4 seed 평균 0.6722로 기각. ⚠️ Δ는 −0.0158이 아니라
@@ -419,10 +454,11 @@ attention은 에피소드당 2.7e10 쌍이라 불가"였는데, **쌍의 개수�
 | `train_dd_projection` | `false` | **Active** | v78. ⚠️ **기각됨**(G-5) — 켜지 말 것. v79에서는 ValueError로 거부된다 |
 | `dd_projection_gradient_weight` | `1.0` | **Active** | v78 전용. 무가중이면 DD가 CV의 52배로 P를 지배한다(G-5) |
 | `dual_head_hidden_dim` | 32 | **v79** | 16→hidden→1 relation head의 폭 |
-| `train_ridge_calibration` | `false` | **Active** | `ridge_log_lambda`/`ridge_log_scale` 동결 해제(197,057 → 197,059). SEAL 0.6840으로 기각 |
+| `ct_head_hidden_dims` | `[]` | **Active (§109)** | relation head 은닉층 폭 리스트. `[]` = bare `Linear(12,1)`(v83, 활성 baseline). v82/v77은 `[32]`(GELU 포함, 197,057 파라미터) — §108이 이 둘을 비교했다(미판정, 사용자 결정으로 승격). `[32, 32]`(v84, 198,113 파라미터)는 §110에서 양쪽 baseline 기준 모두 기각됐다 — 이 이상 깊게 가지 말 것 |
+| `train_ridge_calibration` | `false` | **Active** | `ridge_log_lambda`/`ridge_log_scale` 동결 해제. v82/v77 head(449) 기준 197,057 → 197,059. SEAL 0.6840으로 기각(historical, v83 head로는 재측정 안 됨) |
 | `dd_shrinkage` | 0.25 | **Active** | DD whitening의 shrinkage. ⚠️ backward의 고윳값 **간격은 바꾸지 않는다** |
 | `ct_num_tokens` / `ct_cells_per_bag` | 16 / 64 | **Active** | CT 후보 token 수 / bag당 샘플 cell 수 |
-| `class_separation` | `[0.2, 0.8]` | **Active** | 합성 난이도. ⚠️ **Medium `[0.5,1.4]`가 Hard보다 +0.0053 낫다**(4 seed, t=3.0, §106-2). baseline은 아직 Hard이고 승격에는 DDP4 Medium 3~4 seed 필요 |
+| `class_separation` | `[0.5, 1.4]` | **Active** | 합성 난이도. **Medium이 Hard `[0.2,0.8]`보다 +0.0053 낫고**(4 seed, 4/4 양수, t=3.0, §106-2) **§107에서 baseline이 됐다.** 조이는 것 자체는 `[1.0,2.0]` 대비 +0.011~+0.015로 유효 |
 | `manifold_mode` | `orthogonal` | **Active** | `mlp_bank`·`mixed_linear_mlp_bank`·`nonlinear` 전부 기각(Active-3, §104) |
 | `mlp_num_layers` | 3 | **Active** | `orthogonal`에서는 미사용. `nonlinear`/`mlp_bank`에서만 유효하고 **weight 행렬 개수**다(1은 활성 없음 = MLP 아님) |
 | `data.ragged_training` | `false` | **Active** | `episode_batch_size=1` 전용. Active-5 참조 |
@@ -438,21 +474,28 @@ attention은 에피소드당 2.7e10 쌍이라 불가"였는데, **쌍의 개수�
 
 ## E. Source of Truth
 
-- **활성 baseline (v77)**: `src/models/set_transformer_ridge.py` —
-  `CovarianceMeanLearnablePDDCTMLPModel`. DD 방향 격리는 `_dd_direction`(G-4), v78의 gradient
-  균형은 `_ScaleGradient`(G-5, 기각).
-- **진행 중 (v79)**: 같은 파일 — `DualProjectionCVDDCTMLPModel`. fixed 사영은
+- **활성 baseline (v83)**: `src/models/set_transformer_ridge.py` —
+  `CovarianceMeanLearnablePDDCTMLPModel` (v77·v82와 동일한 클래스. v83은 `ct_head_hidden_dims: []`
+  로 head 구조만 바꾼다 — §109, §107-3 게이트 미달 상태의 사용자 결정).
+  DD 방향 격리는 `_dd_direction`(G-4), v78의 gradient 균형은 `_ScaleGradient`(G-5, 기각).
+- **직전 baseline (v82, historical)**: 같은 클래스, `ct_head_hidden_dims: [32]`(GELU 포함,
+  449 파라미터). v77에서 `class_separation`만 바꾼 데이터 단독 변경이었다.
+- **기각 (v79)**: 같은 파일 — `DualProjectionCVDDCTMLPModel`. fixed 사영은
   `_fixed_covariance_projection` buffer, 두 CV branch는 `_cv_branch_features`가 공유한다.
 - 역사적 모델 A: `src/models/baseline.py` (2,317줄)
 - 역사적 모델 B: `src/models/set_transformer_ridge.py` — `SetTransformerRidgeModel`
 - 평가: `scripts/eval_seal_tasks.sh` → `scripts/test_pathobench.py`
-- **arm 비교(필수)**: `scripts/compare_arms_paired.py` — fold-paired Δ + bootstrap CI.
-  점추정 macro끼리 빼서 판정하지 않는다(§99).
-- canonical config/checkpoint: `configs/train_v77_hard_orthogonal_1536.yaml` /
-  `checkpoints/20260812_v76_classsep_sweep/hard/epoch=048-val_ce_loss=0.1697.ckpt`
+- **arm 비교(필수)**: arm과 baseline(v83)을 각각 **1-GPU 4 seed**로 돌려 **seed-paired Δ + t**로
+  판정한다(§107-3). 시드별 fold-paired CI는 `scripts/compare_arms_paired.py`로 뽑아 보조 근거로
+  쓴다. 점추정 macro끼리 빼서 판정하지 않는다(§99).
+- canonical config/checkpoint: `configs/train_v83_linear_head_1536_1gpu.yaml` /
+  `checkpoints/20260813_153750/v83_linear_head_seed4{2..5}/` (epoch 49, 4 seed 평균 **0.6880**,
+  §109). 직전 baseline: `configs/train_v82_medium_classsep_1536_1gpu.yaml` /
+  `checkpoints/20260813_v82_medium_seeds/seed4{2..5}/` (0.6835, historical).
 - 테스트: `tests/test_set_transformer_ridge.py`(v78 계약 5개 포함 — forward 동일성,
   `_dd_direction`이 autograd 밖, P gradient 도달, weight 선형성, strict-load 양방향),
   `test_ridge_ablation.py`, `test_cvonly_golden.py`, `test_paired_relation_head.py`,
+  `test_relation_head_depth.py`(v83 — head shape 불일치 시 strict-load가 시끄럽게 실패하는지 pin),
   `test_training_uses_dense_path.py`, `test_per_bag_cardinality_padding.py`,
   `test_config_numeric_types.py`, `test_precision_contract.py`
 - ⚠️ 기존 실패 1건: `tests/test_mlp_manifold_bank.py`가 BagPFN env에 없는 `pytest`를 import한다.
@@ -495,11 +538,11 @@ DD는 자기 사영을 갖지 않고 **CV가 만든 covariance를 재사용**한
 | arm | DD가 읽는 covariance | DD→P gradient |
 |---|---|---|
 | v74 | **fixed** P | 학습 P 자체가 없음 |
-| **v77 (활성 baseline)** | **CV가 학습한 P** | 차단 (`no_grad`) |
+| v77 / v82 / **v83 (활성 baseline)** | **CV가 학습한 P** | 차단 (`no_grad`) |
 | v78 (기각) | CV가 학습한 P | **개방**(이차형식만) + weight — G-5 |
-| **v79 (진행 중)** | **fixed** P — CV의 learnable P와 분리 | 구조적으로 불가(buffer를 읽음) |
+| v79 (기각) | **fixed** P — CV의 learnable P와 분리 | 구조적으로 불가(buffer를 읽음) |
 
-⚠️ v77에서 DD는 **자기 목적으로 최적화되지 않은 subspace를 물려받는다.** 이것이 v78·v79가
+⚠️ v77/v82/v83에서 DD는 **자기 목적으로 최적화되지 않은 subspace를 물려받는다.** 이것이 v78·v79가
 겨냥한 문제다.
 
 ### G-1. DD는 무엇을 측정하는가
