@@ -79,11 +79,13 @@
 현행 아키텍처 명세는 [`current_architecture.md`](current_architecture.md),
 실험 절차·결과표·금지사항은 [`current_experiments.md`](current_experiments.md).
 
-**지금 돌아가는 것 (2026-08-13)**: 로컬(NEXGEM)에는 없음. §108의 v83 4 seed 평가와 §110의 v84
+**지금 돌아가는 것 (2026-08-13)**: 없음, 어느 노드에서도. §108의 v83 4 seed 평가와 §110의 v84
 4 seed 평가가 모두 끝났다 — §109에서 baseline을 v83 linear head(1-GPU 4 seed 0.6880)로
 승격했고(사용자 결정, §107-3 게이트 미달), §110에서 v84(deep head)는 양쪽 baseline 기준 모두
-기각했다. **fixed P × Medium 4 seed(§107-6, v85)는 다른 노드(nhn-SMC)에서 진행 중** —
-`configs/train_v85_medium_fixed_p_1536_1gpu.yaml`, 449 trainable parameters (P 고정) 확인됨.
+기각했다. **fixed P × Medium 4 seed(§107-6, v85)는 아직 미착수다** — config
+`configs/train_v85_medium_fixed_p_1536_1gpu.yaml`(449 trainable parameters, P 고정)는 존재하지만
+⚠️ **"nhn-SMC에서 진행 중"이라는 이전 기록은 착오였다**(2026-08-13 정정, nhn-SMC-claude) — 해당
+노드에서 GPU/프로세스를 직접 확인한 결과 실행 중인 학습이 없었다.
 이 승격의 통계적 근거를 보강하려면 `scripts/compare_arms_paired.py`로 fold-paired CI를
 확인하는 것도 다음 후보다.
 
@@ -171,10 +173,11 @@ v82 Medium은 같은 1-GPU 4 seed 레짐에서 0.6835, v77 Hard는 0.6781이다(
 역사적 전체 최고 **v41_K128 CV-only 0.6940**(229 파라미터)도 DDP4 1 seed라 직접 비교 대상이
 아니다. 지도학습 ABMIL 0.7266과의 격차는 여전히 크다.
 
-**지금 돌아가는 것**: 로컬에는 없음. §108(v83)·§110(v84) 4 seed 평가가 모두 끝났고 §109에서
+**지금 돌아가는 것**: 없음. §108(v83)·§110(v84) 4 seed 평가가 모두 끝났고 §109에서
 baseline을 v83으로 승격했다(사용자 결정). v84(head 심화)는 §110에서 기각 — head 깊이 축은
-소진. **fixed P × Medium 4 seed(§107-6)는 다른 노드(nhn-SMC)에서 v85로 진행 중**이고, §109
-승격의 통계적 근거 보강도 후보다. CV/DD 배선 축은 소진으로 본다(§103-5).
+소진. **fixed P × Medium 4 seed(§107-6, v85)는 아직 미착수다** — ⚠️ "nhn-SMC에서 진행 중"이라는
+이전 기록은 착오였다(2026-08-13 정정, nhn-SMC-claude: 해당 노드에서 직접 확인, 실행 중인 학습
+없음). §109 승격의 통계적 근거 보강도 후보다. CV/DD 배선 축은 소진으로 본다(§103-5).
 
 **판정 방법은 §107에서 정해진 그대로다 — baseline만 §109에서 v83으로 바뀌었다.**
 arm과 baseline(v83)을 각각 **1-GPU 4 seed(42–45)**로 돌려 **같은 시드끼리 뺀** 평균 Δ와 t로

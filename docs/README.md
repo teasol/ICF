@@ -51,8 +51,8 @@
   `train_v82_medium_classsep_1536_1gpu.yaml`(직전 baseline, 참고용),
   `train_v82_medium_classsep_1536.yaml`(v82의 DDP4 판본, 참고용),
   `train_v77_hard_orthogonal_1536{,_1gpu}.yaml`(historical control),
-  `train_v85_medium_fixed_p_1536_1gpu.yaml`(§107-6, **진행 중** — 다른 노드에서 학습 중, 결론
-  나면 concluded로 이동).
+  `train_v85_medium_fixed_p_1536_1gpu.yaml`(§107-6, **미착수** — config만 존재, 실행 중인 노드
+  없음; "다른 노드에서 학습 중"이라는 이전 기록은 착오였다, 2026-08-13 정정 nhn-SMC-claude).
   종결된 arm 72개는 `configs/archive/` 아래 시대별
   폴더(`v34_largectx/`, `v40_v45_cvonly/`, `v50_v54_encoder/`, `v57_v61_data_arms/`,
   `v62_v68_hybrid/`, `v69_v76_relation/`, `v77_pop_residual/`, `v78_dd_gradient/`,
