@@ -1,0 +1,24 @@
+# v77 baseline, single-GPU layout for a 4-seed batch on GPUs 0-3.
+#
+# This is the control the v80 / v81 / v82 batches have been missing. Those three
+# ran 1-GPU while the baseline number 0.6880 came from a DDP4 run, so every
+# comparison against it carried a layout confound: one GPU gives 1024 steps/epoch
+# at effective batch 1, DDP4 gives each rank 1024/4 = 256 steps and averages 4
+# gradients -- same LR, 4x the optimizer steps, 4x the gradient noise.
+#
+# With this batch, four questions close at once:
+#   1. the layout effect itself (these 4 seeds vs DDP4 0.6880)
+#   2. Hard vs Medium, seed-matched (vs v82) -- SS105-3's open item
+#   3. learnable vs fixed P at the same difficulty, seed-matched (vs v81)
+#   4. the manifold arm on a matched control (vs v80)
+# and v77 finally gets its own seed std, which SS104-3 had to assume.
+#
+# Only the trainer layout changes from train_v77_hard_orthogonal_1536.yaml, and it
+# matches the v80/v81/v82 batches exactly. Seeds come from the launcher's SEED env
+# var; the training dataset keeps seed: null (episode_dataset: true) and val/test
+# stay pinned at 50042/60042, so all four seeds share identical val/test episodes.
+base_config: train_v77_hard_orthogonal_1536.yaml
+
+trainer_overrides:
+  devices: 1
+  strategy: auto

@@ -23,8 +23,16 @@ CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 >   0.6873은 같은 run의 `epoch=048` validation-best다(Δ +0.0007 [+0.0000, +0.0014]).
 > - **채점은 epoch 49 고정.** validation-best 선택은 val_ce가 평평한 arm에서 과소학습 지점을
 >   고른다 — v80 seed 43이 epoch 16에 걸려 −0.0089를 잃었다.
-> - **macro seed std = 0.0051** (n=4) → **판정 게이트 ≈ macro Δ 0.010(2σ)**. 미만은 "판정 불가".
+> - **macro seed std**는 arm마다 다르다(§106-1): fixed P 0.0018 / Medium 0.0030 / **Hard 0.0053** /
+>   shallow MLP 0.0051. **단일 시드 비교의 게이트는 macro Δ ≈ 0.010(2σ)**이고 미만은 "판정 불가".
+>   **4 seed seed-paired 설계에서는 SE가 0.002 안팎으로 줄어 +0.005도 판정할 수 있다** — 게이트는
+>   시드 1개짜리 비교의 규칙이지 paired 설계에 그대로 적용하는 값이 아니다.
 > - **task별 CI로 판정하지 않는다** — 시드만 달라도 task 6개의 CI가 0을 제외한다(BAP1 −0.0402).
+> - **레이아웃을 섞지 않는다**(§106-4): 1-GPU는 DDP4보다 **−0.0098**이고 합성 val_ce는 반대로
+>   좋아진다. control은 반드시 같은 레이아웃으로 돌린다.
+> - **4 arm × 4 seed 정면 비교 (1-GPU, epoch 49)**: Medium 0.6835 > Hard 0.6782 > fixed-P 0.6734 >
+>   shallow-MLP 0.6722. **Medium−Hard +0.0053 (t=3.0, 4/4 seed)**, learnable−fixed P +0.0048
+>   (t=1.5, seed 44 부호 반전 → **미판정**), shallow MLP −0.0059 (t=−2.7, 기각).
 
 **금지 사항 (전부 실측으로 무너진 판정 방식)**
 

@@ -1,0 +1,38 @@
+# v81: v77 with the learnable projection replaced by the fixed one. Nothing else moves.
+#
+# Why this arm exists (SS105-4): the v74 -> v76 promotion that introduced the
+# learnable P was measured at +0.0004 [-0.0030, +0.0038] once both arms were
+# scored at epoch 49 -- indistinguishable. So "learnable P beats fixed P" is
+# unmeasured, and it sits at the root of the whole v74 -> v76 -> v77 lineage. If
+# it is false, the lineage should fall back to fixed P, where v41_K128 still
+# holds the all-time best 0.6940 on 229 parameters.
+#
+# The old comparison also confounded difficulty: v74 (fixed P) ran at ClassSep
+# [1.0,2.0] while v77 (learnable P) runs at Hard [0.2,0.8]. The Hard x fixed-P
+# cell has never been run. This is that cell.
+#
+# Mechanism: v77's class (CovarianceMeanLearnablePDDCTMLPModel) pops the
+# _covariance_projection buffer and re-registers it as an nn.Parameter, then
+# re-orthonormalizes it every forward via QR. Its parent
+# (CovarianceMeanDDCTMLPModel = v74's class) keeps the same matrix as a
+# persistent=False buffer. That buffer is already orthonormal -- it is
+# QR(sin/cos directions).Q built deterministically from covariance_slopes -- and
+# it is exactly what v77's P is initialized to. So switching model_src to the
+# parent freezes P at v77's initialization and changes nothing else: same K=128
+# subspace family, same DD, same CT, same 12 -> 32 -> 1 head, same data.
+#
+# trainable: head only, 449 parameters (v77 is 197,057). DD and CT stay
+# training-free, and there is no learnable P for a DD gradient to reach, so
+# train_dd_projection is not applicable here.
+#
+# architecture_version drops to v74's value, so this does NOT strict-load a v77
+# checkpoint -- it is trained from scratch, same 50 epochs, same schedule.
+# Judgment: fold-paired delta + bootstrap CI against a v77 arm run in the SAME
+# device layout, seed for seed (SS104-3, SS105-4).
+base_config: train_v77_hard_orthogonal_1536.yaml
+
+model_overrides:
+  model_src: src.models.set_transformer_ridge.CovarianceMeanDDCTMLPModel
+
+logger_overrides:
+  experiment_name: v81_hard_fixed_p

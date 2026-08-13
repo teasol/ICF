@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: `2026-08-12` — 활성 baseline은 **v77 Hard orthogonal의 `epoch 49` checkpoint**이고 SEAL macro는 **0.6880**이다(§104, 사용자 결정). **§105에서 과거 판정 36건을 감사하고 27개 arm을 epoch 49로 재채점했다 — 계보의 두 승격(v74→v76 learnable P: +0.0004, Hard vs Medium: +0.0001)이 모두 판정 불가로 내려갔다.** **v78·v79·v80 모두 기각**이고 **CV/DD·사영 배선 축은 소진**으로 본다. 판정은 **fold-paired Δ + CI**(§99)를 **macro seed std 0.0051**과 함께 읽고(게이트 ≈0.010), **task별 CI는 판정 근거로 쓰지 않는다**(§104-5). 진행 상태는 `current_status.md` §104.
+**Last updated**: `2026-08-13` — 활성 baseline은 **v77 Hard orthogonal의 `epoch 49` checkpoint**(DDP4)이고 SEAL macro는 **0.6880**이다(§104, 사용자 결정). **§106에서 v77/v80/v81/v82를 각각 4 seed로 같은 1-GPU 레짐에서 비교했다 — Medium 난이도가 Hard를 +0.0053(t=3.0)으로 이기고, learnable P는 +0.0048(t=1.5)로 여전히 미판정이며, 1-GPU는 DDP4보다 −0.0098이다.** §105에서 과거 판정 36건 감사 + 27개 arm epoch-49 재채점을 마쳤다. **v78·v79·v80 모두 기각**이고 **CV/DD·사영 배선 축은 소진**으로 본다. 판정은 **fold-paired Δ + CI**(§99)를 **macro seed std 0.0051**과 함께 읽고(게이트 ≈0.010), **task별 CI는 판정 근거로 쓰지 않는다**(§104-5). 진행 상태는 `current_status.md` §104.
 
 > [!IMPORTANT]
 > **baseline 숫자 계약 (§104, 2026-08-12) — 이것부터 읽을 것**
@@ -74,9 +74,21 @@
 > 사실로 쓰지 말 것.** 확정에는 arm당 3 seed가 필요하고, 우선순위는 v74 vs v76이다 —
 > 여기가 무효면 계보 전체가 fixed-P로 되돌아간다.
 >
-> **⑥ ClassSep 서술 규칙**: "`[1.0,2.0]`에서 조이면 +0.011~+0.015"까지만 쓴다. Medium `[0.5,1.4]`
-> 0.6881과 Hard `[0.2,0.8]` 0.6880은 동률이고 네 난이도의 폭 0.0038은 seed std 미만이다.
-> ⚠️ §91 표의 Medium 0.6823은 **오기**다(Very-hard 값 중복).
+> **⑥ ClassSep 서술 규칙**: ⚠️ §106이 갱신했다 — **Medium `[0.5,1.4]`가 Hard `[0.2,0.8]`보다
+> +0.0053 낫다**(4 seed, 4/4 양수, seed-paired t=3.0). "Hard가 최적"은 성립하지 않는다.
+> baseline은 아직 Hard이고 승격에는 DDP4 Medium 3~4 seed가 필요하다.
+> §91 표의 Medium 0.6823은 **오기**다(Very-hard 값 중복, 실제 0.6881).
+>
+> **⑦ 레이아웃을 섞지 말 것 (§106-4)**: **1-GPU는 DDP4보다 SEAL이 −0.0098 낮다**
+> (v77 1-GPU 4 seed 0.6782 vs DDP4 0.6880). 그런데 합성 val_ce는 **반대로** 1-GPU가 더 좋다
+> (0.1650~0.1692 < 0.1717) — 착시를 만든다. arm 비교는 DDP4로 돌리거나, 1-GPU를 쓰면 control도
+> 1-GPU로 맞춘다. 이 confound가 §104-6의 v80 −0.0158을 부풀렸다(정당한 control 대비 **−0.0059**).
+>
+> **⑧ learnable P는 아직 증명되지 않았다 (§106-3)**: 같은 Hard 난이도·같은 레짐·4 seed에서
+> v77(197,057 파라미터) − v81(449 파라미터) = **+0.0048, t=1.5**이고 **seed 44는 −0.0044로 부호가
+> 뒤집힌다.** v82−v81의 +0.0101을 "learnable P의 이득"으로 인용하지 말 것 — 난이도(+0.0053)와
+> P(+0.0048)가 겹친 값이다. arm별 seed std도 다르다: fixed P 0.0018 < Medium 0.0030 <
+> Hard 0.0053 ≈ shallow MLP 0.0051 — **학습되는 P를 가진 arm일수록 realization 노이즈가 크다.**
 
 > [!IMPORTANT]
 > **DD 계약 — 미분 금지 + gradient 개방 금지 (§100·§103, 2026-08-12)**

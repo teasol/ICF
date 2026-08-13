@@ -543,3 +543,276 @@
    — 부분 개선도 즉시 값이 남.
 10. **Musk 0.95 미달** — n>34(0.698) 최약, small-bag 밴드가 0.95 목표의 binding constraint.
     Musk는 transfer development benchmark로 취급, 별도 최종 확인 데이터 잠금 필요.
+
+## 24. current_status.md §91·§98·§100~§102 아카이브 (2026-08-13, §106 시점)
+
+> 출처: `current_status.md` 동일 번호 절 (2026-08-12 작성). 전부 종결됐거나 §104~§106이
+> 대체했다. ⚠️ §91 표의 Medium 0.6823은 **오기**이며 실제는 0.6881이다(§105-3), 그리고
+> §106-2가 **Medium > Hard (+0.0053, 4 seed)**로 결론을 갱신했다. §98이 정한 0.6873은
+> `epoch=048` val-best이고 활성 baseline은 `epoch 49 = 0.6880`이다(§104).
+
+### 91. 2026-08-12 — ClassSep sweep 완료: Hard 0.6873, seed 반복 전 승격 보류
+
+> [!WARNING]
+> **아래 표에 오기가 있고 결론이 §105-3에서 정정됐다.** Medium `[0.5,1.4]`는 0.6823이 아니라
+> **0.6882**(ep48)/**0.6881**(ep49)다 — 0.6823은 Very-hard 값을 잘못 복사한 것이다. 정정하면
+> sweep은 단봉이 아니라 **Medium ≡ Hard의 평탄한 고원**이고(Δ +0.0001 [−0.0022,+0.0024]),
+> 네 난이도 arm의 폭 0.0038은 seed std 0.0051보다 작다. **"Hard가 최적"은 성립하지 않는다.**
+> 살아남는 결론은 "ClassSep을 `[1.0,2.0]`에서 조이면 +0.011~+0.015"까지다.
+
+`scripts/run_v76_classsep_sweep.py`가 GPU 0–3에서 Mild → Hard → Very-hard를 모두 50 epochs
+학습하고 각 validation-best checkpoint를 공식 SEAL 10-task로 평가했다. 09:07 Very-hard의
+마지막 artifact까지 생성됐고 runner/DDP/eval 프로세스는 모두 종료됐다. 산출물은
+`checkpoints/20260812_v76_classsep_sweep/`, 학습 로그는
+`logs/20260812_v76_classsep_sweep/`, task별 평가는 `logs/official50/*_v76_classsep_*_best.log`다.
+
+| ClassSep | 범위 | SEAL macro | Δ vs v76 |
+|---|---|---:|---:|
+| baseline | `[1.0,2.0]` | 0.6748 | — |
+| Medium | `[0.5,1.4]` | 0.6823 | +0.0075 |
+| Mild | `[0.8,1.7]` | 0.6853 | +0.0105 |
+| **Hard** | **`[0.2,0.8]`** | **0.6873** | **+0.0125** |
+| Very-hard | `[0.1,0.5]` | 0.6823 | +0.0075 |
+
+Hard와 동일 SEAL 50-fold 지도학습 baseline의 task별 비교는 다음과 같다.
+
+| task | Hard | ABMIL | Δ ABMIL | MeanMIL | Δ MeanMIL |
+|---|---:|---:|---:|---:|---:|
+| bc_therapy er_status | 0.7023 | 0.717 | −0.0147 | 0.712 | −0.0097 |
+| bc_therapy grade | 0.7227 | 0.770 | −0.0473 | 0.751 | −0.0283 |
+| bc_therapy her2 | 0.6908 | 0.663 | **+0.0278** | 0.684 | **+0.0068** |
+| cptac_brca PIK3CA | 0.5746 | 0.595 | −0.0204 | 0.544 | **+0.0306** |
+| cptac_brca TP53 | 0.8083 | 0.801 | **+0.0073** | 0.787 | **+0.0213** |
+| cptac_luad EGFR | 0.7714 | 0.830 | −0.0586 | 0.777 | −0.0056 |
+| cptac_luad STK11 | 0.8703 | 0.908 | −0.0377 | 0.873 | −0.0027 |
+| cptac_luad TP53 | 0.6621 | 0.751 | −0.0889 | 0.735 | −0.0729 |
+| cptac_ccrcc BAP1 | 0.6320 | 0.693 | −0.0610 | 0.720 | −0.0880 |
+| cptac_ccrcc VHL | 0.4385 | 0.538 | −0.0995 | 0.542 | −0.1035 |
+| **macro** | **0.6873** | **0.7266** | **−0.0393** | **0.7125** | **−0.0252** |
+
+Hard는 ABMIL을 2/10, MeanMIL을 3/10 task에서 상회한다. HER2와 BRCA TP53에서는 둘 다
+상회하고 PIK3CA에서는 MeanMIL을 상회하지만, LUAD TP53과 CCRCC BAP1/VHL이 큰 잔여 약점이다.
+ABMIL/MeanMIL은 task-label 지도학습이고 Hard는 in-context 모델이므로 직접 수치 비교 시 학습
+프로토콜 차이를 명시한다.
+
+**판정/다음 단계**: Hard는 현재 최고 ClassSep 후보이나 모든 arm이 seed 1회뿐이어서 활성 baseline은
+v76으로 유지한다. 다음 작업은 Hard `[0.2,0.8]`를 동일 50-epoch·validation-best·SEAL 10-task
+절차로 seed 반복하고, +0.0125 상승의 재현성과 task별 편차를 확인한 뒤 승격 여부를 정하는 것이다.
+
+### 98. 2026-08-12 — Hard v76을 canonical v77 baseline으로 승격
+
+사용자 결정에 따라 지금까지 `Hard v76`이라 부른 실험을 **v77 Hard orthogonal**로 명확히
+이름 붙이고 활성 baseline으로 승격했다.
+
+- canonical config: `configs/train_v77_hard_orthogonal_1536.yaml`
+- canonical checkpoint:
+  `checkpoints/20260812_v76_classsep_sweep/hard/epoch=048-val_ce_loss=0.1697.ckpt`
+- data: ClassSep `[0.2,0.8]`, fresh orthogonal manifold, latent 32, per-bag 256–8,192,
+  training cap 4,096
+- model: `CovarianceMeanLearnablePDDCTMLPModel`, P(1536×128) + CV/DD/CT 12→32→1 head,
+  trainable **197,057**
+- official SEAL 10-task macro: **0.6873**
+
+이 승격은 **데이터/실험 baseline 버전**의 변경이지 텐서 graph 변경이 아니다. 따라서 모델의
+내부 `architecture_version=54`는 기존 checkpoint strict-load 호환을 위해 유지한다. 과거에
+v77이라 부른 `PopulationTokenResidualModel`은 성능 0.6750으로 기각됐으므로 앞으로
+**retired provisional v77-pop-residual**로 표기한다. 그 모델의 내부 version 55도 replay용으로
+유지한다.
+
+완료된 파생 실험은 다음처럼 판정한다.
+
+| arm | SEAL macro | Δ vs v77 | 판정 |
+|---|---:|---:|---|
+| **v77 Hard orthogonal** | **0.6873** | — | **active baseline** |
+| large-ragged 2k–16k warm-start (epoch 34) | 0.6885 | +0.0012 | 사실상 동률, 파생 실험 유지 |
+| learned ridge λ + logit scale | 0.6840 | −0.0033 | 기각 |
+| MLP bank best (M=1024) | 0.6779 | −0.0094 | 기각 |
+| 50:50 fresh-linear + MLP-1024 | 0.6755 | −0.0118 | 기각 |
+
+v41_K128 0.6940은 여전히 역사적 전체 최고지만 활성 개발 baseline은 사용자 결정에 따라
+v77 0.6873이다. 현재 ICF 학습·평가 프로세스는 없으며, 이후 모든 새 arm은 v77을 control로
+비교한다. 이번 갱신에서는 아직 열려 있는 최근 가설과 재현 근거가 상호 참조되므로 별도
+section archive는 하지 않았다.
+
+### 100. 2026-08-12 — v78: DD quadratic-form gradient path (구현 완료, 미실행)
+
+v77은 P를 **CV ridge 목적으로만** 학습하는데 DD는 그 P가 만든 covariance를 읽는다. subspace가
+한 소비자에 맞춰 최적화되고 다른 소비자는 그것을 물려받는 구조다. v78은 DD에도 P 설계
+발언권을 준다.
+
+### 1. eigen 미분은 하지 않는다 — 사용자 지적이 옳았다
+
+`_dd_distance_features`의 방향 계산에는 문제가 둘 있어서 `no_grad`를 그냥 벗기면 안 된다.
+
+1. **`eigh` backward의 `1/(λ_i − λ_j)`**. eigh가 두 번([L730/L734] 구 기준) 있고 고유벡터 항이
+   고윳값 간격의 역수를 갖는다. ⚠️ **기존 shrinkage가 이걸 막지 못한다** —
+   `+ dd_shrinkage · trace · I`는 모든 고윳값을 같은 양 밀어 **간격을 그대로 둔다**. `clamp_min`도
+   forward `rsqrt`를 지킬 뿐이다. 128×128 pooled covariance는 스펙트럼 어딘가에 반드시 촘촘한
+   군집이 있다.
+2. **hard argmax**. `eigenvectors[:, eigenvalues.abs().argmax()]`는 선택에 gradient가 없고, 상위
+   2개 `|λ|`가 교차하면 방향이 **점프**한다.
+
+게다가 이 실패는 **조용하다** — `nonfinite_gradient_policy: zero`가 non-finite를 0으로 치환하므로
+학습이 완주하고 SEAL도 나온다. §66의 함정("Δ≈0이 가설 기각인지 경로 미개방인지 구분 불가")이
+그대로 재현된다.
+
+**따라서 v78은 방향을 미분하지 않는다.** 방향 계산을 `_dd_direction`으로 분리해 항상 `no_grad`에
+두고(어느 arm에서든), gradient는 그 방향을 소비하는 **이차형식** `z_b = log(fᵀ C_b f)`로만 P에
+도달한다. f는 에피소드별 상수다. `∂f/∂P`를 버린 부분 gradient이며 방향을 현재값에 고정한
+alternating 스킴이다. 이 리팩터는 forward 값을 바꾸지 않는다(`no_grad`는 수치 무관).
+
+### 2. 필수였던 발견 — 무가중 DD는 CV를 대체해버린다
+
+1536-d/K=128에서 6 에피소드 측정한 P gradient 기여도:
+
+| episode | 0 | 1 | 2 | 3 | 4 | 5 | median |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| DD/CV norm 비 | 90.5 | 75.6 | 21.0 | 23.3 | 102.9 | 29.2 | **52.4** |
+
+`cos(grad_CV, grad_CV+DD) = −0.068`로 거의 직교하며 부호도 음수 쪽이다. 즉 flag를 그냥 켜면
+"DD에 발언권을 준다"가 아니라 **P를 DD에 넘기고 CV 신호를 덮어쓴다** — v77이 fixed-P(v74
+0.6731)보다 +0.0142 얻은 그 학습을 지우는 것이다. 그 상태로 지면 §66 함정에 다시 걸린다.
+
+그래서 `dd_projection_gradient_weight`를 도입했다. `_ScaleGradient`(forward 정확한 identity,
+backward에 weight 곱)를 DD로 들어가는 covariance에 적용한다. **v78 arm은 0.02 ≈ 1/52**로
+median 에피소드에서 두 경로를 맞춘다. 비 자체가 5배 변동하므로 모든 에피소드를 맞출 수는
+없다.
+
+### 3. 계약
+
+- config: `configs/train_v78_dd_projection_1536.yaml` (v77 canonical 상속, Hard `[0.2,0.8]`,
+  orthogonal, DDP4 GPU 0–3, bf16, 50 epochs)
+- runner: `scripts/run_v78_dd_projection.py`, tag `v78_dd_projection_best`
+- **파라미터 추가 0개, shape 변경 0개** → trainable 197,057 유지, `architecture_version=54` 유지,
+  v77 checkpoint와 strict-load **양방향** 호환. flag는 backward 그래프만 넓힌다.
+- 기본값 `train_dd_projection: false` → v77 동작 보존. v74는 학습 P가 없으므로 클래스 속성으로
+  opt-out 고정.
+
+### 4. 검증
+
+- 신규 테스트 5개 (`tests/test_set_transformer_ridge.py`): ⓐ 기본 off + flag on/off **forward
+  동일**, ⓑ `_dd_direction`이 두 arm 모두에서 `requires_grad=False`·`grad_fn=None`
+  (eigh가 backward에 없음), ⓒ P gradient가 finite·nonzero이고 **control과 다름**(조용한 null
+  방지), ⓓ weight 0.25/0.5의 DD 기여가 정확히 선형이고 weight 0은 control과 일치, 음수는
+  ValueError, ⓔ 파라미터 수 동일 + strict-load 양방향.
+- 전체 suite **149 tests** (신규 5개 포함). 실패 1건은 **기존** 실패로 이 변경과 무관 —
+  `tests/test_mlp_manifold_bank.py`(`7de8b70`)가 BagPFN env에 없는 `pytest`를 import한다.
+- config: 전체 `base_config` 참조 검증 141개 통과(failing 0), numeric-type·precision 계약 7개 통과.
+- CUDA bf16 smoke (60 bags × 4,096 cells, GPU 0): logits finite, loss 0.5859, P grad finite·nonzero
+  (norm 3.99e-01), head grad finite, peak allocation **2.37 GiB**.
+
+### 5. 다음 Action
+
+1. v78 실행 후 **fold-paired Δ + CI**로 v77 대비 판정(§99):
+   `python scripts/compare_arms_paired.py --baseline v76_classsep_hard_best --arm v78_dd_projection_best`
+2. Δ가 양수이고 CI가 0을 제외하면 seed 반복으로 config 수준 주장으로 승격. 음수여도 이번에는
+   weight로 두 경로를 맞춰뒀으므로 "DD가 P를 잡으면 안 된다"는 해석이 성립한다.
+3. 미실행 상태다. 실행 전 working tree의 mode 변경 16개를 정리할 것.
+
+### 101. 2026-08-12 — 문서 압축: §2~§97 본문을 history.md로 아카이빙
+
+`current_status.md`가 3,652줄까지 커져 새 세션이 읽을 수 없는 상태였다. 사용자 지시로
+`history.md`로 가야 할 본문을 정리했다.
+
+- **3,652 → 811줄**. 전문으로 남긴 것은 §0(요약), §91(활성 baseline 증거표), §98·§99·§100·§101뿐이다.
+- 69개 섹션(§2~§97)의 본문을 **결론 1–2줄 + `history.md` 포인터 스텁**으로 교체했다.
+  **헤딩은 하나도 지우지 않았다** — 다른 Living 문서가 § 번호로 참조하기 때문이다.
+- `history.md`에 빠져 있던 시대를 4개 절로 채웠다(기존 §1–§19는 v41/§71 시대까지만 덮고 있었다):
+  - **§20** CV-2 손잡이 소진과 계보 B의 일반화 실패 (구 §72~§79)
+  - **§21** 합성 데이터 축 — per-bag cardinality, factorized/XOR, manifold 교체 (구 §81~§85)
+  - **§22** Canonical CV / DD / CT와 relation head 계보 v70~v77 (구 §86~§89)
+  - **§23** v77 파생 arm 전수 기각과 판정 프로토콜 전환 (구 §90~§100)
+- §0이 **2026-08-04(v30 시대) 내용으로 stale**했다 — v22/v24 기준선과 이미 폐기된 Action Plan을
+  "새 세션은 여기부터"로 제시하고 있었다. 현재 baseline·판정 방법·열린 과제로 다시 썼다.
+- §80("다음 세션이 할 일", 2026-08-10)도 소진돼 §99-5/§100-5를 가리키는 포인터로 교체했다.
+- 래핑돼 두 개의 `## ` 줄로 쪼개져 있던 §16 헤딩을 하나로 합쳤다.
+
+**검증**: ⓐ `agent_handoff.md`/`current_architecture.md`/`current_experiments.md`/`README.md`가
+참조하는 모든 `§N`이 `current_status.md`에 헤딩으로 존재함을 스크립트로 확인(누락 0),
+ⓑ 모든 스텁이 가리키는 `history.md §N`이 존재함을 확인(누락 0).
+
+**아카이빙 기준**(handoff §6.2): 지속 관리 가치가 있는 결론(ADR·설계 이유·트레이드오프·레슨런)은
+`history.md`에 요약하고, 개별 파일은 `docs/history/` 폴더에 두지 않으며 원문은 git 이력에 보존한다.
+따라서 이 커밋 이전 본문이 필요하면 `git show <이 커밋>^:docs/current_status.md`를 쓸 것.
+
+### v78 진행 상황
+
+문서 정리 중에도 §100의 v78 arm이 계속 돌았다. runner PID/PGID `2164419`(PPID 1, 완전 이탈),
+GPU 0–3, DDP rank 4개. 약 18초/epoch(기존 Hard arm과 동일), first-step peak allocated 10.68 GiB.
+epoch 26에서 val_ce 0.1717로 v77 best 0.1697에 근접 중이다. 완료 후 판정은 §100-5대로
+fold-paired Δ + CI다.
+
+### 102. 2026-08-12 — configs 정리: 루트 67개 → 2개
+
+§101이 부채로 기록만 해둔 config 정리를 실행했다. handoff §7의 "루트에는 활성 entry point만"
+규칙이 지켜지지 않아 루트에 종결된 v40~v76 arm이 67개 쌓여 있었다.
+
+### 1. 결과
+
+- **루트는 2개만 남는다**: `train_v77_hard_orthogonal_1536.yaml`(canonical),
+  `train_v78_dd_projection_1536.yaml`.
+- **v77을 자체 포함형으로 인라인**했다. 이전 체인
+  `v77 → v76_classsep_hard → v76_cv_learnable_p_dd_ct_mlp → v74 → v70 → v69`를 인라인해 그 6개를
+  아카이브해도 v77이 단독 실행된다 — v34가 §56에서 받은 처리와 같다.
+- 종결된 arm **64개**를 시대별로 이관하고 전부 `base_config` 없는 자체 포함형으로 변환했다
+  (§7.3): `v34_largectx/`(3), `v40_v45_cvonly/`(8), `v50_v54_encoder/`(5),
+  `v57_v61_data_arms/`(5), `v62_v68_hybrid/`(12), `v69_v76_relation/`(30), `v77_pop_residual/`(1).
+
+### 2. 검증 — merged 결과 동일성이 핵심 안전망이었다
+
+이동 전 **entry point 183개의 merged config 해시를 스냅샷**해두고 작업 후 대조했다.
+결과 **CHANGED: 0, MISSING: 0**. 전체 테스트는 149개, 실패는 기존 1건
+(`test_mlp_manifold_bank.py`의 `pytest` import)뿐이다.
+
+### 3. 참조 검증에서 배운 것 두 가지 (handoff §7에 반영)
+
+**ⓐ 문자열 검색만으로는 참조를 못 찾는다.** 여러 테스트가
+`REPO_ROOT / "configs" / "<name>.yaml"`처럼 경로를 **조립**하므로 `configs/<name>` 문자열이
+파일에 아예 없다. `configs/` prefix로만 grep해 1차 치환했더니 **테스트 5개에서 35 errors**가
+났다(`test_covariance_sketch_knobs`, `test_paired_relation_head`, `test_ridge_ablation`,
+`test_training_uses_dense_path`). **basename으로도 grep**해야 한다.
+
+**ⓑ fixture 내부에 config 경로가 저장돼 있다.** `tests/fixtures/cvonly_golden.pt`가 config
+경로를 키로 들고 있어 4개 subTest가 깨졌다. **fixture를 재생성하면 pre-prune 기록이 현재
+출력으로 대체돼 그 fixture의 존재 이유가 사라진다**(§73). 그래서 재생성하지 않고
+`test_cvonly_golden._resolve`가 기록된 경로가 없으면 basename으로 폴백하도록 고쳤다
+(단일 매치가 아니면 에러).
+
+### 4. 검증 명령의 구멍을 막았다
+
+handoff §7의 문서화된 검증 명령이 `if 'base_config' not in p.read_text(): continue`로 걸러서
+**삭제된 module fragment 때문에 깨진 config를 못 잡고 있었다**. 실제로
+`configs/archive/v18_v19/` 10개가 `a5dfcf8`에서 삭제된 `configs/data/learnability_*.yaml` 등을
+참조해 로드 불가인데 "failing: 0"을 통과했다. 그 줄을 없애고 module 조각 디렉터리만 제외하도록
+바꿨다.
+
+⚠️ **이 10개는 고치려다 되돌렸다.** fragment를 `a5dfcf8^`에서 복구해 인라인하면 10개가
+전부 로드되지만, 이 파일들은 **v19~v33 config 50개의 base**이고 인라인하면 group 참조가
+해석된 dict로 바뀌어 **자식의 group override 병합 의미가 달라져 그 50개의 merged 결과가 전부
+바뀐다**. 스냅샷 대조가 이것을 잡아냈다(`CHANGED: 50`). 따라서 **`failing: 10`이 정상
+기준선**이며, 새 작업이 이 수를 늘리지 않는지만 확인한다. 폐기된 v18/v19 아키텍처의 재현
+기록이므로 실사용 영향은 없다.
+
+### 5. v78 결과 (§100 판정)
+
+문서 정리 중 v78이 완주했다. 공식 SEAL 10-task macro **0.6869**, v77 대비 fold-paired
+**Δ −0.0004, 95% CI [−0.0021, +0.0013]** — **CI가 0을 포함해 구별 불가**, 상승 5/10 task다.
+
+| task | Δ | 95% CI |
+|---|---:|---|
+| bc_therapy her2_status | +0.0068 | [+0.0034, +0.0102] |
+| cptac_brca PIK3CA | −0.0098 | [−0.0202, −0.0021] |
+| cptac_luad TP53 | −0.0038 | [−0.0065, −0.0011] |
+
+**판정: 기각.** 그리고 이번에는 **가설 기각으로 읽을 수 있다** — 기제가 실제로 P에 도달함을
+테스트로 단정했고(control과 gradient가 다름) weight로 두 경로 크기를 맞춰뒀으므로, §66의
+"Δ≈0이 가설 기각인지 경로 미개방인지 구분 불가" 함정에 걸리지 않는다.
+**결론: DD에 P 설계 발언권을 줘도 subspace 품질이 개선되지 않는다.**
+
+### 6. 다음 Action
+
+1. **seed 반복** — 여전히 미측정이고 이제 더 급하다. v77/v78의 Δ가 −0.0004라 realization
+   노이즈 크기를 모르면 "동률"의 의미를 확정할 수 없다. L8/L16/L32 각 2 seed로 §99-3의
+   ⓐ/ⓑ를 가른다.
+2. BAP1 large-bag 붕괴 진단(§99-2), VHL 랜덤 이하 진단(§0 열린 과제 2).
+

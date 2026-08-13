@@ -143,7 +143,11 @@ Hard 실험의 공통 조건은 다음과 같다.
 - active baseline: v77 Hard orthogonal **epoch 49 = 0.6880** (val-best epoch 48은 0.6873, §104).
 - learned ridge λ/logit scale은 0.6840으로 기각했다. ⚠️ Δ −0.0033은 seed std 0.0051 미만이라
   **§104-4에서 "판정 불가"로 내려갔다**.
-- v80 shallow infinite MLP manifold는 4 seed 평균 0.6722(Δ −0.0158)로 기각(§104-6).
+- v80 shallow infinite MLP manifold는 4 seed 평균 0.6722로 기각. ⚠️ Δ는 −0.0158이 아니라
+  **−0.0059**다(t=−2.7) — 기존 값은 1-GPU arm을 DDP4 baseline과 비교한 탓에 부풀려졌다(§106-4).
+- **learnable P vs fixed P는 미판정이다**(§106-3): 같은 Hard·같은 레짐·4 seed에서 +0.0048, t=1.5,
+  seed 하나는 부호 반전. v81(`CovarianceMeanDDCTMLPModel`, 449 파라미터)이 그 fixed-P arm이며
+  초기 시점에 v77과 수치적으로 동일함을 확인했다(P 차이 3.6e-07).
 - 판정: **epoch 49 고정** checkpoint의 공식 SEAL 10-task macro. **task별 regression은 판정
   근거로 쓰지 않는다**(시드만 달라도 task 6개 CI가 0을 제외한다, §104-5). synthetic val 지표는
   checkpoint 선택에만 사용한다. macro 비교는 점추정 차이가 아니라 **fold-paired Δ + bootstrap
@@ -418,7 +422,7 @@ attention은 에피소드당 2.7e10 쌍이라 불가"였는데, **쌍의 개수�
 | `train_ridge_calibration` | `false` | **Active** | `ridge_log_lambda`/`ridge_log_scale` 동결 해제(197,057 → 197,059). SEAL 0.6840으로 기각 |
 | `dd_shrinkage` | 0.25 | **Active** | DD whitening의 shrinkage. ⚠️ backward의 고윳값 **간격은 바꾸지 않는다** |
 | `ct_num_tokens` / `ct_cells_per_bag` | 16 / 64 | **Active** | CT 후보 token 수 / bag당 샘플 cell 수 |
-| `class_separation` | `[0.2, 0.8]` | **Active** | 합성 난이도. 조이면 +0.011~+0.015이나 **Medium `[0.5,1.4]` 0.6881과 Hard 0.6880은 동률** — "Hard가 최적"은 성립하지 않는다(§105-3) |
+| `class_separation` | `[0.2, 0.8]` | **Active** | 합성 난이도. ⚠️ **Medium `[0.5,1.4]`가 Hard보다 +0.0053 낫다**(4 seed, t=3.0, §106-2). baseline은 아직 Hard이고 승격에는 DDP4 Medium 3~4 seed 필요 |
 | `manifold_mode` | `orthogonal` | **Active** | `mlp_bank`·`mixed_linear_mlp_bank`·`nonlinear` 전부 기각(Active-3, §104) |
 | `mlp_num_layers` | 3 | **Active** | `orthogonal`에서는 미사용. `nonlinear`/`mlp_bank`에서만 유효하고 **weight 행렬 개수**다(1은 활성 없음 = MLP 아님) |
 | `data.ragged_training` | `false` | **Active** | `episode_batch_size=1` 전용. Active-5 참조 |

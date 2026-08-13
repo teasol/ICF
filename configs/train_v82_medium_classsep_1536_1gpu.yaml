@@ -1,0 +1,18 @@
+# v82 Medium ClassSep, single-GPU layout for a 4-seed batch on GPUs 0-3.
+#
+# Only the trainer layout changes from train_v82_medium_classsep_1536.yaml, and it
+# matches the v80 and v81 batches so all three 4-seed sets share one regime.
+#
+# ⚠️ Do NOT compare these seeds against the DDP4 numbers (v77 0.6880, Medium
+# 0.6881). One GPU gives 1024 steps/epoch at effective batch 1; DDP4 gives each
+# rank 256 steps and averages 4 gradients. The matched control is v77 run through
+# this same layout, seed for seed.
+#
+# Seeds come from the launcher's SEED env var. The training dataset keeps
+# seed: null (episode_dataset: true) while val/test stay pinned at 50042/60042,
+# so every seed is validated and tested on identical episodes.
+base_config: train_v82_medium_classsep_1536.yaml
+
+trainer_overrides:
+  devices: 1
+  strategy: auto
