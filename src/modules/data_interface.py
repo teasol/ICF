@@ -11,6 +11,13 @@ from torch.utils.data._utils.collate import default_collate
 from lightning import LightningDataModule
 
 
+# Per-bag cell ceiling for the DENSE training collator. This is a THIRD cap,
+# independent of the dataset's `per_bag_max_cells` and the model's `max_cells`,
+# and until v92 (docs SS120) nothing had ever pushed a bag past it, so it sat
+# unnoticed as a module constant. Raising `per_bag_max_cells` above it does NOT
+# widen training bags -- `_collate_ragged_batch` silently subsamples back down
+# to this number and the arm measures nothing. Override per config with
+# `data.padding_max_cells`.
 SYNTHETIC_PADDING_MAX_CELLS = 4096
 
 
@@ -50,7 +57,10 @@ class EvaluationEpisodeCollator:
         return x, y, mask_index
 
 
-def _collate_ragged_batch(samples: list[Any]):
+def _collate_ragged_batch(
+    samples: list[Any],
+    max_cells: int = SYNTHETIC_PADDING_MAX_CELLS,
+):
     """Pad ragged (B2b, per-bag-cardinality) episodes into a dense batch.
 
     Returns ``(x, y, cell_mask, bag_mask)`` with shapes
@@ -59,9 +69,12 @@ def _collate_ragged_batch(samples: list[Any]):
     cells, ``bag_mask`` marks real bags, and padded bags get label -1 so they
     are never sampled as queries or treated as context.
 
-    Bags above 4,096 cells are uniformly subsampled without replacement before
-    padding. A fresh randperm on every collation makes this a training-time view.
+    Bags above ``max_cells`` (default 4,096) are uniformly subsampled without
+    replacement before padding. A fresh randperm on every collation makes this a
+    training-time view.
     """
+    if max_cells < 1:
+        raise ValueError("max_cells must be positive.")
     first_bag = samples[0][0][0]
     device = first_bag.device
     dtype = first_bag.dtype
@@ -69,7 +82,7 @@ def _collate_ragged_batch(samples: list[Any]):
     episodes = len(samples)
     num_bags = max(len(sample[0]) for sample in samples)
     num_instances = min(
-        SYNTHETIC_PADDING_MAX_CELLS,
+        max_cells,
         max(bag.shape[0] for sample in samples for bag in sample[0]),
     )
     dim = first_bag.shape[-1]
@@ -93,9 +106,9 @@ def _collate_ragged_batch(samples: list[Any]):
         for bag_index, bag in enumerate(bags):
             if bag.ndim != 2 or bag.shape[-1] != dim:
                 raise ValueError("Ragged bag must be [instances, dim].")
-            if bag.shape[0] > SYNTHETIC_PADDING_MAX_CELLS:
+            if bag.shape[0] > max_cells:
                 index = torch.randperm(bag.shape[0], device=bag.device)[
-                    :SYNTHETIC_PADDING_MAX_CELLS
+                    :max_cells
                 ]
                 bag = bag.index_select(0, index)
             count = bag.shape[0]
@@ -107,6 +120,7 @@ def _collate_ragged_batch(samples: list[Any]):
 def collate_synthetic_training_episode(
     samples: list[Any],
     preserve_ragged: bool = False,
+    max_cells: int = SYNTHETIC_PADDING_MAX_CELLS,
 ):
     """Stack equal-shape episodes, or pad ragged (B2b) episodes.
 
@@ -122,7 +136,7 @@ def collate_synthetic_training_episode(
             if len(samples) != 1:
                 raise ValueError("preserve_ragged requires episode_batch_size=1.")
             return samples[0]
-        return _collate_ragged_batch(samples)
+        return _collate_ragged_batch(samples, max_cells=max_cells)
     if len(samples) == 1:
         return samples[0]
     x = torch.stack([sample[0] for sample in samples])
@@ -298,6 +312,10 @@ class DataInterface(LightningDataModule):
             collate_fn = partial(
                 collate_synthetic_training_episode,
                 preserve_ragged=self.hparams.get("ragged_training", False),
+                max_cells=int(
+                    self.hparams.get("padding_max_cells")
+                    or SYNTHETIC_PADDING_MAX_CELLS
+                ),
             )
             return self._episode_dataloader(
                 self.train_dataset,
