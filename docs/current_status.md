@@ -1810,3 +1810,211 @@ population 분기)로도 고쳐지지 않는다. "소수 판별 population을 �
 "레이블 조건 분기를 이미 해봤다"는 음성 결과의 근거이기 때문이다.
 
 **다음**: §65의 미검정 레버가 이걸로 소진됐다. 남은 방향은 재기획이 필요하다.
+
+## 115. 2026-08-14 — 진단: 학습 에피소드가 실제 평가 에피소드의 **모양**을 한 번도 모사한 적이 없다
+
+_Recorded by: nhn-NEXGEM-claude — 2026-08-14 10:18_
+
+**이 절이 정한 것**: §110·§112·§113·§114가 연속으로 실패한 뒤, arm을 더 던지는 대신 **평가 지표를
+task 단위로 분해**했다. 그 결과 (a) v83의 task별 성적을 공식 지도학습 baseline과 처음으로 정면
+대조했고, (b) **학습 분포와 평가 분포가 두 축에서 어긋나 있으며 그 어긋남이 한 번도 모델링된 적이
+없다**는 것을 실측했다. v89는 그중 한 축을 움직이는 arm이고 현재 학습 중이다.
+
+### 1. v83 task별 성적 vs 공식 지도학습 baseline
+
+출처는 `docs/seal_univ2_baseline_17tasks.csv`(SEAL 논문의 50-fold ABMIL/MeanMIL, task별 mean±std).
+v83 숫자는 4 seed(42–45) `logs/official50/*_v83_linear_head_seed4{2..5}_ep49.log`의 fold-mean AUROC
+평균이다.
+
+| task | v83 | ABMIL | Δ | MeanMIL | Δ |
+|---|---:|---:|---:|---:|---:|
+| bc_therapy er_status | 0.7276 | 0.717 | **+0.0106** | 0.712 | **+0.0156** |
+| bc_therapy grade | 0.7259 | 0.770 | −0.0441 | 0.751 | −0.0251 |
+| bc_therapy her2 | 0.6417 | 0.663 | −0.0213 | 0.684 | −0.0423 |
+| cptac_brca PIK3CA | 0.5588 | 0.595 | −0.0362 | 0.544 | **+0.0148** |
+| cptac_brca TP53 | 0.8270 | 0.801 | **+0.0260** | 0.787 | **+0.0400** |
+| cptac_luad EGFR | 0.7761 | 0.830 | −0.0539 | 0.777 | −0.0009 |
+| cptac_luad STK11 | 0.8754 | 0.908 | −0.0326 | 0.873 | **+0.0024** |
+| cptac_luad TP53 | 0.6678 | 0.751 | −0.0832 | 0.735 | −0.0672 |
+| cptac_ccrcc BAP1 | 0.6436 | 0.693 | −0.0494 | 0.720 | −0.0764 |
+| cptac_ccrcc VHL | 0.4360 | 0.538 | −0.1020 | 0.542 | −0.1060 |
+| **macro** | **0.6880** | **0.7266** | **−0.0386** | **0.7125** | **−0.0245** |
+
+**읽는 법 세 가지**:
+1. **모델이 전반적으로 약한 게 아니다.** ABMIL을 2/10, MeanMIL을 **5/10**에서 이긴다. 결손은
+   특정 지점에 몰려 있다 — VHL(0.102) + luad TP53(0.083) + BAP1(0.049) = 0.234로 **총 결손
+   0.386의 61%**가 3개 task에서 나온다.
+2. ⚠️ **VHL은 지도학습으로도 거의 랜덤이다 — ABMIL 0.538 ± 0.128 (n=218, 50 fold).** std가
+   0.128이라 0.5와 구분되지 않는다. **"VHL을 정상 task 수준으로 고친다"는 목표는 존재하지 않는다.**
+   §113·§114가 VHL을 겨냥해 실패한 것은 상한이 0.538인 task를 겨눈 탓이 크다.
+3. 그럼에도 **v83의 0.4360은 여전히 이상하다.** 신호 없는 모델은 0.5로 간다. 4/4 시드가 전부
+   0.5 아래(0.4699/0.4142/0.4374/0.4224)인 것은 역상관 신호를 잡고 있다는 뜻이다. 그리고 이건
+   실익이 있다 — **랜덤(0.5)까지만 돌려놔도 macro +0.0064, ABMIL 수준이면 +0.0102**로 §107-3
+   게이트급이다.
+
+### 2. 두 축의 train/eval mismatch — 실측
+
+**클래스 비율.** `src/datasets/synthetic_data.py::_sample_labels`에 **클래스 사전확률 knob이 아예
+없다**. `balanced: true`는 정확히 50/50이고, v83~v89가 쓰는 `balanced: false`는 불균형이 아니라
+**Bernoulli(0.5)**다. 코드 주석이 의도를 명시한다 — *"Independent labels remove the episode-level
+class-count variable: context label counts contain no information about a masked target."* 즉
+context의 레이블 구성비가 정보를 갖지 **않도록 일부러 제거한** 설계다. 실제 task는 정반대다.
+
+**context 크기.** 평가 경로 `scripts/test_pathobench.py`의 `--context-mode` 기본값은 `all`이고
+`scripts/eval_seal_tasks.sh`는 이 인자를 넘기지 않는다. 따라서 `sample_context_ids()`가
+`return list(train_ids)` — **train fold 전체를 자연 비율 그대로** 쓴다. 균형을 맞추는 `sample`
+모드는 존재하지만 deprecated이고 사용되지 않는다.
+
+| | 클래스 비율 | context 크기 |
+|---|---|---|
+| **학습** (v83 config) | 0.500 ± 0.055 (num_bags 60–100) | **60–100 bags** |
+| **평가** (50 fold 실측) | **0.178 ~ 0.780** | **90 ~ 261 slides** |
+
+| task | ctx | 양성비 | 학습분포 기준 σ | Δ ABMIL |
+|---|---:|---:|---:|---:|
+| er_status | 133 | 0.692 | +3.5σ | +0.0106 |
+| grade | 133 | 0.617 | +2.1σ | −0.0441 |
+| her2 | 133 | 0.391 | −2.0σ | −0.0213 |
+| PIK3CA | 90 | 0.358 | −2.6σ | −0.0362 |
+| brca TP53 | 90 | 0.404 | −1.7σ | +0.0260 |
+| EGFR | 261 | 0.342 | −2.9σ | −0.0539 |
+| STK11 | 261 | 0.178 | **−5.9σ** | −0.0326 |
+| luad TP53 | 261 | 0.592 | +1.7σ | −0.0832 |
+| BAP1 | 197 | 0.181 | **−5.8σ** | −0.0494 |
+| VHL | 197 | 0.780 | **+5.1σ** | −0.1020 |
+
+**in-distribution인 task가 하나도 없다.** 가장 가까운 것도 1.7σ 밖이고, context 크기는 6/10이
+학습 상한(100)의 2~2.6배다. brca 두 개만 크기 범위 안에 있다.
+
+⚠️ **상관은 약하다, 과대해석 금지**: corr(context 크기, Δ) = **−0.607**, corr(|비율 편향|, Δ) =
+**−0.27**. n=10에 코호트가 4개뿐이라 코호트 정체성과 완전히 교란돼 있어 **어느 쪽도 결정적이지
+않다**. 또 AUROC는 클래스 사전확률에 불변이므로 불균형이 지표를 기계적으로 깎지는 않는다 —
+영향은 ridge가 치우친 design에서 방향을 추정하게 되는 간접 경로로만 온다. **결론으로 주장할 수
+있는 것은 "이 두 축이 모사된 적이 없다"는 사실뿐이고, "그래서 성능이 낮다"는 아직 가설이다.**
+§112·§113이 옛 스윕 수치를 재현하려다 실패한 것과 달리 이건 실측된 mismatch라는 점이 다르다.
+
+### 3. 셀 축은 이미 반대로 어긋나 있다 (v89 해석에 필수)
+
+실제 slide의 tile 수(`Data/PathoBench/features/*.h5`, 923개 실측):
+
+| 코호트 | min | p25 | median | p75 | max | mean |
+|---|---:|---:|---:|---:|---:|---:|
+| ccrcc | 358 | 2,638 | 4,988 | 9,635 | 28,831 | 6,947 |
+| luad | 364 | 2,950 | 5,215 | 10,137 | 35,107 | 7,203 |
+| brca | 1,282 | 4,059 | 7,736 | 13,149 | 33,297 | 8,975 |
+| bc_therapy | 392 | 2,011 | 2,674 | 3,246 | 6,487 | 2,730 |
+
+학습은 bag당 평균 **2,724** cell(cap 4,096)이다. 즉 셀 축은 **이미 실제보다 짧다**.
+
+### 4. v89 — bag 축 arm (학습 중)
+
+```
+config: configs/train_v89_episode_shape_1536_1gpu.yaml   (self-contained)
+run:    checkpoints/20260814_094411/v89_episode_shape_seed4{2..5}/
+logs:   logs/20260814_094411/v89_episode_shape_seed4{2..5}.out
+```
+
+v83 대비 데이터 knob **4개만** 변경(모델·head·P는 byte-identical — arch 54, trainable 196,621로
+실측 확인):
+
+| knob | v83 | v89 |
+|---|---|---|
+| `num_bags` | [60, 100] | **[180, 300]** |
+| `num_cells` | [256, 8192] | **[85, 2731]** |
+| `per_bag_max_cells` | 4096 | **1365** |
+
+**예산 중립이 설계 의도**다. log-uniform 추출을 시뮬레이션하면 E[cells/bag] 2,724 → 909(0.334배)로
+E[total cells/episode] 217,936 → 218,167(**+0.1%**)이다. `scripts/smoke_train_budget.py --bf16`
+실측(24 step, GPU 0):
+
+| | v83 | v89 |
+|---|---:|---:|
+| mean cells/step | 297,643 | 298,480 (**+0.3%**) |
+| mean step | 78 ms | 102 ms (+31%) |
+| peak VRAM | 11.9 GiB | 13.3 GiB |
+| episode shape | `(1, 79, 4096, 1536)` | `(1, 230, 1365, 1536)` |
+
+셀 예산은 중립인데 step 시간이 31% 는다 — **bag당 연산(covariance sketch, DD `eigh`, CT 토큰)이
+cell이 아니라 bag 수에 비례**하기 때문이다. epoch ~2분, 50 epoch ~100분/seed.
+
+⚠️ **판정 시 반드시 지킬 것 — 두 축이 같이 움직인다.** 예산 고정은 곧 "셀 축이 bag 축의 비용을
+지불한다"는 뜻이고, §3에서 보듯 셀 축은 이미 짧았다(평균 2,724 → 909, cap 4,096 → 1,365; 실제
+중앙값 대비 약 2배 아래에서 **3~8배 아래**로). 따라서:
+- **양성이면 명확하다** — 셀 축을 악화시키고도 이겼다는 뜻이니 bag 축 효과가 그만큼 크다.
+- **음성/null이면 분리되지 않는다** — bag 축이 무효인지 두 효과가 상쇄된 건지 구분할 수 없다.
+  그때는 **예산 3배(셀 유지, bag만 3배)** 변형으로 갈라야 하고 seed당 ~3.3시간이 든다.
+  이 경우를 "bag 축 소진"으로 기록하지 말 것.
+
+### 5. v90 — 클래스 비율 축 (준비 완료, 미실행)
+
+§2의 나머지 한 축. `_sample_labels`에 knob이 없으므로 생성기 변경이 필요하다 — 상세는 §116.
+
+### 6. 다음 Action
+
+1. **v89 판정** — epoch 49, §107-3(1-GPU 4 seed, seed-paired Δ+t, 게이트 4/4 + |t|≥2.5),
+   v83(0.6880) 대비. macro와 **10개 task 전부** per-seed로 뽑아 §1 표를 갱신할 것.
+2. **v90 실행** — nhn-SMC에 준비 완료 상태로 인계됨(§116).
+3. ~~**VHL을 겨냥한 arm 설계**~~ **하지 말 것** — §1-2에 따라 상한이 0.538이다. VHL은 "고칠
+   task"가 아니라 "0.436 → 0.5의 역상관을 없앨 대상"이고, 그마저 별도 진단(fold별 부호 분포)
+   사안이지 학습 arm 사안이 아니다.
+
+## 116. 2026-08-14 — v90 클래스 비율 arm: 생성기에 `class_prior` 추가 (준비 완료, 미실행)
+
+_Recorded by: nhn-NEXGEM-claude — 2026-08-14 11:05_
+
+**질문**: §115-2의 나머지 한 축. 실제 task는 전부 불균형인데(양성비율 0.178~0.780) 학습은
+Bernoulli(0.5)만 봤다. **불균형 자체를 학습시키면 달라지는가?**
+
+**왜 knob을 새로 만들어야 했나**: `_sample_labels`에 클래스 사전확률 개념이 없었다. `balanced:
+true`는 정확히 50/50, `balanced: false`는 Bernoulli(0.5)로 **둘 다 균형**이다. 후자의 주석이
+설계 의도를 밝힌다 — *"Independent labels remove the episode-level class-count variable"*.
+지름길을 제거한 합리적 선택이었지만, 그 대가로 **모델은 context에서 유병률을 읽는 법을 배우지
+못한다**. 실제 에피소드는 그 정보를 항상 갖고 있다.
+
+**구현** (`SyntheticManifoldGenerator`):
+```yaml
+class_prior: [0.15, 0.85]     # None이면 기존 동작 그대로
+```
+- 에피소드마다 `p ~ U(0.15, 0.85)`를 **한 번** 뽑고 `labels ~ Bernoulli(p)`. bag마다 뽑으면
+  중심극한정리로 매 에피소드가 0.5 근처에 몰려 knob이 무의미해진다 — 테스트가 이걸 고정한다.
+- `balanced: true`와 동시 지정은 **에러**다(균형 경로가 prior를 조용히 버리므로).
+- `_repair_missing_classes`: 클래스가 하나라도 비면 무작위 bag 하나를 그 클래스로 뒤집는다.
+  `ModelInterface._sample_query_index`가 단일 클래스 에피소드에서 **예외를 던지기** 때문에
+  필수다. 지금 설정에서는 ~1e-13 사건이지만, epoch당 1024 에피소드 × 50 epoch에서 "드묾"은
+  안전을 보장하지 않는다.
+
+**테스트** (`tests/test_class_prior.py`, 12개 전부 통과):
+- ⚠️ **가장 중요한 것 — `test_default_is_bit_identical_to_the_old_stream`**: knob 미지정 시
+  레이블 스트림이 v83과 **bit-identical**이어야 한다. v90은 v83과 seed-paired로 비교되므로,
+  파라미터 추가만으로 기본 경로가 흔들렸다면 비교가 prior가 아니라 리팩터를 재는 게 된다.
+- 에피소드 단위 추출 검증(bag 단위였다면 sd≈0.03, 에피소드 단위면 U(0.15,0.85)의 sd=0.202)
+- 실측 실제 범위(0.178~0.780) 포함 여부
+- 극단 prior(0.01/0.99) × 400회에서 단일 클래스 에피소드 0건
+- config `dataset_kwargs` → `**generator_kwargs` 배선
+
+**산출물**:
+```
+generator: src/datasets/synthetic_data.py  class_prior + _repair_missing_classes
+tests:     tests/test_class_prior.py       (12 tests)
+config:    configs/train_v90_class_prior_1536_1gpu.yaml   (self-contained)
+```
+v83 대비 config diff는 `class_prior` 3줄 + `experiment_name`뿐이다. 모델·head·P는 byte-identical
+(arch 54, trainable 196,621). `smoke_train_budget.py --bf16` 실측: peak VRAM 12.0 GiB, episode
+shape `(1, 72, 4096, 1536)` — **v83과 같은 모양**이므로 비용도 v83의 것(~65분/seed)이지 v89의
+것이 아니다. 실측 양성비율 분포(60 에피소드): min 0.125 / med 0.450 / max 0.887.
+
+**알려진 부작용 (버그 아님)**: `_pairwise_ranking_loss`는 뽑힌 query가 전부 한 클래스면 0을
+반환한다. prior가 치우치면 이 일이 잦아진다(p=0.15, query 12개면 약 14%). 즉
+`ranking_loss_weight`가 실질적으로 더 적은 에피소드만 본다. **이것도 이 arm이 재는 대상의
+일부다** — 평가 시 불균형이 문제라면 그 대가를 치르고도 이득이 나야 한다.
+
+**v89와의 관계**: 두 arm은 §115-2의 서로 다른 축이고 **둘 다 v83 기준으로 독립 판정**된다.
+순서 무관, 병렬 가능. ⚠️ 둘 다 이기더라도 **효과가 더해진다고 가정하지 말 것** — 결합 arm은
+별도 검정이다.
+
+**판정**: §107-3 (1-GPU, SEED 42/43/44/45, epoch 49, v83 0.6880 대비 seed-paired Δ+t, 게이트
+4/4 + |t|≥2.5). ⚠️ **macro와 10개 task 전부를 per-seed로 보고할 것** — 이 arm의 요점은 task별
+이고, macro만으로는 불균형이 심한 task(STK11 0.178 / BAP1 0.181 / VHL 0.780)가 움직였는지
+알 수 없다.
+
+**상태**: **준비 완료, 미실행.** nhn-SMC에 인계됐다(실행은 사용자가 직접 한다).

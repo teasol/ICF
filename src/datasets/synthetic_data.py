@@ -106,6 +106,7 @@ class SyntheticManifoldGenerator:
         manifold_linear_probability: float = 0.5,
         manifold_max_condition_number: float = 3.0,
         balanced: bool = True,
+        class_prior: float | tuple[float, float] | None = None,
     ) -> None:
         if isinstance(num_bags, int):
             num_bags = (num_bags, num_bags)
@@ -135,6 +136,20 @@ class SyntheticManifoldGenerator:
             raise ValueError("num_cells_log_uniform_power must be positive.")
         if per_bag_max_cells is not None and per_bag_max_cells < 1:
             raise ValueError("per_bag_max_cells must be positive or None.")
+        if class_prior is not None:
+            if balanced:
+                raise ValueError(
+                    "class_prior requires balanced=False -- the balanced path "
+                    "forces an exact 50/50 split and would ignore the prior."
+                )
+            if isinstance(class_prior, (int, float)):
+                class_prior = (float(class_prior), float(class_prior))
+            class_prior = tuple(float(value) for value in class_prior)
+            if len(class_prior) != 2 or not 0.0 < class_prior[0] <= class_prior[1] < 1.0:
+                raise ValueError(
+                    "class_prior must be a probability or an ordered "
+                    "[min, max] range strictly inside (0, 1)."
+                )
         if response_dim < 1 or responsive_population_count < 1:
             raise ValueError("response_dim and responsive_population_count must be positive.")
         if label_rule not in {"single", "xor"}:
@@ -342,6 +357,7 @@ class SyntheticManifoldGenerator:
         self.manifold_linear_probability = float(manifold_linear_probability)
         self.manifold_max_condition_number = float(manifold_max_condition_number)
         self.balanced = balanced
+        self.class_prior = class_prior
 
     def sample_episode(
         self,
@@ -1027,6 +1043,35 @@ class SyntheticManifoldGenerator:
                 )
             )
 
+        if self.class_prior is not None:
+            # v90 (docs SS116). Every real SEAL task is class-imbalanced -- the
+            # measured positive fraction runs 0.178 (LUAD STK11) to 0.780
+            # (CCRCC VHL), and `scripts/test_pathobench.py --context-mode all`
+            # feeds the whole train fold as context AT THAT NATURAL RATIO. The
+            # two branches above never produce such an episode: `balanced` is
+            # exactly 50/50 and the Bernoulli(0.5) fallback is 0.500 +/- 0.055
+            # at num_bags 60-100, so every eval task sits at least 1.7 sigma
+            # outside anything training has seen.
+            #
+            # The prior is drawn ONCE PER EPISODE, not per bag: a task has one
+            # prevalence, and the model has to infer it from the context rather
+            # than assume balance. That is exactly the episode-level variable
+            # the comment below says was deliberately removed -- see the caveat
+            # in the class docstring about why removing it was reasonable then
+            # and is being revisited now.
+            low, high = self.class_prior
+            probability = (
+                torch.full((), low, device=device)
+                if low == high
+                else torch.rand((), device=device, generator=generator)
+                .mul(high - low)
+                .add(low)
+            )
+            labels = (
+                torch.rand(num_bags, device=device, generator=generator) < probability
+            ).long()
+            return self._repair_missing_classes(labels, generator, device)
+
         # Independent labels remove the episode-level class-count variable:
         # context label counts contain no information about a masked target.
         return torch.randint(
@@ -1037,6 +1082,33 @@ class SyntheticManifoldGenerator:
             device=device,
             generator=generator,
         )
+
+    @staticmethod
+    def _repair_missing_classes(
+        labels: torch.Tensor,
+        generator: torch.Generator | None,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Guarantee at least one bag per class.
+
+        `ModelInterface._sample_query_index` raises `Every episode must contain
+        all classes` outright, so a skewed prior must never be allowed to emit a
+        single-class episode. At num_bags 180-300 with a prior in [0.15, 0.85]
+        that is a ~1e-13 event, but the guard has to exist for small-bag configs
+        and for the tests that use an extreme prior deliberately.
+
+        Flipping for class 0 cannot re-empty class 1: `num_bags >= 2` is
+        enforced in `__init__`, so the untouched bags still carry the other
+        class.
+        """
+        for class_index in (0, 1):
+            if int((labels == class_index).sum()) > 0:
+                continue
+            position = torch.randint(
+                labels.numel(), (), device=device, generator=generator
+            )
+            labels[position] = class_index
+        return labels
 
     def _sample_distributions(
         self,
