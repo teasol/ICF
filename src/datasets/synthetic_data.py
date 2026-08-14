@@ -107,6 +107,9 @@ class SyntheticManifoldGenerator:
         manifold_max_condition_number: float = 3.0,
         balanced: bool = True,
         class_prior: float | tuple[float, float] | None = None,
+        spectral_tail_dim: int = 1024,
+        spectral_tail_decay: float = 0.5,
+        spectral_tail_scale: float = 0.0,
     ) -> None:
         if isinstance(num_bags, int):
             num_bags = (num_bags, num_bags)
@@ -136,6 +139,12 @@ class SyntheticManifoldGenerator:
             raise ValueError("num_cells_log_uniform_power must be positive.")
         if per_bag_max_cells is not None and per_bag_max_cells < 1:
             raise ValueError("per_bag_max_cells must be positive or None.")
+        if spectral_tail_dim < 1:
+            raise ValueError("spectral_tail_dim must be positive.")
+        if spectral_tail_decay < 0.0:
+            raise ValueError("spectral_tail_decay must be non-negative.")
+        if spectral_tail_scale < 0.0:
+            raise ValueError("spectral_tail_scale must be non-negative.")
         if class_prior is not None:
             if balanced:
                 raise ValueError(
@@ -358,6 +367,9 @@ class SyntheticManifoldGenerator:
         self.manifold_max_condition_number = float(manifold_max_condition_number)
         self.balanced = balanced
         self.class_prior = class_prior
+        self.spectral_tail_dim = int(spectral_tail_dim)
+        self.spectral_tail_decay = float(spectral_tail_decay)
+        self.spectral_tail_scale = float(spectral_tail_scale)
 
     def sample_episode(
         self,
@@ -804,6 +816,8 @@ class SyntheticManifoldGenerator:
                 x.shape, dtype=x.dtype, device=device, generator=nuisance_generator
             )
             x = x + self.observation_noise * noise
+        if self.spectral_tail_scale > 0.0:
+            x = self._add_spectral_tail(x, nuisance_generator, device)
         if self.normalize_output:
             x = F.normalize(x, dim=-1, eps=self.output_norm_eps)
 
@@ -1082,6 +1096,80 @@ class SyntheticManifoldGenerator:
             device=device,
             generator=generator,
         )
+
+    def _add_spectral_tail(
+        self,
+        x: torch.Tensor,
+        generator: torch.Generator | None,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Add nuisance directions whose variance DECAYS as ``k ** -decay``.
+
+        Why this exists (docs SS123/SS124). `manifold_mode: orthogonal` is an
+        ISOMETRIC embedding of an isotropic latent, so the cell cloud has a FLAT
+        spectrum inside a `latent_dim`-dimensional subspace: measured
+        participation ratio ~= r90 ~= latent_dim. Real UNI2 tiles have
+        participation ~50 with r90 ~480 -- a few dominant directions plus a long
+        decaying tail. No existing knob reaches that shape, because every one of
+        them moves participation and r90 TOGETHER:
+
+            orthogonal latent 32   participation  31.2   r90   28
+            orthogonal latent 512  participation 411.8   r90  433
+            nonlinear  latent 512  participation 299.2   r90  454
+            real UNI2              participation  50-76  r90 431-542
+
+        `spectral_tail_decay` is the missing degree of freedom: `spectral_tail_dim`
+        sets how far the tail reaches and the decay sets how fast it falls, so the
+        two targets can be matched independently.
+
+        The tail carries NO label signal -- it is nuisance structure added after
+        the manifold map, so the task is unchanged and only the spectrum moves.
+        `spectral_tail_scale` is the tail's standard deviation as a multiple of
+        the signal's, and 0.0 (the default) disables the whole block, leaving
+        every existing arm byte-identical.
+
+        The tail latent is materialised one BAG at a time. Doing the whole
+        episode at once would allocate [bags, cells, spectral_tail_dim] -- 3.4 GB
+        at 100 bags x 8192 cells x 1024 -- while per-bag chunks cap it at
+        [cells, spectral_tail_dim], about 34 MB, for a loop over at most a
+        hundred bags. (A Cholesky of the output-space covariance would avoid the
+        loop but cannot be used: with `spectral_tail_dim < output_dim` that
+        covariance is singular by construction, and jittering it enough to
+        factorise reintroduces exactly the flat isotropic floor this knob exists
+        to avoid.)
+
+        The embedding is a random Gaussian matrix (near-isometric in this
+        regime) drawn fresh per episode, so the tail directions never sit at a
+        fixed angle to the model's deterministic covariance sketch basis.
+        """
+        index = torch.arange(
+            1, self.spectral_tail_dim + 1, device=device, dtype=torch.float32
+        )
+        sigma = index.pow(-self.spectral_tail_decay)
+        embedding = torch.randn(
+            self.spectral_tail_dim,
+            self.output_dim,
+            device=device,
+            generator=generator,
+            dtype=torch.float32,
+        ) / math.sqrt(float(self.spectral_tail_dim))
+        scaled_embedding = sigma[:, None] * embedding
+        tail = torch.empty(x.shape, device=device, dtype=torch.float32)
+        for bag_index in range(x.shape[0]):
+            latent = torch.randn(
+                x.shape[1],
+                self.spectral_tail_dim,
+                device=device,
+                generator=generator,
+                dtype=torch.float32,
+            )
+            tail[bag_index] = latent @ scaled_embedding
+        tail = tail * (
+            self.spectral_tail_scale
+            * x.float().std()
+            / tail.std().clamp_min(1e-12)
+        )
+        return x + tail.to(x.dtype)
 
     @staticmethod
     def _repair_missing_classes(
