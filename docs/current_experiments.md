@@ -297,6 +297,14 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
    `per_bag_max_cells`(데이터) / `max_cells`(모델) / **`padding_max_cells`(collator, 신규 노출)**.
    collator의 4096 상한은 하드코딩돼 있었고 **에러 없이 조용히 자른다** — v92 첫 빌드가 실제로
    당했다. 하나라도 빠지면 "효과 없음"이라는 틀린 결론이 나온다.
+4i. **cell 값 분포 축 — 새로 열린 축, 아직 arm 없음 (§123)** — 에피소드 **모양** 축은 소진됐지만
+   **cell 값 자체의 분포**는 한 번도 측정된 적이 없었다. 실측 결과 **일관되지 않다**: 지배
+   부공간은 맞으나(participation 41 vs 49) **스펙트럼 꼬리가 12~20배 다르고**(r90 47 vs 585,
+   단일 slide로도 283~322), within-bag cosine이 2.7배(+0.130 vs +0.351), cell norm 분산은
+   0 vs 2.56이다. `latent_dim: 32`가 스케치 차원(`covariance_sketch_dim: 128`)의 1/4이라
+   합성에서는 스케치 상당 부분이 노이즈를 본다. ⚠️ `latent_dim`은 **아래로만** 스윕됐고
+   (L2~L32, 32가 최고) **32 초과는 미탐색**이다. 재현: `scripts/diagnose_synthetic_vs_real.py`.
+   ⚠️ §115의 교훈 — 격차 실재와 "좁히면 오른다"는 별개 명제다.
 4h. **task별 결손 분포 (§115-1)** — ABMIL 대비 총 결손 0.386 중 61%가 VHL(0.102)+luad
    TP53(0.083)+BAP1(0.049) 3개에 몰려 있다. MeanMIL 기준으로는 **5/10에서 이긴다**. 모델이
    고르게 약한 게 아니다. ⚠️ **VHL은 지도학습 상한이 0.538±0.128(사실상 랜덤)이라 "고칠 task"가
