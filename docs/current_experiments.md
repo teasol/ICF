@@ -123,8 +123,8 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 | v86 noise | `observation_noise` 0.005 → 0.01 (데이터만) | 0.6884 | 0.0072 | v83 기준 +0.0004 (t=0.71, 3/4) **완전 무효과(null)** — §105-6 옛 레버 재현 안 됨 (§112) |
 | v87 rare | `rare_response_probability` 0.0 → 0.15 (데이터만) | 0.6866 | 0.0043 | v83 기준 −0.0013 (t=−0.70, 2/4) **완전 무효과(null)** — VHL/BAP1 타겟 가설도 반증 (§113) |
 | v88 PA | relation feature 12 → 16 (label-conditioned population 분기 추가, arch 57) | 0.6769 | 0.0047 | v83 기준 −0.0111 (t=−6.69, 4/4) **기각 — 이 레짐 최강 기각**. VHL −0.0290, BAP1 −0.0202 (둘 다 1/4) (§114) |
-| v89 episode shape | `num_bags` [60,100]→[180,300], cell 1/3 (예산 중립, 데이터만) | — | — | **학습 중** (`checkpoints/20260814_094411/`). ⚠️ 두 축 동시 이동 — null이면 분리 불가 (§115-4) |
-| v90 class prior | `class_prior: [0.15,0.85]` 신규 knob (데이터만) | — | — | **준비 완료, 미실행** — nhn-SMC 인계 (§116) |
+| v89 episode shape | `num_bags` [60,100]→[180,300], cell 1/3 (예산 중립, 데이터만) | 0.6832 | 0.0044 | v83 기준 −0.0048 (t=−1.39, 1/4) **미판정**. ⚠️ bag·cell 두 축이 함께 움직여 **"bag 축 무효"와 "상쇄"를 구분 못 한다** — 소진으로 쓰지 말 것 (§115-7) |
+| v90 class prior | `class_prior: [0.15,0.85]` 신규 knob (데이터만) | — | — | **학습 중** (nhn-SMC, `checkpoints/20260814_103137/v90_class_prior_seed4{2..5}/`, GPU 0/1/3/5, §116) |
 | v77 Hard | ClassSep `[0.5,1.4]` → `[0.2,0.8]` (v82 기준) | 0.6781 | 0.0053 | v82 기준 −0.0053 (t=−3.0, 4/4) |
 | v81 fixed P | learnable P → fixed P (197,057 → 449, v77 기준) | 0.6734 | 0.0018 | Hard 기준 −0.0048 (t=−1.5) **미판정** |
 | v80 shallow MLP | orthogonal manifold → shallow MLP (v77 기준) | 0.6722 | 0.0051 | Hard 기준 −0.0059 (t=−2.7) **기각** |
@@ -266,6 +266,10 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
    context 90~261이다. **10개 task 중 in-distribution인 것이 하나도 없다**(최소 1.7σ 밖).
    v89(bag 축)·v90(비율 축)이 각각을 검정한다. ⚠️ §112·§113의 데이터 축 null과 혼동하지 말 것
    — 그건 옛 스윕 수치 재현 시도였고, 이건 **실측된 mismatch**다.
+4g-1. **cell 축 단독 검정 (v91) — 미착수, §115-7이 지정한 다음 수순.** v89가 미판정으로
+   끝나면서 bag 축과 cell 축이 분리되지 않았다. `num_bags`는 v83 그대로 두고 **cell만 1/3**로
+   줄이면 cell 축 단독 효과가 나오고, v89(−0.0048)에서 빼면 bag 축이 남는다. 예산이 1/3이라
+   **~22분/seed**로 지금까지 중 가장 싸다.
 4h. **task별 결손 분포 (§115-1)** — ABMIL 대비 총 결손 0.386 중 61%가 VHL(0.102)+luad
    TP53(0.083)+BAP1(0.049) 3개에 몰려 있다. MeanMIL 기준으로는 **5/10에서 이긴다**. 모델이
    고르게 약한 게 아니다. ⚠️ **VHL은 지도학습 상한이 0.538±0.128(사실상 랜덤)이라 "고칠 task"가
