@@ -31,9 +31,16 @@ CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 >   DDP4 baseline은 0.6880(`v77_hard_ep49`). **두 레짐의 숫자를 빼지 말 것** — 아래 §3-2 결과표는
 >   대부분 DDP4 1 seed 기록이다.
 > - **모든 arm은 1-GPU · SEED 42/43/44/45 · 50 epoch · epoch 49 채점**으로 돌리고 이제는 **v83**
->   4 seed와 **seed-paired**로 비교한다. **판정 조건: 4/4 시드 부호 일치 + |t| ≥ 2.5**, 부호가
->   갈리면 미판정 — 이 게이트 자체는 §109로 바뀌지 않았다.
+>   4 seed와 **seed-paired**로 비교한다. **게이트 자체(4/4 시드 부호 일치 + |t| ≥ 2.5)는
+>   §109로 바뀌지 않았고, 여전히 계산·보고한다.**
 >   시드별 fold-paired CI(`scripts/compare_arms_paired.py`)는 보조 근거다.
+> - **⚠️ 최종 판정은 게이트 통과 여부가 아니라 사용자의 종합적 판단이다 (§118, 2026-08-14,
+>   사용자 결정).** v90이 계기 — macro가 게이트에 근소 미달(t≈−2.23, 4/4)했지만, **task 10개
+>   전부를 baseline 성능대(랜덤 근접 vs 천장 근접)와 함께 보니** 하락이 고성능 구간에, 상승이
+>   저신호 구간에 몰린 비대칭이 드러나 사용자가 **기각**을 확정했다. 평가 완료 시 항상 (i) 이
+>   arm이 무엇을 테스트하는지 먼저 설명, (ii) **task 10개 전부**를 baseline과 나란히 표로 제시
+>   (요약만 하지 않는다), (iii) macro seed-paired Δ+t를 마지막에 보고할 것. 최종 승격·기각·
+>   재검증 여부는 사용자가 정한다.
 > - **채점은 epoch 49 고정.** validation-best 선택은 val_ce가 평평한 arm에서 과소학습 지점을
 >   고른다 — v80 seed 43이 epoch 16에 걸려 −0.0089를 잃었다.
 > - **macro seed std**는 arm마다 다르다(§106-1): fixed P 0.0018 / Medium 0.0029 / **Hard 0.0053** /
@@ -57,7 +64,7 @@ CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 | **단일 측정으로 단정** | 기저 요동 ±0.05, seed 반복 필수 (§69-3) |
 | **점추정 macro끼리 빼서 판정** | task 내 fold 산포가 ±0.09인데 판정 대상 Δ는 0.001~0.012다. 모든 arm이 같은 공식 fold를 쓰므로 **fold별로 먼저 뺀 뒤 평균**해 CI를 낼 것 — `scripts/compare_arms_paired.py` (§99) |
 | **ridge-only 진단치를 기대값으로** | K 64→128 예측 +0.016 vs 실측 +0.004 (§70-2) |
-| **task별 CI로 판정하기** | 시드만 다른 두 run에서 task 6개 CI가 0을 제외, BAP1 −0.0402. task별 seed std 평균 0.0161 = macro의 7배 (§104-5) |
+| **task별 CI로 판정하기** | 시드만 다른 두 run에서 task 6개 CI가 0을 제외, BAP1 −0.0402. task별 seed std 평균 0.0161 = macro의 7배 (§104-5). ⚠️ 이건 **개별 task 하나**를 통계적 근거로 쓰지 말라는 뜻이다 — 10개 전체에 걸친 **패턴**(방향 일관성, baseline 성능대별 비대칭)을 사용자가 종합 판단하는 것은 다르다(§118) |
 | **macro Δ 0.010 미만을 단정하기** | macro seed std 0.0051. ridge calibration(−0.0033)·v78 무가중(−0.0047)은 "판정 불가"로 내려갔다 (§104-4) |
 | **validation-best로 채점하기** | val_ce가 평평하면 과소학습 지점을 고른다. v80 seed 43이 epoch 16에 걸려 −0.0089 (§104-2). **epoch 49 고정으로 채점** |
 | **학습 레이아웃이 다른 arm 비교** | 1-GPU는 1024 step/epoch·batch 1, DDP4는 rank당 256 step·gradient 4개 평균. v80의 −0.0158에 이 confound가 남아 있다 (§104-6) |
@@ -124,7 +131,7 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 | v87 rare | `rare_response_probability` 0.0 → 0.15 (데이터만) | 0.6866 | 0.0043 | v83 기준 −0.0013 (t=−0.70, 2/4) **완전 무효과(null)** — VHL/BAP1 타겟 가설도 반증 (§113) |
 | v88 PA | relation feature 12 → 16 (label-conditioned population 분기 추가, arch 57) | 0.6769 | 0.0047 | v83 기준 −0.0111 (t=−6.69, 4/4) **기각 — 이 레짐 최강 기각**. VHL −0.0290, BAP1 −0.0202 (둘 다 1/4) (§114) |
 | v89 episode shape | `num_bags` [60,100]→[180,300], cell 1/3 (예산 중립, 데이터만) | 0.6832 | 0.0044 | v83 기준 −0.0048 (t=−1.39, 1/4) **미판정**. ⚠️ bag·cell 두 축이 함께 움직여 **"bag 축 무효"와 "상쇄"를 구분 못 한다** — 소진으로 쓰지 말 것 (§115-7) |
-| v90 class prior | `class_prior: [0.15,0.85]` 신규 knob (데이터만) | — | — | **학습 중** (nhn-SMC, `checkpoints/20260814_103137/v90_class_prior_seed4{2..5}/`, GPU 0/1/3/5, §116) |
+| v90 class prior | `class_prior: [0.15,0.85]` 신규 knob (데이터만) | 0.6827 | 0.0074 | v83 기준 −0.0053 (t≈−2.23, **4/4**), 게이트(2.5) 근소 미달이지만 **기각** — task 10개 중 하락 7개가 고성능(천장 근접) 구간에 몰리고 상승 3개는 저신호 구간, 사용자의 종합 판단(§118) |
 | v77 Hard | ClassSep `[0.5,1.4]` → `[0.2,0.8]` (v82 기준) | 0.6781 | 0.0053 | v82 기준 −0.0053 (t=−3.0, 4/4) |
 | v81 fixed P | learnable P → fixed P (197,057 → 449, v77 기준) | 0.6734 | 0.0018 | Hard 기준 −0.0048 (t=−1.5) **미판정** |
 | v80 shallow MLP | orthogonal manifold → shallow MLP (v77 기준) | 0.6722 | 0.0051 | Hard 기준 −0.0059 (t=−2.7) **기각** |
