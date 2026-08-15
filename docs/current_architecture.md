@@ -1,4 +1,4 @@
-# Current architecture — 활성 relation 계보와 역사적 비교군 (2026-08-13)
+# Current architecture — 활성 relation 계보와 역사적 비교군 (2026-08-15)
 
 > [!IMPORTANT]
 > **활성 baseline은 v83 linear head의 4 seed × `epoch 49` checkpoint**
@@ -142,8 +142,27 @@ head 파라미터 수뿐이고 P·gradient 경로는 동일하다.
 | shared populations | 4–10, fraction 0.82–0.96 |
 | response tasks | composition/state/covariance/interaction/combined 동일 확률 |
 | ClassSep | **Medium `[0.5,1.4]`** (v82, §107). Hard `[0.2,0.8]`은 직전 baseline |
-| observation noise | 0.005 |
+| observation noise | 0.005 — ⚠️ **정규화지 nuisance가 아니다**. 끄면 합성 val_ce 0.152→0.099로 쉬워지고 SEAL은 −0.0076(v100, §127-3) |
+| donor shift | 0.35 — bag마다 latent 벡터 하나를 그 bag 전 cell에 더하는 강체 이동. 축 전체가 노이즈 안에서 평평(§128-2) |
 | training | **1-GPU × 4 seed(42–45)**, GPU 0–3에 하나씩, bf16, 50 epochs (§107) |
+
+### Active-3a. 이후 추가된 생성기 knob (전부 기본값 inert)
+
+| knob | 기본 | 하는 일 | 판정 |
+|---|---|---|---|
+| `class_prior` | `None` | 에피소드마다 `p~U(lo,hi)` 뽑아 `Bernoulli(p)`. `None`이면 기존 `torch.randint` 스트림과 **bit-identical** | **기각** (v90, §118) |
+| `spectral_tail_{dim,decay,scale}` | 1024 / 0.5 / **0.0** | manifold map 뒤에 `k**-decay` 감쇠 공분산의 nuisance를 더해 스펙트럼 꼬리를 만든다. `scale=0`이면 완전 inert | **기각** (v95/v102, §129) |
+| `spectral_tail_bag_fraction` | **0.0** | 위 꼬리를 bag 공유분/cell 개별분으로 분할(`√(1−f)`/`√f`, cell별 총분산 보존). 스펙트럼과 응집도를 **하나의 기전**으로 동시에 만든다 | **기각** (v102, §129) |
+| `data.padding_max_cells` | **4096** | dense 학습 collator의 per-bag 상한. §120-1에서 하드코딩 상수를 노출한 것 | 중립(인프라) |
+
+⚠️ **bag 크기를 키우는 arm은 cell 상한 3개를 전부 올려야 한다** — `per_bag_max_cells`(데이터),
+`max_cells`(모델 subsample), `padding_max_cells`(collator). 하나라도 빠지면 **에러 없이 조용히
+잘린다**(§120-1). 테스트: `tests/test_padding_max_cells.py`, `tests/test_spectral_tail.py`,
+`tests/test_class_prior.py`.
+
+⚠️⚠️ **§129 결론: 이 데이터 계약을 실제 UNI2 통계에 "맞추려는" 변경은 하지 말 것.**
+격차는 §123이 정확히 실측했으나(스펙트럼 r90 47 vs 585, 응집도 cosine 0.130 vs 0.351,
+norm sd 0 vs 2.56), **닫을수록 단조로 나빠진다.** 재현 진단: `scripts/diagnose_synthetic_vs_real.py`.
 
 `manifold_mode`은 실험 축이다.
 
@@ -168,7 +187,15 @@ head 파라미터 수뿐이고 P·gradient 경로는 동일하다.
 
 ## Active-4. 현재 실험과 판정
 
-- 활성 실행: 없음.
+- 활성 실행: v98 seed 46–49 (앙상블 재현성 확인, §130-7).
+- ⚠️ **판정 절차가 §118에서 바뀌었다**: §107-3 게이트(4/4 부호 일치 + |t|≥2.5)는 계속 계산·보고하되
+  **통과 여부가 승격/기각을 자동 결정하지 않는다.** 최종 판정은 macro + **task 10개 전부**를
+  baseline 성능대와 함께 본 패턴 + 다른 arm과의 일관성을 종합한 **사용자 판단**이다.
+  보고 형식: (i) arm이 뭘 테스트하는지 → (ii) task 10개 전부 표 → (iii) macro Δ+t (§118-3).
+- ⚠️ **1 seed 스크리닝은 배제에만 쓴다** — v94가 seed42에서 +0.0022였으나 4 seed로는 −0.0043이었다
+  (§125-1).
+- **분산 감소가 현재 최대 레버다 (§130)**: 시드 앙상블이 학습 비용 0으로 +0.0058(v83)~+0.0071(v98).
+  model soup(가중치 평균)은 +0.0014로 실패했고, arm 다양성은 기여하지 않는다.
 - **v78·v79 모두 기각.** weight 0/0.02/1.0에서 0.6873/0.6869/0.6826(G-5), v79 분리는 0.6768
   (Active-6). 세 방식 모두 지고 건드린 정도가 클수록 더 졌다 — 이 축은 소진으로 본다.
 - active baseline: **v83 linear head orthogonal, 1-GPU 4 seed 평균 epoch 49 = 0.6880** (§109).

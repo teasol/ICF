@@ -1,8 +1,17 @@
 # Documentation map
 
-**Last updated**: `2026-08-13`
+**Last updated**: `2026-08-15`
 **Active baseline**: **v83 linear head relation model** (SEAL 10-task macro 1-GPU 4 seed 평균 0.6880, §109 —
-사용자 결정, §107-3 판정 게이트 미달 상태에서의 승격). 실행 중: 없음.
+사용자 결정, §107-3 판정 게이트 미달 상태에서의 승격). 실행 중: v98 seed 46–49(앙상블 재현성, §130-7).
+
+> **새 세션이 먼저 알아야 할 3가지 (2026-08-15, 상세는 `current_status.md` 최상단)**
+> 1. **데이터 분포 축은 닫혔다 (§129)** — 합성 에피소드를 실제 UNI2 통계에 맞추는 것은 도움이 안 될
+>    뿐 아니라 **닫은 격차가 많을수록 단조로 나빠진다**(v102 t=−2.70 기각, v100 t=−3.59 기각).
+>    이 축에서 새 arm을 설계하지 말 것.
+> 2. **문제는 편향이 아니라 분산일 수 있다 (§130)** — seed std 0.0074인데 15개 arm이 쫓던 효과는
+>    전부 ±0.005 안쪽이었다. **시드 앙상블이 학습 비용 0으로 +0.0058~0.0071**(10/10 task 양수).
+> 3. **판정은 게이트가 자동으로 하지 않는다 (§118)** — 최종 승격/기각은 macro + task 10개 전부의
+>    성능대별 패턴 + arm 간 일관성을 종합한 **사용자 판단**이고, 보고 형식이 정해져 있다(§118-3).
 
 문서는 **새 대화 세션으로 접속하는 Agent가 최우선으로 읽는 Living 문서 5개와 현행 proposal 1개(`docs/` 루트)**, **과거 기록/딥다이브 분석서([`docs/history.md`](history.md))**로 이원화하여 관리합니다.
 
@@ -13,7 +22,7 @@
 사용자가 매번 새 채팅 세션으로 접속할 때, 새로 시작한 Agent는 아래 `docs/` 최상위 루트의 Living md 파일 5개와 현재 `architecture_*_proposal.md` 1개를 우선 정독하고 **Git commit log/diff**를 조회하여 작업 맥락을 동기화합니다:
 
 1. [`agent_handoff.md`](agent_handoff.md): 새 세션 Agent 초기화 수칙, Git 기반 워크플로우, 실행 환경, 타임아웃, 테스트 검증, Docs/Config 정리 규칙
-2. [`current_status.md`](current_status.md): 개발 현황, 최신 실증 수치, 판정 프로토콜(**fold-paired Δ + CI**, §99), 열린 과제, Next Action Plan (SSOT). §2~§97 본문은 `history.md` §20–§23으로 아카이빙되고 스텁+포인터만 남았다(§101)
+2. [`current_status.md`](current_status.md): 개발 현황, 최신 실증 수치, 판정 프로토콜(§107-3 게이트 + **§118 사용자 종합 판단**), 열린 과제, Next Action Plan (SSOT). §2~§97 본문은 `history.md` §20–§23으로 아카이빙되고 스텁+포인터만 남았다(§101)
 3. [`current_architecture.md`](current_architecture.md): 활성 **v83 linear head** relation 구조와 역사적 CV-only/Encoder+Ridge 비교, 데이터·학습 계약
 4. [`current_experiments.md`](current_experiments.md): 실험 전략과 검정력, 평가 프로토콜, Stage 1~3 실행 명령어 및 실증 수치
 5. [`README.md`](README.md): 문서 맵 및 갱신/아카이빙 가이드라인
@@ -46,13 +55,21 @@
 - **Git 커밋 동기화**: 세션 핸드오프 시 작업을 남김없이 커밋하고 커밋 내역/diff를 `agent_handoff.md` 및 `current_status.md`에 반영합니다.
 - **아카이빙 규칙**: 특정 버전 딥다이브 보고서나 계획 문서는 완료 시 **핵심 결론(ADR·트레이드오프·레슨)을 `docs/history.md`의 해당 시기 절에 추가**하고, 개별 원문 파일은 새로 만들지 않습니다(원문은 git 이력에 보존). `docs/` 루트를 단순하고 가독성 높게 유지합니다.
 - **Config 루트 관리**: `configs/` 루트에는 **현재 활성 파이프라인의 entry point만** 둔다
-  (상세는 [`agent_handoff.md`](agent_handoff.md) §7). **2026-08-13(§111) 기준 5개다** —
-  `train_v83_linear_head_1536_1gpu.yaml`(**canonical baseline**, 자체 포함형, §109 사용자 결정),
-  `train_v82_medium_classsep_1536_1gpu.yaml`(직전 baseline, 참고용),
-  `train_v82_medium_classsep_1536.yaml`(v82의 DDP4 판본, 참고용),
-  `train_v77_hard_orthogonal_1536{,_1gpu}.yaml`(historical control).
-  §107-6(fixed P × Medium, v85)은 한 번도 실행되지 않은 채 **취소**됐고 config도 삭제됐다
-  (2026-08-13 사용자 결정) — 새 실험 방향은 재기획 중이다.
+  (상세는 [`agent_handoff.md`](agent_handoff.md) §7). **2026-08-15 기준 루트 구성**:
+
+  | config | 역할 |
+  |---|---|
+  | `train_v83_linear_head_1536_1gpu.yaml` | **canonical baseline** (§109). 모든 arm의 비교 대상 |
+  | `train_v82_medium_classsep_1536{,_1gpu}.yaml` | 직전 baseline(historical) |
+  | `train_v77_hard_orthogonal_1536{,_1gpu}.yaml` | historical control |
+  | `train_v86_noise / v87_rare` | §105-6 데이터 스윕 재검증 — 둘 다 null |
+  | `train_v89_episode_shape / v91_cell_axis / v92_big_bags / v93_cell_axis_clean` | §115 에피소드 **모양** 축 — 전부 닫힘/기각 |
+  | `train_v88_population_attention` | 레이블 조건 분기 — 기각(§114) |
+  | `train_v90_class_prior` | 클래스 비율 축 — 기각(§118) |
+  | `train_v94~v97, v98_p1_reverse, v99_p2_norm, v100_nuisance_min, v101_donor_shift_zero, v102_tail_bagshared` | §123 cell **값 분포** 축 — 전부 null~기각(§129) |
+
+  ⚠️ v94/v95/v96/v97은 **1 seed 스크리닝 전용**이다(헤더에 명시). §3-1 판정표에 넣지 말 것.
+  §107-6(fixed P × Medium, v85)은 한 번도 실행되지 않은 채 **취소**됐고 config도 삭제됐다.
   종결된 arm 72개는 `configs/archive/` 아래 시대별
   폴더(`v34_largectx/`, `v40_v45_cvonly/`, `v50_v54_encoder/`, `v57_v61_data_arms/`,
   `v62_v68_hybrid/`, `v69_v76_relation/`, `v77_pop_residual/`, `v78_dd_gradient/`,
