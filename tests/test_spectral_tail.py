@@ -112,6 +112,62 @@ class SpectralTailEffectTest(unittest.TestCase):
         self.assertTrue(torch.allclose(norms, torch.ones_like(norms), atol=1e-4))
 
 
+class SpectralTailBagFractionTest(unittest.TestCase):
+    """`spectral_tail_bag_fraction` -- the knob that unblocked SS123 (see SS129).
+
+    Before it, the spectrum and the within-bag coherence came from two separate
+    mechanisms in different spaces: the tail in 1536-dim output space, and
+    `donor_shift_scale` in the 32-dim latent. A 32-dim lever cannot offset
+    1536-dim variation, so with the tail on, cosine saturated at +0.130 against a
+    +0.351 target even at donor_shift_scale 8.0 -- you could match the spectrum or
+    the coherence, never both. This splits the tail itself into a bag-shared part
+    and a per-cell part drawn from the SAME covariance, which is how real slides
+    work: one high-dimensional slide-specific offset shared by every tile.
+    """
+
+    def test_rejects_out_of_range_fraction(self):
+        for bad in (-0.1, 1.1):
+            with self.assertRaises(ValueError, msg=f"accepted {bad}"):
+                build(spectral_tail_bag_fraction=bad)
+
+    def test_default_is_zero_and_inert(self):
+        self.assertEqual(build().spectral_tail_bag_fraction, 0.0)
+        plain = episode(build(spectral_tail_scale=2.5), seed=4).x
+        explicit = episode(
+            build(spectral_tail_scale=2.5, spectral_tail_bag_fraction=0.0), seed=4
+        ).x
+        self.assertTrue(torch.equal(plain, explicit))
+
+    def test_fraction_raises_within_bag_coherence(self):
+        """The point of the knob: bags become internally coherent."""
+        def coherence(generator_object):
+            x = episode(generator_object, seed=6).x
+            flat = x.reshape(-1, x.shape[-1])
+            z = (flat - flat.mean(0, keepdim=True)) / flat.std(0, keepdim=True).clamp_min(1e-6)
+            z = z.reshape(x.shape)
+            values = []
+            for bag in z:
+                unit = torch.nn.functional.normalize(bag, dim=-1)
+                similarity = unit @ unit.T
+                values.append(similarity[torch.triu(torch.ones_like(similarity), diagonal=1) > 0])
+            return float(torch.cat(values).mean())
+
+        low = coherence(build(spectral_tail_scale=2.5, spectral_tail_bag_fraction=0.0))
+        high = coherence(build(spectral_tail_scale=2.5, spectral_tail_bag_fraction=0.6))
+        self.assertGreater(high, low + 0.15)
+
+    def test_per_cell_marginal_variance_is_preserved(self):
+        """Weights are sqrt(1-f) and sqrt(f), so moving the split must NOT change
+        how much total variance the tail contributes -- only where it sits."""
+        def spread(fraction):
+            x = episode(
+                build(spectral_tail_scale=2.5, spectral_tail_bag_fraction=fraction), seed=8
+            ).x
+            return float(x.reshape(-1, x.shape[-1]).std())
+
+        self.assertAlmostEqual(spread(0.0), spread(0.6), delta=0.15 * spread(0.0))
+
+
 class SpectralTailIsNuisanceTest(unittest.TestCase):
     """The tail must not touch the task."""
 

@@ -110,6 +110,7 @@ class SyntheticManifoldGenerator:
         spectral_tail_dim: int = 1024,
         spectral_tail_decay: float = 0.5,
         spectral_tail_scale: float = 0.0,
+        spectral_tail_bag_fraction: float = 0.0,
     ) -> None:
         if isinstance(num_bags, int):
             num_bags = (num_bags, num_bags)
@@ -145,6 +146,8 @@ class SyntheticManifoldGenerator:
             raise ValueError("spectral_tail_decay must be non-negative.")
         if spectral_tail_scale < 0.0:
             raise ValueError("spectral_tail_scale must be non-negative.")
+        if not 0.0 <= spectral_tail_bag_fraction <= 1.0:
+            raise ValueError("spectral_tail_bag_fraction must be in [0, 1].")
         if class_prior is not None:
             if balanced:
                 raise ValueError(
@@ -370,6 +373,7 @@ class SyntheticManifoldGenerator:
         self.spectral_tail_dim = int(spectral_tail_dim)
         self.spectral_tail_decay = float(spectral_tail_decay)
         self.spectral_tail_scale = float(spectral_tail_scale)
+        self.spectral_tail_bag_fraction = float(spectral_tail_bag_fraction)
 
     def sample_episode(
         self,
@@ -1122,6 +1126,22 @@ class SyntheticManifoldGenerator:
         sets how far the tail reaches and the decay sets how fast it falls, so the
         two targets can be matched independently.
 
+        `spectral_tail_bag_fraction` splits that variance into a part shared by
+        every cell of a bag and a part drawn per cell, both from the SAME
+        covariance. This is what unblocks SS123's programme (see SS129). The
+        spectrum and the within-bag coherence were being produced by two separate
+        mechanisms living in different spaces -- the tail in the 1536-dim output
+        space, `donor_shift_scale` in the 32-dim latent -- so a 32-dim lever could
+        not offset 1536-dim variation and cosine saturated at +0.130 against a
+        +0.351 target even at donor_shift_scale 8.0. In real slides both come from
+        ONE thing: a high-dimensional, slide-specific offset (staining, scanner,
+        patient) shared by every tile. This knob reproduces that.
+
+        Because between-bag and within-bag variance sum to the total, moving the
+        split leaves the POOLED covariance -- and therefore the spectrum,
+        participation ratio and r90 -- unchanged. Only ICC and within-bag cosine
+        move. That is the decoupling the two-mechanism design could not give.
+
         The tail carries NO label signal -- it is nuisance structure added after
         the manifold map, so the task is unchanged and only the spectrum moves.
         `spectral_tail_scale` is the tail's standard deviation as a multiple of
@@ -1154,6 +1174,9 @@ class SyntheticManifoldGenerator:
             dtype=torch.float32,
         ) / math.sqrt(float(self.spectral_tail_dim))
         scaled_embedding = sigma[:, None] * embedding
+        fraction = self.spectral_tail_bag_fraction
+        cell_weight = math.sqrt(1.0 - fraction)
+        bag_weight = math.sqrt(fraction)
         tail = torch.empty(x.shape, device=device, dtype=torch.float32)
         for bag_index in range(x.shape[0]):
             latent = torch.randn(
@@ -1163,6 +1186,18 @@ class SyntheticManifoldGenerator:
                 generator=generator,
                 dtype=torch.float32,
             )
+            if fraction > 0.0:
+                # One draw shared by every cell in this bag. Weights are
+                # sqrt(1-f) and sqrt(f) so per-cell marginal variance is
+                # unchanged at 1 -- only the WITHIN-bag/BETWEEN-bag split moves.
+                shared = torch.randn(
+                    1,
+                    self.spectral_tail_dim,
+                    device=device,
+                    generator=generator,
+                    dtype=torch.float32,
+                )
+                latent = cell_weight * latent + bag_weight * shared
             tail[bag_index] = latent @ scaled_embedding
         tail = tail * (
             self.spectral_tail_scale
