@@ -153,6 +153,8 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 | v100 nuisance min | `donor_shift`·`donor_component_shift`·`observation_noise` → 0 | 0.6804 | 0.0035 | v83 기준 −0.0076 (t=−3.59, **0/4**) **게이트 기각**. §126-3 예측 반증 — 축은 역U자(최적 ~0.15). ⚠️ knob 3개 동시 변경이라 귀속 불가 (§127) |
 | v101 donor_shift 0 | `donor_shift_scale` 0.35→**0.0** 단독 | 0.6855 | 0.0024 | v83 기준 −0.0025 (t=−0.58, 1/4) **미판정**. v100 하락의 절반은 noise·component 제거분(−0.0051). her2 **+0.0323 (4/4, t=+3.09)** 개별 게이트 통과 (§128) |
 | v102 tail bag-shared | 꼬리를 bag 공유분/cell 개별분으로 분할 (`bag_fraction` 0.4) | 0.6750 | 0.0069 | v83 기준 **−0.0130 (t=−2.70, 0/4) 기각**. 스펙트럼·응집도를 **처음으로 동시 달성**했는데 **가장 크게 기각** (§129) |
+| v103 GELU head | v98에서 head `Linear(12,1)`→`12→32→1`(GELU), 197,057 | 0.6828 | 0.0059 | v98(42–45) 기준 −0.0073 (t=−2.01, 1/4) **측정 불가**(<0.0121). 단 v83 vs v82(+0.0045)와 **부호 반복** — linear 유지 (§132) |
+| v104 fixed P | `model_src` learnable P 제거, **trainable 196,621→13** | — | — | **학습 중** — §131-3 목록 #1 (§132-4) |
 | v77 Hard | ClassSep `[0.5,1.4]` → `[0.2,0.8]` (v82 기준) | 0.6781 | 0.0053 | v82 기준 −0.0053 (t=−3.0, 4/4) |
 | v81 fixed P | learnable P → fixed P (197,057 → 449, v77 기준) | 0.6734 | 0.0018 | Hard 기준 −0.0048 (t=−1.5) **미판정** |
 | v80 shallow MLP | orthogonal manifold → shallow MLP (v77 기준) | 0.6722 | 0.0051 | Hard 기준 −0.0059 (t=−2.7) **기각** |
