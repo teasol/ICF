@@ -81,6 +81,8 @@ CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 | **값만 보고 config 검증** | `lr: 2e-05`는 YAML이 **문자열**로 읽는다. 출력하면 숫자처럼 보인다 — 타입을 볼 것 (§79) |
 | **`nvidia-smi`로 GPU 여유 판단하기** | caching allocator가 카드를 채우고 캐시를 놓지 않는다. ×3과 ×2 변형이 **같은** 172.8 GiB에서 평탄화됐고 실제 `max_memory_allocated`는 42.4 GiB였다 — 3배 차이를 오판했다. `torch.cuda.max_memory_allocated`를 볼 것 (§122-5) |
 | **1 seed 스크리닝으로 양수 부호를 주장하기** | v94는 seed42에서 +0.0022였으나 4 seed로는 **−0.0043**(t=−1.43, 1/4)이었다. VHL의 "첫 0.5 돌파"(0.5176)도 seed42만이고 나머지 셋은 0.4156~0.4314. 단일 시드-쌍 Δ의 SD≈0.008 — **스크리닝은 크게 나쁜 것을 배제하는 데만 쓸 것** (§125-1·§125-2) |
+| **테스트 스위트를 `python3`로 실행** | 프로젝트 env 밖에는 `lightning`이 없어 **14개 모듈이 통째로 import 실패**하는데, 출력은 `Ran 158 tests ... FAILED (errors=14)`로 75개가 사라진 걸 말해주지 않는다. `/home/aibio_3/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"`를 쓸 것 (§141-3) |
+| **pytest 스타일로 테스트 파일 추가** | `unittest`는 모듈 수준 `def test_*`를 수집하지 못한다. `test_factorized_response.py`는 5개 테스트가 **에러도 없이** 0개 실행되고 있었다 — 반드시 `unittest.TestCase` 안에 넣을 것 (§141-1) |
 | **데이터 크기 arm의 비용을 예산 비례로 추정** | cell 3.3배에 step 시간은 +19%였다(78→93 ms). v83 크기에서는 GPU가 포화되지 않아 고정 오버헤드가 지배한다 — "예산 3배 = 3.3시간" 추정이 실제 93분이었다 (§122-5) |
 
 ---

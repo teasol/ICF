@@ -4312,3 +4312,60 @@ margins = clf.margins(context_bags, context_labels, query_bags)   # 양수 = cla
 
 ⚠️ **드롭인 교체가 아니다**: `forward(instances, labels, query_index)` 시그니처도, checkpoint
 호환도, 학습 경로도 없다. 학습 없는 구성의 **평가 전용**이다.
+
+---
+
+## 141. 2026-08-16 — 테스트 스위트 정리: **조용히 0개 돌던 파일 2개를 복구** (233개 전수 통과)
+
+*작성: nhn-NEXGEM-claude, 2026-08-16 (KST)*
+
+### 1. 문제 — 실패 1건 뒤에 숨어 있던 무증상 1건
+
+전체 스위트를 돌리면 `test_mlp_manifold_bank.py`가 계속 에러를 냈다. 원인은 `import pytest`이고
+이 환경에 pytest가 없다. 그런데 그 파일을 조사하다 **같은 병을 앓지만 증상이 없는 파일**을 찾았다.
+
+| 파일 | 스타일 | 증상 | 실제 실행된 테스트 |
+|---|---|---|---:|
+| `test_mlp_manifold_bank.py` | pytest, `TestCase` 0개 | **에러 1건** (시끄러움) | 0 / 4 |
+| `test_factorized_response.py` | pytest, `TestCase` 0개 | **무증상** — "NO TESTS RAN" | 0 / 5 |
+
+`unittest`는 모듈 수준 `def test_*`를 수집하지 못한다. 두 번째 파일은 import가 성공하므로
+아무 소리 없이 통과한 것처럼 보였다. **9개 테스트가 존재하는 척만 하고 있었다** — 시끄러운
+실패보다 조용한 0이 더 위험하다.
+
+두 파일 모두 `SyntheticManifoldGenerator`의 **살아 있는** 인자(`manifold_mode`,
+`manifold_bank_size`, `label_rule="xor"`, `random_causal_factors`, `separate_nuisance_rng`)를
+검정한다. 생성자에 그대로 존재함을 확인했으므로 폐기가 아니라 **변환**이 맞다.
+`unittest.TestCase`로 옮겼고 단언은 그대로 두었다(pytest 의존성을 두 파일 때문에 추가하지 않는다).
+
+### 2. 전수 점검 — 같은 패턴은 더 없다
+
+```
+for f in tests/test_*.py: TestCase 0개 / import pytest / 모듈 수준 def test_*
+→ 해당 없음 (clean)
+```
+
+나머지 25개 파일은 모두 살아 있는 코드를 겨눈다. **거부된 arm의 테스트도 남긴다** —
+`test_spectral_tail`, `test_class_prior`, `test_population_attention`은 기본값으로 꺼져 있는
+노브를 고정하며, 이 테스트가 없으면 그 노브가 조용히 되살아나도 알 수 없다. `test_slot_mla`가
+겨누는 `src/models/baseline.py`는 `set_transformer_ridge.py`가 import하는 현역 모듈이다.
+**삭제하거나 `tests/history/legacy_*.py`로 옮긴 파일은 없다.**
+
+### 3. ⚠️ 인터프리터 — `python3`로 돌리면 결과가 거짓말을 한다
+
+이번에 실수로 `python3 -m unittest`로 돌렸더니 `ModuleNotFoundError: No module named 'lightning'`
+로 **14개 모듈이 통째로 import 실패**했다. 출력은 `Ran 158 tests ... FAILED (errors=14)`.
+75개 테스트가 사라졌는데도 "158개 돌았다"고 말한다. 반드시 문서에 적힌 인터프리터를 쓸 것:
+
+```bash
+/home/aibio_3/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"
+```
+
+### 4. 결과
+
+```
+Ran 233 tests in 162.9s
+OK
+```
+
+정리 전 224개 실행 + 에러 1건 → **233개 전수 통과**(복구 9개), 실패 0, 무증상 0.
