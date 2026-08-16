@@ -427,8 +427,58 @@ def evaluate_trial(
         query_index = torch.arange(
             n_context, n_context + len(test_ids), device=device
         )
-        with torch.no_grad(), autocast:
-            logits = model.model(episode_bags, episode_y, query_index)
+        # docs SS138. Two env-var overrides, following the ICF_FORCE_GENERIC_EVAL
+        # idiom above, so the OFFICIAL path can score the training-free variants
+        # from SS136/SS137 without a second evaluation implementation:
+        #
+        #   ICF_COVARIANCE_BASIS=pca  replace the learned projection P with the
+        #       top-K eigenvectors of the pooled covariance of THIS fold's
+        #       CONTEXT cells. Context-only, so no test leakage.
+        #   ICF_FIXED_HEAD=1          replace the trained 12->1 head with the
+        #       label-antisymmetric constants
+        #       margin = 1.442*(CV1-CV0) - 0.343*(D1-D0) + 0.286*(q1-q0).
+        #
+        # Both are restored after the fold so one process can score several folds.
+        basis_mode = os.environ.get("ICF_COVARIANCE_BASIS", "trained")
+        use_fixed_head = os.environ.get("ICF_FIXED_HEAD") == "1"
+        inner = model.model
+        saved_projection = getattr(inner, "_effective_covariance_projection", None)
+        saved_head = None
+        if basis_mode == "pca":
+            with torch.no_grad():
+                dim = episode_bags[0].shape[-1]
+                total = 0
+                summation = torch.zeros(dim, dtype=torch.float64, device=device)
+                for bag in episode_bags[:n_context]:
+                    summation += bag.double().sum(dim=0)
+                    total += bag.shape[0]
+                pooled_mean = summation / total
+                scatter = torch.zeros(dim, dim, dtype=torch.float64, device=device)
+                for bag in episode_bags[:n_context]:
+                    centered = bag.double() - pooled_mean
+                    scatter += centered.T @ centered
+                _, vectors = torch.linalg.eigh(scatter / total)
+                pca = vectors[:, -inner.covariance_sketch_dim:].flip(-1).float()
+            inner._effective_covariance_projection = lambda b=pca: b
+        if use_fixed_head:
+            head = inner.cv_dd_ct_head[0]
+            saved_head = (head.weight.detach().clone(), head.bias.detach().clone())
+            with torch.no_grad():
+                head.weight.zero_()
+                head.bias.zero_()
+                for slot, value in ((0, -1.442), (1, 1.442), (4, 0.343),
+                                    (5, -0.343), (8, -0.286), (9, 0.286)):
+                    head.weight[0, slot] = value
+        try:
+            with torch.no_grad(), autocast:
+                logits = model.model(episode_bags, episode_y, query_index)
+        finally:
+            if basis_mode == "pca" and saved_projection is not None:
+                inner._effective_covariance_projection = saved_projection
+            if saved_head is not None:
+                with torch.no_grad():
+                    inner.cv_dd_ct_head[0].weight.copy_(saved_head[0])
+                    inner.cv_dd_ct_head[0].bias.copy_(saved_head[1])
         scores = torch.softmax(logits.float(), dim=-1)[:, 1]
         nan_count = int(torch.isnan(scores).sum())
         probabilities = [float(value) for value in scores]

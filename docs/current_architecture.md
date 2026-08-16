@@ -112,7 +112,7 @@ CV ridge coefficient는 real/synthetic episode의 support label로 매번 다시
 | 파라미터 | 개수 | gradient 경로 |
 |---|---:|---|
 | `_covariance_projection` P | 196,608 | CV ridge solve를 통과 |
-| `cv_dd_ct_head` (bare `Linear(12,1)`) | 13 | 12개 relation feature |
+| `cv_dd_ct_head` (bare `Linear(12,1)`) | 13 | 12개 relation feature. ⚠️ **§138-4에서 상수 3개로 대체 가능함이 확정됐다**(정식 경로 Δ−0.0003) — 라벨 반대칭이 `w(SEP)=0`·`bias=0`을 강제하고 차분 feature는 쌍의 선형결합이라 선형 head에 표현력을 안 더한다. `margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.286·(q1−q0)`, 8 seed std 0.027/0.008/0.012. 재현: `ICF_FIXED_HEAD=1` |
 | **합계** | **196,621** | |
 
 v82/v77(head `12→32→1`, GELU)은 head가 449개라 **합계 197,057**이었다 — 두 세대의 유일한 차이는
@@ -145,6 +145,27 @@ head 파라미터 수뿐이고 P·gradient 경로는 동일하다.
 | observation noise | 0.005 — ⚠️ **정규화지 nuisance가 아니다**. 끄면 합성 val_ce 0.152→0.099로 쉬워지고 SEAL은 −0.0076(v100, §127-3) |
 | donor shift | 0.35 — bag마다 latent 벡터 하나를 그 bag 전 cell에 더하는 강체 이동. 축 전체가 노이즈 안에서 평평(§128-2) |
 | training | **1-GPU × 4 seed(42–45)**, GPU 0–3에 하나씩, bf16, 50 epochs (§107) |
+
+### Active-3z. ⚠️ 서브샘플링 계약 — 학습과 평가가 다르다 (§138-1)
+
+**평가**: relation 계보(v83~)는 **tile 서브샘플링을 하지 않는다.** `eval_seal_tasks.sh`가
+`--max-tiles`를 안 넘기므로 스크립트 상한은 `None`이고, 모델의 `max_cells: 8192`는
+**`BagTokenEncoder.forward`에만** 있어(`_subsample`) descriptor 경로(`_covariance_descriptors` /
+`_bag_means`)는 그것을 타지 않는다. 실증: 같은 설정 재실행이 저장값과 소수 넷째 자리까지 동일하다
+(`_subsample`이 발동했다면 per-call randperm으로 값이 달라진다). `ct_cells_per_bag: 64`는
+farthest-point라 결정론적이다.
+
+**학습**: 상한이 셋이고 서로 독립이다.
+
+| 위치 | knob | 값 | 성격 |
+|---|---|---|---|
+| 데이터셋 | `per_bag_max_cells` | 4096 | 에피소드 추출 시 무작위 subsample |
+| collator | `padding_max_cells` | 4096 | dense padding 전 무작위 subsample (§120-1) |
+| 모델(encoder) | `max_cells` | 8192 | **relation 계보 미발동** |
+
+⚠️ **결과적으로 학습은 bag당 ≤4,096 cell, 평가는 full tile(중앙값 4,988~7,736, 최대 35,107)을
+본다.** 의도된 설계가 아니라 계보가 진화하며 남은 비대칭이고, §123-3의 "cell 축이 실제보다 짧다"의
+정확한 출처다. **이 비대칭 자체는 아직 arm으로 검정된 적이 없다.**
 
 ### Active-3a. 이후 추가된 생성기 knob (전부 기본값 inert)
 
