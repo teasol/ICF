@@ -1,4 +1,21 @@
-# Current architecture — 활성 relation 계보와 역사적 비교군 (2026-08-15)
+# Current architecture — 활성 relation 계보와 역사적 비교군 (2026-08-16)
+
+> [!IMPORTANT]
+> **활성 구성은 v106 — 학습 파라미터 0 (§139·§140).** 아래 Active-1~6은 **학습을 포함하던 직전
+> 계보(v83~v98)** 의 명세이고 historical 참조다. 현재 구성은:
+>
+> ```
+> 기저   fold의 CONTEXT cell 공분산을 bag별 자기 평균으로 센터링해 풀링 → 상위 128 고유벡터
+> descriptor  bag마다 [triu(BᵀC_bag B), μ_bag]  = 8,256 + 1,536
+> CV     클래스 균형 ridge (dual). ⚠️ 공분산 블록과 평균 블록을 **각각 따로** RMS 정규화
+> DD     rank-1 분산 방향까지의 정규화 제곱**거리** (logit 아님 → head가 음수 계수)
+> CT     결정론적 farthest-point 토큰 16개, bag당 64 cell 등간격 추출
+> head   margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.286·(q1−q0)   ← 라벨 반대칭이 강제
+> ```
+> 구현: **`src/models/training_free.py` (315줄, 파라미터 0)**. 기존 경로(2,419줄)와의 등가성은
+> `tests/test_training_free.py`가 고정한다 — margin `allclose`, 순위 완전 일치, 실제 데이터에서
+> 차이 −0.0003/−0.0005.
+> 정식 채점은 `ICF_COVARIANCE_BASIS=pca_within ICF_FIXED_HEAD=1`로 기존 경로를 써도 등가다.
 
 > [!IMPORTANT]
 > **활성 baseline은 v83 linear head의 4 seed × `epoch 49` checkpoint**

@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-16` (nhn-NEXGEM-claude 13:35) — §139까지. ⚠️⚠️ **v106 확정(사용자 결정): within-slide PCA 사영 + 고정 3상수 head = 학습 파라미터 0, seed std 0.00000, 정식 경로 macro 0.6864.** v98 대비 seed-paired −0.0037(t=−1.08, 측정 불가)을 **감수하고** 학습·시드 반복을 없애는 트레이드다(§139-2).
+**Last updated**: `2026-08-16` (nhn-NEXGEM-claude 13:53) — §140까지. 활성 구성은 **v106 = within-slide PCA + 고정 3상수 head, 학습 파라미터 0**(§139, 사용자 결정, 정식 경로 macro 0.6864, seed std 0.00000). **독립 최소 구현 `src/models/training_free.py`(315줄)가 기존 경로와 등가임을 테스트로 고정했다**(§140).
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -4202,11 +4202,113 @@ head 유무 두 arm에서 동일하게 재현된다(0.6844→0.6864, 0.6844→0.
 
 PCA는 어느 버전이든 **label을 보지 않는다.** P는 CV ridge를 통해 label loss로 학습된다.
 "분산이 큰 방향"과 "class를 가르는 방향"은 다르므로, 남은 격차의 상당 부분이 여기서 올 가능성이
-높다. **미검정.** 다음 후보는 **학습 없이 label을 보는 사영** — context label로 LDA나 부분최소제곱을
-풀면 PCA와 같은 비용(고윳값분해 1회)으로 label 방향을 얻는다.
+높다. **미검정.**
+
+⚠️ **정정 (2026-08-16)**: 이 절은 처음에 "context label로 LDA나 부분최소제곱을 풀면 된다"고 썼는데
+**부정확했다.** 문자 그대로의 LDA는 여기서 성립하지 않는다:
+
+1. **이진 라벨은 방향을 1개만 준다.** `S_B = n₀(μ₀−μ)(μ₀−μ)ᵀ + n₁(μ₁−μ)(μ₁−μ)ᵀ`는 **rank 1**이라
+   LDA의 유용한 판별 방향은 최대 `C−1 = 1`개다. 우리는 **128개**가 필요하다. PLS도 같다 — 이진
+   응답 하나에 대한 첫 방향은 사실상 `μ₁−μ₀`이고 그 뒤로 신호가 없다.
+2. **descriptor가 사영에 대해 이차다.** `triu(BᵀCB)`이므로 "bag 클래스를 잘 가르는 B"를 찾는 문제는
+   일반화 고유값 문제로 떨어지지 않는다. LDA가 풀 수 있는 형태가 아니다.
+3. **cell 단위로 라벨을 상속시키는 형태는 이미 기각됐다** — v88(PA)이 정확히 그것이었고
+   −0.0111(t=−6.69, 4/4)로 이 세션 최강 기각 중 하나다(§114).
+
+**실제로 가능한 형태는 사영을 supervised로 *만드는* 것이 아니라 PCA 방향 중에서 supervised로
+*고르는* 것이다.** descriptor의 대각 성분이 `covariance[k,k] = (1/n)Σ(x·b_k)²` = **그 bag의 방향 k
+위 분산**이므로, 방향마다 bag별 스칼라가 하나씩 나온다. context bag이 ~200개이고 라벨이 있으니
+방향별 판별력을 직접 잴 수 있다:
+
+```
+1. within-slide PCA로 상위 M개(예: 512) 방향   ← 고윳값분해 1회, 지금과 동일
+2. 방향 k마다 {b_kᵀ C_bag b_k}와 context 라벨의 판별력(AUROC/t) 계산
+3. 판별력 상위 128개를 B로 채택            ← 분산 순서가 아니라 라벨 관련성 순서
+```
+비용은 고윳값분해 1회 + M번 t검정으로 PCA와 같은 급이고 **학습은 여전히 0**이다.
+
+⚠️ **위험 두 가지**: (a) 선택과 적합이 같은 context를 쓴다 — query는 안 보므로 누출은 아니지만,
+bag 200개에 방향 512개를 스크리닝하면 **선택 편향**이 생긴다(context를 둘로 나눠 한쪽에서 고르고
+한쪽에서 푸는 방어가 필요할 수 있다). (b) v88 전례가 있다 — 기전은 다르지만(cell 단위 ridge vs
+bag 단위 방향 선택) 사전 확률은 좋지 않다.
 
 ### 6. 판정 프로토콜에 미치는 영향
 
 v106을 기준선으로 쓰면 **자기 자신은 분산이 0**이다. 다만 비교 대상 arm이 학습을 포함하면 그 arm의
 분산은 그대로이므로, §107-3 게이트와 §131-2의 검출 한계는 **학습을 포함하는 arm에 대해서는 계속
 적용된다.** training-free 변형끼리 비교할 때만 검출 한계가 ≈0이 된다.
+
+## 140. 2026-08-16 — v106 아키텍처 상세 명세 + 독립 최소 구현 (`src/models/training_free.py`)
+
+_Recorded by: nhn-NEXGEM-claude — 2026-08-16 13:53_
+
+### 0. 왜 새 파일인가 (사용자 지시)
+
+v106은 학습이 없는데도 `set_transformer_ridge.py`(**2,419줄**)를 통해 실행되고 있었다. 그 파일은
+Set-Transformer 인코더, learnable-P 변형, PA·dual projection·gradient weight arm과 각각의
+checkpoint 호환 장치를 싣고 있고 **v106은 그중 무엇도 쓰지 않는다.** 파라미터가 0인 모델에서
+검증할 수 있는 것은 코드뿐이므로, **읽을 수 있는 크기**가 곧 신뢰성이다.
+
+`src/models/training_free.py` — **315줄**, 클래스 1개, 파라미터 0개, 학습 경로 없음.
+
+### 1. 알고리즘 명세 (에피소드 = 라벨된 context bag들 + 라벨 없는 query bag들, bag = [cells, 1536])
+
+**① 기저** — context cell 공분산을 **bag별 자기 평균으로 센터링**해 풀링, 상위 K=128 고유벡터.
+```
+scatter = Σ_bag Σ_{x∈bag} (x − μ_bag)(x − μ_bag)ᵀ ;   B = eigh(scatter/N)의 상위 128
+```
+전역 평균이 아니라 bag별로 센터링하는 것이 between-slide 항을 **정확히** 제거한다(§139-4, +0.0020).
+bag 단위 누적이라 전체 cell을 한 번에 올리지 않는다(§62-3의 eval OOM 회피).
+
+**② descriptor** — bag마다 `[triu(BᵀC_bag B), μ_bag]` = 8,256 + 1,536 = 9,792차원.
+
+**③ CV** — context descriptor에 대한 **클래스 균형 ridge**를 dual로 풂(bag ~200 ≪ 특징 9,792).
+⚠️ 공분산 블록과 평균 블록을 **각각 따로** RMS 정규화한다 — 스케일이 자릿수 단위로 달라 한 번에
+정규화하면 큰 쪽이 ridge를 지배한다. **이 한 가지를 빠뜨렸을 때 기존 경로와 약 2% 어긋났다.**
+
+**④ DD** — 스케치 공분산들에서 rank-1 분산 방향을 뽑고, query에서 두 클래스 프로토타입까지의
+**정규화 제곱거리**. ⚠️ logit이 아니라 **거리**다 — head가 음수 계수를 주는 이유.
+`eigh`는 미분하지 않는다(§100: backward가 `1/(λᵢ−λⱼ)`를 갖고 방향 선택이 hard argmax).
+
+**⑤ CT** — context cell 위 **결정론적 farthest-point** 토큰 16개(선택에 라벨 미개입), bag별 soft
+abundance, 그중 클래스를 가장 잘 가르는 두 토큰을 읽음. bag당 64 cell은 **등간격 추출**이라
+전 과정이 결정론적이다.
+
+**⑥ head** — 상수:
+```
+margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.286·(q1−q0)
+logits = (−margin/2, +margin/2)
+```
+
+### 2. 등가성 검증 — 재구현은 증명 없이는 쓸 수 없다
+
+v106의 0.6864는 `set_transformer_ridge.py`를 패치해 만든 숫자다. 새 파일이 조금이라도 어긋나면
+**v106 대비 모든 비교가 조용히 의미를 잃는다.** 그래서 등가성을 테스트로 고정했다
+(`tests/test_training_free.py`, 7개 통과):
+
+- **margin 일치** — 무작위 에피소드 3개에서 패치된 기존 경로와 `allclose(atol=2e-3)`
+- **순위 완전 일치** — AUROC는 순서만 읽으므로 `argsort`가 정확히 같아야 한다
+- **라벨 스왑 시 margin 부호 반전** — ①의 상수 3개가 옳은 매개화라는 근거 자체(§137-3)
+- 결정론성 / 파라미터 부재 / 기저가 query를 안 봄 / within ≠ pooled 기저
+
+**실제 데이터 대조** (전체 50 fold):
+
+| task | 새 구현 | 기존 경로 | 차이 |
+|---|---:|---:|---:|
+| cptac_brca TP53 | 0.8283 | 0.8286 | −0.0003 |
+| cptac_ccrcc VHL | 0.4630 | 0.4635 | −0.0005 |
+
+부동소수점 수준 차이다(기존 경로는 일부 구간을 float32로, 새 구현은 기저 누적을 float64로 한다).
+
+### 3. 사용법
+
+```python
+from src.models.training_free import TrainingFreeClassifier
+clf = TrainingFreeClassifier()                      # 파라미터 0, 설정은 dataclass
+margins = clf.margins(context_bags, context_labels, query_bags)   # 양수 = class 1
+```
+정식 SEAL 채점은 여전히 `ICF_COVARIANCE_BASIS=pca_within ICF_FIXED_HEAD=1`로 기존 경로를 쓴다
+(§139-0) — 두 경로가 등가임이 §2로 확인됐으므로 어느 쪽을 써도 같다.
+
+⚠️ **드롭인 교체가 아니다**: `forward(instances, labels, query_index)` 시그니처도, checkpoint
+호환도, 학습 경로도 없다. 학습 없는 구성의 **평가 전용**이다.
