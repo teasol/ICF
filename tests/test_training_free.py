@@ -1,10 +1,14 @@
 """`TrainingFreeClassifier` must reproduce the lineage path it replaces (docs SS140).
 
 A rewrite of a scoring pipeline is only worth having if it is provably the same
-pipeline. v106's number (official-path macro 0.6864) was produced by
-`set_transformer_ridge.py` with `ICF_COVARIANCE_BASIS=pca_within` and
-`ICF_FIXED_HEAD=1`; if this file drifts from that by even a little, every
-comparison against v106 silently stops meaning what it says.
+pipeline. v107's number (official-path macro 0.6945) was produced by
+`set_transformer_ridge.py` with `ICF_COVARIANCE_BASIS=pca_within`,
+`ICF_FIXED_HEAD=1` and `ICF_SKETCH_DIM=256`; if this file drifts from that by
+even a little, every comparison against v107 silently stops meaning what it says.
+
+The equivalence tests below pin K=8, not the 256 default: the property that
+matters is that the two implementations agree at whatever K they are given, and
+a small K keeps the test fast. `DefaultTest` guards the default itself.
 
 So the central test is equivalence: build a random episode, score it both ways,
 and require the margins to agree. The rest pin the properties the design rests
@@ -78,6 +82,13 @@ class EquivalenceTest(unittest.TestCase):
         )
         theirs = lineage_margins(context_bags, labels, query_bags)
         self.assertTrue(torch.equal(torch.argsort(mine), torch.argsort(theirs)))
+
+
+class DefaultTest(unittest.TestCase):
+    def test_default_sketch_dim_is_the_promoted_value(self):
+        """SS142 promoted K=128 -> 256. The default IS the baseline; if it drifts,
+        `TrainingFreeClassifier()` silently stops being the active configuration."""
+        self.assertEqual(TrainingFreeConfig().sketch_dim, 256)
 
 
 class PropertyTest(unittest.TestCase):

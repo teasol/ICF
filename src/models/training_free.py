@@ -1,4 +1,4 @@
-"""v106: the training-free in-context classifier (docs SS139, SS140).
+"""v107: the training-free in-context classifier (docs SS139, SS140, SS142).
 
 This is a standalone reimplementation of the configuration adopted in SS139 —
 within-slide PCA projection plus a constant head — written from scratch rather
@@ -20,7 +20,7 @@ bags of UNI2 tiles (each bag is [cells, 1536]):
                 slides apart (staining, scanner, patient).
   2. DESCRIPTOR Each bag becomes [upper triangle of B^T C B, bag mean].
   3. CV         Class-balanced ridge over context descriptors, solved in the dual
-                (bags number ~200 against a descriptor of ~8k), giving two logits
+                (bags number ~200 against a descriptor of ~34k), giving two logits
                 per query.
   4. DD         A rank-1 dispersion direction from the sketched covariances, then
                 normalised squared DISTANCES from each query to the two class
@@ -93,7 +93,7 @@ def _standardise(context: torch.Tensor, query: torch.Tensor) -> tuple[torch.Tens
 def _standardise_blocks(context, query, split):
     """Standardise the covariance and mean halves SEPARATELY.
 
-    Not cosmetic. The covariance triangle has ~8k entries and the bag mean 1,536,
+    Not cosmetic. The covariance triangle has ~33k entries and the bag mean 1,536,
     and their natural scales differ by orders of magnitude; one shared RMS would
     let whichever block is larger dominate the ridge. The lineage does the same
     (`CovarianceMeanRidgeModel._normalize_descriptors` calls `_normalize_block`
@@ -112,7 +112,12 @@ def _standardise_blocks(context, query, split):
 
 @dataclass(frozen=True)
 class TrainingFreeConfig:
-    sketch_dim: int = 128
+    # SS142: K was locked to 128 while P was a learned 1536xK matrix. Under PCA it
+    # is a free evaluation knob, and sweeping it found an inverted U peaking on a
+    # 256-512 plateau. 256 is the promoted value: +0.0076 over 128 across all 17
+    # tasks (t=3.01, 12/17), replicated on the 7 held out from the choice, at no
+    # runtime cost. K=384 scored higher on the SEAL 10 but did not replicate.
+    sketch_dim: int = 256
     ridge_lambda: float = 1.0
     ridge_scale: float = 2.0
     dd_shrinkage: float = 0.25

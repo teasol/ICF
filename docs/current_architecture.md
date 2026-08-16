@@ -1,12 +1,13 @@
 # Current architecture — 활성 relation 계보와 역사적 비교군 (2026-08-16)
 
 > [!IMPORTANT]
-> **활성 구성은 v106 — 학습 파라미터 0 (§139·§140).** 아래 Active-1~6은 **학습을 포함하던 직전
+> **활성 구성은 v107 — 학습 파라미터 0, K=256 (§139·§140·§142).** 아래 Active-1~6은 **학습을 포함하던 직전
 > 계보(v83~v98)** 의 명세이고 historical 참조다. 현재 구성은:
 >
 > ```
-> 기저   fold의 CONTEXT cell 공분산을 bag별 자기 평균으로 센터링해 풀링 → 상위 128 고유벡터
-> descriptor  bag마다 [triu(BᵀC_bag B), μ_bag]  = 8,256 + 1,536
+> 기저   fold의 CONTEXT cell 공분산을 bag별 자기 평균으로 센터링해 풀링 → 상위 **256** 고유벡터
+> descriptor  bag마다 [triu(BᵀC_bag B), μ_bag]  = **32,896** + 1,536
+>        (K=128이면 8,256+1,536 = v106. K는 §142에서 평가 시점 노브가 됐다)
 > CV     클래스 균형 ridge (dual). ⚠️ 공분산 블록과 평균 블록을 **각각 따로** RMS 정규화
 > DD     rank-1 분산 방향까지의 정규화 제곱**거리** (logit 아님 → head가 음수 계수)
 > CT     결정론적 farthest-point 토큰 16개, bag당 64 cell 등간격 추출

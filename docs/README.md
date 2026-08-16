@@ -1,10 +1,11 @@
 # Documentation map
 
-**Last updated**: `2026-08-15`
-**Active 구성**: **v106 — 학습 파라미터 0** (§139, 사용자 결정). within-slide PCA 사영 + 고정 3상수 head,
-정식 경로 SEAL macro **0.6864**, **seed std 0.00000**. ⚠️ v98 대비 seed-paired −0.0037(측정 불가)을
-감수하고 **학습·시드 반복을 없애는 트레이드**다. 직전 baseline v98(8 seed 0.6852)은 historical.
-실행 중: 없음.
+**Last updated**: `2026-08-16`
+**Active 구성**: **v107 — 학습 파라미터 0, K=256** (§142, 사용자 결정). within-slide PCA 사영 +
+고정 3상수 head, 정식 경로 SEAL macro **0.6945**, **seed std 0.00000**. 실행: `bash scripts/eval_v107.sh <gpu> <tag>`.
+v106(K=128, 0.6864)과 직전 baseline v98(8 seed 0.6852)은 historical.
+⚠️ v98 8 seed 평균 대비 +0.0093이지만 **v98 상위 두 시드와 4-seed 앙상블(0.6951)에는 아직 진다** —
+"v98을 이겼다"고 쓰지 말 것. 실행 중: 없음.
 
 > **새 세션이 먼저 알아야 할 3가지 (2026-08-15, 상세는 `current_status.md` 최상단)**
 > 1. **데이터 분포 축은 닫혔다 (§129)** — 합성 에피소드를 실제 UNI2 통계에 맞추는 것은 도움이 안 될
