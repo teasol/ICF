@@ -1258,6 +1258,109 @@ class CovarianceMeanLearnablePDDCTMLPModel(CovarianceMeanDDCTMLPModel):
         return covariance[..., row, column].to(cells.dtype)
 
 
+class CovarianceMeanMLPProjectionDDCTMLPModel(CovarianceMeanLearnablePDDCTMLPModel):
+    """v105 (docs SS134): the cell projection becomes a 2-layer MLP.
+
+    What it replaces. In v98 the projection is a single learnable matrix P
+    (1536x128) that is orthonormalised by a thin QR on EVERY forward, so what the
+    model learns is not an arbitrary linear map but a 128-dimensional SUBSPACE of
+    UNI2 space -- scale and conditioning are pinned by construction (Active-2).
+    v104 established that learning it matters: freezing P costs -0.0126
+    (t = -3.59), one of the few results in this project that clears both the gate
+    and the 0.0121 four-seed detection floor.
+
+    Why the QR pin is kept here. A plain MLP would leave the output scale free,
+    and the covariance magnitudes feed `ridge_lambda` and `covariance_slopes`
+    (= 0.85*pi/K at K=128), both calibrated to the current scale -- SS70 measured
+    that the real gains come from that sketch geometry, not from capacity
+    (K fixed +0.0271, extra dimensions +0.0043). Letting scale drift would
+    confound the arm with a recalibration. So the LAST layer is still
+    QR-orthonormalised exactly like P, and the nonlinearity is inserted before it:
+
+        h         = act(centered @ W1)        # 1536 -> projection_hidden_dim
+        projected = h @ QR(W2).Q              # hidden -> K, orthonormal columns
+
+    With `projection_hidden_dim = 1536`, `W1 = I` and no activation this reduces
+    exactly to the current behaviour, which is what makes it a superset rather
+    than a different model.
+
+    ⚠️ Prior evidence is against this direction. Lineage B (Encoder+Ridge) was
+    REJECTED in SS79 after a much stronger version was tried: cell-cell attention
+    at 16,384 dimensions moved synthetic val_auroc 0.784 -> 0.849 while SEAL fell
+    0.6619 -> 0.6526, and the arm that was best on synthetic (v54) was worst on
+    SEAL at 0.6219. The recorded conclusion was "the problem is generalisation,
+    not capacity or structure". This arm is narrower -- it keeps the covariance
+    sketch and the orthonormal output -- but it moves in the same direction, so
+    the synthetic-improves/SEAL-drops pattern is the specific failure to watch
+    for. Report synthetic val_ce alongside SEAL for that reason.
+    """
+
+    architecture_version = 58
+
+    def __init__(
+        self,
+        *args,
+        projection_hidden_dim: int = 128,
+        projection_activation: str = "gelu",
+        **kwargs,
+    ):
+        super().__init__(*args, **kwargs)
+        if projection_hidden_dim < self.covariance_sketch_dim:
+            raise ValueError(
+                "projection_hidden_dim must be at least covariance_sketch_dim."
+            )
+        if projection_activation not in {"gelu", "relu", "identity"}:
+            raise ValueError(
+                "projection_activation must be one of gelu/relu/identity."
+            )
+        self.projection_hidden_dim = int(projection_hidden_dim)
+        self.projection_activation = projection_activation
+        # P is replaced wholesale: drop the inherited parameter so a stale
+        # 1536xK tensor cannot silently ride along in the state dict.
+        del self._covariance_projection
+        self.projection_input = nn.Linear(
+            self.input_dim, self.projection_hidden_dim, bias=False
+        )
+        self._covariance_projection = nn.Parameter(
+            torch.empty(self.projection_hidden_dim, self.covariance_sketch_dim)
+        )
+        nn.init.orthogonal_(self._covariance_projection)
+        # Near-isometric init so the untrained model starts close to a random
+        # linear sketch rather than at a degenerate point.
+        nn.init.orthogonal_(self.projection_input.weight)
+        self._architecture_version.fill_(self.architecture_version)
+
+    def _project_cells(self, centered: torch.Tensor) -> torch.Tensor:
+        hidden = self.projection_input(centered)
+        if self.projection_activation == "gelu":
+            hidden = F.gelu(hidden)
+        elif self.projection_activation == "relu":
+            hidden = F.relu(hidden)
+        return hidden @ self._effective_covariance_projection()
+
+    def _covariance_descriptors(
+        self, cells: torch.Tensor, cell_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        values = cells.float()
+        if cell_mask is None:
+            centered = values - values.mean(dim=-2, keepdim=True)
+            count: int | torch.Tensor = values.shape[-2]
+        else:
+            count_tensor = cell_mask.sum(dim=-1, keepdim=True).clamp_min(1).float()
+            masked = values.masked_fill(~cell_mask.unsqueeze(-1), 0.0)
+            mean = masked.sum(dim=-2, keepdim=True) / count_tensor.unsqueeze(-1)
+            centered = (masked - mean).masked_fill(~cell_mask.unsqueeze(-1), 0.0)
+            count = count_tensor
+        projected = self._project_cells(centered)
+        covariance = projected.transpose(-1, -2) @ projected
+        if isinstance(count, int):
+            covariance = covariance / count
+        else:
+            covariance = covariance / count.unsqueeze(-1)
+        row, column = self._covariance_triangle
+        return covariance[..., row, column].to(cells.dtype)
+
+
 class CovarianceMeanLearnablePDDCTPAMLPModel(CovarianceMeanLearnablePDDCTMLPModel):
     """v88: v83/v77 lineage plus a support-label-conditioned population branch (PA).
 
