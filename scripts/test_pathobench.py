@@ -431,9 +431,12 @@ def evaluate_trial(
         # idiom above, so the OFFICIAL path can score the training-free variants
         # from SS136/SS137 without a second evaluation implementation:
         #
-        #   ICF_COVARIANCE_BASIS=pca  replace the learned projection P with the
-        #       top-K eigenvectors of the pooled covariance of THIS fold's
-        #       CONTEXT cells. Context-only, so no test leakage.
+        #   ICF_COVARIANCE_BASIS=pca | pca_within
+        #       replace the learned projection P with the top-K eigenvectors of
+        #       THIS fold's CONTEXT cells (context-only, so no test leakage).
+        #       `pca` pools around a global mean and therefore includes the
+        #       between-slide term; `pca_within` centres each bag on its own mean
+        #       and drops it. See the block below.
         #   ICF_FIXED_HEAD=1          replace the trained 12->1 head with the
         #       label-antisymmetric constants
         #       margin = 1.442*(CV1-CV0) - 0.343*(D1-D0) + 0.286*(q1-q0).
@@ -444,19 +447,39 @@ def evaluate_trial(
         inner = model.model
         saved_projection = getattr(inner, "_effective_covariance_projection", None)
         saved_head = None
-        if basis_mode == "pca":
+        if basis_mode in ("pca", "pca_within"):
+            # `pca`        pools every context cell around one GLOBAL mean, so the
+            #              covariance carries both within-slide variation and the
+            #              between-slide mean differences. SS123-4 measured the
+            #              latter at ICC 31.6%, i.e. roughly a third of this
+            #              basis is spent on directions that merely tell slides
+            #              apart -- staining, scanner, patient -- which is
+            #              nuisance unless the task rides on it.
+            # `pca_within` centres each bag on its OWN mean before accumulating,
+            #              which drops the between-slide term exactly and leaves
+            #              sum_i n_i * C_i / sum_i n_i. SS138-5's hypothesis for why
+            #              pooled PCA loses on the full-tile path is that better
+            #              per-slide mean estimates sharpen the between-slide term
+            #              and pull the basis further toward it.
             with torch.no_grad():
                 dim = episode_bags[0].shape[-1]
                 total = 0
-                summation = torch.zeros(dim, dtype=torch.float64, device=device)
-                for bag in episode_bags[:n_context]:
-                    summation += bag.double().sum(dim=0)
-                    total += bag.shape[0]
-                pooled_mean = summation / total
                 scatter = torch.zeros(dim, dim, dtype=torch.float64, device=device)
-                for bag in episode_bags[:n_context]:
-                    centered = bag.double() - pooled_mean
-                    scatter += centered.T @ centered
+                if basis_mode == "pca":
+                    summation = torch.zeros(dim, dtype=torch.float64, device=device)
+                    for bag in episode_bags[:n_context]:
+                        summation += bag.double().sum(dim=0)
+                        total += bag.shape[0]
+                    pooled_mean = summation / total
+                    for bag in episode_bags[:n_context]:
+                        centered = bag.double() - pooled_mean
+                        scatter += centered.T @ centered
+                else:
+                    for bag in episode_bags[:n_context]:
+                        values = bag.double()
+                        centered = values - values.mean(dim=0, keepdim=True)
+                        scatter += centered.T @ centered
+                        total += values.shape[0]
                 _, vectors = torch.linalg.eigh(scatter / total)
                 pca = vectors[:, -inner.covariance_sketch_dim:].flip(-1).float()
             inner._effective_covariance_projection = lambda b=pca: b
@@ -473,7 +496,7 @@ def evaluate_trial(
             with torch.no_grad(), autocast:
                 logits = model.model(episode_bags, episode_y, query_index)
         finally:
-            if basis_mode == "pca" and saved_projection is not None:
+            if basis_mode in ("pca", "pca_within") and saved_projection is not None:
                 inner._effective_covariance_projection = saved_projection
             if saved_head is not None:
                 with torch.no_grad():

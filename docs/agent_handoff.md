@@ -40,7 +40,7 @@
 > ABMIL 대비 총 결손 0.386의 **61%가 VHL+luadTP53+BAP1 3개**에 몰려 있고, MeanMIL 기준으로는
 > **5/10 task에서 이긴다.** 진짜 헤드룸은 **luad TP53**(상한 0.751, 현재 −0.083)이다.
 
-**Last updated**: `2026-08-16` (nhn-NEXGEM-claude 12:51) — 진행 상태는 `current_status.md` §108–§137.
+**Last updated**: `2026-08-16` (nhn-NEXGEM-claude 13:35) — 진행 상태는 `current_status.md` §108–§139.
 
 활성 baseline은 **v98**(`donor_shift_scale` 0.15) — 1-GPU **8 seed(42–49) 평균 0.6852**(§131,
 사용자 결정). ⚠️ **"v83보다 낫다"가 아니라 "8 seed로 측정된 유일한 arm"이라는 뜻**이고, v83의
@@ -51,6 +51,38 @@
 4/4 부호 일치 단독은 p=0.125다. ~20개 arm을 판정했으므로 **우연한 게이트 통과 1~2개가 기대된다.**
 **"미판정"을 "효과 없음"으로 쓰지 말 것 — "측정 불가"다.** 반복 재현(독립 시드 그룹에서 부호 일치)을
 단일 그룹의 |t|보다 우선한다(§131-5).
+
+> [!IMPORTANT]
+> **⚠️⚠️ 2026-08-16 — 활성 구성이 v106으로 바뀌었다: 학습 파라미터 0 (§139, 사용자 결정)**
+>
+> ```
+> 사영 : fold의 CONTEXT cell을 bag별 자기 평균으로 센터링해 풀링한 공분산의 상위 128 고유벡터
+> head : margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.286·(q1−q0)
+> 정식 경로 SEAL macro 0.6864,  seed std 0.00000,  학습 파라미터 196,621 → 0
+>
+> ICF_COVARIANCE_BASIS=pca_within ICF_FIXED_HEAD=1 \
+>   bash scripts/eval_seal_tasks.sh <gpu> <아무 v98 ckpt> \
+>        configs/train_v98_p1_reverse_1536_1gpu.yaml <tag> <tasks...>
+> ```
+> checkpoint는 껍데기다 — P는 PCA가, head는 상수가 덮어쓰고 `ridge_log_*`는 초기값 그대로다.
+>
+> **① 고정 head는 확정이다 (Δ−0.0003, 정식 경로).** 최종 logit이 `(−½·margin,+½·margin)`이라
+> 클래스 스왑 시 margin이 부호를 뒤집어야 하고, SEP 3개는 그 스왑에 **불변**이므로 라벨 반대칭이
+> `w(SEP)=0`·`bias=0`을 강제한다. 차분 feature는 쌍의 선형결합이라 선형 head에 표현력을 안 더한다.
+> ⚠️ **DD의 음수 계수는 버그가 아니다** — `_dd_distance_features`는 logit이 아니라 거리를 낸다.
+>
+> **② within-slide 센터링이 pooled보다 +0.0020이다.** pooled 공분산의 between-slide 항은
+> §123-4가 잰 ICC 31.6%만큼 사영을 nuisance 방향(염색·스캐너·환자)에 쓴다. bag별 자기 평균으로
+> 센터링하면 정확히 사라진다.
+>
+> ⚠️ **"v98보다 낫다"가 아니다.** seed-paired Δ = **−0.0037**(t=−1.08 → 측정 불가, 부호 음수).
+> macro를 조금 내주고 **학습 제거·시드 반복 제거**를 얻는 트레이드다. v106의 0.6864와 v98 8 seed
+> 0.6852를 **빼지 말 것**(시드 집합이 다름, §131-1).
+> ⚠️ **학습을 포함하는 arm과 비교할 때는 §107-3 게이트와 §131-2 검출 한계가 그대로 적용된다.**
+> 검출 한계가 ≈0이 되는 것은 training-free 변형끼리 비교할 때뿐이다(§139-6).
+>
+> **남은 격차 −0.0038의 유력 원인은 label 정보다** — PCA는 label을 안 보고 P는 CV ridge로 label
+> loss를 받는다. 다음 후보: **학습 없이 label을 보는 사영**(context label로 LDA·부분최소제곱).
 
 > [!IMPORTANT]
 > **⚠️⚠️ 2026-08-16 — 아래 모든 박스보다 먼저 읽을 것: 학습이 필요 없을지도 모른다 (§136–§137)**
