@@ -908,6 +908,86 @@ def evaluate_official_folds(
         print(f"Saved official-fold predictions to {out}")
 
 
+def apply_sketch_dim_override(config: dict) -> int | None:
+    """`ICF_SKETCH_DIM` — change K, the covariance sketch dimension (docs SS142).
+
+    K used to be locked to the checkpoint: P was a learned 1536xK matrix, so
+    moving K meant retraining. Under v106 the projection is per-episode PCA and
+    the head is three constants, so K became a free evaluation-time knob and
+    `_covariance_projection` is the ONLY parameter whose shape depends on it --
+    verified against the v98 checkpoint, where the other 24 tensors are all
+    encoder/head weights of fixed shape. That single tensor is exactly the one
+    `ICF_COVARIANCE_BASIS=pca_within` overrides, so dropping it costs nothing.
+
+    ⚠️ Only meaningful together with `ICF_COVARIANCE_BASIS=pca|pca_within`. With
+    the trained basis there is no 1536xK matrix to supply and the load will fail.
+    """
+    override = os.environ.get("ICF_SKETCH_DIM")
+    if override is None:
+        return None
+    sketch_dim = int(override)
+    previous = config["model"].get("covariance_sketch_dim")
+    config["model"]["covariance_sketch_dim"] = sketch_dim
+    print(f"ICF_SKETCH_DIM: covariance_sketch_dim {previous} -> {sketch_dim}", flush=True)
+    if os.environ.get("ICF_COVARIANCE_BASIS") not in ("pca", "pca_within"):
+        raise ValueError(
+            "ICF_SKETCH_DIM requires ICF_COVARIANCE_BASIS=pca or pca_within; "
+            "the trained projection has no K-agnostic form."
+        )
+    return sketch_dim
+
+
+def load_state_dict_for_sketch_dim(model, state_dict: dict) -> None:
+    """`load_state_dict`, dropping ONLY the K-shaped projection when K moved.
+
+    Anything else that fails to match is a real error and is re-raised: a silent
+    `strict=False` here would let an unrelated architecture drift load as zeros
+    and quietly change the number being reported.
+    """
+    if os.environ.get("ICF_SKETCH_DIM") is None:
+        model.load_state_dict(state_dict)
+        return
+    key = "model._covariance_projection"
+    expected = model.state_dict()[key].shape
+    if state_dict[key].shape != expected:
+        print(
+            f"ICF_SKETCH_DIM: dropping {key} {tuple(state_dict[key].shape)} "
+            f"(model wants {tuple(expected)}; PCA supplies it per episode)",
+            flush=True,
+        )
+        state_dict = {k: v for k, v in state_dict.items() if k != key}
+    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+    if set(missing) - {key} or unexpected:
+        raise RuntimeError(
+            f"unexpected state_dict mismatch beyond {key}: "
+            f"missing={sorted(set(missing) - {key})} unexpected={sorted(unexpected)}"
+        )
+
+
+def apply_ridge_lambda_override(model) -> None:
+    """`ICF_RIDGE_LAMBDA` — set the ridge penalty (docs SS142).
+
+    Needed as a CONTROL for the K sweep, not as a tuning knob. Standardisation
+    scales each descriptor block to unit RMS, so a bag's squared norm grows with
+    the descriptor length: K=128 gives 8,256+1,536 entries and K=256 gives
+    32,896+1,536. The dual Gram therefore grows with K while a fixed lambda=1.0
+    does not, and raising K silently weakens the ridge. Comparing K at fixed
+    lambda bundles two knobs, which SS127-2 forbids.
+
+    lambda was never trained: `ridge_log_lambda` sits at exp(0)=1.0 and
+    `ridge_log_scale` at 2.0 on all eight v98 seeds, i.e. still at init.
+    """
+    override = os.environ.get("ICF_RIDGE_LAMBDA")
+    if override is None:
+        return
+    value = float(override)
+    import math
+
+    with torch.no_grad():
+        model.model.ridge_log_lambda.fill_(math.log(value))
+    print(f"ICF_RIDGE_LAMBDA: ridge lambda -> {value:.4f}", flush=True)
+
+
 def main() -> None:
     def _mean(values: list[float]) -> float:
         return sum(values) / len(values)
@@ -919,6 +999,7 @@ def main() -> None:
 
     config = merge_train_config(args.config.expanduser().resolve())
     config["seed"] = args.seed
+    apply_sketch_dim_override(config)
     input_dim = (
         args.input_dim
         if args.input_dim is not None
@@ -937,7 +1018,8 @@ def main() -> None:
             args.checkpoint.expanduser().resolve(), map_location="cpu"
         )
         model.on_load_checkpoint(checkpoint)
-        model.load_state_dict(checkpoint["state_dict"])
+        load_state_dict_for_sketch_dim(model, checkpoint["state_dict"])
+        apply_ridge_lambda_override(model)
         if args.rare_logits_zero:
             model.model.meta_classifier.force_rare_logits_zero = True
         model.eval()
@@ -978,6 +1060,7 @@ def main() -> None:
     # directly (no PCA bridge).
     config = merge_train_config(args.config.expanduser().resolve())
     config["seed"] = args.seed
+    apply_sketch_dim_override(config)
     input_dim = (
         args.input_dim
         if args.input_dim is not None
@@ -1014,7 +1097,8 @@ def main() -> None:
             args.checkpoint.expanduser().resolve(), map_location="cpu"
         )
         model.on_load_checkpoint(checkpoint)
-        model.load_state_dict(checkpoint["state_dict"])
+        load_state_dict_for_sketch_dim(model, checkpoint["state_dict"])
+        apply_ridge_lambda_override(model)
         if args.rare_logits_zero:
             model.model.meta_classifier.force_rare_logits_zero = True
         model.eval()
