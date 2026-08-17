@@ -483,6 +483,51 @@ def evaluate_trial(
                 _, vectors = torch.linalg.eigh(scatter / total)
                 pca = vectors[:, -inner.covariance_sketch_dim:].flip(-1).float()
             inner._effective_covariance_projection = lambda b=pca: b
+        # docs SS145. `ICF_SKETCH_DIM_DD` gives the DD branch its OWN K, so the K
+        # effect measured in SS142 can be attributed to a branch instead of to
+        # "the model". K enters two places and SS142 moved both at once:
+        #
+        #   CV  the descriptor is triu(B^T C_bag B), so K sets its length
+        #   DD  reconstructs those same K x K matrices from that triangle
+        #       (`_covariance_matrices_from_triangle`) and takes a rank-1
+        #       dispersion direction through two `eigh`s
+        #   CT  selects on RAW cells -- basis-free, so K cannot touch it
+        #
+        # Decoupling is EXACT, not an approximation: the PCA basis is eigenvectors
+        # sorted by descending eigenvalue, so the top-left k x k block of
+        # B^T C B computed at K equals B^T C B computed at k. Slicing is therefore
+        # the same thing as rebuilding at the smaller K, with no second eigh.
+        #
+        # `covariance_sketch_dim` has to move with the slice because `_dd_direction`
+        # builds its shrinkage identity from it; it is restored immediately.
+        dd_sketch_dim = os.environ.get("ICF_SKETCH_DIM_DD")
+        saved_dd_features = None
+        if dd_sketch_dim is not None:
+            dd_sketch_dim = int(dd_sketch_dim)
+            if dd_sketch_dim > inner.covariance_sketch_dim:
+                raise ValueError(
+                    f"ICF_SKETCH_DIM_DD={dd_sketch_dim} exceeds the CV sketch dim "
+                    f"{inner.covariance_sketch_dim}; DD reads a SUB-block of the CV "
+                    "triangle and cannot see directions CV never computed."
+                )
+            saved_dd_features = inner._dd_distance_features
+
+            def dd_with_own_sketch_dim(
+                context_covariance, context_labels, query_covariance,
+                _original=saved_dd_features, _k=dd_sketch_dim,
+            ):
+                saved_dim = inner.covariance_sketch_dim
+                inner.covariance_sketch_dim = _k
+                try:
+                    return _original(
+                        context_covariance[..., :_k, :_k],
+                        context_labels,
+                        query_covariance[..., :_k, :_k],
+                    )
+                finally:
+                    inner.covariance_sketch_dim = saved_dim
+
+            inner._dd_distance_features = dd_with_own_sketch_dim
         if use_fixed_head:
             head = inner.cv_dd_ct_head[0]
             saved_head = (head.weight.detach().clone(), head.bias.detach().clone())
@@ -502,6 +547,8 @@ def evaluate_trial(
                 with torch.no_grad():
                     inner.cv_dd_ct_head[0].weight.copy_(saved_head[0])
                     inner.cv_dd_ct_head[0].bias.copy_(saved_head[1])
+            if saved_dd_features is not None:
+                inner._dd_distance_features = saved_dd_features
         scores = torch.softmax(logits.float(), dim=-1)[:, 1]
         nan_count = int(torch.isnan(scores).sum())
         probabilities = [float(value) for value in scores]
