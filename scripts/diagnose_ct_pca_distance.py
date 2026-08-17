@@ -46,6 +46,7 @@ from src.models.ct_readout import (  # noqa: E402
     CTReadoutConfig,
     ct_abundance,
     discriminative_score,
+    prepare_cells,
     readout_extreme,
 )
 from src.models.training_free import TrainingFreeClassifier, TrainingFreeConfig  # noqa: E402
@@ -62,11 +63,24 @@ DIMS = [None, 4, 8, 16, 32, 64, 128, 256]
 BASIS_DIM = 256
 
 
-def token_contrast(abundance_tokens, cells, temperature):
-    """(max - min)/mean of each cell's distances to the tokens, averaged."""
-    distance = (cells[:, None, :] - abundance_tokens[None]).square().mean(-1)
-    spread = (distance.max(dim=1).values - distance.min(dim=1).values)
-    return float((spread / distance.mean(dim=1).clamp_min(1e-12)).mean())
+def concentration(cells, tokens):
+    """Two measures of how distinguishable a cell's token distances are.
+
+    ⚠️ `cells` must be the CELLS, not the tokens. Passing the tokens makes every
+    row contain its own zero self-distance, which turns `contrast` into max/mean
+    and fabricates a trend -- the bug that produced SS149's first contrast table.
+
+    contrast  (max - min) / mean of one cell's distances to the 16 tokens, then
+              averaged over cells. This is what the softmax over -distance/T has
+              to work with; concentration drives it toward 0.
+    rel_std   std / mean over ALL cell-token distances. The textbook statement of
+              distance concentration is that this shrinks as dimension grows.
+    """
+    distance = (cells[:, None, :] - tokens[None]).square().mean(-1)
+    spread = distance.max(dim=1).values - distance.min(dim=1).values
+    contrast = float((spread / distance.mean(dim=1).clamp_min(1e-12)).mean())
+    rel_std = float(distance.std(unbiased=False) / distance.mean().clamp_min(1e-12))
+    return contrast, rel_std
 
 
 def main() -> None:
@@ -83,7 +97,8 @@ def main() -> None:
     reference = TrainingFreeClassifier(TrainingFreeConfig(sketch_dim=BASIS_DIM))
     generator = torch.Generator().manual_seed(0)
     h5_index = index_h5(FEATURES)
-    stats = {dim: {"contrast": [], "entropy": [], "tmed": [], "auroc": []} for dim in DIMS}
+    stats = {dim: {"contrast": [], "relstd": [], "entropy": [], "tmed": [], "auroc": []}
+             for dim in DIMS}
     per_task = {dim: {} for dim in DIMS}
 
     for task in args.tasks:
@@ -108,11 +123,13 @@ def main() -> None:
                 margins = readout_extreme(abundance, y, config)
                 rows = abundance.context.clamp_min(1e-12)
                 entropy = float(-(rows * rows.log()).sum(dim=-1).mean())
-                # Rebuild the projected+standardised cells the tokens live among.
-                cells = abundance.tokens
-                stats[dim]["contrast"].append(
-                    token_contrast(abundance.tokens, cells, config.temperature)
+                # The SAME cells the tokens were chosen from, via the shared helper.
+                cells, _ = prepare_cells(
+                    context_bags, query_bags, config, None if dim is None else basis
                 )
+                contrast, rel_std = concentration(torch.cat(cells, 0), abundance.tokens)
+                stats[dim]["contrast"].append(contrast)
+                stats[dim]["relstd"].append(rel_std)
                 stats[dim]["entropy"].append(entropy)
                 stats[dim]["tmed"].append(
                     float(discriminative_score(abundance, y, config).abs().median())
@@ -133,12 +150,13 @@ def main() -> None:
 
     print(f"\n{len(args.tasks)} tasks. ln(16) = {math.log(16):.3f} nats "
           f"= a perfectly uniform (useless) assignment.\n")
-    print(f"{'PCA dim':>9} {'contrast':>10} {'entropy':>9} {'|t| median':>11} "
-          f"{'CT-only AUROC':>14}")
+    print(f"{'PCA dim':>10} {'contrast':>10} {'rel_std':>9} {'entropy':>9} "
+          f"{'|t| median':>11} {'CT-only AUROC':>14}")
     for dim in DIMS:
         row = stats[dim]
         label = "1536 (raw)" if dim is None else str(dim)
-        print(f"{label:>9} {statistics.mean(row['contrast']):>10.4f} "
+        print(f"{label:>10} {statistics.mean(row['contrast']):>10.4f} "
+              f"{statistics.mean(row['relstd']):>9.4f} "
               f"{statistics.mean(row['entropy']):>9.4f} "
               f"{statistics.mean(row['tmed']):>11.2f} "
               f"{statistics.mean(row['auroc']):>14.4f}")
@@ -151,9 +169,10 @@ def main() -> None:
     print(f"{'MACRO':34s}" + "".join(f"{macro[d]:>9.4f}" for d in DIMS))
     print(f"{'Δ vs raw':34s}" + "".join(f"{macro[d]-macro[None]:>+9.4f}" for d in DIMS))
 
-    print("\ncontrast = (max-min)/mean of a cell's 16 token distances. Concentration "
-          "drives it toward 0.\nentropy near ln(16) means the softmax assigns every "
-          "cell to every token equally.")
+    print("\ncontrast = (max-min)/mean of a CELL's 16 token distances (higher = more "
+          "distinguishable).\nrel_std  = std/mean over all cell-token distances; "
+          "concentration shrinks this as dimension grows.\nentropy near ln(16) means "
+          "the softmax assigns every cell to every token equally.")
 
 
 if __name__ == "__main__":

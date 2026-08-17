@@ -106,6 +106,58 @@ def sample_cells(bag: torch.Tensor, config: CTReadoutConfig) -> torch.Tensor:
     return values.index_select(0, index)
 
 
+def prepare_cells(
+    context_bags: Sequence[torch.Tensor],
+    query_bags: Sequence[torch.Tensor],
+    config: CTReadoutConfig,
+    pca_basis: torch.Tensor | None = None,
+):
+    """Steps 1-2: sample cells, optionally project, then standardise on context.
+
+    Returned so diagnostics can measure distances among the SAME cells the tokens
+    are chosen from. Recomputing this in a diagnostic instead is how SS149's first
+    contrast table came to measure token-to-token distance by mistake.
+    """
+    context = [sample_cells(bag, config) for bag in context_bags]
+    query = [sample_cells(bag, config) for bag in query_bags]
+    projected = pca_basis is not None and config.pca_dim is not None
+    if projected:
+        # Project the RAW cells: the basis was built in unstandardised UNI2 space,
+        # so that is the space it is orthonormal in. Per-coordinate standardisation
+        # then happens below, on the retained components instead of on all 1,536.
+        basis = pca_basis[:, : config.pca_dim].to(context[0].dtype)
+        context = [bag @ basis for bag in context]
+        query = [bag @ basis for bag in query]
+    pooled = torch.cat(context, dim=0)
+    centre = pooled.mean(dim=0, keepdim=True)
+    if config.pca_scaling == "standardise" or not projected:
+        scale = (pooled - centre).square().mean(dim=0, keepdim=True).sqrt()
+    elif config.pca_scaling == "raw":
+        # One shared scale: centres the cloud without flattening the eigenvalue
+        # spectrum, so leading components keep their larger share of the distance.
+        scale = (pooled - centre).square().mean().sqrt().reshape(1, 1)
+    else:
+        raise ValueError(
+            f"pca_scaling must be 'standardise' or 'raw', got {config.pca_scaling!r}"
+        )
+    scale = scale.clamp_min(config.eps)
+    return ([(bag - centre) / scale for bag in context],
+            [(bag - centre) / scale for bag in query])
+
+
+def farthest_point_tokens(pooled: torch.Tensor, config: CTReadoutConfig) -> torch.Tensor:
+    """Step 3. Deterministic, and labels are deliberately absent."""
+    count = min(config.num_tokens, pooled.shape[0])
+    first = (pooled - pooled.mean(dim=0, keepdim=True)).square().mean(dim=1).argmin()
+    selected = [first]
+    nearest = (pooled - pooled[first]).square().mean(dim=1)
+    for _ in range(1, count):
+        index = nearest.argmax()
+        selected.append(index)
+        nearest = torch.minimum(nearest, (pooled - pooled[index]).square().mean(dim=1))
+    return pooled[torch.stack(selected)]
+
+
 def ct_abundance(
     context_bags: Sequence[torch.Tensor],
     query_bags: Sequence[torch.Tensor],
@@ -120,38 +172,8 @@ def ct_abundance(
     basis must come from CONTEXT cells only; nothing here checks that, because the
     caller owns it -- v107 passes the within-slide PCA the CV branch already built.
     """
-    context = [sample_cells(bag, config) for bag in context_bags]
-    query = [sample_cells(bag, config) for bag in query_bags]
-    if pca_basis is not None and config.pca_dim is not None:
-        # Project the RAW cells: the basis was built in unstandardised UNI2 space,
-        # so that is the space it is orthonormal in. Per-coordinate standardisation
-        # then happens below, on the retained components instead of on all 1,536.
-        basis = pca_basis[:, : config.pca_dim].to(context[0].dtype)
-        context = [bag @ basis for bag in context]
-        query = [bag @ basis for bag in query]
-    pooled = torch.cat(context, dim=0)
-    centre = pooled.mean(dim=0, keepdim=True)
-    if config.pca_scaling == "standardise" or pca_basis is None or config.pca_dim is None:
-        scale = (pooled - centre).square().mean(dim=0, keepdim=True).sqrt().clamp_min(config.eps)
-    elif config.pca_scaling == "raw":
-        # One shared scale: centres the cloud without flattening the eigenvalue
-        # spectrum, so leading components keep their larger share of the distance.
-        scale = (pooled - centre).square().mean().sqrt().clamp_min(config.eps)
-    else:
-        raise ValueError(f"pca_scaling must be 'standardise' or 'raw', got {config.pca_scaling!r}")
-    context = [(bag - centre) / scale for bag in context]
-    query = [(bag - centre) / scale for bag in query]
-    pooled = torch.cat(context, dim=0)
-
-    count = min(config.num_tokens, pooled.shape[0])
-    first = (pooled - pooled.mean(dim=0, keepdim=True)).square().mean(dim=1).argmin()
-    selected = [first]
-    nearest = (pooled - pooled[first]).square().mean(dim=1)
-    for _ in range(1, count):
-        index = nearest.argmax()
-        selected.append(index)
-        nearest = torch.minimum(nearest, (pooled - pooled[index]).square().mean(dim=1))
-    tokens = pooled[torch.stack(selected)]
+    context, query = prepare_cells(context_bags, query_bags, config, pca_basis)
+    tokens = farthest_point_tokens(torch.cat(context, dim=0), config)
 
     def abundance(bags):
         return torch.stack([

@@ -23,6 +23,7 @@ from src.models.ct_readout import (
     ct_margins,
     discriminative_score,
     readout_extreme,
+    prepare_cells,
     readout_prototype,
     readout_ridge,
     ridge_coefficients,
@@ -227,6 +228,62 @@ class RidgeTest(unittest.TestCase):
         context_bags, labels, query_bags = episode(14)
         with self.assertRaisesRegex(ValueError, "mode must be one of"):
             ct_margins(context_bags, labels, query_bags, CONFIG, "nope")
+
+
+class PrepareCellsTest(unittest.TestCase):
+    """SS149-7. The diagnostic that measured concentration re-derived the cells by
+    hand and passed the TOKENS in by mistake. `prepare_cells` is now the one
+    definition, so pin that `ct_abundance` really uses it."""
+
+    def test_tokens_are_drawn_from_prepare_cells_output(self):
+        context_bags, _, query_bags = episode(20)
+        for pca_dim, basis in ((None, None), (5, torch.linalg.qr(
+                torch.randn(DIM, 8, generator=torch.Generator().manual_seed(0)))[0])):
+            config = CTReadoutConfig(
+                num_tokens=CONFIG.num_tokens, cells_per_bag=CONFIG.cells_per_bag,
+                temperature=CONFIG.temperature, eps=CONFIG.eps, pca_dim=pca_dim,
+            )
+            abundance = ct_abundance(context_bags, query_bags, config, basis)
+            context, _ = prepare_cells(context_bags, query_bags, config, basis)
+            pooled = torch.cat(context, dim=0)
+            self.assertEqual(abundance.tokens.shape[-1], pooled.shape[-1])
+            # Every token must BE one of the prepared cells, not a derived point.
+            for token in abundance.tokens:
+                distance = (pooled - token).square().sum(dim=-1)
+                self.assertLess(float(distance.min()), 1e-8)
+
+    def test_projection_reduces_the_working_dimension(self):
+        context_bags, _, query_bags = episode(21)
+        basis = torch.linalg.qr(
+            torch.randn(DIM, 8, generator=torch.Generator().manual_seed(1)))[0]
+        config = CTReadoutConfig(pca_dim=5, num_tokens=CONFIG.num_tokens,
+                                 cells_per_bag=CONFIG.cells_per_bag)
+        context, query = prepare_cells(context_bags, query_bags, config, basis)
+        self.assertEqual(context[0].shape[-1], 5)
+        self.assertEqual(query[0].shape[-1], 5)
+
+    def test_raw_scaling_keeps_component_variance_unequal(self):
+        """`pca_scaling='raw'` must NOT flatten the spectrum, unlike 'standardise'."""
+        context_bags, _, query_bags = episode(22)
+        basis = torch.linalg.qr(
+            torch.randn(DIM, 8, generator=torch.Generator().manual_seed(2)))[0]
+        common = dict(pca_dim=6, num_tokens=CONFIG.num_tokens,
+                      cells_per_bag=CONFIG.cells_per_bag)
+        standardised, _ = prepare_cells(
+            context_bags, query_bags, CTReadoutConfig(**common), basis)
+        raw, _ = prepare_cells(
+            context_bags, query_bags,
+            CTReadoutConfig(**common, pca_scaling="raw"), basis)
+        spread = lambda cells: torch.cat(cells, 0).var(dim=0)
+        self.assertLess(float(spread(standardised).std()), 1e-3)
+        self.assertGreater(float(spread(raw).std()), 1e-3)
+
+    def test_unknown_scaling_is_rejected(self):
+        context_bags, _, query_bags = episode(23)
+        basis = torch.eye(DIM)[:, :4]
+        with self.assertRaisesRegex(ValueError, "pca_scaling"):
+            prepare_cells(context_bags, query_bags,
+                          CTReadoutConfig(pca_dim=4, pca_scaling="nope"), basis)
 
 
 if __name__ == "__main__":
