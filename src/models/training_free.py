@@ -61,6 +61,8 @@ from typing import Sequence
 
 import torch
 
+from src.models.ct_readout import CTReadoutConfig, ct_margins
+
 
 def _solve_ridge(gram: torch.Tensor, targets: torch.Tensor, penalty: float) -> torch.Tensor:
     """Solve (gram + penalty*I) x = targets, adding jitter only if it fails.
@@ -131,6 +133,10 @@ class TrainingFreeConfig:
     weight_cv: float = 1.442
     weight_dd: float = -0.343
     weight_ct: float = 0.286
+    # SS148 diagnostic only. "extreme" is v107; "prototype"/"ridge" read all 16
+    # abundance dims instead of two. Changing this changes the model.
+    ct_readout: str = "extreme"
+
 
 
 class TrainingFreeClassifier:
@@ -225,62 +231,31 @@ class TrainingFreeClassifier:
         return (query_feature[:, None] - prototypes[None, :]).square() / dispersions[None, :]
 
     # ---- 5. CT ------------------------------------------------------------
-    def _ct_sample(self, bag: torch.Tensor) -> torch.Tensor:
-        values = bag.float()
-        if values.shape[0] <= self.config.ct_cells_per_bag:
-            return values
-        # Evenly spaced, not random: keeps the whole pipeline deterministic.
-        index = torch.linspace(
-            0, values.shape[0] - 1, self.config.ct_cells_per_bag, device=values.device
-        ).round().long()
-        return values.index_select(0, index)
-
     def _ct_features(self, context_bags, labels, query_bags):
+        """Two-token abundance readout, delegated to `ct_readout` (docs SS148).
+
+        Steps 1-5 (sample, standardise, farthest-point tokens, soft assign, per-bag
+        average) live in `ct_readout.ct_abundance` so that the readout experiments
+        cannot accidentally differ from this path in the REPRESENTATION -- only in
+        step 6-7. `mode="extreme"` is today's behaviour and stays the default, so
+        v107's output is unchanged; `tests/test_training_free.py` pins that against
+        the lineage and `tests/test_ct_readout.py` pins the refactor itself.
+        """
         config = self.config
-        labels = labels.long()
-        context = [self._ct_sample(bag) for bag in context_bags]
-        query = [self._ct_sample(bag) for bag in query_bags]
-        pooled = torch.cat(context, dim=0)
-        centre = pooled.mean(dim=0, keepdim=True)
-        scale = (pooled - centre).square().mean(dim=0, keepdim=True).sqrt().clamp_min(config.ct_eps)
-        context = [(bag - centre) / scale for bag in context]
-        query = [(bag - centre) / scale for bag in query]
-        pooled = torch.cat(context, dim=0)
-
-        # Farthest-point tokens. Labels are deliberately absent from selection --
-        # they enter only when scoring which tokens separate the classes.
-        count = min(config.ct_num_tokens, pooled.shape[0])
-        first = (pooled - pooled.mean(dim=0, keepdim=True)).square().mean(dim=1).argmin()
-        selected = [first]
-        nearest = (pooled - pooled[first]).square().mean(dim=1)
-        for _ in range(1, count):
-            index = nearest.argmax()
-            selected.append(index)
-            nearest = torch.minimum(nearest, (pooled - pooled[index]).square().mean(dim=1))
-        tokens = pooled[torch.stack(selected)]
-
-        def abundance(bags):
-            return torch.stack([
-                (-(bag[:, None, :] - tokens[None]).square().mean(-1) / config.ct_temperature)
-                .softmax(dim=-1).mean(dim=0)
-                for bag in bags
-            ])
-
-        context_abundance = abundance(context)
-        query_abundance = abundance(query)
-        class_mean = torch.stack([context_abundance[labels == c].mean(0) for c in range(2)])
-        class_variance = torch.stack([
-            (context_abundance[labels == c] - class_mean[c]).square().mean(0) for c in range(2)
-        ])
-        standard_error = (
-            class_variance[0] / (labels == 0).sum().clamp_min(1)
-            + class_variance[1] / (labels == 1).sum().clamp_min(1)
-        ).sqrt().clamp_min(config.ct_eps)
-        score = (class_mean[0] - class_mean[1]) / standard_error
-        centre = context_abundance.mean(dim=0)
-        spread = (context_abundance - centre).square().mean(dim=0).sqrt().clamp_min(config.ct_eps)
-        standardised = (query_abundance - centre) / spread
-        return standardised[:, score.argmax()], standardised[:, score.argmin()]
+        margins, _ = ct_margins(
+            context_bags, labels, query_bags,
+            CTReadoutConfig(
+                num_tokens=config.ct_num_tokens,
+                cells_per_bag=config.ct_cells_per_bag,
+                temperature=config.ct_temperature,
+                eps=config.ct_eps,
+            ),
+            mode=config.ct_readout,
+        )
+        # The head consumes (q0, q1) and weighs q1 - q0, so hand back a pair whose
+        # difference IS the margin. For "extreme" this returns exactly the two
+        # standardised token abundances it always did.
+        return -0.5 * margins.query, 0.5 * margins.query
 
     # ---- 6. head ----------------------------------------------------------
     def margins(

@@ -1,0 +1,233 @@
+"""CT readouts (docs SS148): the baseline must not move, and the alternatives
+must be honest.
+
+`ct_readout` factors steps 1-5 of CT out of two places (`training_free.py` and
+the lineage) so the readout experiment varies ONLY step 6-7. That refactor is the
+risk: if `extreme` drifts from the lineage by any amount, every "prototype gains
+X" number silently mixes a readout change with a representation change. So the
+first test compares against `_ct_features` directly.
+
+The rest pin what the alternatives must satisfy to be usable at all: no query
+statistics anywhere, determinism, and label antisymmetry -- the property the fixed
+head's three constants are derived from (SS137-3).
+"""
+
+import unittest
+
+import torch
+
+from src.models.ct_readout import (
+    CTReadoutConfig,
+    calibrate,
+    ct_abundance,
+    ct_margins,
+    discriminative_score,
+    readout_extreme,
+    readout_prototype,
+    readout_ridge,
+    ridge_coefficients,
+)
+from src.models.set_transformer_ridge import CovarianceMeanLearnablePDDCTMLPModel
+
+DIM = 40
+CONFIG = CTReadoutConfig(num_tokens=8, cells_per_bag=24, temperature=0.5, eps=1e-6)
+
+
+def episode(seed=0, context=16, query=6, cells=30):
+    generator = torch.Generator().manual_seed(seed)
+    bags = [torch.randn(cells, DIM, generator=generator) for _ in range(context + query)]
+    # A real class signal, so the alternatives are not being asked to fit noise.
+    labels = torch.tensor([i % 2 for i in range(context)])
+    for index, label in enumerate(labels.tolist()):
+        if label == 1:
+            bags[index] = bags[index] + 0.4
+    return bags[:context], labels, bags[context:]
+
+
+def lineage_model():
+    torch.manual_seed(0)
+    return CovarianceMeanLearnablePDDCTMLPModel(
+        input_dim=DIM, token_dim=16, num_heads=1, num_layers=1, feedforward_dim=16,
+        num_summary_tokens=1, max_cells=4096, dropout=0.0, covariance_sketch_dim=8,
+        ridge_lambda=1.0, ridge_logit_scale=2.0, num_classes=2,
+        ct_num_tokens=CONFIG.num_tokens, ct_cells_per_bag=CONFIG.cells_per_bag,
+        ct_temperature=CONFIG.temperature, ct_eps=CONFIG.eps,
+        ct_head_hidden_dims=[], dd_shrinkage=0.25, dd_eps=1e-6,
+    ).eval()
+
+
+class BaselineUnchangedTest(unittest.TestCase):
+    def test_extreme_matches_the_lineage_ct_features(self):
+        """The refactor must not move v107 by a float."""
+        model = lineage_model()
+        for seed in range(4):
+            context_bags, labels, query_bags = episode(seed)
+            with torch.no_grad():
+                q0, q1, separation = model._ct_features(context_bags, labels, query_bags)
+            margins, _ = ct_margins(context_bags, labels, query_bags, CONFIG, "extreme")
+            self.assertTrue(
+                torch.allclose(margins.query, q1 - q0, atol=1e-6, rtol=1e-6),
+                f"seed {seed}: {margins.query.tolist()} vs {(q1 - q0).tolist()}",
+            )
+            self.assertTrue(torch.allclose(margins.separation, separation, atol=1e-6))
+
+    def test_extreme_is_never_calibrated(self):
+        """`extreme` IS the reference, so `calibrated` must not touch it."""
+        context_bags, labels, query_bags = episode(1)
+        on, _ = ct_margins(context_bags, labels, query_bags, CONFIG, "extreme", True)
+        off, _ = ct_margins(context_bags, labels, query_bags, CONFIG, "extreme", False)
+        self.assertTrue(torch.equal(on.query, off.query))
+
+    def test_score_matches_the_lineage_token_ranking(self):
+        model = lineage_model()
+        context_bags, labels, query_bags = episode(2)
+        abundance = ct_abundance(context_bags, query_bags, CONFIG)
+        score = discriminative_score(abundance, labels, CONFIG)
+        with torch.no_grad():
+            q0, q1, _ = model._ct_features(context_bags, labels, query_bags)
+        _, standardised_query = None, None
+        # Indirect check: the two selected coordinates must reproduce q0/q1.
+        _, query = (abundance.context, abundance.query)
+        centre = abundance.context.mean(dim=0)
+        spread = (abundance.context - centre).square().mean(dim=0).sqrt().clamp_min(CONFIG.eps)
+        standardised = (query - centre) / spread
+        self.assertTrue(torch.allclose(standardised[:, score.argmax()], q0, atol=1e-6))
+        self.assertTrue(torch.allclose(standardised[:, score.argmin()], q1, atol=1e-6))
+        del standardised_query
+
+
+class ShapeAndDeterminismTest(unittest.TestCase):
+    def test_shapes(self):
+        context_bags, labels, query_bags = episode(3, context=16, query=6)
+        for mode in ("extreme", "prototype", "ridge"):
+            margins, abundance = ct_margins(context_bags, labels, query_bags, CONFIG, mode)
+            self.assertEqual(margins.context.shape, (16,), mode)
+            self.assertEqual(margins.query.shape, (6,), mode)
+            self.assertEqual(margins.separation.shape, (), mode)
+            self.assertEqual(abundance.context.shape, (16, CONFIG.num_tokens), mode)
+            self.assertEqual(abundance.query.shape, (6, CONFIG.num_tokens), mode)
+
+    def test_deterministic(self):
+        context_bags, labels, query_bags = episode(4)
+        for mode in ("extreme", "prototype", "ridge"):
+            first, _ = ct_margins(context_bags, labels, query_bags, CONFIG, mode)
+            second, _ = ct_margins(context_bags, labels, query_bags, CONFIG, mode)
+            self.assertTrue(torch.equal(first.query, second.query), mode)
+
+    def test_abundance_rows_are_simplex(self):
+        context_bags, _, query_bags = episode(5)
+        abundance = ct_abundance(context_bags, query_bags, CONFIG)
+        for side in (abundance.context, abundance.query):
+            self.assertTrue(torch.allclose(side.sum(dim=-1), torch.ones(side.shape[0]), atol=1e-5))
+            self.assertTrue(bool((side >= 0).all()))
+
+
+class ContextOnlyTest(unittest.TestCase):
+    def test_query_bags_never_change_the_context_side(self):
+        """No leakage: standardisation, tokens, prototypes and ridge are context-only."""
+        context_bags, labels, query_bags = episode(6)
+        other = [bag * 5.0 + 11.0 for bag in query_bags]
+        for mode in ("extreme", "prototype", "ridge"):
+            a, first = ct_margins(context_bags, labels, query_bags, CONFIG, mode)
+            b, second = ct_margins(context_bags, labels, other, CONFIG, mode)
+            self.assertTrue(torch.equal(first.tokens, second.tokens), mode)
+            self.assertTrue(torch.equal(first.context, second.context), mode)
+            self.assertTrue(torch.equal(a.context, b.context), mode)
+
+    def test_adding_query_bags_does_not_move_existing_query_scores(self):
+        context_bags, labels, query_bags = episode(7, query=4)
+        few, _ = ct_margins(context_bags, labels, query_bags, CONFIG, "ridge")
+        more, _ = ct_margins(
+            context_bags, labels, list(query_bags) + [query_bags[0] * 3.0],
+            CONFIG, "ridge",
+        )
+        self.assertTrue(torch.allclose(few.query, more.query[:4], atol=1e-6))
+
+
+class AntisymmetryTest(unittest.TestCase):
+    """SS137-3: the fixed head's constants exist because a class swap negates the
+    margin. A readout that breaks this cannot be dropped into that head."""
+
+    def test_class_swap_negates_every_readout(self):
+        context_bags, labels, query_bags = episode(8, context=20)
+        for mode in ("extreme", "prototype", "ridge"):
+            original, _ = ct_margins(context_bags, labels, query_bags, CONFIG, mode)
+            flipped, _ = ct_margins(context_bags, 1 - labels, query_bags, CONFIG, mode)
+            self.assertTrue(
+                torch.allclose(original.query, -flipped.query, atol=1e-4),
+                f"{mode}: {original.query.tolist()} vs {(-flipped.query).tolist()}",
+            )
+
+    def test_calibration_preserves_antisymmetry(self):
+        context_bags, labels, query_bags = episode(9, context=20)
+        for mode in ("prototype", "ridge"):
+            original, _ = ct_margins(context_bags, labels, query_bags, CONFIG, mode, True)
+            flipped, _ = ct_margins(context_bags, 1 - labels, query_bags, CONFIG, mode, True)
+            self.assertTrue(
+                torch.allclose(original.query, -flipped.query, atol=1e-4), mode
+            )
+
+
+class CalibrationTest(unittest.TestCase):
+    def test_context_rms_and_mean_match_the_reference(self):
+        context_bags, labels, query_bags = episode(10, context=20)
+        abundance = ct_abundance(context_bags, query_bags, CONFIG)
+        reference = readout_extreme(abundance, labels, CONFIG)
+        for readout in (readout_prototype, readout_ridge):
+            calibrated = calibrate(readout(abundance, labels, CONFIG), reference, CONFIG)
+            self.assertAlmostEqual(
+                float(calibrated.context.mean()), float(reference.context.mean()), places=4
+            )
+            self.assertAlmostEqual(
+                float(calibrated.context.std(unbiased=False)),
+                float(reference.context.std(unbiased=False)),
+                places=4,
+            )
+
+    def test_calibration_is_monotone_so_ct_only_auroc_is_unaffected(self):
+        context_bags, labels, query_bags = episode(11, context=20)
+        abundance = ct_abundance(context_bags, query_bags, CONFIG)
+        reference = readout_extreme(abundance, labels, CONFIG)
+        raw = readout_ridge(abundance, labels, CONFIG)
+        calibrated = calibrate(raw, reference, CONFIG)
+        self.assertTrue(torch.equal(torch.argsort(raw.query), torch.argsort(calibrated.query)))
+
+
+class RidgeTest(unittest.TestCase):
+    def test_coefficients_are_antisymmetric_across_the_two_classes(self):
+        context_bags, labels, query_bags = episode(12, context=20)
+        abundance = ct_abundance(context_bags, query_bags, CONFIG)
+        beta, _, _, _ = ridge_coefficients(abundance, labels, CONFIG)
+        # One-hot targets sum to 1, so the two columns are mirror images.
+        self.assertTrue(torch.allclose(beta[:, 0], -beta[:, 1], atol=1e-5))
+
+    def test_class_balancing_removes_prevalence_from_the_centring(self):
+        """The weighted centre must be the midpoint of the two class means.
+
+        Testing this by duplicating context bags would NOT isolate the weighting:
+        extra bags also move the coordinate standardisation and the farthest-point
+        token set, so the representation changes too. So assert the invariant the
+        weights exist for, on a fixed abundance and a deliberately skewed context.
+        """
+        context_bags, _, query_bags = episode(13, context=18)
+        labels = torch.tensor([1] * 13 + [0] * 5)   # 72% positive
+        abundance = ct_abundance(context_bags, query_bags, CONFIG)
+        _, _, context, _ = ridge_coefficients(abundance, labels, CONFIG)
+        counts = torch.bincount(labels, minlength=2)
+        weight = counts.float().reciprocal()[labels]
+        weighted_centre = (weight[:, None] * context).sum(0) / weight.sum()
+        midpoint = 0.5 * (
+            context[labels == 0].mean(dim=0) + context[labels == 1].mean(dim=0)
+        )
+        self.assertTrue(torch.allclose(weighted_centre, midpoint, atol=1e-5))
+        # An unweighted centre would sit near the majority class instead.
+        self.assertFalse(torch.allclose(context.mean(dim=0), midpoint, atol=1e-3))
+
+    def test_unknown_mode_is_rejected(self):
+        context_bags, labels, query_bags = episode(14)
+        with self.assertRaisesRegex(ValueError, "mode must be one of"):
+            ct_margins(context_bags, labels, query_bags, CONFIG, "nope")
+
+
+if __name__ == "__main__":
+    unittest.main()

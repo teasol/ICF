@@ -586,6 +586,45 @@ def evaluate_trial(
                 return distances, separation
 
             inner._dd_distance_features = dd_with_adaptive_rank
+        # docs SS148. `ICF_CT_READOUT=prototype|ridge` replaces CT's step 6-7 only.
+        # Steps 1-5 (cells -> tokens -> 16-d abundance) come from the SHARED
+        # `ct_abundance`, so an arm cannot differ in the representation -- which is
+        # the whole point: this separates "the tokens are weak" from "reading two
+        # of sixteen coordinates loses information".
+        #
+        # The alternative margin is calibrated to the extreme margin's CONTEXT mean
+        # and RMS before entering the head, so the fixed 0.286 weight keeps its
+        # meaning and the comparison is of readout QUALITY, not CT's magnitude.
+        # `extreme` is passed through untouched, so the baseline cannot move.
+        ct_readout = os.environ.get("ICF_CT_READOUT", "extreme")
+        saved_ct_features = None
+        if ct_readout != "extreme":
+            from src.models.ct_readout import CTReadoutConfig, ct_margins  # noqa: PLC0415
+
+            readout_config = CTReadoutConfig(
+                num_tokens=int(inner.ct_num_tokens),
+                cells_per_bag=int(inner.ct_cells_per_bag),
+                temperature=float(inner.ct_temperature),
+                eps=float(inner.ct_eps),
+                ridge_lambda=float(os.environ.get("ICF_CT_RIDGE_LAMBDA", "1.0")),
+            )
+            saved_ct_features = inner._ct_features
+            calibrated = os.environ.get("ICF_CT_CALIBRATE", "1") == "1"
+
+            def ct_with_readout(
+                context_bags_, context_labels_, query_bags_,
+                _mode=ct_readout, _config=readout_config, _calibrated=calibrated,
+            ):
+                margins, _ = ct_margins(
+                    context_bags_, context_labels_, query_bags_, _config,
+                    mode=_mode, calibrated=_calibrated,
+                )
+                # The head weighs q1 - q0, so split the margin symmetrically.
+                return -0.5 * margins.query, 0.5 * margins.query, margins.separation
+
+            inner._ct_features = ct_with_readout
+            print(f"ICF_CT_READOUT={ct_readout} calibrated={calibrated} "
+                  f"lambda={readout_config.ridge_lambda}", flush=True)
         if use_fixed_head:
             head = inner.cv_dd_ct_head[0]
             saved_head = (head.weight.detach().clone(), head.bias.detach().clone())
@@ -609,6 +648,8 @@ def evaluate_trial(
                 inner._dd_distance_features = saved_dd_features
             if saved_rank_features is not None:
                 inner._dd_distance_features = saved_rank_features
+            if saved_ct_features is not None:
+                inner._ct_features = saved_ct_features
         scores = torch.softmax(logits.float(), dim=-1)[:, 1]
         nan_count = int(torch.isnan(scores).sum())
         probabilities = [float(value) for value in scores]

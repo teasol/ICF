@@ -4932,3 +4932,127 @@ DD에서 시도한 것과 결과:
 ⚠️ 유일하게 남은 미검증 갈래는 **context 표본 분할 |t|**(§146-6)다. 지금의 |t|는 전부 오염돼
 있으므로 정화하면 달라질 여지가 있다. 다만 ① |λ|가 이미 이기고 있고 ② 쫓는 효과가 ±0.005인데
 task별 SD가 0.03~0.06이라 **검출 자체가 어렵다.** 인프라(모듈·테스트 14개·훅 6개)는 남겨 뒀다.
+
+---
+
+## 148. 2026-08-17 — CT 진단: **two-token readout은 병목이 아니다.** 16차원 abundance 자체가 거의 비어 있다
+
+*작성: nhn-NEXGEM-claude, 2026-08-17 (KST)*
+
+CT는 16차원 abundance를 만든 뒤 2개 좌표만 읽는다(`argmax`/`argmin` of
+`(mean_0−mean_1)/SE`, margin = `q1−q0`). readout에서 정보를 버리는지, 아니면 token 자체가
+약한지 분리했다.
+
+### 1. 구현 — 표현(1–5단계)을 공유해 교란을 제거
+
+`src/models/ct_readout.py`(신규). **1–5단계(cell 샘플링 → 표준화 → farthest-point token →
+soft assign → bag별 평균)를 `ct_abundance()` 하나로 뽑아내** 세 arm이 **표현에서는 절대 다를 수
+없게** 했다. 6–7단계만 교체한다:
+
+| mode | readout |
+|---|---|
+| `extreme` | `q1 − q0` (현행 v107) |
+| `prototype` | 16차원 표준화 abundance의 클래스 prototype, `‖â−p0‖² − ‖â−p1‖²` |
+| `ridge` | 16차원 전체에 class-balanced ridge(primal, λ=1), `logit1 − logit0` |
+
+`training_free.py._ct_features`도 이 공통 함수를 호출하도록 리팩터했고, 기본값
+`ct_readout="extreme"`이라 **v107 출력은 그대로**다.
+
+**검증**: ① `readout_extreme`가 계보 `_ct_features`와 **1e-6 일치**(테스트)
+② 공식 경로 `ct_extreme` SEAL macro = **0.6945**, 즉 v107 자릿수까지 재현
+③ shape·결정론·context-only(query 통계 미사용)·클래스 스왑 반대칭 테스트 15개 통과.
+
+⚠️ **스케일 교정**: 대체 margin은 head 투입 전 extreme margin의 **context** 평균·RMS에 맞춘다.
+`nocal` 대조군을 함께 돌려 이 선택이 실제로 필요했음을 확인했다(아래 §2).
+
+### 2. full-model (공식 경로, 고정 head, CT weight 0.286)
+
+| task | extreme | prototype | ridge | proto_nocal | ridge_nocal |
+|---|---:|---:|---:|---:|---:|
+| bc_therapy er_status | 0.7047 | 0.6878 | 0.7000 | 0.6794 | 0.6972 |
+| bc_therapy grade | 0.7191 | 0.7192 | 0.7222 | 0.7083 | 0.7226 |
+| bc_therapy her2_status | 0.6755 | 0.6704 | 0.6696 | 0.6666 | 0.6682 |
+| cptac_brca PIK3CA | 0.5333 | 0.5351 | 0.5319 | 0.5321 | 0.5341 |
+| cptac_brca TP53 | 0.8264 | 0.8334 | 0.8341 | 0.8355 | 0.8305 |
+| cptac_ccrcc BAP1 | 0.6669 | 0.6649 | 0.6561 | 0.6727 | 0.6419 |
+| cptac_ccrcc VHL | 0.4762 | 0.4790 | 0.4896 | 0.4695 | 0.4812 |
+| cptac_luad EGFR | 0.7836 | 0.7871 | 0.7821 | 0.7746 | 0.7849 |
+| cptac_luad STK11 | 0.8841 | 0.8788 | 0.8890 | 0.8621 | 0.8924 |
+| cptac_luad TP53 | 0.6753 | 0.6664 | 0.6728 | 0.6501 | 0.6826 |
+| **MACRO** | **0.6945** | 0.6922 | **0.6947** | 0.6851 | 0.6936 |
+
+교정 없이 넣으면 prototype이 −0.0094다 → **교정은 필요했다**(품질이 아니라 크기를 비교하게 됨).
+
+| 홀드아웃 7 | extreme | prototype | ridge |
+|---|---:|---:|---:|
+| MACRO | 0.5836 | 0.5836 | 0.5853 |
+
+| 증분 | SEAL 10 | 홀드아웃 7 | **전체 17** |
+|---|---|---|---|
+| prototype | −0.0023, t −1.03, 5/10 | −0.0000, t −0.01, 3/7 | **−0.0014, t −0.74, 8/17** |
+| ridge | +0.0002, t +0.10, 4/10 | +0.0017, t +0.45, 4/7 | **+0.0008, t +0.42, 8/17** |
+
+### 3. CT-only (CT margin 단독, CV·DD 없음)
+
+| | extreme | prototype | ridge |
+|---|---:|---:|---:|
+| SEAL 10 | **0.5990** | 0.5765 | 0.5969 |
+| 홀드아웃 7 | 0.5042 | 0.5162 | **0.5207** |
+| **전체 17** | **0.5600** | 0.5517 | 0.5655 |
+| 전체 17 증분 | — | −0.0083, t −0.65, **8/17** | +0.0056, t +0.38, **8/17** |
+| balanced BCE (SEAL, 교정 margin) | **0.7746** | 0.8332 | 0.7845 |
+
+**두 집단에서 부호가 뒤집히고 둘 다 8/17이다** — 완전한 동전이다.
+
+### 4. 왜 그런지 — 진단값이 답한다
+
+| 진단 | SEAL 10 | 홀드아웃 7 |
+|---|---:|---:|
+| token별 \|(m0−m1)/SE\| 최대 | 3.44 | 3.18 |
+| token별 \|(m0−m1)/SE\| **중앙값** | **1.31** | **1.23** |
+| \|t\|>2인 token 수 | 4.5 / 16 | 3.4 / 16 |
+| ridge \|w\| top-1 비중 | 0.156 | 0.145 |
+| ridge \|w\| top-2 비중 | 0.282 | 0.263 |
+| ridge **실효 token 수** (참여율) | **6.81 / 16** | **7.62 / 16** |
+| extreme의 2개가 ridge top-2에 포함 | 1.17 / 2 | 1.05 / 2 |
+
+**① abundance에 클래스 정보가 거의 없다.** token별 판별 통계의 **중앙값이 1.31** — 노이즈
+수준이다. 16개 중 |t|>2를 넘는 것이 3~5개뿐이고, CT-only macro가 전체 17에서 **0.5600**으로
+우연에서 겨우 벗어난다.
+
+**② ridge는 실제로 더 많은 token을 쓰려 했고, 그래도 못 이겼다.** 실효 token 수가 6.8/16이고
+top-1 비중이 15.6%다 — 극단 2개로 붕괴한 게 **아니다.** 정보가 있는데 readout이 못 읽은 것이라면
+이 조건에서 이겼어야 한다. 못 이겼다는 것은 **나머지 14차원이 대부분 노이즈**라는 뜻이고,
+그래서 가중을 퍼뜨리는 것이 도움이 아니라 해가 된다(prototype이 CT-only에서 −0.0224인 이유).
+
+**③ 두 기준이 고르는 token이 절반만 겹친다**(1.17/2). 어느 선택도 이기지 못하므로, token 간
+차이가 신호가 아니라 노이즈라는 ②와 같은 결론이다.
+
+### 5. 판정 — 사용자 기준표 적용
+
+> "prototype과 ridge 모두 개선되지 않음 → readout보다 **token 생성, cell sampling 또는
+> distance metric이 병목**"
+
+**이 경우다.** CT-only에서도, full-model에서도, 두 독립 task 집단 어디서도 개선이 없다
+(전부 8/17). **two-token readout은 병목이 아니다.** 병목은 상류다:
+
+- **token 생성**: farthest-point sampling은 밀도를 무시하고 **극단값(outlier cell)을 고른다.**
+  16개 token 중 다수가 희귀 cell 근방에 놓이면 bag 간 abundance가 거의 상수가 되고, 중앙값
+  |t|=1.31이 정확히 그 모습이다.
+- **cell sampling**: bag당 64 cell은 slide당 4,096 cell의 1.6%다. abundance는 64개 표본의
+  평균이므로 표본오차 자체가 클래스 차이보다 클 수 있다.
+- **distance metric**: 1536차원에서 squared Euclidean + softmax(T=0.5)는 거리 집중 현상에
+  취약하다 — 모든 cell이 모든 token에서 비슷하게 멀면 abundance가 균일해진다.
+
+⚠️ **아무것도 승격하지 않았다.** 기본값은 `ct_readout="extreme"`(v107) 그대로다.
+
+### 6. 한계
+
+- CT-only 진단은 `diagnose_full_basis.load_task` 경로라 bag을 로드 시 1회 8,192로 cap한다
+  (§138-2). 절대값은 SEAL macro와 직접 비교할 수 없고 **arm 간 격차만** 유효하다.
+  full-model 표는 공식 경로이므로 v107과 직접 비교 가능하다.
+- ridge λ는 1.0 고정이다(`ICF_CT_RIDGE_LAMBDA`로 조정 가능). context bag이 50~200인데 16차원
+  이므로 과적합 위험은 낮지만, λ를 쓸어보지는 않았다.
+- CT-only가 0.56이라는 것은 **CT가 약하다**는 뜻이지 **쓸모없다**는 뜻이 아니다. CT 자체를
+  제거하는 ablation은 이번 범위가 아니다.
+- 위 세 상류 후보(token 생성 / sampling / metric) 중 어느 것인지는 **아직 분리하지 않았다.**
