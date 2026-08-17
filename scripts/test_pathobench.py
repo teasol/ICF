@@ -596,9 +596,16 @@ def evaluate_trial(
         # and RMS before entering the head, so the fixed 0.286 weight keeps its
         # meaning and the comparison is of readout QUALITY, not CT's magnitude.
         # `extreme` is passed through untouched, so the baseline cannot move.
+        #   ICF_CT_PCA_DIM=k       measure cell-token distances in the leading k
+        #                          PCA directions instead of raw 1536-d (SS149).
+        #                          The basis is the one the CV branch already built
+        #                          for this fold, so no extra eigh and CT is
+        #                          guaranteed to see the same subspace.
+        #   ICF_CT_PCA_SCALING     standardise (default) | raw
         ct_readout = os.environ.get("ICF_CT_READOUT", "extreme")
+        ct_pca_dim = os.environ.get("ICF_CT_PCA_DIM")
         saved_ct_features = None
-        if ct_readout != "extreme":
+        if ct_readout != "extreme" or ct_pca_dim is not None:
             from src.models.ct_readout import CTReadoutConfig, ct_margins  # noqa: PLC0415
 
             readout_config = CTReadoutConfig(
@@ -607,7 +614,14 @@ def evaluate_trial(
                 temperature=float(inner.ct_temperature),
                 eps=float(inner.ct_eps),
                 ridge_lambda=float(os.environ.get("ICF_CT_RIDGE_LAMBDA", "1.0")),
+                pca_dim=None if ct_pca_dim is None else int(ct_pca_dim),
+                pca_scaling=os.environ.get("ICF_CT_PCA_SCALING", "standardise"),
             )
+            if ct_pca_dim is not None and basis_mode not in ("pca", "pca_within"):
+                raise ValueError(
+                    "ICF_CT_PCA_DIM reuses the CV branch's PCA basis, so it needs "
+                    "ICF_COVARIANCE_BASIS=pca or pca_within."
+                )
             saved_ct_features = inner._ct_features
             calibrated = os.environ.get("ICF_CT_CALIBRATE", "1") == "1"
 
@@ -618,13 +632,19 @@ def evaluate_trial(
                 margins, _ = ct_margins(
                     context_bags_, context_labels_, query_bags_, _config,
                     mode=_mode, calibrated=_calibrated,
+                    pca_basis=(
+                        None if _config.pca_dim is None
+                        else inner._effective_covariance_projection()
+                    ),
                 )
                 # The head weighs q1 - q0, so split the margin symmetrically.
                 return -0.5 * margins.query, 0.5 * margins.query, margins.separation
 
             inner._ct_features = ct_with_readout
             print(f"ICF_CT_READOUT={ct_readout} calibrated={calibrated} "
-                  f"lambda={readout_config.ridge_lambda}", flush=True)
+                  f"lambda={readout_config.ridge_lambda} "
+                  f"pca_dim={readout_config.pca_dim} "
+                  f"scaling={readout_config.pca_scaling}", flush=True)
         if use_fixed_head:
             head = inner.cv_dd_ct_head[0]
             saved_head = (head.weight.detach().clone(), head.bias.detach().clone())

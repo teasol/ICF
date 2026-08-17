@@ -60,6 +60,25 @@ class CTReadoutConfig:
     temperature: float = 0.5
     eps: float = 1e-6
     ridge_lambda: float = 1.0
+    # SS149. Measure cell-token distances in a PCA subspace instead of raw 1536-d.
+    # None = today's behaviour (v107), unchanged.
+    #
+    # Squared Euclidean distance concentrates as dimension grows: the spread of
+    # pairwise distances shrinks relative to their mean, so every cell ends up
+    # roughly equidistant from every token and the softmax abundance flattens
+    # toward uniform. SS148-4 measured the symptom -- per-token discriminative
+    # |t| with a MEDIAN of 1.31 -- without being able to name the cause.
+    #
+    # The basis is supplied by the caller, not recomputed here: under v107 the
+    # within-slide PCA of the fold's context cells already exists for the CV
+    # branch, so CT can reuse it for free and is guaranteed to see the same
+    # subspace. `pca_dim` slices its leading columns, which is exact because PCA
+    # eigenvectors are ordered by descending eigenvalue (same argument as SS145).
+    pca_dim: int | None = None
+    # "standardise" rescales each retained component to unit context RMS, keeping
+    # the per-coordinate convention the 1536-d path already uses. "raw" leaves the
+    # eigenvalue scaling in place, so the top components dominate the distance.
+    pca_scaling: str = "standardise"
 
 
 class CTAbundance(NamedTuple):
@@ -91,13 +110,35 @@ def ct_abundance(
     context_bags: Sequence[torch.Tensor],
     query_bags: Sequence[torch.Tensor],
     config: CTReadoutConfig,
+    pca_basis: torch.Tensor | None = None,
 ) -> CTAbundance:
-    """Steps 1-5. Identical for every readout, and label-free by construction."""
+    """Steps 1-5. Identical for every readout, and label-free by construction.
+
+    With `pca_basis` and `config.pca_dim` set, cells are projected into that
+    subspace BEFORE tokens are chosen, so both the farthest-point selection and
+    the soft assignment measure distance in the reduced space (docs SS149). The
+    basis must come from CONTEXT cells only; nothing here checks that, because the
+    caller owns it -- v107 passes the within-slide PCA the CV branch already built.
+    """
     context = [sample_cells(bag, config) for bag in context_bags]
     query = [sample_cells(bag, config) for bag in query_bags]
+    if pca_basis is not None and config.pca_dim is not None:
+        # Project the RAW cells: the basis was built in unstandardised UNI2 space,
+        # so that is the space it is orthonormal in. Per-coordinate standardisation
+        # then happens below, on the retained components instead of on all 1,536.
+        basis = pca_basis[:, : config.pca_dim].to(context[0].dtype)
+        context = [bag @ basis for bag in context]
+        query = [bag @ basis for bag in query]
     pooled = torch.cat(context, dim=0)
     centre = pooled.mean(dim=0, keepdim=True)
-    scale = (pooled - centre).square().mean(dim=0, keepdim=True).sqrt().clamp_min(config.eps)
+    if config.pca_scaling == "standardise" or pca_basis is None or config.pca_dim is None:
+        scale = (pooled - centre).square().mean(dim=0, keepdim=True).sqrt().clamp_min(config.eps)
+    elif config.pca_scaling == "raw":
+        # One shared scale: centres the cloud without flattening the eigenvalue
+        # spectrum, so leading components keep their larger share of the distance.
+        scale = (pooled - centre).square().mean().sqrt().clamp_min(config.eps)
+    else:
+        raise ValueError(f"pca_scaling must be 'standardise' or 'raw', got {config.pca_scaling!r}")
     context = [(bag - centre) / scale for bag in context]
     query = [(bag - centre) / scale for bag in query]
     pooled = torch.cat(context, dim=0)
@@ -255,7 +296,7 @@ def calibrate(alternative: CTMargins, reference: CTMargins, config) -> CTMargins
 
 
 def ct_margins(context_bags, labels, query_bags, config, mode="extreme",
-               calibrated=True):
+               calibrated=True, pca_basis=None):
     """One entry point: abundance once, then the requested readout.
 
     `calibrated` only affects the non-extreme modes; `extreme` IS the reference
@@ -263,7 +304,7 @@ def ct_margins(context_bags, labels, query_bags, config, mode="extreme",
     """
     if mode not in READOUTS:
         raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
-    abundance = ct_abundance(context_bags, query_bags, config)
+    abundance = ct_abundance(context_bags, query_bags, config, pca_basis)
     margins = READOUTS[mode](abundance, labels, config)
     if mode != "extreme" and calibrated:
         margins = calibrate(margins, readout_extreme(abundance, labels, config), config)

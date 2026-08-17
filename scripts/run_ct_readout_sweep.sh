@@ -58,6 +58,14 @@ run_job() {
     ct_ridge)            vars+=(ICF_CT_READOUT=ridge) ;;
     ct_prototype_nocal)  vars+=(ICF_CT_READOUT=prototype ICF_CT_CALIBRATE=0) ;;
     ct_ridge_nocal)      vars+=(ICF_CT_READOUT=ridge ICF_CT_CALIBRATE=0) ;;
+    # SS149: distances in the leading k PCA directions instead of raw 1536-d,
+    # reusing the basis the CV branch already built for the fold.
+    pca*_raw)            vars+=(ICF_CT_PCA_DIM="${arm#pca}" ICF_CT_PCA_SCALING=raw)
+                         vars[-2]="ICF_CT_PCA_DIM=${arm#pca}"
+                         vars[-2]="${vars[-2]%_raw}" ;;
+    pca*_ridge)          local d="${arm#pca}"; d="${d%_ridge}"
+                         vars+=(ICF_CT_PCA_DIM="$d" ICF_CT_READOUT=ridge) ;;
+    pca*)                vars+=(ICF_CT_PCA_DIM="${arm#pca}") ;;
   esac
   CUDA_VISIBLE_DEVICES="$gpu" env "${vars[@]}" "$PY" scripts/test_pathobench.py \
     --checkpoint "$CKPT" --config "$CONFIG" \
