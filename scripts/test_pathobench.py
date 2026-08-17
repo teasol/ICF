@@ -672,6 +672,74 @@ def evaluate_trial(
         # `ICF_DD_RELATIVE_CALIBRATE=0` turns off the rescale, as the control: the
         # relative margin lives in (-1, 1) while the difference is unbounded, so
         # feeding it raw to a fixed 0.343 compares DD's magnitude, not its shape.
+        # docs SS156. `ICF_CV_BLOCKS` restricts what the CV RIDGE sees, to decompose
+        # where CV's 34,432-d descriptor [vech(B^T C_bag B), xbar_b] earns its keep.
+        #
+        #   cov+mean (default) | cov | mean | diag | offdiag | diag+mean
+        #
+        # ⚠️ DD is deliberately UNTOUCHED. It rebuilds its K x K matrices from the
+        # CV descriptor's triangle (`_covariance_matrices_from_triangle`) using the
+        # raw `context` that `_relation_logits` holds, so masking here cannot reach
+        # it -- which is the whole point: masking the descriptor globally would break
+        # DD on the mean-only arm and confound the two branches. CT reads raw cells
+        # and is independent either way.
+        #
+        # The masking rides inside `_normalize_descriptors` because `_ridge_logits`
+        # looks that up on the INSTANCE (while `_ridge_logits` itself is called by
+        # class from `_relation_logits`, so it cannot be patched per-instance, SS145).
+        # It may change the descriptor width, and the ridge simply uses what it gets.
+        #
+        #   ICF_CV_BLOCK_NORM=blockwise (default) each surviving block gets its own
+        #       context RMS -- what the pipeline would do for a descriptor of that
+        #       shape. `parent` normalises the FULL covariance and mean blocks first
+        #       and then selects columns, so diag/offdiag differ from `cov` in CONTENT
+        #       ONLY. Running both separates content from normalisation.
+        cv_blocks = os.environ.get("ICF_CV_BLOCKS")
+        saved_normalize = None
+        if cv_blocks is not None:
+            covariance_dim = int(inner.covariance_descriptor_dim)
+            mean_dim = int(inner.mean_descriptor_dim)
+            row, column = inner._covariance_triangle
+            is_diagonal = (row == column)
+            device = row.device
+            cov_index = torch.arange(covariance_dim, device=device)
+            groups = {
+                "cov": [cov_index],
+                "mean": [torch.arange(covariance_dim, covariance_dim + mean_dim, device=device)],
+                "diag": [cov_index[is_diagonal]],
+                "offdiag": [cov_index[~is_diagonal]],
+            }
+            selection = []
+            for name in cv_blocks.split("+"):
+                if name not in groups:
+                    raise ValueError(
+                        f"ICF_CV_BLOCKS parts must be in {sorted(groups)}, got {name!r}"
+                    )
+                selection.extend(groups[name])
+            block_norm = os.environ.get("ICF_CV_BLOCK_NORM", "blockwise")
+            if block_norm not in ("blockwise", "parent"):
+                raise ValueError("ICF_CV_BLOCK_NORM must be blockwise or parent")
+            saved_normalize = inner._normalize_descriptors
+
+            def masked_normalize(context, query, _sel=selection, _norm=block_norm):
+                if _norm == "parent":
+                    # Normalise the two ORIGINAL blocks, then select columns, so a
+                    # sub-block keeps the scale it had inside the full descriptor.
+                    context, query = saved_normalize(context, query)
+                    index = torch.cat(_sel)
+                    return context.index_select(-1, index), query.index_select(-1, index)
+                parts_c, parts_q = [], []
+                for index in _sel:
+                    piece_c, piece_q = inner._normalize_block(
+                        context.index_select(-1, index), query.index_select(-1, index)
+                    )
+                    parts_c.append(piece_c)
+                    parts_q.append(piece_q)
+                return torch.cat(parts_c, dim=-1), torch.cat(parts_q, dim=-1)
+
+            inner._normalize_descriptors = masked_normalize
+            print(f"ICF_CV_BLOCKS={cv_blocks} norm={block_norm} "
+                  f"dims={sum(int(i.numel()) for i in selection)}", flush=True)
         dd_relative = os.environ.get("ICF_DD_RELATIVE") == "1"
         saved_relative_features = None
         if dd_relative:
@@ -781,6 +849,8 @@ def evaluate_trial(
                 inner._dd_distance_features = saved_llr_features
             if saved_relative_features is not None:
                 inner._dd_distance_features = saved_relative_features
+            if saved_normalize is not None:
+                inner._normalize_descriptors = saved_normalize
         scores = torch.softmax(logits.float(), dim=-1)[:, 1]
         nan_count = int(torch.isnan(scores).sum())
         probabilities = [float(value) for value in scores]

@@ -48,7 +48,7 @@ for arm in $ARMS; do for t in "${TASKS[@]}"; do jobs+=("$arm|$t"); done; done
 echo "${#jobs[@]} jobs over $NGPU GPUs"
 
 run_job() {
-  local gpu="$1" arm="$2" task="$3" d
+  local gpu="$1" arm="$2" task="$3" d rest blocks suffix
   local name="${task//\//_}"
   local log="$OUT/${arm}_${name}.log"
   local vars=(ICF_COVARIANCE_BASIS=pca_within ICF_FIXED_HEAD=1 ICF_SKETCH_DIM=256)
@@ -81,6 +81,21 @@ run_job() {
     rel)                 vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_DD_RELATIVE=1) ;;
     rel_nocal)           vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_DD_RELATIVE=1
                                 ICF_DD_RELATIVE_CALIBRATE=0) ;;
+    # SS156: CV descriptor decomposition, all on top of v108.
+    #   cvo_*  = CV-ONLY: DD and CT weights set to 0, so the margin is 1.442*(cv1-cv0)
+    #            and AUROC (scale-free) reads the CV branch alone.
+    #   *_par  = ICF_CV_BLOCK_NORM=parent, the normalisation control.
+    #   *_lam* = ridge lambda, checking SS142-2's inertness at the new dimensions.
+    cvo_*|cv_*)
+        rest="${arm#cv}"; rest="${rest#o}"; rest="${rest#_}"
+        blocks="${rest%%_*}"; suffix="${rest#"$blocks"}"
+        vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
+               ICF_CV_BLOCKS="${blocks//./+}")
+        case "$arm" in cvo_*) vars+=(ICF_FIXED_HEAD_DD_WEIGHT=0 ICF_FIXED_HEAD_CT_WEIGHT=0) ;; esac
+        case "$suffix" in
+          _par)   vars+=(ICF_CV_BLOCK_NORM=parent) ;;
+          _lam*)  vars+=(ICF_RIDGE_LAMBDA="${suffix#_lam}") ;;
+        esac ;;
     dd*)                 vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
                                 ICF_FIXED_HEAD_DD_WEIGHT="${arm#dd}") ;;
   esac
