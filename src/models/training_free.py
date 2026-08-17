@@ -133,9 +133,14 @@ class TrainingFreeConfig:
     weight_cv: float = 1.442
     weight_dd: float = -0.343
     weight_ct: float = 0.286
-    # SS148 diagnostic only. "extreme" is v107; "prototype"/"ridge" read all 16
-    # abundance dims instead of two. Changing this changes the model.
-    ct_readout: str = "extreme"
+    # SS152 (v108, user decision). CT reads all 16 abundance dims through a
+    # class-balanced ridge, and measures cell-token distance in the leading 32 PCA
+    # directions instead of raw 1,536. The two are promoted TOGETHER because
+    # neither works alone: singles are +0.0019 and +0.0008 on 17 tasks, the
+    # combination is +0.0037 and is the only CT variant positive in both task
+    # groups (SS150-2). v107's values were "extreme" and None.
+    ct_readout: str = "ridge"
+    ct_pca_dim: int | None = 32
 
 
 
@@ -231,7 +236,7 @@ class TrainingFreeClassifier:
         return (query_feature[:, None] - prototypes[None, :]).square() / dispersions[None, :]
 
     # ---- 5. CT ------------------------------------------------------------
-    def _ct_features(self, context_bags, labels, query_bags):
+    def _ct_features(self, context_bags, labels, query_bags, basis=None):
         """Two-token abundance readout, delegated to `ct_readout` (docs SS148).
 
         Steps 1-5 (sample, standardise, farthest-point tokens, soft assign, per-bag
@@ -249,8 +254,14 @@ class TrainingFreeClassifier:
                 cells_per_bag=config.ct_cells_per_bag,
                 temperature=config.ct_temperature,
                 eps=config.ct_eps,
+                pca_dim=config.ct_pca_dim,
             ),
             mode=config.ct_readout,
+            # The SAME within-slide basis the CV branch uses, sliced to
+            # `ct_pca_dim`. Reusing it costs no extra eigh -- and is also why the
+            # gain is capped, since CT then lives inside a subspace CV already
+            # covers (SS149-4).
+            pca_basis=basis,
         )
         # The head consumes (q0, q1) and weighs q1 - q0, so hand back a pair whose
         # difference IS the margin. For "extreme" this returns exactly the two
@@ -283,7 +294,7 @@ class TrainingFreeClassifier:
             return matrices
 
         dd = self._dd_features(to_matrices(context), context_labels, to_matrices(query))
-        q0, q1 = self._ct_features(context_bags, context_labels, query_bags)
+        q0, q1 = self._ct_features(context_bags, context_labels, query_bags, basis)
         return (
             config.weight_cv * (cv[:, 1] - cv[:, 0])
             + config.weight_dd * (dd[:, 1] - dd[:, 0])

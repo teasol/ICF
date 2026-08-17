@@ -69,6 +69,10 @@ run_job() {
     pca*_proto)          d="${arm#pca}"; d="${d%_proto}"
                          vars+=(ICF_CT_PCA_DIM="$d" ICF_CT_READOUT=prototype) ;;
     pca*)                vars+=(ICF_CT_PCA_DIM="${arm#pca}") ;;
+    # SS151: CT weight sweep on top of the (pca32, ridge) configuration. 0.286 was
+    # fitted for the OLD readout, so a better CT margin may want more of the head.
+    w*)                  vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
+                                ICF_FIXED_HEAD_CT_WEIGHT="${arm#w}") ;;
   esac
   CUDA_VISIBLE_DEVICES="$gpu" env "${vars[@]}" "$PY" scripts/test_pathobench.py \
     --checkpoint "$CKPT" --config "$CONFIG" \

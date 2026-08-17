@@ -1,9 +1,11 @@
 # Documentation map
 
-**Last updated**: `2026-08-16`
-**Active 구성**: **v107 — 학습 파라미터 0, K=256** (§142, 사용자 결정). within-slide PCA 사영 +
-고정 3상수 head, 정식 경로 SEAL macro **0.6945**, **seed std 0.00000**. 실행: `bash scripts/eval_v107.sh <gpu> <tag>`.
-v106(K=128, 0.6864)과 직전 baseline v98(8 seed 0.6852)은 historical.
+**Last updated**: `2026-08-17`
+**Active 구성**: **v108 — 학습 파라미터 0** (§152, 사용자 결정). within-slide PCA(K=256) 사영 +
+고정 3상수 head + **CT는 32-d PCA 부분공간에서 16-d abundance ridge**. 정식 경로 SEAL macro
+**0.6967**, **seed std 0.00000**. 실행: `bash scripts/eval_v108.sh <gpu> <tag>`.
+⚠️ **결정론적이므로 t·p·CI 금지**(§151-1) — 부호 일치와 독립 집단 재현으로 판정.
+v107(0.6945)·v106(0.6864)과 직전 baseline v98(8 seed 0.6852)은 historical.
 ⚠️ v98 8 seed 평균 대비 +0.0093이지만 **v98 상위 두 시드와 4-seed 앙상블(0.6951)에는 아직 진다** —
 "v98을 이겼다"고 쓰지 말 것. 실행 중: 없음.
 

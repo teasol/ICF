@@ -1,14 +1,19 @@
 """`TrainingFreeClassifier` must reproduce the lineage path it replaces (docs SS140).
 
 A rewrite of a scoring pipeline is only worth having if it is provably the same
-pipeline. v107's number (official-path macro 0.6945) was produced by
-`set_transformer_ridge.py` with `ICF_COVARIANCE_BASIS=pca_within`,
+pipeline. The lineage path is reachable with `ICF_COVARIANCE_BASIS=pca_within`,
 `ICF_FIXED_HEAD=1` and `ICF_SKETCH_DIM=256`; if this file drifts from that by
-even a little, every comparison against v107 silently stops meaning what it says.
+even a little, every comparison against it silently stops meaning what it says.
 
-The equivalence tests below pin K=8, not the 256 default: the property that
-matters is that the two implementations agree at whatever K they are given, and
-a small K keeps the test fast. `DefaultTest` guards the default itself.
+⚠️ The equivalence tests pin the **v107** CT configuration explicitly
+(`ct_readout="extreme"`, `ct_pca_dim=None`), because that is what the lineage
+`_ct_features` computes. v108 changed the DEFAULTS (SS152), and the lineage has no
+ridge/PCA CT to compare against -- so equivalence is a statement about a
+configuration, not about the default. `DefaultTest` guards the default separately,
+and the property tests below run on the default so they cover the live model.
+
+They also pin K=8 rather than 256: what matters is that the two implementations
+agree at whatever K they are given, and a small K keeps the test fast.
 
 So the central test is equivalence: build a random episode, score it both ways,
 and require the margins to agree. The rest pin the properties the design rests
@@ -24,6 +29,8 @@ from src.models.training_free import TrainingFreeClassifier, TrainingFreeConfig
 
 DIM = 48
 SKETCH = 8
+# The configuration the lineage `_ct_features` implements -- v108's defaults differ.
+V107 = TrainingFreeConfig(sketch_dim=SKETCH, ct_readout="extreme", ct_pca_dim=None)
 
 
 def episode(seed=0, context=10, query=3, cells=40):
@@ -44,7 +51,7 @@ def lineage_margins(context_bags, labels, query_bags):
         ct_head_hidden_dims=[], dd_shrinkage=0.25, dd_eps=1e-6,
     ).eval()
 
-    reference = TrainingFreeClassifier(TrainingFreeConfig(sketch_dim=SKETCH))
+    reference = TrainingFreeClassifier(V107)
     basis = reference.within_slide_basis(context_bags)
     model._effective_covariance_projection = lambda b=basis: b
     with torch.no_grad():
@@ -65,9 +72,9 @@ class EquivalenceTest(unittest.TestCase):
     def test_margins_match_the_lineage_path(self):
         for seed in range(3):
             context_bags, labels, query_bags = episode(seed)
-            mine = TrainingFreeClassifier(
-                TrainingFreeConfig(sketch_dim=SKETCH)
-            ).margins(context_bags, labels, query_bags)
+            mine = TrainingFreeClassifier(V107).margins(
+                context_bags, labels, query_bags
+            )
             theirs = lineage_margins(context_bags, labels, query_bags)
             self.assertTrue(
                 torch.allclose(mine, theirs, atol=2e-3, rtol=2e-3),
@@ -77,7 +84,7 @@ class EquivalenceTest(unittest.TestCase):
     def test_ranking_matches_exactly(self):
         """AUROC only reads the ordering, so ordering is the contract that counts."""
         context_bags, labels, query_bags = episode(7, query=8)
-        mine = TrainingFreeClassifier(TrainingFreeConfig(sketch_dim=SKETCH)).margins(
+        mine = TrainingFreeClassifier(V107).margins(
             context_bags, labels, query_bags
         )
         theirs = lineage_margins(context_bags, labels, query_bags)
@@ -85,10 +92,15 @@ class EquivalenceTest(unittest.TestCase):
 
 
 class DefaultTest(unittest.TestCase):
-    def test_default_sketch_dim_is_the_promoted_value(self):
-        """SS142 promoted K=128 -> 256. The default IS the baseline; if it drifts,
-        `TrainingFreeClassifier()` silently stops being the active configuration."""
-        self.assertEqual(TrainingFreeConfig().sketch_dim, 256)
+    def test_defaults_are_the_promoted_values(self):
+        """The default IS the baseline; if it drifts, `TrainingFreeClassifier()`
+        silently stops being the active configuration. SS142 promoted K=128 -> 256;
+        SS152 promoted CT to the ridge readout inside a 32-d PCA subspace."""
+        config = TrainingFreeConfig()
+        self.assertEqual(config.sketch_dim, 256)
+        self.assertEqual(config.ct_readout, "ridge")
+        self.assertEqual(config.ct_pca_dim, 32)
+        self.assertEqual(config.weight_ct, 0.286)
 
 
 class PropertyTest(unittest.TestCase):
@@ -100,7 +112,7 @@ class PropertyTest(unittest.TestCase):
     def test_deterministic(self):
         context_bags, labels, query_bags = episode(3)
         model = TrainingFreeClassifier(TrainingFreeConfig(sketch_dim=SKETCH))
-        first = model.margins(context_bags, labels, query_bags)
+        first = model.margins(context_bags, labels, query_bags)  # v108 defaults
         second = model.margins(context_bags, labels, query_bags)
         self.assertTrue(torch.equal(first, second))
 

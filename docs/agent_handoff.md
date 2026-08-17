@@ -53,20 +53,25 @@
 단일 그룹의 |t|보다 우선한다(§131-5).
 
 > [!IMPORTANT]
-> **⚠️⚠️ 2026-08-16 — 활성 구성은 v107: 학습 파라미터 0, K=256 (§139·§142, 사용자 결정)**
+> **⚠️⚠️ 2026-08-17 — 활성 구성은 v108: 학습 파라미터 0 (§139·§142·§152, 사용자 결정)**
 >
 > ```
 > 사영 : fold의 CONTEXT cell을 bag별 자기 평균으로 센터링해 풀링한 공분산의 상위 256 고유벡터
-> head : margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.286·(q1−q0)
-> 정식 경로 SEAL macro 0.6945,  seed std 0.00000,  학습 파라미터 196,621 → 0
+> head : margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.286·(CT1−CT0)
+> CT   : 상위 32 PCA 방향에서 거리 → 16 token abundance → class-balanced ridge
+> 정식 경로 SEAL macro 0.6967,  seed std 0.00000,  학습 파라미터 196,621 → 0
 >
-> bash scripts/eval_v107.sh <gpu> <tag> [tasks...]    # 정의가 사는 단 하나의 자리
+> bash scripts/eval_v108.sh <gpu> <tag> [tasks...]    # 정의가 사는 단 하나의 자리
 > #  = ICF_COVARIANCE_BASIS=pca_within ICF_FIXED_HEAD=1 ICF_SKETCH_DIM=256
 > #    bash scripts/eval_seal_tasks.sh <gpu> <아무 v98 ckpt> \
 > #         configs/train_v98_p1_reverse_1536_1gpu.yaml <tag> <tasks...>
 > ```
-> ⚠️ K=256은 **환경변수로만** 걸린다. config의 `covariance_sketch_dim`은 128 그대로다 — 바꾸면
-> v98 학습 재현이 깨진다. 무학습 구현 `TrainingFreeClassifier`의 기본값만 256으로 바꿨다.
+> ⚠️ K=256과 CT 설정은 **환경변수로만** 걸린다. config의 `covariance_sketch_dim`은 128 그대로다 —
+> 바꾸면 v98 학습 재현이 깨진다. 무학습 구현 `TrainingFreeClassifier`의 기본값만 v108로 바꿨다.
+>
+> ⚠️⚠️ **결정론적 arm에 t·p·CI를 쓰지 말 것 (§151-1).** §107-3의 t는 seed-paired이고 시드 분산이
+> 분모인데, v106 이후는 시드 std가 정확히 0이다. §142~§150에서 내가 보고한 t는 task를 표본으로
+> 끼워넣은 것이라 근거가 없다 — **부호 일치 수**와 **독립 task 집단 재현**으로 판정한다.
 > checkpoint는 껍데기다 — P는 PCA가, head는 상수가 덮어쓰고 `ridge_log_*`는 초기값 그대로다.
 >
 > **① 고정 head는 확정이다 (Δ−0.0003, 정식 경로).** 최종 logit이 `(−½·margin,+½·margin)`이라

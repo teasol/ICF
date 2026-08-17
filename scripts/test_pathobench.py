@@ -646,14 +646,24 @@ def evaluate_trial(
                   f"pca_dim={readout_config.pca_dim} "
                   f"scaling={readout_config.pca_scaling}", flush=True)
         if use_fixed_head:
+            # docs SS151. `ICF_FIXED_HEAD_CT_WEIGHT` overrides the CT coefficient.
+            # 0.286 came from decomposing the eight trained heads (SS137-3), i.e. it
+            # was fitted against the OLD two-token readout at raw 1536 dims. A
+            # better CT margin has no reason to want the same weight, and CT's
+            # weight is only a fifth of CV's 1.442, so the branch is structurally
+            # limited in how far it can move the macro at 0.286.
+            # Antisymmetry is untouched: the pair stays equal and opposite.
+            ct_weight = float(os.environ.get("ICF_FIXED_HEAD_CT_WEIGHT", "0.286"))
             head = inner.cv_dd_ct_head[0]
             saved_head = (head.weight.detach().clone(), head.bias.detach().clone())
             with torch.no_grad():
                 head.weight.zero_()
                 head.bias.zero_()
                 for slot, value in ((0, -1.442), (1, 1.442), (4, 0.343),
-                                    (5, -0.343), (8, -0.286), (9, 0.286)):
+                                    (5, -0.343), (8, -ct_weight), (9, ct_weight)):
                     head.weight[0, slot] = value
+            if ct_weight != 0.286:
+                print(f"ICF_FIXED_HEAD_CT_WEIGHT={ct_weight}", flush=True)
         try:
             with torch.no_grad(), autocast:
                 logits = model.model(episode_bags, episode_y, query_index)
