@@ -625,8 +625,9 @@ def evaluate_trial(
         #   ICF_CT_PCA_SCALING     standardise (default) | raw
         ct_readout = os.environ.get("ICF_CT_READOUT", "extreme")
         ct_pca_dim = os.environ.get("ICF_CT_PCA_DIM")
+        ct_kmeans = os.environ.get("ICF_CT_KMEANS")
         saved_ct_features = None
-        if ct_readout != "extreme" or ct_pca_dim is not None:
+        if ct_readout != "extreme" or ct_pca_dim is not None or ct_kmeans is not None:
             from src.models.ct_readout import CTReadoutConfig, ct_margins  # noqa: PLC0415
 
             readout_config = CTReadoutConfig(
@@ -637,6 +638,8 @@ def evaluate_trial(
                 ridge_lambda=float(os.environ.get("ICF_CT_RIDGE_LAMBDA", "1.0")),
                 pca_dim=None if ct_pca_dim is None else int(ct_pca_dim),
                 pca_scaling=os.environ.get("ICF_CT_PCA_SCALING", "standardise"),
+                # SS157: Lloyd iterations refining the farthest-point tokens.
+                kmeans_iterations=int(os.environ.get("ICF_CT_KMEANS", "0")),
             )
             if ct_pca_dim is not None and basis_mode not in ("pca", "pca_within"):
                 raise ValueError(
@@ -665,7 +668,8 @@ def evaluate_trial(
             print(f"ICF_CT_READOUT={ct_readout} calibrated={calibrated} "
                   f"lambda={readout_config.ridge_lambda} "
                   f"pca_dim={readout_config.pca_dim} "
-                  f"scaling={readout_config.pca_scaling}", flush=True)
+                  f"scaling={readout_config.pca_scaling} "
+                  f"kmeans={readout_config.kmeans_iterations}", flush=True)
         # docs SS155. `ICF_DD_RELATIVE=1` ranks by (D0-D1)/(D0+D1+eps) instead of
         # (D0-D1), i.e. by the RATIO rather than the difference, which suppresses a
         # query that is far from BOTH prototypes yet has a large raw gap.

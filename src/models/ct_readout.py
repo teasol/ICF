@@ -79,6 +79,25 @@ class CTReadoutConfig:
     # the per-coordinate convention the 1536-d path already uses. "raw" leaves the
     # eigenvalue scaling in place, so the top components dominate the distance.
     pca_scaling: str = "standardise"
+    # SS157. Lloyd (k-means) iterations refining the farthest-point tokens.
+    # 0 = farthest-point only, i.e. v108 unchanged.
+    #
+    # Farthest-point sampling maximises spread, so it puts tokens in LOW-density
+    # regions -- outlier cells. Every ordinary cell is then far from every token and
+    # the soft assignment flattens, which is SS148-4's symptom (per-token |t| median
+    # 1.31). k-means puts centroids at density modes instead, which is what "cell
+    # token = a cell population" was supposed to mean.
+    #
+    # Initialised FROM the farthest-point tokens rather than at random, for three
+    # reasons: determinism is a v107/v108 invariant (seed std 0.00000), 0 iterations
+    # reproduces today's behaviour bit for bit, and the iteration count then becomes
+    # ONE knob interpolating between coverage (FPS) and density (k-means).
+    #
+    # ⚠️ The two failure modes are opposite. FPS over-represents rare/outlier cells;
+    # k-means over-represents the dominant population and can spend every centroid
+    # on stroma, losing rare-but-informative ones. Partial refinement sits between,
+    # which is why the count is swept rather than set to convergence.
+    kmeans_iterations: int = 0
 
 
 class CTAbundance(NamedTuple):
@@ -158,6 +177,35 @@ def farthest_point_tokens(pooled: torch.Tensor, config: CTReadoutConfig) -> torc
     return pooled[torch.stack(selected)]
 
 
+def lloyd_refine(pooled: torch.Tensor, tokens: torch.Tensor, iterations: int):
+    """Move tokens to their cluster means, `iterations` times (docs SS157).
+
+    Deterministic throughout: assignment is a hard argmin and the update is a plain
+    mean, so nothing here depends on a seed. A cluster that loses every member keeps
+    its previous position -- the standard fix, and the only one that stays
+    deterministic. Returns the tokens and the final cluster sizes, since how BALANCED
+    the clusters are is the diagnostic that separates "k-means helped" from
+    "k-means collapsed onto the dominant population".
+    """
+    counts = None
+    for _ in range(iterations):
+        assignment = (pooled[:, None, :] - tokens[None]).square().mean(-1).argmin(dim=1)
+        sums = torch.zeros_like(tokens).index_add_(0, assignment, pooled)
+        counts = torch.zeros(
+            tokens.shape[0], device=pooled.device, dtype=pooled.dtype
+        ).index_add_(0, assignment, torch.ones_like(assignment, dtype=pooled.dtype))
+        occupied = counts > 0
+        tokens = torch.where(
+            occupied[:, None], sums / counts.clamp_min(1.0)[:, None], tokens
+        )
+    if counts is None:
+        assignment = (pooled[:, None, :] - tokens[None]).square().mean(-1).argmin(dim=1)
+        counts = torch.zeros(
+            tokens.shape[0], device=pooled.device, dtype=pooled.dtype
+        ).index_add_(0, assignment, torch.ones_like(assignment, dtype=pooled.dtype))
+    return tokens, counts
+
+
 def ct_abundance(
     context_bags: Sequence[torch.Tensor],
     query_bags: Sequence[torch.Tensor],
@@ -173,7 +221,10 @@ def ct_abundance(
     caller owns it -- v107 passes the within-slide PCA the CV branch already built.
     """
     context, query = prepare_cells(context_bags, query_bags, config, pca_basis)
-    tokens = farthest_point_tokens(torch.cat(context, dim=0), config)
+    pooled = torch.cat(context, dim=0)
+    tokens = farthest_point_tokens(pooled, config)
+    if config.kmeans_iterations > 0:
+        tokens, _ = lloyd_refine(pooled, tokens, config.kmeans_iterations)
 
     def abundance(bags):
         return torch.stack([

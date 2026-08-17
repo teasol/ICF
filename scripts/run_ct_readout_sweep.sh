@@ -79,6 +79,17 @@ run_job() {
     llr)                 vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_DD_LLR=1) ;;
     # SS155: rank DD by the ratio (D0-D1)/(D0+D1+eps) instead of the difference.
     rel)                 vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_DD_RELATIVE=1) ;;
+    # SS157: k-means (Lloyd) refinement of the farthest-point tokens, on v108.
+    # SS157-5: k-means tokens x CT weight. SS151 swept the weight on FPS tokens,
+    # which the effective-token count says were collapsed onto ~2 of 16 -- so that
+    # sweep says nothing about the weight a WORKING CT branch wants.
+    km*w*)               rest="${arm#km}"
+                         vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
+                                ICF_CT_KMEANS="${rest%%w*}"
+                                ICF_FIXED_HEAD_CT_WEIGHT="${rest#*w}") ;;
+    kme*)                vars+=(ICF_CT_PCA_DIM=32 ICF_CT_KMEANS="${arm#kme}") ;;
+    km*)                 vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
+                                ICF_CT_KMEANS="${arm#km}") ;;
     rel_nocal)           vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_DD_RELATIVE=1
                                 ICF_DD_RELATIVE_CALIBRATE=0) ;;
     # SS156: CV descriptor decomposition, all on top of v108.

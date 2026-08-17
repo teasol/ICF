@@ -23,6 +23,8 @@ from src.models.ct_readout import (
     ct_margins,
     discriminative_score,
     readout_extreme,
+    farthest_point_tokens,
+    lloyd_refine,
     prepare_cells,
     readout_prototype,
     readout_ridge,
@@ -284,6 +286,85 @@ class PrepareCellsTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "pca_scaling"):
             prepare_cells(context_bags, query_bags,
                           CTReadoutConfig(pca_dim=4, pca_scaling="nope"), basis)
+
+
+class KMeansTest(unittest.TestCase):
+    """SS157. Lloyd refinement of the farthest-point tokens. `iterations=0` must be
+    today's behaviour exactly, or every "k-means gains X" mixes two changes."""
+
+    def _config(self, iterations, pca_dim=None):
+        return CTReadoutConfig(
+            num_tokens=CONFIG.num_tokens, cells_per_bag=CONFIG.cells_per_bag,
+            temperature=CONFIG.temperature, eps=CONFIG.eps,
+            pca_dim=pca_dim, kmeans_iterations=iterations,
+        )
+
+    def test_zero_iterations_is_farthest_point_exactly(self):
+        context_bags, labels, query_bags = episode(30)
+        for mode in ("extreme", "ridge"):
+            a, _ = ct_margins(context_bags, labels, query_bags, self._config(0), mode)
+            b, _ = ct_margins(context_bags, labels, query_bags, CONFIG, mode)
+            self.assertTrue(torch.equal(a.query, b.query), mode)
+
+    def test_refinement_moves_the_tokens(self):
+        context_bags, _, query_bags = episode(31)
+        before = ct_abundance(context_bags, query_bags, self._config(0)).tokens
+        after = ct_abundance(context_bags, query_bags, self._config(5)).tokens
+        self.assertFalse(torch.allclose(before, after, atol=1e-6))
+        self.assertEqual(before.shape, after.shape)
+
+    def test_tokens_stop_being_actual_cells(self):
+        """FPS tokens ARE cells; centroids are averages, so they need not be."""
+        context_bags, _, query_bags = episode(32)
+        context, _ = prepare_cells(context_bags, query_bags, self._config(5), None)
+        pooled = torch.cat(context, dim=0)
+        tokens = ct_abundance(context_bags, query_bags, self._config(5)).tokens
+        distances = [
+            float((pooled - token).square().sum(dim=-1).min()) for token in tokens
+        ]
+        self.assertGreater(max(distances), 1e-6)
+
+    def test_deterministic_across_calls(self):
+        context_bags, labels, query_bags = episode(33)
+        for iterations in (1, 5, 20):
+            a, _ = ct_margins(context_bags, labels, query_bags,
+                              self._config(iterations), "ridge")
+            b, _ = ct_margins(context_bags, labels, query_bags,
+                              self._config(iterations), "ridge")
+            self.assertTrue(torch.equal(a.query, b.query), str(iterations))
+
+    def test_query_cells_never_move_the_tokens(self):
+        context_bags, _, query_bags = episode(34)
+        config = self._config(8)
+        first = ct_abundance(context_bags, query_bags, config).tokens
+        other = [bag * 4.0 - 9.0 for bag in query_bags]
+        second = ct_abundance(context_bags, other, config).tokens
+        self.assertTrue(torch.equal(first, second))
+
+    def test_converges_so_extra_iterations_stop_changing_anything(self):
+        context_bags, _, query_bags = episode(35)
+        near = ct_abundance(context_bags, query_bags, self._config(60)).tokens
+        further = ct_abundance(context_bags, query_bags, self._config(80)).tokens
+        self.assertTrue(torch.allclose(near, further, atol=1e-5))
+
+    def test_empty_cluster_keeps_its_previous_position(self):
+        """Two tight blobs and many tokens forces empties; must not produce NaN."""
+        generator = torch.Generator().manual_seed(0)
+        bags = [torch.randn(20, DIM, generator=generator) * 0.01 + offset
+                for offset in (0.0, 10.0)] * 4
+        config = CTReadoutConfig(num_tokens=12, cells_per_bag=20, temperature=0.5,
+                                 eps=1e-6, kmeans_iterations=10)
+        tokens = ct_abundance(bags, bags[:2], config).tokens
+        self.assertTrue(bool(torch.isfinite(tokens).all()))
+
+    def test_cluster_sizes_are_reported_and_sum_to_the_cell_count(self):
+        context_bags, _, query_bags = episode(36)
+        config = self._config(5)
+        context, _ = prepare_cells(context_bags, query_bags, config, None)
+        pooled = torch.cat(context, dim=0)
+        tokens = farthest_point_tokens(pooled, config)
+        _, counts = lloyd_refine(pooled, tokens, config.kmeans_iterations)
+        self.assertEqual(int(counts.sum()), pooled.shape[0])
 
 
 if __name__ == "__main__":
