@@ -14,6 +14,8 @@ from src.models.dd_adaptive_rank import (
     _welch_t,
     adaptive_dd_distance_features,
     dispersion_directions,
+    select_ranks,
+    tstat_by_rank,
 )
 from src.models.set_transformer_ridge import CovarianceMeanLearnablePDDCTMLPModel
 
@@ -128,6 +130,62 @@ class GateTest(unittest.TestCase):
             AdaptiveRankConfig(rank_max=4, t_threshold=0.0, scale_by_rank=True),
         )
         self.assertTrue(torch.allclose(scaled, raw / kept))
+
+
+class SelectorTest(unittest.TestCase):
+    """SS147: |lambda| and |t| mean different things -- large gap vs consistent gap.
+    Used as a SELECTOR (argmax over candidates) rather than as a threshold."""
+
+    def _setup(self, seed=1, context=30):
+        context_cov, labels, query_cov = covariances(seed, context=context)
+        config = AdaptiveRankConfig(selection="lambda_plus_t", tstat_range=(1, SKETCH))
+        directions, _ = dispersion_directions(context_cov, labels, config)
+        return context_cov, labels, query_cov, directions, config
+
+    def test_lambda_plus_t_keeps_rank_0_and_adds_the_t_argmax(self):
+        context_cov, labels, _, directions, config = self._setup()
+        ranks = select_ranks(context_cov, labels, directions, config)
+        candidate_ranks, statistics = tstat_by_rank(
+            context_cov, labels, directions, config
+        )
+        expected = candidate_ranks[int(torch.stack(statistics).argmax())]
+        self.assertEqual(ranks, [0, expected])
+        self.assertNotEqual(expected, 0, "the t pick must not collapse onto rank 0")
+
+    def test_tstat_alone_drops_rank_0(self):
+        context_cov, labels, _, directions, config = self._setup()
+        ranks = select_ranks(
+            context_cov, labels, directions,
+            AdaptiveRankConfig(selection="tstat", tstat_range=(1, SKETCH)),
+        )
+        self.assertEqual(len(ranks), 1)
+        self.assertNotIn(0, ranks)
+
+    def test_range_is_respected(self):
+        context_cov, labels, _, directions, _ = self._setup()
+        for low, high in ((1, 4), (3, 7)):
+            ranks = select_ranks(
+                context_cov, labels, directions,
+                AdaptiveRankConfig(selection="tstat", tstat_range=(low, high)),
+            )
+            self.assertGreaterEqual(ranks[0], low)
+            self.assertLess(ranks[0], high)
+
+    def test_lambda_plus_t_yields_two_directions_and_a_two_wide_output(self):
+        context_cov, labels, query_cov, _, config = self._setup()
+        distances, _, kept = adaptive_dd_distance_features(
+            context_cov, labels, query_cov, config
+        )
+        self.assertEqual(kept, 2)
+        self.assertEqual(distances.shape, (5, 2))
+
+    def test_unknown_selection_is_rejected(self):
+        context_cov, labels, _, directions, _ = self._setup()
+        with self.assertRaisesRegex(ValueError, "unknown selection"):
+            select_ranks(
+                context_cov, labels, directions,
+                AdaptiveRankConfig(selection="nope"),
+            )
 
 
 class WelchTest(unittest.TestCase):

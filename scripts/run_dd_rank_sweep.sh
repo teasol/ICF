@@ -57,6 +57,14 @@ run_job() {
   case "$arm" in
     r1)     ;;
     scale8) vars+=(ICF_DD_RANK_MAX=8 ICF_DD_RANK_TSTAT=0 ICF_DD_RANK_SCALE=1) ;;
+    # SS147: |lambda| picks the LARGEST dispersion gap, |t| the most CONSISTENT
+    # one, and SS146-2 measured that they disagree. `lamt` takes one of each
+    # (r=2, so `r2` is its scale-matched control); `tonly` swaps |lambda|'s pick
+    # for |t|'s (r=1, so `r1` is its control). The |t| argmax is drawn from
+    # |lambda|-ranks 1..15 -- the 2nd..16th directions -- so it can never
+    # collapse onto rank 0.
+    lamt)   vars+=(ICF_DD_SELECT=lambda_plus_t ICF_DD_TSTAT_RANGE=1:16) ;;
+    tonly)  vars+=(ICF_DD_SELECT=tstat ICF_DD_TSTAT_RANGE=1:16) ;;
     r*)     vars+=(ICF_DD_RANK_MAX="${arm#r}" ICF_DD_RANK_TSTAT=0) ;;
   esac
   CUDA_VISIBLE_DEVICES="$gpu" env "${vars[@]}" "$PY" scripts/test_pathobench.py \

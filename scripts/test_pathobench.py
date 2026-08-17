@@ -542,9 +542,15 @@ def evaluate_trial(
         #                            (0 = keep all r, inf = keep only rank 1)
         #   ICF_DD_RANK_SCALE=1      divide distances by the count kept (control
         #                            for DD's magnitude growing with r)
+        #   ICF_DD_SELECT=lambda_plus_t|tstat   how directions are CHOSEN (SS147).
+        #                            |lambda| = the dispersion gap is LARGE,
+        #                            |t| = it is CONSISTENT. SS146-2 measured that
+        #                            the two disagree, so they are complementary.
+        #   ICF_DD_TSTAT_RANGE=1:16  |lambda|-rank window the |t| argmax comes from
         rank_max = int(os.environ.get("ICF_DD_RANK_MAX", "1"))
+        selection = os.environ.get("ICF_DD_SELECT", "eigenvalue")
         saved_rank_features = None
-        if rank_max > 1:
+        if rank_max > 1 or selection != "eigenvalue":
             from src.models.dd_adaptive_rank import (  # noqa: PLC0415
                 AdaptiveRankConfig,
                 adaptive_dd_distance_features,
@@ -556,13 +562,18 @@ def evaluate_trial(
                     "_dd_distance_features; run them one at a time (SS127-2)."
                 )
             saved_rank_features = inner._dd_distance_features
+            low, high = os.environ.get("ICF_DD_TSTAT_RANGE", "1:16").split(":")
             rank_config = AdaptiveRankConfig(
                 rank_max=rank_max,
                 t_threshold=float(os.environ.get("ICF_DD_RANK_TSTAT", "2.5")),
                 scale_by_rank=os.environ.get("ICF_DD_RANK_SCALE") == "1",
                 shrinkage=float(inner.dd_shrinkage),
                 eps=float(inner.dd_eps),
+                selection=selection,
+                tstat_range=(int(low), int(high)),
             )
+            print(f"ICF_DD_SELECT={selection} range=({low},{high}) rank_max={rank_max}",
+                  flush=True)
 
             def dd_with_adaptive_rank(
                 context_covariance, context_labels, query_covariance,

@@ -51,6 +51,25 @@ class AdaptiveRankConfig:
     scale_by_rank: bool = False
     shrinkage: float = 0.25
     eps: float = 1e-6
+    # SS147. How directions are CHOSEN, as opposed to how many pass a threshold.
+    # The two criteria mean different things and SS146-2 measured that they
+    # disagree (rank 0 is the |t| argmax on 1 of 15 folds):
+    #
+    #   |lambda|  the class dispersion gap is LARGE   (a mean difference)
+    #   |t|       the class dispersion gap is CONSISTENT
+    #             (that same difference divided by within-class scatter)
+    #
+    #   "eigenvalue"     top `rank_max` by |lambda| -- SS146's behaviour
+    #   "lambda_plus_t"  rank 0 by |lambda|, PLUS the |t| argmax drawn from
+    #                    `tstat_range`. r=2, two complementary criteria.
+    #   "tstat"          the |t| argmax from `tstat_range` alone, r=1. Isolates
+    #                    whether |t| picks a BETTER single direction than
+    #                    |lambda| does, which "lambda_plus_t" cannot tell you.
+    selection: str = "eigenvalue"
+    # Half-open |lambda|-rank window the |t| argmax is drawn from, 0-indexed.
+    # (1, 16) = the 2nd through 16th directions, excluding rank 0 so the |t| pick
+    # cannot collapse onto the |lambda| pick.
+    tstat_range: tuple[int, int] = (1, 16)
 
 
 def _welch_t(first: torch.Tensor, second: torch.Tensor, eps: float) -> torch.Tensor:
@@ -96,40 +115,82 @@ def dispersion_directions(context_covariance, context_labels, config):
         return whitening @ eigenvectors[:, order], eigenvalues[order]
 
 
+def _log_scalars(covariance, direction, eps):
+    """log(s_b) where s_b = u^T C_b u -- the one number a direction induces."""
+    return torch.einsum("d,bdk,k->b", direction, covariance, direction).clamp_min(eps).log()
+
+
+def tstat_by_rank(context_covariance, context_labels, directions, config):
+    """|t| of log(s_b) split by class, for every rank in `tstat_range`.
+
+    ⚠️ Post-selection: these directions were chosen on these bags, so |t| is
+    inflated and is NOT a p-value (SS146-2). Used here only to ARGMAX over
+    candidates, which needs an ordering rather than a calibrated scale.
+    """
+    labels = context_labels.long()
+    low, high = config.tstat_range
+    high = min(high, directions.shape[-1])
+    ranks, statistics = [], []
+    for rank in range(low, high):
+        scalar = _log_scalars(context_covariance, directions[:, rank], config.eps)
+        ranks.append(rank)
+        statistics.append(
+            _welch_t(scalar[labels == 0], scalar[labels == 1], config.eps).abs()
+        )
+    return ranks, statistics
+
+
+def select_ranks(context_covariance, context_labels, directions, config):
+    """Which |lambda|-ranks to use, per `config.selection`."""
+    if config.selection == "eigenvalue":
+        # Threshold mode: rank 0 always, later ranks must pass |t| (SS146).
+        labels = context_labels.long()
+        chosen = [0]
+        for rank in range(1, min(config.rank_max, directions.shape[-1])):
+            scalar = _log_scalars(context_covariance, directions[:, rank], config.eps)
+            statistic = _welch_t(scalar[labels == 0], scalar[labels == 1], config.eps)
+            if float(statistic.abs()) >= config.t_threshold:
+                chosen.append(rank)
+        return chosen
+    ranks, statistics = tstat_by_rank(
+        context_covariance, context_labels, directions, config
+    )
+    if not ranks:
+        return [0]
+    best = ranks[int(torch.stack(statistics).argmax())]
+    if config.selection == "tstat":
+        return [best]
+    if config.selection == "lambda_plus_t":
+        return [0, best]
+    raise ValueError(f"unknown selection {config.selection!r}")
+
+
 def adaptive_dd_distance_features(
     context_covariance, context_labels, query_covariance, config
 ):
-    """`_dd_distance_features` with an adaptive number of directions.
+    """`_dd_distance_features` with an adaptive set of directions.
 
     Returns `(distances, separation, kept)` where `distances` is [queries, 2] as
     the rank-1 version is, so the fixed 12-feature head is untouched. `kept` is
-    the number of directions used, for logging how often the gate fires.
+    how many directions were used, so a null result can be told apart from a
+    selector that never fired.
     """
     labels = context_labels.long()
     directions, _ = dispersion_directions(context_covariance, context_labels, config)
+    chosen = select_ranks(context_covariance, context_labels, directions, config)
 
-    context_features, query_features, kept = [], [], 0
-    for rank in range(min(config.rank_max, directions.shape[-1])):
+    context_features, query_features = [], []
+    for rank in chosen:
         direction = directions[:, rank]
-        context_scalar = torch.einsum(
-            "d,bdk,k->b", direction, context_covariance, direction
-        ).clamp_min(config.eps).log()
-        query_scalar = torch.einsum(
-            "d,qdk,k->q", direction, query_covariance, direction
-        ).clamp_min(config.eps).log()
-        if rank > 0:
-            statistic = _welch_t(
-                context_scalar[labels == 0], context_scalar[labels == 1], config.eps
-            )
-            if float(statistic.abs()) < config.t_threshold:
-                continue
+        context_scalar = _log_scalars(context_covariance, direction, config.eps)
+        query_scalar = _log_scalars(query_covariance, direction, config.eps)
         # Context-only centring and scalar RMS, per direction, exactly as the
         # rank-1 path does. Each direction's log-variance has its own scale.
         centre = context_scalar.mean()
         scale = (context_scalar - centre).square().mean().sqrt().clamp_min(config.eps)
         context_features.append((context_scalar - centre) / scale)
         query_features.append((query_scalar - centre) / scale)
-        kept += 1
+    kept = len(chosen)
 
     context_feature = torch.stack(context_features, dim=-1)
     query_feature = torch.stack(query_features, dim=-1)
