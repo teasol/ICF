@@ -60,6 +60,11 @@ from src.utils.utils import (  # noqa: E402
 MODEL_INPUT_DIM = 512
 FEATURE_DIM = 1536
 
+# docs SS146: how many DD directions the adaptive gate kept, per episode. An
+# arm that reports only AUROC cannot distinguish "rank 2 does not help" from
+# "the gate never fired", so the firing rate is part of the result.
+DD_RANKS_KEPT: list[int] = []
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -528,6 +533,48 @@ def evaluate_trial(
                     inner.covariance_sketch_dim = saved_dim
 
             inner._dd_distance_features = dd_with_own_sketch_dim
+        # docs SS146. Adaptive-rank DD: keep r > 1 dispersion directions, but only
+        # those whose class separation in log(u^T C_b u) passes a Welch t on the
+        # CONTEXT bags. Rank 1 is always kept, so the arm falls back to today's
+        # behaviour rather than to nothing.
+        #   ICF_DD_RANK_MAX=r        candidates considered (1 = unchanged)
+        #   ICF_DD_RANK_TSTAT=x      |t| a direction past the first must reach
+        #                            (0 = keep all r, inf = keep only rank 1)
+        #   ICF_DD_RANK_SCALE=1      divide distances by the count kept (control
+        #                            for DD's magnitude growing with r)
+        rank_max = int(os.environ.get("ICF_DD_RANK_MAX", "1"))
+        saved_rank_features = None
+        if rank_max > 1:
+            from src.models.dd_adaptive_rank import (  # noqa: PLC0415
+                AdaptiveRankConfig,
+                adaptive_dd_distance_features,
+            )
+
+            if saved_dd_features is not None:
+                raise ValueError(
+                    "ICF_DD_RANK_MAX and ICF_SKETCH_DIM_DD both replace "
+                    "_dd_distance_features; run them one at a time (SS127-2)."
+                )
+            saved_rank_features = inner._dd_distance_features
+            rank_config = AdaptiveRankConfig(
+                rank_max=rank_max,
+                t_threshold=float(os.environ.get("ICF_DD_RANK_TSTAT", "2.5")),
+                scale_by_rank=os.environ.get("ICF_DD_RANK_SCALE") == "1",
+                shrinkage=float(inner.dd_shrinkage),
+                eps=float(inner.dd_eps),
+            )
+
+            def dd_with_adaptive_rank(
+                context_covariance, context_labels, query_covariance,
+                _config=rank_config,
+            ):
+                distances, separation, kept = adaptive_dd_distance_features(
+                    context_covariance, context_labels, query_covariance, _config
+                )
+                DD_RANKS_KEPT.append(kept)
+                return distances, separation
+
+            inner._dd_distance_features = dd_with_adaptive_rank
         if use_fixed_head:
             head = inner.cv_dd_ct_head[0]
             saved_head = (head.weight.detach().clone(), head.bias.detach().clone())
@@ -549,6 +596,8 @@ def evaluate_trial(
                     inner.cv_dd_ct_head[0].bias.copy_(saved_head[1])
             if saved_dd_features is not None:
                 inner._dd_distance_features = saved_dd_features
+            if saved_rank_features is not None:
+                inner._dd_distance_features = saved_rank_features
         scores = torch.softmax(logits.float(), dim=-1)[:, 1]
         nan_count = int(torch.isnan(scores).sum())
         probabilities = [float(value) for value in scores]
@@ -933,6 +982,14 @@ def evaluate_official_folds(
           f"{tsv.parent.name} — {len(slide_ids)} slides (folds {start + 1}..{end}) ===")
     print(f"per-fold AUROC: {' '.join(f'{x:.4f}' for x in fold_aurocs)}")
     print(f"fold-mean AUROC: {mean:.4f} ± {std:.4f}   pooled AUROC: {pooled:.4f}")
+    if DD_RANKS_KEPT:
+        # docs SS146: without this, "rank 2 did not help" is indistinguishable
+        # from "the threshold never let a second direction through".
+        counts = sorted(set(DD_RANKS_KEPT))
+        histogram = "  ".join(
+            f"r={r}:{DD_RANKS_KEPT.count(r)}" for r in counts
+        )
+        print(f"DD ranks kept: mean {sum(DD_RANKS_KEPT)/len(DD_RANKS_KEPT):.2f}   {histogram}")
 
     if args.output is not None:
         out = args.output.expanduser().resolve()
