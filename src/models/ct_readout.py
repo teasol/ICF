@@ -188,6 +188,28 @@ def farthest_point_tokens(pooled: torch.Tensor, config: CTReadoutConfig) -> torc
     return pooled[torch.stack(selected)]
 
 
+# docs SS160. Element budget for the cell-to-token distance block. The 3-D
+# broadcast allocates [chunk, tokens, dims], and at 128 tokens over a full-cell
+# context (~1.6M cells) the unchunked form asked for 24.4 GiB and OOM'd on a shared
+# GPU. Chunking over CELLS keeps every element's arithmetic identical -- it only
+# splits the allocation -- so nothing that fit before can change value. 2^27
+# elements is ~537 MB in fp32, and it leaves v109 (64 cells/bag, ~13k pooled cells,
+# 16 tokens) inside a SINGLE chunk, hence bit-identical.
+_DISTANCE_ELEMENT_BUDGET = 1 << 27
+
+
+def _assign(pooled: torch.Tensor, tokens: torch.Tensor) -> torch.Tensor:
+    """Nearest-token index per cell, chunked over cells (docs SS160)."""
+    rows = max(1, _DISTANCE_ELEMENT_BUDGET // max(1, tokens.shape[0] * tokens.shape[1]))
+    if rows >= pooled.shape[0]:
+        return (pooled[:, None, :] - tokens[None]).square().mean(-1).argmin(dim=1)
+    parts = [
+        (pooled[start:start + rows, None, :] - tokens[None]).square().mean(-1).argmin(dim=1)
+        for start in range(0, pooled.shape[0], rows)
+    ]
+    return torch.cat(parts)
+
+
 def lloyd_refine(pooled: torch.Tensor, tokens: torch.Tensor, iterations: int):
     """Move tokens to their cluster means, `iterations` times (docs SS157).
 
@@ -200,7 +222,7 @@ def lloyd_refine(pooled: torch.Tensor, tokens: torch.Tensor, iterations: int):
     """
     counts = None
     for _ in range(iterations):
-        assignment = (pooled[:, None, :] - tokens[None]).square().mean(-1).argmin(dim=1)
+        assignment = _assign(pooled, tokens)
         sums = torch.zeros_like(tokens).index_add_(0, assignment, pooled)
         counts = torch.zeros(
             tokens.shape[0], device=pooled.device, dtype=pooled.dtype
@@ -210,7 +232,7 @@ def lloyd_refine(pooled: torch.Tensor, tokens: torch.Tensor, iterations: int):
             occupied[:, None], sums / counts.clamp_min(1.0)[:, None], tokens
         )
     if counts is None:
-        assignment = (pooled[:, None, :] - tokens[None]).square().mean(-1).argmin(dim=1)
+        assignment = _assign(pooled, tokens)
         counts = torch.zeros(
             tokens.shape[0], device=pooled.device, dtype=pooled.dtype
         ).index_add_(0, assignment, torch.ones_like(assignment, dtype=pooled.dtype))
@@ -238,11 +260,27 @@ def ct_abundance(
         tokens, _ = lloyd_refine(pooled, tokens, config.kmeans_iterations)
 
     def abundance(bags):
-        return torch.stack([
-            (-(bag[:, None, :] - tokens[None]).square().mean(-1) / config.temperature)
-            .softmax(dim=-1).mean(dim=0)
-            for bag in bags
-        ])
+        # Chunked for the same reason as `_assign`, and identically exact: the mean
+        # over cells is accumulated as a weighted sum of per-chunk means.
+        rows = max(1, _DISTANCE_ELEMENT_BUDGET
+                   // max(1, tokens.shape[0] * tokens.shape[1]))
+        outputs = []
+        for bag in bags:
+            if rows >= bag.shape[0]:
+                outputs.append(
+                    (-(bag[:, None, :] - tokens[None]).square().mean(-1)
+                     / config.temperature).softmax(dim=-1).mean(dim=0)
+                )
+                continue
+            total = torch.zeros(tokens.shape[0], device=bag.device, dtype=bag.dtype)
+            for start in range(0, bag.shape[0], rows):
+                block = bag[start:start + rows]
+                total = total + (
+                    -(block[:, None, :] - tokens[None]).square().mean(-1)
+                    / config.temperature
+                ).softmax(dim=-1).sum(dim=0)
+            outputs.append(total / bag.shape[0])
+        return torch.stack(outputs)
 
     return CTAbundance(tokens, abundance(context), abundance(query))
 

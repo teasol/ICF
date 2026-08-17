@@ -85,6 +85,18 @@ run_job() {
     v109_fullcell)       vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
                                 ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
                                 ICF_CV_BLOCKS=offdiag ICF_CT_CELLS=all) ;;
+    # SS160: token count (= cluster count = CT feature count) at FULL cells.
+    # SS160-4: token count at v109's 64-cell setting -- is the token gain conditional
+    # on full cells, or does it stand alone? (SS150-4: check the diagonal cell.)
+    c64T*)               vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
+                                ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
+                                ICF_CV_BLOCKS=offdiag ICF_CT_TOKENS="${arm#c64T}") ;;
+    fcT*)                rest="${arm#fcT}"
+                         vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
+                                ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
+                                ICF_CV_BLOCKS=offdiag ICF_CT_CELLS=all
+                                ICF_CT_TOKENS="${rest%%_*}")
+                         case "$rest" in *_lam*) vars+=(ICF_CT_RIDGE_LAMBDA="${rest#*_lam}") ;; esac ;;
     v109_cells*)         vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
                                 ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
                                 ICF_CV_BLOCKS=offdiag

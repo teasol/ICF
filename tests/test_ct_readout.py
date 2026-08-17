@@ -367,10 +367,6 @@ class KMeansTest(unittest.TestCase):
         self.assertEqual(int(counts.sum()), pooled.shape[0])
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class FullCellTest(unittest.TestCase):
     """SS159. `cells_per_bag=None` uses every cell. The invariants that matter are
     that 64 still reproduces v109 and that the query still cannot reach the tokens
@@ -424,3 +420,48 @@ class FullCellTest(unittest.TestCase):
         flipped, _ = ct_margins(context_bags, 1 - labels, query_bags, config, "ridge")
         self.assertTrue(torch.equal(a.query, b.query))
         self.assertTrue(torch.allclose(a.query, -flipped.query, atol=1e-4))
+
+
+class ChunkingTest(unittest.TestCase):
+    """SS160. Chunking the cell-to-token distance must be EXACT, not approximate --
+    v109 is a promoted baseline and cannot shift because of a memory fix."""
+
+    def test_chunked_assignment_matches_unchunked(self):
+        import src.models.ct_readout as module
+        generator = torch.Generator().manual_seed(0)
+        pooled = torch.randn(5000, 16, generator=generator)
+        tokens = torch.randn(24, 16, generator=generator)
+        saved = module._DISTANCE_ELEMENT_BUDGET
+        try:
+            reference = module._assign(pooled, tokens)          # single chunk
+            module._DISTANCE_ELEMENT_BUDGET = 24 * 16 * 7       # forces many chunks
+            chunked = module._assign(pooled, tokens)
+        finally:
+            module._DISTANCE_ELEMENT_BUDGET = saved
+        self.assertTrue(torch.equal(reference, chunked))
+
+    def test_chunked_abundance_matches_unchunked(self):
+        import src.models.ct_readout as module
+        context_bags, _, query_bags = episode(50, cells=400)
+        config = CTReadoutConfig(num_tokens=12, cells_per_bag=None,
+                                 temperature=0.5, eps=1e-6, kmeans_iterations=3)
+        saved = module._DISTANCE_ELEMENT_BUDGET
+        try:
+            reference = ct_abundance(context_bags, query_bags, config)
+            module._DISTANCE_ELEMENT_BUDGET = 12 * DIM * 5
+            chunked = ct_abundance(context_bags, query_bags, config)
+        finally:
+            module._DISTANCE_ELEMENT_BUDGET = saved
+        self.assertTrue(torch.equal(reference.tokens, chunked.tokens))
+        self.assertTrue(torch.allclose(reference.context, chunked.context, atol=1e-6))
+        self.assertTrue(torch.allclose(reference.query, chunked.query, atol=1e-6))
+
+    def test_v109_setting_stays_in_one_chunk(self):
+        """64 cells/bag x 16 tokens must never chunk, so v109 is bit-identical."""
+        import src.models.ct_readout as module
+        rows = module._DISTANCE_ELEMENT_BUDGET // (16 * 32)
+        self.assertGreater(rows, 200 * 64)
+
+
+if __name__ == "__main__":
+    unittest.main()
