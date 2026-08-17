@@ -165,6 +165,32 @@ def select_ranks(context_covariance, context_labels, directions, config):
     raise ValueError(f"unknown selection {config.selection!r}")
 
 
+def class_dispersions(context_covariance, context_labels, config):
+    """sigma_c^2 of DD's standardised log-variance feature, per class (docs SS154).
+
+    `_dd_distance_features` divides by these and never returns them, and they cannot
+    be read back off its output: d_c already contains the division, so averaging
+    d_c over class c gives exactly 1 by construction. Rather than re-deriving the
+    feature by hand in a caller -- the mistake SS149-7 came from -- it is computed
+    here, on the same code path `adaptive_dd_distance_features(rank_max=1)` uses to
+    reproduce the lineage bit for bit.
+
+    Needed for the log-determinant term of the Gaussian LLR:
+        log p(f|1) - log p(f|0) = 1/2 (d0 - d1) + 1/2 log(sigma_0^2 / sigma_1^2)
+    """
+    labels = context_labels.long()
+    directions, _ = dispersion_directions(context_covariance, context_labels, config)
+    scalar = _log_scalars(context_covariance, directions[:, 0], config.eps)
+    centre = scalar.mean()
+    scale = (scalar - centre).square().mean().sqrt().clamp_min(config.eps)
+    feature = (scalar - centre) / scale
+    prototypes = torch.stack([feature[labels == c].mean() for c in range(2)])
+    return torch.stack([
+        (feature[labels == c] - prototypes[c]).square().mean().clamp_min(config.eps)
+        for c in range(2)
+    ])
+
+
 def adaptive_dd_distance_features(
     context_covariance, context_labels, query_covariance, config
 ):

@@ -65,6 +65,10 @@ FEATURE_DIM = 1536
 # "the gate never fired", so the firing rate is part of the result.
 DD_RANKS_KEPT: list[int] = []
 
+# docs SS154: the per-episode log(sigma_0^2/sigma_1^2) the LLR term adds. Recorded
+# so "no change" can be told apart from "the term was zero".
+DD_LLR_OFFSETS: list[float] = []
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -505,6 +509,23 @@ def evaluate_trial(
         #
         # `covariance_sketch_dim` has to move with the slice because `_dd_direction`
         # builds its shrinkage identity from it; it is restored immediately.
+        # docs SS154. `ICF_DD_LLR=1` completes DD's log-likelihood ratio.
+        #
+        # `_dd_distance_features` returns d_c = (f - mu_c)^2 / sigma_c^2 and the head
+        # forms 0.343*(d0 - d1). For two univariate Gaussians the actual LLR is
+        #
+        #   log p(f|1) - log p(f|0) = 1/2 (d0 - d1) + 1/2 log(sigma_0^2 / sigma_1^2)
+        #
+        # so today's DD is the ratio with its LOG-DETERMINANT TERM DROPPED. Adding
+        # log(sigma_c^2) to d_c restores it exactly, since
+        # (d0 + log s0) - (d1 + log s1) = (d0 - d1) + log(s0/s1). Class swap negates
+        # it (s0 <-> s1), so the fixed head stays valid.
+        #
+        # ⚠️ sigma_c comes from the CONTEXT only, so the added term is CONSTANT across
+        # every query in a fold. Per-fold AUROC reads only the ranking within a fold
+        # and therefore cannot move; what moves is pooled AUROC (which mixes folds
+        # carrying different constants) and anything calibration-based.
+        dd_llr = os.environ.get("ICF_DD_LLR") == "1"
         dd_sketch_dim = os.environ.get("ICF_SKETCH_DIM_DD")
         saved_dd_features = None
         if dd_sketch_dim is not None:
@@ -645,6 +666,34 @@ def evaluate_trial(
                   f"lambda={readout_config.ridge_lambda} "
                   f"pca_dim={readout_config.pca_dim} "
                   f"scaling={readout_config.pca_scaling}", flush=True)
+        saved_llr_features = None
+        if dd_llr:
+            saved_llr_features = inner._dd_distance_features
+
+            def dd_with_log_determinant(
+                context_covariance, context_labels, query_covariance,
+                _original=saved_llr_features,
+            ):
+                distances, separation = _original(
+                    context_covariance, context_labels, query_covariance
+                )
+                # sigma_c^2 cannot be read back off `distances` -- d_c already
+                # divides by it, so averaging over class c returns exactly 1. It
+                # comes from `class_dispersions`, which sits on the code path that
+                # is pinned equal to the lineage (SS146 tests).
+                from src.models.dd_adaptive_rank import (  # noqa: PLC0415
+                    AdaptiveRankConfig, class_dispersions,
+                )
+
+                offset = class_dispersions(
+                    context_covariance, context_labels,
+                    AdaptiveRankConfig(shrinkage=float(inner.dd_shrinkage),
+                                       eps=float(inner.dd_eps)),
+                ).log()
+                DD_LLR_OFFSETS.append(float(offset[0] - offset[1]))
+                return distances + offset[None, :], separation
+
+            inner._dd_distance_features = dd_with_log_determinant
         if use_fixed_head:
             # docs SS151. `ICF_FIXED_HEAD_CT_WEIGHT` overrides the CT coefficient.
             # 0.286 came from decomposing the eight trained heads (SS137-3), i.e. it
@@ -687,6 +736,8 @@ def evaluate_trial(
                 inner._dd_distance_features = saved_rank_features
             if saved_ct_features is not None:
                 inner._ct_features = saved_ct_features
+            if saved_llr_features is not None:
+                inner._dd_distance_features = saved_llr_features
         scores = torch.softmax(logits.float(), dim=-1)[:, 1]
         nan_count = int(torch.isnan(scores).sum())
         probabilities = [float(value) for value in scores]
@@ -1071,6 +1122,11 @@ def evaluate_official_folds(
           f"{tsv.parent.name} — {len(slide_ids)} slides (folds {start + 1}..{end}) ===")
     print(f"per-fold AUROC: {' '.join(f'{x:.4f}' for x in fold_aurocs)}")
     print(f"fold-mean AUROC: {mean:.4f} ± {std:.4f}   pooled AUROC: {pooled:.4f}")
+    if DD_LLR_OFFSETS:
+        values = torch.tensor(DD_LLR_OFFSETS)
+        print(f"DD LLR log(s0/s1): mean {values.mean():+.4f}  "
+              f"sd {values.std():.4f}  |max| {values.abs().max():.4f}  "
+              f"n {len(DD_LLR_OFFSETS)}")
     if DD_RANKS_KEPT:
         # docs SS146: without this, "rank 2 did not help" is indistinguishable
         # from "the threshold never let a second direction through".

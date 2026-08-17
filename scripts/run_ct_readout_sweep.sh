@@ -75,6 +75,8 @@ run_job() {
                                 ICF_FIXED_HEAD_CT_WEIGHT="${arm#w}") ;;
     # SS153: DD weight, swept DOWNWARD from 0.343 on top of v108. dd0 ablates DD.
     v108)                vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge) ;;
+    # SS154: restore the LLR's log-determinant term, log(sigma_0^2/sigma_1^2).
+    llr)                 vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_DD_LLR=1) ;;
     dd*)                 vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
                                 ICF_FIXED_HEAD_DD_WEIGHT="${arm#dd}") ;;
   esac

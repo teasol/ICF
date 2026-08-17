@@ -11,8 +11,10 @@ import torch
 
 from src.models.dd_adaptive_rank import (
     AdaptiveRankConfig,
+    _log_scalars,
     _welch_t,
     adaptive_dd_distance_features,
+    class_dispersions,
     dispersion_directions,
     select_ranks,
     tstat_by_rank,
@@ -201,6 +203,55 @@ class WelchTest(unittest.TestCase):
     def test_degenerate_group_returns_zero_rather_than_nan(self):
         single = torch.tensor([1.0])
         self.assertEqual(float(_welch_t(single, torch.randn(10), 1e-6)), 0.0)
+
+
+class ClassDispersionTest(unittest.TestCase):
+    """SS154. `class_dispersions` must be the sigma_c^2 the lineage actually divides
+    by, or the LLR's log-determinant term is built on the wrong number."""
+
+    def test_dispersions_reconstruct_the_lineage_distances(self):
+        model = lineage_model()
+        config = AdaptiveRankConfig()
+        for seed in range(3):
+            context, labels, query = covariances(seed)
+            expected, _ = model._dd_distance_features(context, labels, query)
+            variances = class_dispersions(context, labels, config)
+            # Rebuild d_c = (f_q - mu_c)^2 / sigma_c^2 from the same pieces and
+            # require it to match, which pins sigma_c^2 rather than assuming it.
+            directions, _ = dispersion_directions(context, labels, config)
+            ctx = _log_scalars(context, directions[:, 0], config.eps)
+            centre = ctx.mean()
+            scale = (ctx - centre).square().mean().sqrt().clamp_min(config.eps)
+            feature = (ctx - centre) / scale
+            query_feature = (
+                _log_scalars(query, directions[:, 0], config.eps) - centre
+            ) / scale
+            prototypes = torch.stack(
+                [feature[labels.long() == c].mean() for c in range(2)]
+            )
+            rebuilt = (query_feature[:, None] - prototypes[None, :]).square() / variances[None, :]
+            self.assertTrue(
+                torch.allclose(rebuilt, expected, atol=1e-5, rtol=1e-5),
+                f"seed {seed}",
+            )
+
+    def test_averaging_the_lineage_distances_gives_one_not_sigma(self):
+        """The trap: d_c already contains the division (SS154)."""
+        model = lineage_model()
+        context, labels, _ = covariances(1)
+        distances, _ = model._dd_distance_features(context, labels, context)
+        for class_index in range(2):
+            members = distances[labels.long() == class_index, class_index]
+            self.assertAlmostEqual(float(members.mean()), 1.0, places=4)
+
+    def test_log_ratio_is_antisymmetric_under_class_swap(self):
+        context, labels, _ = covariances(2, context=20)
+        config = AdaptiveRankConfig()
+        forward = class_dispersions(context, labels, config).log()
+        swapped = class_dispersions(context, 1 - labels, config).log()
+        self.assertAlmostEqual(
+            float(forward[0] - forward[1]), float(-(swapped[0] - swapped[1])), places=4
+        )
 
 
 if __name__ == "__main__":
