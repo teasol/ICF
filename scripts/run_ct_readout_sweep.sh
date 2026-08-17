@@ -77,6 +77,10 @@ run_job() {
     v108)                vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge) ;;
     # SS154: restore the LLR's log-determinant term, log(sigma_0^2/sigma_1^2).
     llr)                 vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_DD_LLR=1) ;;
+    # SS155: rank DD by the ratio (D0-D1)/(D0+D1+eps) instead of the difference.
+    rel)                 vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_DD_RELATIVE=1) ;;
+    rel_nocal)           vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_DD_RELATIVE=1
+                                ICF_DD_RELATIVE_CALIBRATE=0) ;;
     dd*)                 vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
                                 ICF_FIXED_HEAD_DD_WEIGHT="${arm#dd}") ;;
   esac

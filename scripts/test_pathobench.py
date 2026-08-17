@@ -666,6 +666,47 @@ def evaluate_trial(
                   f"lambda={readout_config.ridge_lambda} "
                   f"pca_dim={readout_config.pca_dim} "
                   f"scaling={readout_config.pca_scaling}", flush=True)
+        # docs SS155. `ICF_DD_RELATIVE=1` ranks by (D0-D1)/(D0+D1+eps) instead of
+        # (D0-D1), i.e. by the RATIO rather than the difference, which suppresses a
+        # query that is far from BOTH prototypes yet has a large raw gap.
+        # `ICF_DD_RELATIVE_CALIBRATE=0` turns off the rescale, as the control: the
+        # relative margin lives in (-1, 1) while the difference is unbounded, so
+        # feeding it raw to a fixed 0.343 compares DD's magnitude, not its shape.
+        dd_relative = os.environ.get("ICF_DD_RELATIVE") == "1"
+        saved_relative_features = None
+        if dd_relative:
+            from src.models.dd_adaptive_rank import relative_margin  # noqa: PLC0415
+
+            saved_relative_features = inner._dd_distance_features
+            relative_calibrate = os.environ.get("ICF_DD_RELATIVE_CALIBRATE", "1") == "1"
+
+            def dd_with_relative_margin(
+                context_covariance, context_labels, query_covariance,
+                _original=saved_relative_features, _calibrate=relative_calibrate,
+            ):
+                distances, separation = _original(
+                    context_covariance, context_labels, query_covariance
+                )
+                margin = relative_margin(distances, inner.dd_eps)
+                if _calibrate:
+                    # Context-only: score the CONTEXT bags as if they were queries
+                    # and match the reference difference's centre and RMS there.
+                    context_distances, _ = _original(
+                        context_covariance, context_labels, context_covariance
+                    )
+                    reference = context_distances[:, 0] - context_distances[:, 1]
+                    own = relative_margin(context_distances, inner.dd_eps)
+                    centre, target = own.mean(), reference.mean()
+                    spread = (own - centre).square().mean().sqrt().clamp_min(inner.dd_eps)
+                    target_spread = (
+                        (reference - target).square().mean().sqrt().clamp_min(inner.dd_eps)
+                    )
+                    margin = (margin - centre) * (target_spread / spread) + target
+                # The head weighs (d0 - d1), so split the margin symmetrically.
+                pair = torch.stack((0.5 * margin, -0.5 * margin), dim=-1)
+                return pair, separation
+
+            inner._dd_distance_features = dd_with_relative_margin
         saved_llr_features = None
         if dd_llr:
             saved_llr_features = inner._dd_distance_features
@@ -738,6 +779,8 @@ def evaluate_trial(
                 inner._ct_features = saved_ct_features
             if saved_llr_features is not None:
                 inner._dd_distance_features = saved_llr_features
+            if saved_relative_features is not None:
+                inner._dd_distance_features = saved_relative_features
         scores = torch.softmax(logits.float(), dim=-1)[:, 1]
         nan_count = int(torch.isnan(scores).sum())
         probabilities = [float(value) for value in scores]

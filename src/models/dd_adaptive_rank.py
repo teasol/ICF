@@ -191,6 +191,28 @@ def class_dispersions(context_covariance, context_labels, config):
     ])
 
 
+def relative_margin(distances: torch.Tensor, eps: float) -> torch.Tensor:
+    """(D0 - D1) / (D0 + D1 + eps) -- rank by the RATIO, not the difference (SS155).
+
+    `d_c` are normalised squared distances to each class prototype, and the head
+    consumes their difference. A query far from BOTH prototypes can still produce a
+    large difference and so a confident margin, even though it looks like neither
+    class. Dividing by the total suppresses that: ignoring eps this is
+    (r - 1)/(r + 1) with r = D0/D1, a monotone function of the RATIO alone, so it is
+    invariant to how far the query sits from the pair.
+
+    ⚠️ Range is (-1, 1) where the difference is unbounded, so anything feeding this
+    to the fixed head must rescale first or it is comparing DD's magnitude rather
+    than its shape (the SS148 trap).
+
+    Class swap sends d0 <-> d1, negating the numerator and leaving the denominator
+    alone, so antisymmetry survives and the constant head stays valid (SS137-3).
+    """
+    difference = distances[..., 0] - distances[..., 1]
+    total = distances[..., 0] + distances[..., 1] + eps
+    return difference / total
+
+
 def adaptive_dd_distance_features(
     context_covariance, context_labels, query_covariance, config
 ):
