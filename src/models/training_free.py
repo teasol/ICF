@@ -105,6 +105,10 @@ def _standardise_blocks(context, query, split):
     context_covariance, context_mean = context.split(split, dim=-1)
     query_covariance, query_mean = query.split(split, dim=-1)
     context_covariance, query_covariance = _standardise(context_covariance, query_covariance)
+    if context_mean.shape[-1] == 0:
+        # v109's off-diagonal descriptor has no mean block; standardising an empty
+        # tensor would return NaN from the mean of nothing.
+        return context_covariance, query_covariance
     context_mean, query_mean = _standardise(context_mean, query_mean)
     return (
         torch.cat((context_covariance, context_mean), dim=-1),
@@ -132,7 +136,11 @@ class TrainingFreeConfig:
     # distances rather than logits.
     weight_cv: float = 1.442
     weight_dd: float = -0.343
-    weight_ct: float = 0.286
+    # SS157-5: 0.286 was fitted against the collapsed FPS tokens. With k-means
+    # tokens the branch earns more weight -- sign agreement HOLDS at 11/17 for
+    # 0.5-0.7 where on FPS tokens it fell to 7/17. 0.5/0.7/1.0 sit within 0.002 of
+    # each other, so 0.7 is "best mean and best agreement", not a sharp optimum.
+    weight_ct: float = 0.7
     # SS152 (v108, user decision). CT reads all 16 abundance dims through a
     # class-balanced ridge, and measures cell-token distance in the leading 32 PCA
     # directions instead of raw 1,536. The two are promoted TOGETHER because
@@ -141,6 +149,16 @@ class TrainingFreeConfig:
     # groups (SS150-2). v107's values were "extreme" and None.
     ct_readout: str = "ridge"
     ct_pca_dim: int | None = 32
+    # SS158 (v109, user decision). Lloyd iterations refining the farthest-point
+    # tokens. FPS was using ~1.9 of its 16 tokens (SS157-2); 30 iterations brings
+    # that to ~13 and lifts CT-only by +0.037.
+    ct_kmeans_iterations: int = 30
+    # Which blocks of the descriptor the CV RIDGE sees (SS156). "offdiag" drops the
+    # 256 diagonal entries AND the 1,536 raw bag mean: the mean adds nothing
+    # (+0.0019 to remove) and the diagonal is actively harmful (+0.0052 to remove,
+    # 13/17). ⚠️ DD still receives the FULL triangle -- it rebuilds its K x K
+    # matrices from it, so masking globally would break DD, not just narrow CV.
+    cv_blocks: str = "offdiag"
 
 
 
@@ -255,6 +273,7 @@ class TrainingFreeClassifier:
                 temperature=config.ct_temperature,
                 eps=config.ct_eps,
                 pca_dim=config.ct_pca_dim,
+                kmeans_iterations=config.ct_kmeans_iterations,
             ),
             mode=config.ct_readout,
             # The SAME within-slide basis the CV branch uses, sliced to
@@ -283,8 +302,22 @@ class TrainingFreeClassifier:
         query = torch.stack([self._descriptor(b, basis, triangle) for b in query_bags])
 
         covariance_dim = triangle.shape[1]
-        split = (covariance_dim, context.shape[-1] - covariance_dim)
-        cv = self._cv_logits(context, context_labels, query, split)
+        # CV sees only the blocks `cv_blocks` names; DD below always gets the full
+        # triangle out of `context`/`query` (SS156-1).
+        if config.cv_blocks == "cov+mean":
+            cv_context, cv_query = context, query
+            split = (covariance_dim, context.shape[-1] - covariance_dim)
+        elif config.cv_blocks == "offdiag":
+            keep = triangle[0] != triangle[1]
+            cv_context = context[..., :covariance_dim][..., keep]
+            cv_query = query[..., :covariance_dim][..., keep]
+            # One surviving block, so the whole descriptor is standardised together.
+            split = (cv_context.shape[-1], 0)
+        else:
+            raise ValueError(
+                f'cv_blocks must be "offdiag" or "cov+mean", got {config.cv_blocks!r}'
+            )
+        cv = self._cv_logits(cv_context, context_labels, cv_query, split)
 
         def to_matrices(descriptors):
             flat = descriptors[..., : triangle.shape[1]]

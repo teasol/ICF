@@ -30,7 +30,10 @@ from src.models.training_free import TrainingFreeClassifier, TrainingFreeConfig
 DIM = 48
 SKETCH = 8
 # The configuration the lineage `_ct_features` implements -- v108's defaults differ.
-V107 = TrainingFreeConfig(sketch_dim=SKETCH, ct_readout="extreme", ct_pca_dim=None)
+V107 = TrainingFreeConfig(
+    sketch_dim=SKETCH, ct_readout="extreme", ct_pca_dim=None,
+    ct_kmeans_iterations=0, cv_blocks="cov+mean", weight_ct=0.286,
+)
 
 
 def episode(seed=0, context=10, query=3, cells=40):
@@ -95,12 +98,56 @@ class DefaultTest(unittest.TestCase):
     def test_defaults_are_the_promoted_values(self):
         """The default IS the baseline; if it drifts, `TrainingFreeClassifier()`
         silently stops being the active configuration. SS142 promoted K=128 -> 256;
-        SS152 promoted CT to the ridge readout inside a 32-d PCA subspace."""
+        SS152 promoted CT to the ridge readout inside a 32-d PCA subspace; SS158
+        added k-means tokens at weight 0.7 and off-diagonal-only CV."""
         config = TrainingFreeConfig()
         self.assertEqual(config.sketch_dim, 256)
         self.assertEqual(config.ct_readout, "ridge")
         self.assertEqual(config.ct_pca_dim, 32)
-        self.assertEqual(config.weight_ct, 0.286)
+        self.assertEqual(config.ct_kmeans_iterations, 30)
+        self.assertEqual(config.cv_blocks, "offdiag")
+        self.assertEqual(config.weight_ct, 0.7)
+
+
+class V109Test(unittest.TestCase):
+    """SS158. CV must see only the off-diagonal entries while DD still gets the FULL
+    triangle -- masking globally would break DD rather than narrow CV (SS156-1)."""
+
+    def test_cv_blocks_changes_the_margin(self):
+        context_bags, labels, query_bags = episode(20)
+        wide = TrainingFreeClassifier(
+            TrainingFreeConfig(sketch_dim=SKETCH, cv_blocks="cov+mean")
+        ).margins(context_bags, labels, query_bags)
+        narrow = TrainingFreeClassifier(
+            TrainingFreeConfig(sketch_dim=SKETCH, cv_blocks="offdiag")
+        ).margins(context_bags, labels, query_bags)
+        self.assertFalse(torch.allclose(wide, narrow, atol=1e-4))
+
+    def test_dd_is_unaffected_by_the_cv_mask(self):
+        """Same episode, CV weight 0: the margin is then DD+CT only and must not
+        move when cv_blocks changes."""
+        context_bags, labels, query_bags = episode(21)
+        margins = []
+        for blocks in ("cov+mean", "offdiag"):
+            model = TrainingFreeClassifier(TrainingFreeConfig(
+                sketch_dim=SKETCH, cv_blocks=blocks, weight_cv=0.0
+            ))
+            margins.append(model.margins(context_bags, labels, query_bags))
+        self.assertTrue(torch.allclose(margins[0], margins[1], atol=1e-6))
+
+    def test_offdiag_descriptor_has_no_diagonal_and_no_mean(self):
+        model = TrainingFreeClassifier(TrainingFreeConfig(sketch_dim=SKETCH))
+        expected = SKETCH * (SKETCH + 1) // 2 - SKETCH
+        triangle = torch.triu_indices(SKETCH, SKETCH)
+        self.assertEqual(int((triangle[0] != triangle[1]).sum()), expected)
+        del model
+
+    def test_unknown_cv_blocks_is_rejected(self):
+        context_bags, labels, query_bags = episode(22)
+        with self.assertRaisesRegex(ValueError, "cv_blocks"):
+            TrainingFreeClassifier(
+                TrainingFreeConfig(sketch_dim=SKETCH, cv_blocks="nope")
+            ).margins(context_bags, labels, query_bags)
 
 
 class PropertyTest(unittest.TestCase):

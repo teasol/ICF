@@ -53,15 +53,16 @@
 단일 그룹의 |t|보다 우선한다(§131-5).
 
 > [!IMPORTANT]
-> **⚠️⚠️ 2026-08-17 — 활성 구성은 v108: 학습 파라미터 0 (§139·§142·§152, 사용자 결정)**
+> **⚠️⚠️ 2026-08-18 — 활성 구성은 v109: 학습 파라미터 0 (§139·§142·§152·§158, 사용자 결정)**
 >
 > ```
 > 사영 : fold의 CONTEXT cell을 bag별 자기 평균으로 센터링해 풀링한 공분산의 상위 256 고유벡터
-> head : margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.286·(CT1−CT0)
-> CT   : 상위 32 PCA 방향에서 거리 → 16 token abundance → class-balanced ridge
-> 정식 경로 SEAL macro 0.6967,  seed std 0.00000,  학습 파라미터 196,621 → 0
+> head : margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
+> CV   : off-diagonal 32,640차원만 ⚠️ DD는 전체 triangle을 계속 받는다(§156-1)
+> CT   : 32 PCA 방향에서 거리 → k-means token(Lloyd 30) → class-balanced ridge
+> 정식 경로 SEAL macro 0.7027,  홀드아웃 0.6042,  학습 파라미터 196,621 → 0
 >
-> bash scripts/eval_v108.sh <gpu> <tag> [tasks...]    # 정의가 사는 단 하나의 자리
+> bash scripts/eval_v109.sh <gpu> <tag> [tasks...]    # 정의가 사는 단 하나의 자리
 > #  = ICF_COVARIANCE_BASIS=pca_within ICF_FIXED_HEAD=1 ICF_SKETCH_DIM=256
 > #    bash scripts/eval_seal_tasks.sh <gpu> <아무 v98 ckpt> \
 > #         configs/train_v98_p1_reverse_1536_1gpu.yaml <tag> <tasks...>

@@ -75,6 +75,16 @@ run_job() {
                                 ICF_FIXED_HEAD_CT_WEIGHT="${arm#w}") ;;
     # SS153: DD weight, swept DOWNWARD from 0.343 on top of v108. dd0 ablates DD.
     v108)                vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge) ;;
+    # SS158 candidate: v108 + k-means tokens at weight 0.7 + off-diagonal-only CV.
+    # The two live in DIFFERENT branches, but SS150 showed knobs interact, so the
+    # combination is measured rather than assumed additive.
+    v109)                vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
+                                ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
+                                ICF_CV_BLOCKS=offdiag) ;;
+    v109_ctonly)         vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
+                                ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7) ;;
+    v109_cvonly)         vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
+                                ICF_CV_BLOCKS=offdiag) ;;
     # SS154: restore the LLR's log-determinant term, log(sigma_0^2/sigma_1^2).
     llr)                 vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_DD_LLR=1) ;;
     # SS155: rank DD by the ratio (D0-D1)/(D0+D1+eps) instead of the difference.
