@@ -86,12 +86,22 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tasks", nargs="*", default=None)
     parser.add_argument("--heldout", action="store_true")
+    parser.add_argument("--pca-dim", type=int, default=None,
+                        help="SS150: compare the readouts INSIDE this PCA subspace "
+                             "(reuses the within-slide basis, as v107's CV does)")
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
     tasks = args.tasks or (HELDOUT if args.heldout else ALL_TASKS)
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
-    config = CTReadoutConfig()
+    config = CTReadoutConfig(pca_dim=args.pca_dim)
+    reference_model = None
+    if args.pca_dim is not None:
+        from src.models.training_free import (  # noqa: PLC0415
+            TrainingFreeClassifier, TrainingFreeConfig,
+        )
+        reference_model = TrainingFreeClassifier(TrainingFreeConfig(sketch_dim=256))
+    print(f"pca_dim={args.pca_dim}")
     generator = torch.Generator().manual_seed(0)
     h5_index = index_h5(FEATURES)
     results = {name: {} for name in READOUTS}
@@ -113,7 +123,9 @@ def main() -> None:
             context_bags = [bags[s] for s in train]
             query_bags = [bags[s] for s in test]
 
-            abundance = ct_abundance(context_bags, query_bags, config)
+            basis = (None if reference_model is None
+                     else reference_model.within_slide_basis(context_bags))
+            abundance = ct_abundance(context_bags, query_bags, config, basis)
             reference = readout_extreme(abundance, y, config)
             for name, readout in READOUTS.items():
                 margins = readout(abundance, y, config)

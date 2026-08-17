@@ -48,7 +48,7 @@ for arm in $ARMS; do for t in "${TASKS[@]}"; do jobs+=("$arm|$t"); done; done
 echo "${#jobs[@]} jobs over $NGPU GPUs"
 
 run_job() {
-  local gpu="$1" arm="$2" task="$3"
+  local gpu="$1" arm="$2" task="$3" d
   local name="${task//\//_}"
   local log="$OUT/${arm}_${name}.log"
   local vars=(ICF_COVARIANCE_BASIS=pca_within ICF_FIXED_HEAD=1 ICF_SKETCH_DIM=256)
@@ -60,11 +60,14 @@ run_job() {
     ct_ridge_nocal)      vars+=(ICF_CT_READOUT=ridge ICF_CT_CALIBRATE=0) ;;
     # SS149: distances in the leading k PCA directions instead of raw 1536-d,
     # reusing the basis the CV branch already built for the fold.
-    pca*_raw)            vars+=(ICF_CT_PCA_DIM="${arm#pca}" ICF_CT_PCA_SCALING=raw)
-                         vars[-2]="ICF_CT_PCA_DIM=${arm#pca}"
-                         vars[-2]="${vars[-2]%_raw}" ;;
-    pca*_ridge)          local d="${arm#pca}"; d="${d%_ridge}"
+    # SS150: PCA and readout together. SS148 varied the readout at raw 1536 and
+    # SS149 varied the dimension at the extreme readout -- one knob each, so the
+    # COMBINATION was never run. If relieving concentration puts information into
+    # the abundance, the readout only becomes binding after that.
+    pca*_ridge)          d="${arm#pca}"; d="${d%_ridge}"
                          vars+=(ICF_CT_PCA_DIM="$d" ICF_CT_READOUT=ridge) ;;
+    pca*_proto)          d="${arm#pca}"; d="${d%_proto}"
+                         vars+=(ICF_CT_PCA_DIM="$d" ICF_CT_READOUT=prototype) ;;
     pca*)                vars+=(ICF_CT_PCA_DIM="${arm#pca}") ;;
   esac
   CUDA_VISIBLE_DEVICES="$gpu" env "${vars[@]}" "$PY" scripts/test_pathobench.py \
