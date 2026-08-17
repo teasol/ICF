@@ -81,6 +81,23 @@ run_job() {
     v109)                vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
                                 ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
                                 ICF_CV_BLOCKS=offdiag) ;;
+    # SS159: v109 with CT's 64-cell cap removed (every cell). CV/DD untouched.
+    v109_fullcell)       vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
+                                ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
+                                ICF_CV_BLOCKS=offdiag ICF_CT_CELLS=all) ;;
+    v109_cells*)         vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
+                                ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
+                                ICF_CV_BLOCKS=offdiag
+                                ICF_CT_CELLS="${arm#v109_cells}") ;;
+    # SS159-4: does the cell count matter BEFORE the SS157 k-means fix? Closing the
+    # axis only at kmeans=30 would repeat SS148's mistake of closing "readout" using
+    # measurements taken at raw 1536 dims (SS150-4).
+    fps64)               vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
+                                ICF_FIXED_HEAD_CT_WEIGHT=0.7 ICF_CV_BLOCKS=offdiag
+                                ICF_CT_KMEANS=0) ;;
+    fpsall)              vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
+                                ICF_FIXED_HEAD_CT_WEIGHT=0.7 ICF_CV_BLOCKS=offdiag
+                                ICF_CT_KMEANS=0 ICF_CT_CELLS=all) ;;
     v109_ctonly)         vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
                                 ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7) ;;
     v109_cvonly)         vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge

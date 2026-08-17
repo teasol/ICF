@@ -56,7 +56,14 @@ MODES = ("extreme", "prototype", "ridge")
 @dataclass(frozen=True)
 class CTReadoutConfig:
     num_tokens: int = 16
-    cells_per_bag: int = 64
+    # SS159. `None` = use EVERY cell in the bag. 64 is v109's value and stays the
+    # default so it remains the reproduction path.
+    #
+    # 64 evenly spaced cells is 1.6% of an 8,192-cell slide, and the abundance is an
+    # average over that sample -- so its sampling error can exceed the class
+    # difference it is meant to carry. This is the last of SS148-5's three suspects
+    # (token generation was SS157, the distance metric SS149).
+    cells_per_bag: int | None = 64
     temperature: float = 0.5
     eps: float = 1e-6
     ridge_lambda: float = 1.0
@@ -113,11 +120,15 @@ class CTMargins(NamedTuple):
 
 
 def sample_cells(bag: torch.Tensor, config: CTReadoutConfig) -> torch.Tensor:
-    """Evenly spaced, never random -- the whole pipeline stays deterministic."""
+    """Evenly spaced, never random -- the whole pipeline stays deterministic.
+
+    `cells_per_bag=None` keeps every cell (docs SS159); the bag is already capped
+    upstream by the encoder's `max_cells`, so this is not unbounded.
+    """
     values = bag.float()
     if values.shape[0] == 0:
         raise ValueError("Every bag must contain at least one cell.")
-    if values.shape[0] <= config.cells_per_bag:
+    if config.cells_per_bag is None or values.shape[0] <= config.cells_per_bag:
         return values
     index = torch.linspace(
         0, values.shape[0] - 1, config.cells_per_bag, device=values.device

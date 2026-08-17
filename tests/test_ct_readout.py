@@ -369,3 +369,58 @@ class KMeansTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FullCellTest(unittest.TestCase):
+    """SS159. `cells_per_bag=None` uses every cell. The invariants that matter are
+    that 64 still reproduces v109 and that the query still cannot reach the tokens
+    or the normalisation statistics."""
+
+    def _config(self, cells, **kw):
+        return CTReadoutConfig(
+            num_tokens=CONFIG.num_tokens, cells_per_bag=cells,
+            temperature=CONFIG.temperature, eps=CONFIG.eps, **kw
+        )
+
+    def test_none_keeps_every_cell(self):
+        context_bags, _, query_bags = episode(40, cells=37)
+        context, query = prepare_cells(context_bags, query_bags, self._config(None), None)
+        self.assertTrue(all(bag.shape[0] == 37 for bag in context))
+        self.assertTrue(all(bag.shape[0] == 37 for bag in query))
+
+    def test_a_cap_below_the_bag_size_still_subsamples(self):
+        context_bags, _, query_bags = episode(41, cells=37)
+        context, _ = prepare_cells(context_bags, query_bags, self._config(12), None)
+        self.assertTrue(all(bag.shape[0] == 12 for bag in context))
+
+    def test_cap_at_or_above_the_bag_size_equals_none(self):
+        context_bags, labels, query_bags = episode(42, cells=30)
+        wide, _ = ct_margins(context_bags, labels, query_bags, self._config(30), "ridge")
+        every, _ = ct_margins(context_bags, labels, query_bags, self._config(None), "ridge")
+        self.assertTrue(torch.equal(wide.query, every.query))
+
+    def test_full_cells_change_the_margin(self):
+        context_bags, labels, query_bags = episode(43, cells=50)
+        few, _ = ct_margins(context_bags, labels, query_bags,
+                            self._config(8, kmeans_iterations=5), "ridge")
+        every, _ = ct_margins(context_bags, labels, query_bags,
+                              self._config(None, kmeans_iterations=5), "ridge")
+        self.assertFalse(torch.allclose(few.query, every.query, atol=1e-4))
+
+    def test_query_cannot_reach_tokens_or_statistics_at_full_cells(self):
+        context_bags, labels, query_bags = episode(44, cells=45)
+        config = self._config(None, kmeans_iterations=8)
+        first = ct_abundance(context_bags, query_bags, config)
+        other = [bag * 7.0 - 3.0 for bag in query_bags]
+        second = ct_abundance(context_bags, other, config)
+        self.assertTrue(torch.equal(first.tokens, second.tokens))
+        self.assertTrue(torch.equal(first.context, second.context))
+
+    def test_deterministic_and_antisymmetric_at_full_cells(self):
+        context_bags, labels, query_bags = episode(45, context=20, cells=45)
+        config = self._config(None, kmeans_iterations=10)
+        a, _ = ct_margins(context_bags, labels, query_bags, config, "ridge")
+        b, _ = ct_margins(context_bags, labels, query_bags, config, "ridge")
+        flipped, _ = ct_margins(context_bags, 1 - labels, query_bags, config, "ridge")
+        self.assertTrue(torch.equal(a.query, b.query))
+        self.assertTrue(torch.allclose(a.query, -flipped.query, atol=1e-4))

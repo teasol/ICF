@@ -626,13 +626,19 @@ def evaluate_trial(
         ct_readout = os.environ.get("ICF_CT_READOUT", "extreme")
         ct_pca_dim = os.environ.get("ICF_CT_PCA_DIM")
         ct_kmeans = os.environ.get("ICF_CT_KMEANS")
+        ct_cells = os.environ.get("ICF_CT_CELLS")
         saved_ct_features = None
-        if ct_readout != "extreme" or ct_pca_dim is not None or ct_kmeans is not None:
+        if (ct_readout != "extreme" or ct_pca_dim is not None
+                or ct_kmeans is not None or ct_cells is not None):
             from src.models.ct_readout import CTReadoutConfig, ct_margins  # noqa: PLC0415
 
             readout_config = CTReadoutConfig(
                 num_tokens=int(inner.ct_num_tokens),
-                cells_per_bag=int(inner.ct_cells_per_bag),
+                # SS159: ICF_CT_CELLS=all uses every cell; a number caps as before.
+                cells_per_bag=(
+                    None if os.environ.get("ICF_CT_CELLS") == "all"
+                    else int(os.environ.get("ICF_CT_CELLS", inner.ct_cells_per_bag))
+                ),
                 temperature=float(inner.ct_temperature),
                 eps=float(inner.ct_eps),
                 ridge_lambda=float(os.environ.get("ICF_CT_RIDGE_LAMBDA", "1.0")),
@@ -669,7 +675,8 @@ def evaluate_trial(
                   f"lambda={readout_config.ridge_lambda} "
                   f"pca_dim={readout_config.pca_dim} "
                   f"scaling={readout_config.pca_scaling} "
-                  f"kmeans={readout_config.kmeans_iterations}", flush=True)
+                  f"kmeans={readout_config.kmeans_iterations} "
+                  f"cells={readout_config.cells_per_bag}", flush=True)
         # docs SS155. `ICF_DD_RELATIVE=1` ranks by (D0-D1)/(D0+D1+eps) instead of
         # (D0-D1), i.e. by the RATIO rather than the difference, which suppresses a
         # query that is far from BOTH prototypes yet has a large raw gap.

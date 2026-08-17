@@ -129,7 +129,8 @@ class TrainingFreeConfig:
     dd_shrinkage: float = 0.25
     dd_eps: float = 1e-6
     ct_num_tokens: int = 16
-    ct_cells_per_bag: int = 64
+    # SS159: None = every cell. 64 is v109's value (the reproduction path).
+    ct_cells_per_bag: int | None = 64
     ct_temperature: float = 0.5
     ct_eps: float = 1e-6
     # SS137-3: CV : DD : CT. Sign of the DD term is required by DD returning
