@@ -653,17 +653,24 @@ def evaluate_trial(
             # weight is only a fifth of CV's 1.442, so the branch is structurally
             # limited in how far it can move the macro at 0.286.
             # Antisymmetry is untouched: the pair stays equal and opposite.
+            # `ICF_FIXED_HEAD_DD_WEIGHT` likewise (docs SS153). 0.343 is a MAGNITUDE:
+            # the sign is fixed by DD returning squared DISTANCES rather than logits,
+            # so a large D1 is evidence AGAINST class 1. 0 ablates DD entirely, which
+            # is the question worth asking now that SS145-147 closed every way of
+            # improving it -- K saturates by 128, r=1 is the peak, and both the |t|
+            # gate and the |t| selector lose to |lambda| alone.
             ct_weight = float(os.environ.get("ICF_FIXED_HEAD_CT_WEIGHT", "0.286"))
+            dd_weight = float(os.environ.get("ICF_FIXED_HEAD_DD_WEIGHT", "0.343"))
             head = inner.cv_dd_ct_head[0]
             saved_head = (head.weight.detach().clone(), head.bias.detach().clone())
             with torch.no_grad():
                 head.weight.zero_()
                 head.bias.zero_()
-                for slot, value in ((0, -1.442), (1, 1.442), (4, 0.343),
-                                    (5, -0.343), (8, -ct_weight), (9, ct_weight)):
+                for slot, value in ((0, -1.442), (1, 1.442), (4, dd_weight),
+                                    (5, -dd_weight), (8, -ct_weight), (9, ct_weight)):
                     head.weight[0, slot] = value
-            if ct_weight != 0.286:
-                print(f"ICF_FIXED_HEAD_CT_WEIGHT={ct_weight}", flush=True)
+            if ct_weight != 0.286 or dd_weight != 0.343:
+                print(f"fixed head: cv=1.442 dd={dd_weight} ct={ct_weight}", flush=True)
         try:
             with torch.no_grad(), autocast:
                 logits = model.model(episode_bags, episode_y, query_index)

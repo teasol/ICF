@@ -73,6 +73,10 @@ run_job() {
     # fitted for the OLD readout, so a better CT margin may want more of the head.
     w*)                  vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
                                 ICF_FIXED_HEAD_CT_WEIGHT="${arm#w}") ;;
+    # SS153: DD weight, swept DOWNWARD from 0.343 on top of v108. dd0 ablates DD.
+    v108)                vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge) ;;
+    dd*)                 vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
+                                ICF_FIXED_HEAD_DD_WEIGHT="${arm#dd}") ;;
   esac
   CUDA_VISIBLE_DEVICES="$gpu" env "${vars[@]}" "$PY" scripts/test_pathobench.py \
     --checkpoint "$CKPT" --config "$CONFIG" \
