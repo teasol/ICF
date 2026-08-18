@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-18` (Codex) — §165까지. random 512-cell dictionary + full-cell abundance는 4 sampling seed 평균으로 SEAL −0.00314, 홀드아웃 −0.00139라 기각했고 활성 v110은 유지한다. 활성 구성은 **v110 = v109에서 CT cluster 16→32, 학습 파라미터 0**(§161, 사용자 결정, 정식 경로 macro **0.7070**, 홀드아웃 **0.6103**). 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다. 직전 v107은(§142, 사용자 결정, 정식 경로 macro **0.6945**, seed std 0.00000). K는 v106에서 사영이 학습을 벗어나며 **평가 시점 노브**가 됐고, 스윕 결과 128은 최적이 아니었다 — 전체 17 task에서 +0.0076(t=3.01, 12/17), 선택에 쓰지 않은 홀드아웃 7개에서 재현(§142). **독립 최소 구현 `src/models/training_free.py`가 기존 경로와 등가임을 테스트로 고정했다**(§140).
+**Last updated**: `2026-08-18` (Codex) — §166까지. random-512 dictionary에서 abundance `all→512` paired 분리는 전체 17에서 **−0.00014**로 사실상 동률이라, §165 하락의 원인은 full-cell abundance가 아니다. random-512 dictionary + full-cell abundance는 4 sampling seed 평균으로 SEAL −0.00314, 홀드아웃 −0.00139라 기각했고 활성 v110은 유지한다. 활성 구성은 **v110 = v109에서 CT cluster 16→32, 학습 파라미터 0**(§161, 사용자 결정, 정식 경로 macro **0.7070**, 홀드아웃 **0.6103**). 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다. 직전 v107은(§142, 사용자 결정, 정식 경로 macro **0.6945**, seed std 0.00000). K는 v106에서 사영이 학습을 벗어나며 **평가 시점 노브**가 됐고, 스윕 결과 128은 최적이 아니었다 — 전체 17 task에서 +0.0076(t=3.01, 12/17), 선택에 쓰지 않은 홀드아웃 7개에서 재현(§142). **독립 최소 구현 `src/models/training_free.py`가 기존 경로와 등가임을 테스트로 고정했다**(§140).
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -6433,3 +6433,53 @@ sampling policy(균등→random), dictionary 크기(64→512), abundance cap(64�
 다음에 원인을 더 분리한다면 `random64/match`, `random512/match`, `random64/all`의 대각선 세 칸이
 필요하다. 그러나 현재 성능 개선 최우선순위는 여전히 `current_architecture.md` §0-6의 CV 가중과
 CT의 독립 부분공간이며, 이 sampling 축은 요청 없이는 추가로 확장하지 않는다.
+
+---
+
+## 166. 2026-08-18 — random-512에서 abundance `all → 512`: **full abundance는 원인이 아님**
+
+*작성: Codex, 2026-08-18 — 사용자 지시로 §165와 같은 seed에서 abundance population 하나만 분리.*
+
+### 1. 실험 설계
+
+§165의 `r512all_s{42..45}`를 control로 재사용했다. 새 `r512a512_s{42..45}`는 정규화와 dictionary에
+쓰는 random 512-cell subset, sampling seed 42–45, v110의 나머지 설정을 모두 고정하고
+`ICF_CT_ABUNDANCE_CELLS=all`만 `512`로 바꿨다. 따라서 같은 seed·task의 차이는 abundance 계산에
+전체 cell을 넣느냐 동일한 512-cell subset만 넣느냐의 효과다.
+
+```bash
+BAGPY=/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python
+ARMS='r512a512_s42 r512a512_s43 r512a512_s44 r512a512_s45' NGPU=8 GPU_OFFSET=0 \
+  TASKSET=seal bash scripts/run_ct_readout_sweep.sh \
+  logs/20260818_ct_random512_abundance512/seal
+# 같은 명령의 TASKSET=heldout → heldout/
+
+"$BAGPY" -m unittest tests.test_ct_readout tests.test_training_free
+# Ran 52 tests in 10.186s — OK
+```
+
+로그와 예측은 `logs/20260818_ct_random512_abundance512/{seal,heldout}/`에 있다(40+28 완료).
+
+### 2. 결과 — abundance=512가 오히려 미세하게 낮음
+
+| seed | SEAL 10 | 홀드아웃 7 | 전체 17 | Δ vs 같은-seed abundance-all | W/T/L vs all |
+|---|---:|---:|---:|---:|---:|
+| 42 | 0.70322 | 0.60814 | 0.66407 | −0.00029 | 6/1/10 |
+| 43 | 0.70368 | 0.60776 | 0.66418 | +0.00004 | 9/0/8 |
+| 44 | 0.70313 | 0.61027 | 0.66489 | −0.00018 | 6/1/10 |
+| 45 | 0.70400 | 0.60966 | 0.66515 | −0.00011 | 5/1/11 |
+| **4-seed 평균** | **0.70351±0.00035** | **0.60896±0.00104** | **0.66458±0.00046** | **−0.00014** | **task-mean 5/0/12** |
+
+paired 차이는 SEAL **−0.00027**, 홀드아웃 **+0.00006**, 전체 **−0.00014**다. seed마다 전체 Δ도
+`−0.00029, +0.00004, −0.00018, −0.00011`로 10⁻⁴ 수준이다. 반면 새 arm은 v110 대비 여전히
+전체 **−0.00256**(seed별 −0.00306/−0.00295/−0.00224/−0.00198)이다.
+
+### 3. 판단
+
+**full-cell abundance가 §165 하락의 원인이라는 가설은 기각한다.** abundance를 512로 제한해도
+성능은 회복되지 않았고 오히려 미세하게 낮다. 즉 random-512 dictionary 위에서는 abundance
+추정 표본을 512에서 전체로 늘리는 효과가 거의 없으며, §165의 v110 대비 하락은 dictionary/정규화의
+random-512 구성(그리고 v110의 even-64와 달라진 sampling policy/크기)에 귀속된다.
+
+활성 v110(`even-64 / abundance=match`)은 유지한다. 다음 원인 분리의 최소 비교는 같은 random policy의
+`random64/match` 대 `random512/match`이며, abundance-all 자체를 더 의심할 근거는 없다.

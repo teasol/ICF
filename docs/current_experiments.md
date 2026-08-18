@@ -5,7 +5,7 @@ CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 
 ---
 
-## 0. 결정론적 v110에서 무작위 CT arm을 평가하는 규칙 (§165)
+## 0. 결정론적 v110에서 무작위 CT arm을 평가하는 규칙 (§165–§166)
 
 활성 v110은 결정론적이지만 CT dictionary cell을 무작위로 뽑는 arm은 다시 seed 분산이 생긴다.
 따라서 단일 seed나 task 반복을 근거로 삼지 않고 **sampling seed 42–45를 같은 17 task에서 반복**한다.
@@ -16,6 +16,12 @@ CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 음수라 기각했다. 실행 arm은 `r512all_s{42..45}`, 로그는
 `logs/20260818_ct_random512_abundance_all/{seal,heldout}/`이다. 활성 v110의 64-cell even 경로는
 바뀌지 않았다.
+
+§166은 같은 random-512 subset과 seed를 고정하고 abundance만 `all→512`로 바꿨다. 4-seed 전체
+17-task 평균은 0.66458로 abundance-all 0.66471보다 **−0.00014**였고, SEAL −0.00027 / 홀드아웃
++0.00006으로 사실상 동률이었다. 따라서 §165 하락의 원인은 abundance-all이 아니며 dictionary/
+정규화에 쓰인 random-512 구성 쪽이다. arm은 `r512a512_s{42..45}`, 로그는
+`logs/20260818_ct_random512_abundance512/{seal,heldout}/`이다.
 
 ---
 
