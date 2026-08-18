@@ -96,7 +96,9 @@ class CTReadoutConfig:
     distance_kernel: Literal["broadcast", "gemm"] = "broadcast"
     # SS168. Hierarchical PCA-initialised 2-means reads every context cell in
     # O(N D log K), avoiding the 30 x O(N K D) Lloyd sweep at large K.
-    tokenizer: Literal["fps_lloyd", "hierarchical_2means", "hdbscan"] = "fps_lloyd"
+    tokenizer: Literal[
+        "fps_lloyd", "hierarchical_2means", "hdbscan", "dbscan"
+    ] = "fps_lloyd"
     bisect_iterations: int = 2
     bisect_power_iterations: int = 3
     # "segment" is bit-reproducible but sorts ~N cells at every tree update.
@@ -112,6 +114,10 @@ class CTReadoutConfig:
     hdbscan_cluster_selection_method: Literal["eom", "leaf"] = "leaf"
     hdbscan_build_algo: Literal["brute_force", "nn_descent"] = "nn_descent"
     hdbscan_allow_single_cluster: bool = False
+    # SS170. DBSCAN has no K, but needs a density radius. None chooses eps from
+    # the knee of the context-only min_samples-neighbour distance curve.
+    dbscan_eps: float | None = None
+    dbscan_min_samples: int = 16
     temperature: float = 0.5
     eps: float = 1e-6
     ridge_lambda: float = 1.0
@@ -517,6 +523,86 @@ def hdbscan_tokens(pooled: torch.Tensor, config: CTReadoutConfig) -> torch.Tenso
     return tokens
 
 
+def dbscan_tokens(pooled: torch.Tensor, config: CTReadoutConfig) -> torch.Tensor:
+    """Fit GPU DBSCAN with label-free adaptive eps and return hard centroids."""
+    if not pooled.is_cuda:
+        raise RuntimeError("The DBSCAN tokenizer requires a CUDA tensor.")
+    if config.dbscan_min_samples < 2:
+        raise ValueError("dbscan_min_samples must be at least 2.")
+    if config.dbscan_eps is not None and config.dbscan_eps <= 0:
+        raise ValueError("dbscan_eps must be positive or None for adaptive eps.")
+
+    try:
+        import cupy as cp  # noqa: PLC0415
+        from cuml.cluster import DBSCAN  # noqa: PLC0415
+        from cuml.neighbors import NearestNeighbors  # noqa: PLC0415
+    except ImportError as error:
+        raise RuntimeError(
+            "DBSCAN tokenizer needs RAPIDS; install requirements-hdbscan.txt "
+            "into the BagPFN environment."
+        ) from error
+
+    cells = pooled.shape[0]
+    min_samples = min(config.dbscan_min_samples, cells)
+    values = cp.from_dlpack(pooled.detach().contiguous())
+    knee_quantile = None
+    if config.dbscan_eps is None:
+        distances, _ = NearestNeighbors(
+            n_neighbors=min_samples, metric="euclidean", output_type="cupy"
+        ).fit(values).kneighbors(values)
+        curve = cp.sort(distances[:, -1])
+        spread = curve[-1] - curve[0]
+        if float(spread.item()) <= config.eps:
+            eps = max(float(curve[-1].item()), config.eps)
+            knee_index = cells - 1
+        else:
+            y = (curve - curve[0]) / spread
+            x = cp.linspace(0.0, 1.0, cells, dtype=curve.dtype)
+            # For the conventional ascending convex k-distance plot, the elbow
+            # maximises the vertical gap between the endpoint chord and curve.
+            knee_index = int(cp.argmax(x - y).item())
+            eps = max(float(curve[knee_index].item()), config.eps)
+        knee_quantile = knee_index / max(1, cells - 1)
+    else:
+        eps = config.dbscan_eps
+
+    labels = torch.from_dlpack(DBSCAN(
+        eps=eps,
+        min_samples=min_samples,
+        metric="euclidean",
+        algorithm="brute",
+        calc_core_sample_indices=False,
+        output_type="cupy",
+    ).fit_predict(values)).clone()
+    valid = labels >= 0
+    noise_fraction = (~valid).float().mean().item()
+    eps_source = (
+        f"knee_quantile={knee_quantile:.6f}" if knee_quantile is not None
+        else "eps_source=fixed"
+    )
+    if not bool(valid.any()):
+        print(
+            f"ICF_CT_DBSCAN cells={cells} eps={eps:.6g} {eps_source} "
+            "clusters=1 noise=1.000000 fallback=global_mean",
+            flush=True,
+        )
+        return pooled.mean(dim=0, keepdim=True)
+
+    cluster_ids, inverse = torch.unique(labels[valid], sorted=True, return_inverse=True)
+    sums = torch.zeros(
+        cluster_ids.numel(), pooled.shape[1], device=pooled.device, dtype=pooled.dtype
+    ).index_add_(0, inverse, pooled[valid])
+    counts = torch.bincount(inverse, minlength=cluster_ids.numel()).to(pooled.dtype)
+    tokens = sums / counts.clamp_min(1.0)[:, None]
+    print(
+        f"ICF_CT_DBSCAN cells={cells} eps={eps:.6g} {eps_source} "
+        f"min_samples={min_samples} clusters={tokens.shape[0]} "
+        f"noise={noise_fraction:.6f}",
+        flush=True,
+    )
+    return tokens
+
+
 # docs SS160. Element budget for the cell-to-token distance block. The 3-D
 # broadcast allocates [chunk, tokens, dims], and at 128 tokens over a full-cell
 # context (~1.6M cells) the unchunked form asked for 24.4 GiB and OOM'd on a shared
@@ -626,9 +712,12 @@ def ct_abundance(
         tokens = hierarchical_2means_tokens(pooled, config)
     elif config.tokenizer == "hdbscan":
         tokens = hdbscan_tokens(pooled, config)
+    elif config.tokenizer == "dbscan":
+        tokens = dbscan_tokens(pooled, config)
     else:
         raise ValueError(
-            "tokenizer must be 'fps_lloyd', 'hierarchical_2means', or 'hdbscan', "
+            "tokenizer must be 'fps_lloyd', 'hierarchical_2means', 'hdbscan', "
+            "or 'dbscan', "
             f"got {config.tokenizer!r}"
         )
 

@@ -26,6 +26,7 @@ from src.models.ct_readout import (
     farthest_point_tokens,
     hierarchical_2means_tokens,
     hdbscan_tokens,
+    dbscan_tokens,
     lloyd_refine,
     prepare_cells,
     readout_prototype,
@@ -628,6 +629,32 @@ class HDBSCANTest(unittest.TestCase):
             hdbscan_min_samples=16,
         )
         tokens = hdbscan_tokens(pooled, config)
+        self.assertEqual(tokens.shape, (2, 8))
+        self.assertTrue(torch.allclose(
+            tokens.sort(dim=0).values.mean(dim=1),
+            torch.tensor([-3.0, 3.0], device="cuda"), atol=0.1,
+        ))
+
+
+@unittest.skipUnless(torch.cuda.is_available(), "GPU DBSCAN requires CUDA")
+class DBSCANTest(unittest.TestCase):
+    def test_adaptive_eps_finds_blobs_and_ignores_fixed_token_count(self):
+        try:
+            import cuml  # noqa: F401, PLC0415
+        except ImportError:
+            self.skipTest("RAPIDS cuML is not installed")
+        generator = torch.Generator(device="cuda").manual_seed(170)
+        pooled = torch.cat([
+            torch.randn(512, 8, generator=generator, device="cuda") * 0.1 - 3,
+            torch.randn(512, 8, generator=generator, device="cuda") * 0.1 + 3,
+        ])
+        tokens = dbscan_tokens(
+            pooled,
+            CTReadoutConfig(
+                tokenizer="dbscan", num_tokens=999,
+                dbscan_eps=None, dbscan_min_samples=16,
+            ),
+        )
         self.assertEqual(tokens.shape, (2, 8))
         self.assertTrue(torch.allclose(
             tokens.sort(dim=0).values.mean(dim=1),

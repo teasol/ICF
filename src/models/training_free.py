@@ -151,6 +151,8 @@ class TrainingFreeConfig:
     ct_hdbscan_cluster_selection_method: str = "leaf"
     ct_hdbscan_build_algo: str = "nn_descent"
     ct_hdbscan_allow_single_cluster: bool = False
+    ct_dbscan_eps: float | None = None
+    ct_dbscan_min_samples: int = 16
     ct_temperature: float = 0.5
     ct_eps: float = 1e-6
     # SS137-3: CV : DD : CT. Sign of the DD term is required by DD returning
@@ -307,6 +309,8 @@ class TrainingFreeClassifier:
                 ),
                 hdbscan_build_algo=config.ct_hdbscan_build_algo,
                 hdbscan_allow_single_cluster=config.ct_hdbscan_allow_single_cluster,
+                dbscan_eps=config.ct_dbscan_eps,
+                dbscan_min_samples=config.ct_dbscan_min_samples,
                 temperature=config.ct_temperature,
                 eps=config.ct_eps,
                 pca_dim=config.ct_pca_dim,

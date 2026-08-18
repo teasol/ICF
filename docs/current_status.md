@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-18` (Codex) — §169까지. GPU HDBSCAN으로 K를 density hierarchy에서 자동 선택한 full-cell/full-abundance arm은 fold별 **K=1..19 (중앙값 8)**, noise 평균 **96.2%**, 전체 17 평균 **0.64991**로 v110보다 **−0.01722 (3/14)**였다. 고정 hierarchical K8(0.65087)보다도 −0.00096이라 기각하고 v110을 유지한다. 즉 task별 최적 K가 다르다는 §168의 간접 증거는 있었지만, **label-free density 기준이 predictive K를 찾아주지는 않았다**. 활성 구성은 **v110 = v109에서 CT cluster 16→32, 학습 파라미터 0**(§161, 사용자 결정, 정식 경로 macro **0.7070**, 홀드아웃 **0.6103**). 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다. **독립 최소 구현 `src/models/training_free.py`가 기존 경로와 등가임을 테스트로 고정했다**(§140).
+**Last updated**: `2026-08-18` (Codex) — §170까지. random-64 dictionary + full abundance에 adaptive-eps GPU DBSCAN을 적용한 4-seed arm은 3,400 folds의 **84.5%에서 K=1**(평균 1.16), 전체 평균 **0.64976±0.00041**로 v110보다 **−0.01737 (5/12)**, 동일 random64/all k-means보다 **−0.01484 (6/11)**였다. DBSCAN이 PCA32 cell manifold를 하나의 density-connected cluster로 합쳐 CT abundance가 상수화되므로 기각하고 v110을 유지한다. §169 HDBSCAN도 전체 −0.01722였지만 반대로 noise 96.2%/K 중앙값 8이었다. 즉 이 공간에서 단일 density rule은 predictive resolution을 찾지 못한다. 활성 구성은 **v110 = v109에서 CT cluster 16→32, 학습 파라미터 0**(§161, 사용자 결정, 정식 경로 macro **0.7070**, 홀드아웃 **0.6103**). 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다. **독립 최소 구현 `src/models/training_free.py`가 기존 경로와 등가임을 테스트로 고정했다**(§140).
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -6669,3 +6669,79 @@ label-free HDBSCAN은 후자를 해결하지만 전자를 해결하지 못했다
 로그/예측: `logs/20260818_ct_hdbscan_fullcell/{seal,heldout}/` (10+7 task, 850 folds 완료).
 BagPFN Python 직접 실행 full **302 tests in 40.813s, OK**
 (`logs/20260818_ct_hdbscan_fullcell/tests/full_tests.log`).
+
+---
+
+## 170. 2026-08-18 — random-64 + adaptive DBSCAN: **84.5%가 K=1, 전체 −0.01737로 기각**
+
+*작성: Codex, 2026-08-18 — 사용자 지시로 64 random subsampling에서 K-free DBSCAN 평가.*
+
+### 1. 설계
+
+§167의 `random64/all`과 동일하게 context bag마다 seed별 64 cell을 random 추출해 dictionary와
+정규화를 fit하고, 최종 abundance는 context/query **전체 cell**로 계산했다. seed 42–45를 모두 반복했다.
+
+- PCA32 standardised cell, class-balanced ridge λ=1, CT weight 0.7
+- GPU cuML DBSCAN, `min_samples=16`, K/cluster 수 지정 없음
+- eps는 각 fold context-only 16-NN distance를 오름차순 정렬하고, endpoint chord와 curve의 수직 간격
+  `x−y`가 최대인 k-distance knee에서 자동 선택
+- DBSCAN noise는 centroid 계산에서 제외하되 전체 cell이 최종 soft abundance에 참여
+- all-noise면 global mean 1-token fallback
+- arm: `db64all_s{42..45}`
+
+합성된 두 Gaussian blob에서는 num_tokens=999를 무시하고 K=2, noise 1.1%를 복원했다. 실제 데이터에서는
+평균 eps 5.0965, knee quantile 0.9356이었다.
+
+### 2. 결과
+
+| seed | SEAL 10 | held-out 7 | 전체 17 |
+|---:|---:|---:|---:|
+| 42 | 0.69707 | 0.58299 | 0.65009 |
+| 43 | 0.69756 | 0.58247 | 0.65017 |
+| 44 | 0.69605 | 0.58333 | 0.64964 |
+| 45 | 0.69675 | 0.58114 | 0.64915 |
+| **4-seed 평균** | **0.69686±0.00055** | **0.58248±0.00083** | **0.64976±0.00041** |
+
+비교:
+
+| 기준 | SEAL Δ | held-out Δ | 전체 Δ | task W/L |
+|---|---:|---:|---:|---:|
+| v110 | −0.01006 | −0.02781 | **−0.01737** | 5/12 |
+| 같은 random64/all k-means (§167) | −0.00693 | −0.02612 | **−0.01484** | 6/11 |
+
+task별 4-seed 평균 / Δ vs v110:
+
+| task | AUROC | Δ |
+|---|---:|---:|
+| ER | 0.70420 | +0.00280 |
+| grade | 0.72490 | −0.01840 |
+| HER2 | 0.67350 | −0.00680 |
+| PIK3CA | 0.54180 | +0.00370 |
+| BRCA TP53 | 0.83000 | +0.00450 |
+| BAP1 | 0.63148 | −0.04353 |
+| VHL | 0.49732 | −0.02598 |
+| EGFR | 0.78832 | +0.00612 |
+| STK11 | 0.89440 | −0.01040 |
+| LUAD TP53 | 0.68265 | −0.01265 |
+| PBRM1 | 0.52192 | −0.03068 |
+| ARID1A | 0.41430 | −0.09570 |
+| Histologic Grade | 0.60025 | −0.04055 |
+| KEAP1 | 0.56468 | −0.02232 |
+| KRAS | 0.70357 | −0.01003 |
+| SMAD4 | 0.49510 | +0.00710 |
+| progression | 0.77755 | −0.00245 |
+
+3,400 folds에서 K 범위 **1–5**, 평균 **1.162**, 중앙값 1이었다. K별 fold 수는
+`K1=2874 (84.5%) / K2=506 / K3=16 / K4=3 / K5=1`; noise 평균은 **0.00523**였다.
+
+### 3. 판단
+
+**DBSCAN arm 기각, v110 유지.** adaptive knee eps는 거의 모든 sampled cell을 하나의 density-connected
+component로 묶었다. K=1이면 softmax abundance는 모든 bag에서 `[1]`이라 standardisation 후 CT margin이
+0으로 붕괴한다. 따라서 §167과의 −0.01484는 random-64 sampling 때문이 아니라 DBSCAN tokenizer가
+대부분 CT branch를 제거한 결과다. HDBSCAN은 반대로 96.2%를 noise로 버렸고 DBSCAN은 99.5%를 한
+cluster에 연결했다. PCA32에서 density-only 방식 어느 쪽도 predictive cell resolution을 주지 못했다.
+
+로그/예측: `logs/20260818_ct_dbscan_random64_all/{seal,heldout}/` (40+28 task, 3,400 folds).
+BagPFN Python 직접 실행 full **303 tests in 33.346s, OK**
+(`logs/20260818_ct_dbscan_random64_all/tests/full_tests.log`).

@@ -684,6 +684,13 @@ def evaluate_trial(
                 hdbscan_allow_single_cluster=(
                     os.environ.get("ICF_CT_HDBSCAN_ALLOW_SINGLE", "0") == "1"
                 ),
+                dbscan_eps=(
+                    None if os.environ.get("ICF_CT_DBSCAN_EPS") is None
+                    else float(os.environ["ICF_CT_DBSCAN_EPS"])
+                ),
+                dbscan_min_samples=int(
+                    os.environ.get("ICF_CT_DBSCAN_MIN_SAMPLES", "16")
+                ),
                 temperature=float(inner.ct_temperature),
                 eps=float(inner.ct_eps),
                 ridge_lambda=float(os.environ.get("ICF_CT_RIDGE_LAMBDA", "1.0")),
@@ -732,6 +739,8 @@ def evaluate_trial(
                   f"hdbscan_min_cluster_fraction="
                   f"{readout_config.hdbscan_min_cluster_fraction} "
                   f"hdbscan_min_samples={readout_config.hdbscan_min_samples} "
+                  f"dbscan_eps={readout_config.dbscan_eps} "
+                  f"dbscan_min_samples={readout_config.dbscan_min_samples} "
                   f"tokens={readout_config.num_tokens}", flush=True)
         # docs SS155. `ICF_DD_RELATIVE=1` ranks by (D0-D1)/(D0+D1+eps) instead of
         # (D0-D1), i.e. by the RATIO rather than the difference, which suppresses a

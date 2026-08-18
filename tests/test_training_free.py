@@ -122,6 +122,8 @@ class DefaultTest(unittest.TestCase):
         self.assertEqual(config.ct_hdbscan_cluster_selection_method, "leaf")
         self.assertEqual(config.ct_hdbscan_build_algo, "nn_descent")
         self.assertFalse(config.ct_hdbscan_allow_single_cluster)
+        self.assertIsNone(config.ct_dbscan_eps)
+        self.assertEqual(config.ct_dbscan_min_samples, 16)
         self.assertEqual(config.cv_blocks, "offdiag")
         self.assertEqual(config.weight_ct, 0.7)
 

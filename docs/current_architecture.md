@@ -85,6 +85,7 @@ head    margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
 | CT cell 샘플링 | random64/all ≈ random512/all(−0.00011), abundance512 ≈ all(−0.00014). 표본 수는 원인이 아니며 남은 축은 even/random policy다. 단 random64/match로 최종 분리 필요 (§159, §160, §165–§167) |
 | CT hierarchical full-cell | K=8/16/32/64/128/256이 0.65087→0.66070, K64 이후 plateau. 최고도 v110 대비 −0.00643 (§168) |
 | CT HDBSCAN full-cell | GPU NN-descent, K=1..19(중앙값 8), noise 96.2%. 전체 0.64991로 v110 대비 −0.01722; density K ≠ predictive K (§169) |
+| CT DBSCAN random64/all | adaptive k-distance knee eps, fold 84.5%가 K=1. 전체 0.64976±0.00041, v110 대비 −0.01737 (§170) |
 | CT two-token readout | ridge로 대체됨. 단 raw 1536에서만 "무관"이었다 (§148·§150) |
 
 ## 0-6. 열려 있는 갈래

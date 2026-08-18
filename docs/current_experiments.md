@@ -5,7 +5,7 @@ CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 
 ---
 
-## 0. CT sampling/tokenizer 최근 결론 (§165–§169)
+## 0. CT sampling/tokenizer 최근 결론 (§165–§170)
 
 활성 v110은 결정론적이지만 CT dictionary cell을 무작위로 뽑는 arm은 다시 seed 분산이 생긴다.
 따라서 단일 seed나 task 반복을 근거로 삼지 않고 **sampling seed 42–45를 같은 17 task에서 반복**한다.
@@ -38,6 +38,11 @@ arm이 아니다. `h2T{8,16,32,64,128,256}`, 로그는
 K=1..19(중앙값 8), noise 평균 96.2%였고 전체 17은 0.64991로 v110 대비 −0.01722(3/14),
 hierarchical K8 대비도 −0.00096이었다. density 기반 dynamic K가 predictive K를 찾지 못해 기각했다.
 로그는 `logs/20260818_ct_hdbscan_fullcell/{seal,heldout}/`이다.
+
+§170은 §167과 같은 random64/all에서 GPU DBSCAN의 eps를 context-only k-distance knee로 자동 선택했다.
+4 seeds × 17 tasks에서 fold의 84.5%가 K=1(평균 1.16)이었고 전체 0.64976±0.00041로 v110 대비
+−0.01737, 같은 random64/all k-means 대비 −0.01484였다. 단일 cluster로 CT가 상수화되어 기각했다.
+로그는 `logs/20260818_ct_dbscan_random64_all/{seal,heldout}/`이다.
 
 ---
 
