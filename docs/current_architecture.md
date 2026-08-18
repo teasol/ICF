@@ -82,7 +82,7 @@ head    margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
 |---|---|
 | 합성 데이터 분포 | 격차를 닫을수록 단조로 나빠진다 (§129) |
 | DD 전반 | K·rank·게이트·selector 네 갈래 모두 (§145~§147) |
-| CT cell 샘플링 | 전체 cell이 4개 token 수 전부에서 손해. random512 dictionary + full abundance도 양 집단에서 음수. 같은 dictionary에서 abundance 512는 all 대비 −0.00014라 **full abundance가 원인은 아님** (§159, §160, §165, §166) |
+| CT cell 샘플링 | random64/all ≈ random512/all(−0.00011), abundance512 ≈ all(−0.00014). 표본 수는 원인이 아니며 남은 축은 even/random policy다. 단 random64/match로 최종 분리 필요 (§159, §160, §165–§167) |
 | CT two-token readout | ridge로 대체됨. 단 raw 1536에서만 "무관"이었다 (§148·§150) |
 
 ## 0-6. 열려 있는 갈래

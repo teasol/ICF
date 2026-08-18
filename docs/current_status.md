@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-18` (Codex) — §166까지. random-512 dictionary에서 abundance `all→512` paired 분리는 전체 17에서 **−0.00014**로 사실상 동률이라, §165 하락의 원인은 full-cell abundance가 아니다. random-512 dictionary + full-cell abundance는 4 sampling seed 평균으로 SEAL −0.00314, 홀드아웃 −0.00139라 기각했고 활성 v110은 유지한다. 활성 구성은 **v110 = v109에서 CT cluster 16→32, 학습 파라미터 0**(§161, 사용자 결정, 정식 경로 macro **0.7070**, 홀드아웃 **0.6103**). 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다. 직전 v107은(§142, 사용자 결정, 정식 경로 macro **0.6945**, seed std 0.00000). K는 v106에서 사영이 학습을 벗어나며 **평가 시점 노브**가 됐고, 스윕 결과 128은 최적이 아니었다 — 전체 17 task에서 +0.0076(t=3.01, 12/17), 선택에 쓰지 않은 홀드아웃 7개에서 재현(§142). **독립 최소 구현 `src/models/training_free.py`가 기존 경로와 등가임을 테스트로 고정했다**(§140).
+**Last updated**: `2026-08-18` (Codex) — §167까지. random-64/full-abundance는 random-512/full 대비 전체 17에서 **−0.00011**로 동률이고 v110 대비 **−0.00253**이라, 64→512 표본 수는 원인이 아니며 random sampling policy가 남은 유력 축이다(단 `random64/match`로 최종 분리 필요). §166에서 abundance `all→512`도 −0.00014로 동률임을 확인했다. 활성 v110은 유지한다. 활성 구성은 **v110 = v109에서 CT cluster 16→32, 학습 파라미터 0**(§161, 사용자 결정, 정식 경로 macro **0.7070**, 홀드아웃 **0.6103**). 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다. 직전 v107은(§142, 사용자 결정, 정식 경로 macro **0.6945**, seed std 0.00000). K는 v106에서 사영이 학습을 벗어나며 **평가 시점 노브**가 됐고, 스윕 결과 128은 최적이 아니었다 — 전체 17 task에서 +0.0076(t=3.01, 12/17), 선택에 쓰지 않은 홀드아웃 7개에서 재현(§142). **독립 최소 구현 `src/models/training_free.py`가 기존 경로와 등가임을 테스트로 고정했다**(§140).
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -6483,3 +6483,52 @@ random-512 구성(그리고 v110의 even-64와 달라진 sampling policy/크기)
 
 활성 v110(`even-64 / abundance=match`)은 유지한다. 다음 원인 분리의 최소 비교는 같은 random policy의
 `random64/match` 대 `random512/match`이며, abundance-all 자체를 더 의심할 근거는 없다.
+
+---
+
+## 167. 2026-08-18 — random-64 dictionary + full-cell abundance: **64→512 크기는 원인 아님**
+
+*작성: Codex, 2026-08-18 — 사용자의 “64 토큰 random”을 bag당 64 cell random 추출로 해석. CT token은 v110의 32개 유지.*
+
+### 1. 설계와 실행
+
+새 `r64all_s{42..45}`는 `cells=64 / sampling=random / abundance=all`이고, PCA32·k-means30·token32·
+CT weight 0.7 등은 v110과 같다. 같은 seed의 §165 `r512all`과 비교하면 dictionary/정규화 표본 수
+`512→64`만 달라진다. 모든 Python 명령은 BagPFN 환경 인터프리터를 직접 사용했다.
+
+```bash
+BAGPY=/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python
+ARMS='r64all_s42 r64all_s43 r64all_s44 r64all_s45' NGPU=8 GPU_OFFSET=0 \
+  TASKSET=seal bash scripts/run_ct_readout_sweep.sh \
+  logs/20260818_ct_random64_abundance_all/seal
+# TASKSET=heldout도 동일하게 실행
+
+"$BAGPY" -m unittest tests.test_ct_readout tests.test_training_free
+# Ran 52 tests in 11.074s — OK
+```
+
+로그/예측: `logs/20260818_ct_random64_abundance_all/{seal,heldout}/` (40+28 완료).
+
+### 2. 결과
+
+| seed | SEAL 10 | 홀드아웃 7 | 전체 17 | Δ vs random512/all | W/T/L vs random512 |
+|---|---:|---:|---:|---:|---:|
+| 42 | 0.70388 | 0.60880 | 0.66473 | +0.00037 | 10/0/7 |
+| 43 | 0.70385 | 0.60781 | 0.66431 | +0.00016 | 11/0/6 |
+| 44 | 0.70351 | 0.60841 | 0.66435 | −0.00072 | 6/0/11 |
+| 45 | 0.70394 | 0.60939 | 0.66501 | −0.00026 | 5/2/10 |
+| **4-seed 평균** | **0.70379±0.00017** | **0.60860±0.00057** | **0.66460±0.00029** | **−0.00011** | **task-mean 9/0/8** |
+
+random512/all 대비 paired 차이는 SEAL **+0.00001**, 홀드아웃 **−0.00030**, 전체 **−0.00011**로
+사실상 동률이다. v110 대비는 SEAL **−0.00313**, 홀드아웃 **−0.00169**, 전체 **−0.00253**이고,
+task-mean 부호도 8/17만 양수다.
+
+### 3. 판단
+
+**random dictionary의 cell 수 64→512가 §165 하락의 원인이라는 가설은 기각한다.** abundance-all을
+고정하면 random-64와 random-512가 같다. §166에서 abundance 512/all도 같았으므로, 지금까지 분리한
+두 축(dictionary 표본 수, abundance 표본 수)은 성능을 설명하지 않는다.
+
+남은 직접적인 차이는 v110의 `sampling=even`과 새 arm의 `sampling=random`이다. 다만 v110은
+`abundance=match(64)`이고 이 arm은 `all`이므로 최종 단일변수 확인은 `random64/match`가 필요하다.
+현재 결과만으로 random 자체를 확정 기각하지는 않으며 활성 v110은 유지한다.

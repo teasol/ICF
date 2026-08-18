@@ -23,6 +23,11 @@ CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 정규화에 쓰인 random-512 구성 쪽이다. arm은 `r512a512_s{42..45}`, 로그는
 `logs/20260818_ct_random512_abundance512/{seal,heldout}/`이다.
 
+§167은 abundance-all과 sampling seed를 고정하고 dictionary 표본만 random 512→64로 줄였다.
+전체 17-task 평균은 0.66460으로 random512/all 대비 **−0.00011**(SEAL +0.00001, 홀드아웃 −0.00030),
+v110 대비 −0.00253이다. 따라서 random arm의 하락은 512라는 표본 수 때문도 아니다. arm은
+`r64all_s{42..45}`, 로그는 `logs/20260818_ct_random64_abundance_all/{seal,heldout}/`이다.
+
 ---
 
 ## 1. 판정 기준 (§71-4 확정)

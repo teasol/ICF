@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: 2026-08-18 (Codex) — §166. abundance 512 paired 분리로 full abundance가 §165 하락 원인이 아님을 확인, v110 유지.
+**Last updated**: 2026-08-18 (Codex) — §167. random64/all ≈ random512/all로 dictionary 표본 수 역시 하락 원인이 아님을 확인, v110 유지.
 
 ---
 
@@ -98,6 +98,7 @@ head margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
 | **§163** CT λ | λ=1이 최적. §160 이득의 30%는 λ 효과 (+0.0051 → +0.0036) |
 | **§165** random 512 + full abundance | 4 seed 평균 SEAL −0.00314, 홀드아웃 −0.00139. 기각, v110 유지 |
 | **§166** random 512 + abundance 512 | 같은 seed의 abundance-all 대비 전체 −0.00014(사실상 동률). **full abundance는 하락 원인 아님** |
+| **§167** random 64 + full abundance | random512/all 대비 전체 −0.00011(동률), v110 대비 −0.00253. **64→512 크기는 원인 아님** |
 
 ## 0-6. 다음에 할 일 (근거 순)
 
