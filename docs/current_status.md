@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-18` (nhn-NEXGEM-claude 09:30) — §164까지(서버 이동 준비 포함). 활성 구성은 **v110 = v109에서 CT cluster 16→32, 학습 파라미터 0**(§161, 사용자 결정, 정식 경로 macro **0.7070**, 홀드아웃 **0.6103**). 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다. 직전 v107은(§142, 사용자 결정, 정식 경로 macro **0.6945**, seed std 0.00000). K는 v106에서 사영이 학습을 벗어나며 **평가 시점 노브**가 됐고, 스윕 결과 128은 최적이 아니었다 — 전체 17 task에서 +0.0076(t=3.01, 12/17), 선택에 쓰지 않은 홀드아웃 7개에서 재현(§142). **독립 최소 구현 `src/models/training_free.py`가 기존 경로와 등가임을 테스트로 고정했다**(§140).
+**Last updated**: `2026-08-18` (Codex) — §165까지. random 512-cell dictionary + full-cell abundance는 4 sampling seed 평균으로 SEAL −0.00314, 홀드아웃 −0.00139라 기각했고 활성 v110은 유지한다. 활성 구성은 **v110 = v109에서 CT cluster 16→32, 학습 파라미터 0**(§161, 사용자 결정, 정식 경로 macro **0.7070**, 홀드아웃 **0.6103**). 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다. 직전 v107은(§142, 사용자 결정, 정식 경로 macro **0.6945**, seed std 0.00000). K는 v106에서 사영이 학습을 벗어나며 **평가 시점 노브**가 됐고, 스윕 결과 128은 최적이 아니었다 — 전체 17 task에서 +0.0076(t=3.01, 12/17), 선택에 쓰지 않은 홀드아웃 7개에서 재현(§142). **독립 최소 구현 `src/models/training_free.py`가 기존 경로와 등가임을 테스트로 고정했다**(§140).
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -6334,3 +6334,102 @@ CV·DD가 만드는 것이다. 이번 범위 밖이지만 기록해 둔다.
 "$ICF_PYTHON" -m unittest discover -s tests -p "test_*.py"     # 291 tests
 bash scripts/eval_v110.sh 0 smoke cptac_ccrcc/VHL_mutation     # 0.5233
 ```
+
+---
+
+## 165. 2026-08-18 — CT random 512-cell dictionary + full-cell abundance: **기각**
+
+*작성: Codex, 2026-08-18 — 사용자 지시로 균등 64 추출을 random 512로 바꾸고 abundance만 전체 cell 사용.*
+
+### 1. 질문과 분리한 변수
+
+§159·§160의 `ICF_CT_CELLS=all`은 한 번에 네 가지를 바꿨다: (i) context 좌표 정규화,
+(ii) FPS/k-means dictionary, (iii) context abundance, (iv) query abundance. 그래서 “전체 cell의
+abundance가 나쁜가”와 “전체 cell이 dictionary를 움직인 것이 나쁜가”를 구분할 수 없었다.
+
+이번 arm은 다음처럼 분리했다.
+
+```
+dictionary + 정규화   : bag당 random 512 cells (sampling seed 고정)
+context/query abundance: 모든 cell
+나머지                 : v110 그대로 (PCA32, k-means30, token32, CT ridge λ=1, weight 0.7)
+```
+
+구현:
+
+- `CTReadoutConfig.abundance_cells_per_bag`: `"match"`는 기존 coupled 경로를 bit-identical하게 유지,
+  `None`은 dictionary cap과 무관하게 abundance에 전체 cell 사용.
+- `sampling="random"`, `sampling_seed`: bag index를 seed에 섞은 재현 가능한 무작위 subset.
+  추출 뒤 index를 정렬해 누적 순서는 유지했다.
+- 평가 훅: `ICF_CT_ABUNDANCE_CELLS`, `ICF_CT_SAMPLING`, `ICF_CT_SAMPLING_SEED`.
+- 기본값은 `cells=64 / abundance=match / sampling=even`으로 유지 — v110은 움직이지 않는다.
+
+### 2. 실행과 검증
+
+모든 Python 실행은 새 노드의 환경 인터프리터를 직접 사용했다.
+
+```bash
+BAGPY=/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python
+"$BAGPY" -m unittest discover -s tests -p 'test_*.py'
+# Ran 295 tests in 267.559s — OK
+
+ICF_CT_CELLS=512 ICF_CT_ABUNDANCE_CELLS=all \
+ICF_CT_SAMPLING=random ICF_CT_SAMPLING_SEED=42 \
+  bash scripts/eval_v110.sh 0 ct_r512_aball_s42_smoke cptac_ccrcc/VHL_mutation
+# VHL 0.5183 (v110 0.5233)
+
+ARMS='v110 r512all_s42 r512all_s43 r512all_s44 r512all_s45' NGPU=8 GPU_OFFSET=0 \
+  TASKSET=seal bash scripts/run_ct_readout_sweep.sh \
+    logs/20260818_ct_random512_abundance_all/seal
+ARMS='v110 r512all_s42 r512all_s43 r512all_s44 r512all_s45' NGPU=8 GPU_OFFSET=0 \
+  TASKSET=heldout bash scripts/run_ct_readout_sweep.sh \
+    logs/20260818_ct_random512_abundance_all/heldout
+```
+
+로그/예측:
+
+- `logs/20260818_ct_random512_abundance_all/{seal,heldout}/`
+- `logs/20260818_ct_random512_abundance_all/full_tests.log`
+- 예측 `.pt`는 위 sweep directory의 arm/task별 파일
+
+### 3. 결과 — 두 집단 모두 음수
+
+| arm | SEAL 10 | 홀드아웃 7 | 전체 17 | Δ 전체 | 상승 task |
+|---|---:|---:|---:|---:|---:|
+| **v110** | **0.70692** | **0.61029** | **0.66713** | — | — |
+| random512/all s42 | 0.70344 | 0.60853 | 0.66436 | −0.00277 | 6/17 |
+| random512/all s43 | 0.70392 | 0.60733 | 0.66415 | −0.00298 | 5/17 |
+| random512/all s44 | 0.70360 | 0.61004 | 0.66508 | −0.00205 | 6/17 |
+| random512/all s45 | 0.70416 | 0.60970 | 0.66526 | −0.00186 | 10/17 |
+| **4-seed 평균** | **0.70378±0.00032** | **0.60890±0.00123** | **0.66471±0.00054** | **−0.00242±0.00054** | **7/17** |
+
+SEAL 평균 Δ는 **−0.00314**, 홀드아웃 Δ는 **−0.00139**로 독립 집단의 부호가 같다.
+sampling seed 분산은 작아(SEAL macro std 0.00032) 음수가 한 seed의 불운으로 생긴 것도 아니다.
+
+task별 4-seed 평균의 큰 변화:
+
+| 하락 | Δ | 상승 | Δ |
+|---|---:|---|---:|
+| ER status | **−0.0142** | grade | +0.0046 |
+| HER2 status | **−0.0129** | KRAS (홀드아웃) | +0.0034 |
+| BAP1 | **−0.0094** | BRCA TP53 | +0.0023 |
+| SMAD4 (홀드아웃) | −0.0062 | ucla progression | +0.0025 |
+| KEAP1 (홀드아웃) | −0.0057 | Histologic Grade | +0.0013 |
+| ARID1A (홀드아웃) | −0.0050 | STK11 | +0.0007 |
+
+### 4. 판단과 해석
+
+**기각, v110 유지.** 사용자가 지시한 random 512 + full abundance는 구현됐지만 활성 기본값으로
+승격하지 않는다. 기존의 “균등 간격 64가 이론적으로 옳다”는 주장도 하지 않는다. 이번 arm은
+sampling policy(균등→random), dictionary 크기(64→512), abundance cap(64→all)을 함께 바꿨으므로
+음수의 귀속을 셋 중 하나로 정할 수 없다.
+
+다만 두 가지는 확정됐다.
+
+1. 전체-cell abundance 자체가 512-cell random dictionary 위에서 성능을 회복시키지 못했다.
+2. seed 42–45 평균에서도 v110보다 낮아, “균등 64의 우연한 index 선택”만으로 기존 우위를
+   설명할 수는 없다.
+
+다음에 원인을 더 분리한다면 `random64/match`, `random512/match`, `random64/all`의 대각선 세 칸이
+필요하다. 그러나 현재 성능 개선 최우선순위는 여전히 `current_architecture.md` §0-6의 CV 가중과
+CT의 독립 부분공간이며, 이 sampling 축은 요청 없이는 추가로 확장하지 않는다.

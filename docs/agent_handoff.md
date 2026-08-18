@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: 2026-08-18 (nhn-NEXGEM-claude) — §164. 서버 이동 대비로 최상단을 새로 씀.
+**Last updated**: 2026-08-18 (Codex) — §165. random-512/full-abundance arm 기각, v110 유지.
 
 ---
 
@@ -96,6 +96,7 @@ head margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
 | **§159·§160** cell 수 / token 수 | 전체 cell 기각(4개 token 수 전부). **token 32가 정점** |
 | **§162** CV 상관행렬 | 기각. `√(λᵢλⱼ)` 크기는 **정보였다** |
 | **§163** CT λ | λ=1이 최적. §160 이득의 30%는 λ 효과 (+0.0051 → +0.0036) |
+| **§165** random 512 + full abundance | 4 seed 평균 SEAL −0.00314, 홀드아웃 −0.00139. 기각, v110 유지 |
 
 ## 0-6. 다음에 할 일 (근거 순)
 

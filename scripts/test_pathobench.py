@@ -627,11 +627,15 @@ def evaluate_trial(
         ct_pca_dim = os.environ.get("ICF_CT_PCA_DIM")
         ct_kmeans = os.environ.get("ICF_CT_KMEANS")
         ct_cells = os.environ.get("ICF_CT_CELLS")
+        ct_abundance_cells = os.environ.get("ICF_CT_ABUNDANCE_CELLS")
+        ct_sampling = os.environ.get("ICF_CT_SAMPLING")
+        ct_sampling_seed = os.environ.get("ICF_CT_SAMPLING_SEED")
         ct_tokens = os.environ.get("ICF_CT_TOKENS")
         saved_ct_features = None
         if (ct_readout != "extreme" or ct_pca_dim is not None
                 or ct_kmeans is not None or ct_cells is not None
-                or ct_tokens is not None):
+                or ct_abundance_cells is not None or ct_sampling is not None
+                or ct_sampling_seed is not None or ct_tokens is not None):
             from src.models.ct_readout import CTReadoutConfig, ct_margins  # noqa: PLC0415
 
             readout_config = CTReadoutConfig(
@@ -642,6 +646,16 @@ def evaluate_trial(
                     None if os.environ.get("ICF_CT_CELLS") == "all"
                     else int(os.environ.get("ICF_CT_CELLS", inner.ct_cells_per_bag))
                 ),
+                # SS165: keep dictionary/statistics at `ICF_CT_CELLS` but use a
+                # separate cap for the per-bag abundance average. "all" supports
+                # the random-512 dictionary / full-abundance diagnostic.
+                abundance_cells_per_bag=(
+                    "match" if ct_abundance_cells is None
+                    else None if ct_abundance_cells == "all"
+                    else int(ct_abundance_cells)
+                ),
+                sampling=os.environ.get("ICF_CT_SAMPLING", "even"),
+                sampling_seed=int(os.environ.get("ICF_CT_SAMPLING_SEED", "0")),
                 temperature=float(inner.ct_temperature),
                 eps=float(inner.ct_eps),
                 ridge_lambda=float(os.environ.get("ICF_CT_RIDGE_LAMBDA", "1.0")),
@@ -680,6 +694,9 @@ def evaluate_trial(
                   f"scaling={readout_config.pca_scaling} "
                   f"kmeans={readout_config.kmeans_iterations} "
                   f"cells={readout_config.cells_per_bag} "
+                  f"abundance_cells={readout_config.abundance_cells_per_bag} "
+                  f"sampling={readout_config.sampling} "
+                  f"sampling_seed={readout_config.sampling_seed} "
                   f"tokens={readout_config.num_tokens}", flush=True)
         # docs SS155. `ICF_DD_RELATIVE=1` ranks by (D0-D1)/(D0+D1+eps) instead of
         # (D0-D1), i.e. by the RATIO rather than the difference, which suppresses a

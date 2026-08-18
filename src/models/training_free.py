@@ -135,6 +135,11 @@ class TrainingFreeConfig:
     ct_num_tokens: int = 32
     # SS159: None = every cell. 64 is v109's value (the reproduction path).
     ct_cells_per_bag: int | None = 64
+    # SS165: "match" is the exact v110 path. None keeps the 64-cell dictionary
+    # above but averages assignments over every cell in each bag.
+    ct_abundance_cells_per_bag: int | None | str = "match"
+    ct_sampling: str = "even"
+    ct_sampling_seed: int = 0
     ct_temperature: float = 0.5
     ct_eps: float = 1e-6
     # SS137-3: CV : DD : CT. Sign of the DD term is required by DD returning
@@ -275,6 +280,9 @@ class TrainingFreeClassifier:
             CTReadoutConfig(
                 num_tokens=config.ct_num_tokens,
                 cells_per_bag=config.ct_cells_per_bag,
+                abundance_cells_per_bag=config.ct_abundance_cells_per_bag,
+                sampling=config.ct_sampling,
+                sampling_seed=config.ct_sampling_seed,
                 temperature=config.ct_temperature,
                 eps=config.ct_eps,
                 pca_dim=config.ct_pca_dim,

@@ -29,6 +29,7 @@ from src.models.ct_readout import (
     readout_prototype,
     readout_ridge,
     ridge_coefficients,
+    sample_cells,
 )
 from src.models.set_transformer_ridge import CovarianceMeanLearnablePDDCTMLPModel
 
@@ -402,6 +403,75 @@ class FullCellTest(unittest.TestCase):
         every, _ = ct_margins(context_bags, labels, query_bags,
                               self._config(None, kmeans_iterations=5), "ridge")
         self.assertFalse(torch.allclose(few.query, every.query, atol=1e-4))
+
+    def test_abundance_all_keeps_the_capped_dictionary_exact(self):
+        """SS165: only the cells averaged into abundance may change."""
+        context_bags, _, query_bags = episode(46, cells=50)
+        reference = ct_abundance(
+            context_bags, query_bags,
+            self._config(12, kmeans_iterations=5),
+        )
+        split = ct_abundance(
+            context_bags, query_bags,
+            CTReadoutConfig(
+                num_tokens=CONFIG.num_tokens,
+                cells_per_bag=12,
+                abundance_cells_per_bag=None,
+                temperature=CONFIG.temperature,
+                eps=CONFIG.eps,
+                kmeans_iterations=5,
+            ),
+        )
+        self.assertTrue(torch.equal(reference.tokens, split.tokens))
+        self.assertFalse(torch.allclose(reference.context, split.context, atol=1e-5))
+        self.assertFalse(torch.allclose(reference.query, split.query, atol=1e-5))
+
+    def test_match_is_bit_identical_to_the_legacy_default(self):
+        context_bags, _, query_bags = episode(47, cells=50)
+        implicit = ct_abundance(
+            context_bags, query_bags,
+            self._config(12, kmeans_iterations=5),
+        )
+        explicit = ct_abundance(
+            context_bags, query_bags,
+            CTReadoutConfig(
+                num_tokens=CONFIG.num_tokens,
+                cells_per_bag=12,
+                abundance_cells_per_bag="match",
+                temperature=CONFIG.temperature,
+                eps=CONFIG.eps,
+                kmeans_iterations=5,
+            ),
+        )
+        for left, right in zip(implicit, explicit):
+            self.assertTrue(torch.equal(left, right))
+
+    def test_random_sampling_is_reproducible_and_seeded(self):
+        bag = torch.arange(200 * DIM, dtype=torch.float32).reshape(200, DIM)
+        first = sample_cells(
+            bag,
+            CTReadoutConfig(cells_per_bag=32, sampling="random", sampling_seed=7),
+        )
+        repeated = sample_cells(
+            bag,
+            CTReadoutConfig(cells_per_bag=32, sampling="random", sampling_seed=7),
+        )
+        other = sample_cells(
+            bag,
+            CTReadoutConfig(cells_per_bag=32, sampling="random", sampling_seed=8),
+        )
+        self.assertTrue(torch.equal(first, repeated))
+        self.assertFalse(torch.equal(first, other))
+        self.assertEqual(first.shape, (32, DIM))
+
+    def test_random_bags_do_not_share_one_index_pattern(self):
+        bag = torch.arange(200 * DIM, dtype=torch.float32).reshape(200, DIM)
+        context, _ = prepare_cells(
+            [bag, bag],
+            [bag],
+            CTReadoutConfig(cells_per_bag=32, sampling="random", sampling_seed=9),
+        )
+        self.assertFalse(torch.equal(context[0], context[1]))
 
     def test_query_cannot_reach_tokens_or_statistics_at_full_cells(self):
         context_bags, labels, query_bags = episode(44, cells=45)

@@ -1,7 +1,21 @@
-# Current experiments (2026-08-15)
+# Current experiments (2026-08-18)
 
 CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 **그 문서의 판정 절차는 폐기됐다** — 합성 지표로 arm을 고르는 방식이 반복적으로 실패했다.
+
+---
+
+## 0. 결정론적 v110에서 무작위 CT arm을 평가하는 규칙 (§165)
+
+활성 v110은 결정론적이지만 CT dictionary cell을 무작위로 뽑는 arm은 다시 seed 분산이 생긴다.
+따라서 단일 seed나 task 반복을 근거로 삼지 않고 **sampling seed 42–45를 같은 17 task에서 반복**한다.
+각 seed는 bag index와 섞어 bag마다 다른 subset을 만들고, 같은 seed는 완전 재현된다.
+
+§165의 첫 arm은 dictionary/정규화에 bag당 random 512 cells를 쓰고 abundance에는 전체 cell을 썼다.
+4-seed 평균은 v110 대비 SEAL −0.00314, 홀드아웃 −0.00139, 전체 17 −0.00242로 양쪽 집단에서
+음수라 기각했다. 실행 arm은 `r512all_s{42..45}`, 로그는
+`logs/20260818_ct_random512_abundance_all/{seal,heldout}/`이다. 활성 v110의 64-cell even 경로는
+바뀌지 않았다.
 
 ---
 

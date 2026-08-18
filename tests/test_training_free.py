@@ -108,6 +108,9 @@ class DefaultTest(unittest.TestCase):
         self.assertEqual(config.ct_kmeans_iterations, 30)
         self.assertEqual(config.ct_num_tokens, 32)
         self.assertEqual(config.ct_cells_per_bag, 64)
+        self.assertEqual(config.ct_abundance_cells_per_bag, "match")
+        self.assertEqual(config.ct_sampling, "even")
+        self.assertEqual(config.ct_sampling_seed, 0)
         self.assertEqual(config.cv_blocks, "offdiag")
         self.assertEqual(config.weight_ct, 0.7)
 

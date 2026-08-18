@@ -82,6 +82,15 @@ run_job() {
     v110)                vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_CT_TOKENS=32
                                 ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
                                 ICF_CV_BLOCKS=offdiag) ;;
+    # SS165: fit normalisation/tokens from a reproducible random 512-cell subset
+    # per bag, then average assignments over EVERY cell.  This separates codebook
+    # construction from abundance precision; the suffix is the sampling seed.
+    r512all_s*)          rest="${arm##*_s}"
+                         vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_CT_TOKENS=32
+                                ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
+                                ICF_CV_BLOCKS=offdiag ICF_CT_CELLS=512
+                                ICF_CT_ABUNDANCE_CELLS=all ICF_CT_SAMPLING=random
+                                ICF_CT_SAMPLING_SEED="$rest") ;;
     # SS163: CT ridge lambda sensitivity. CT's ridge is only 32-dimensional now, and
     # SS156-5 showed lambda comes alive at low dimension (+0.012 at 256 dims), so
     # lambda=1 was never checked where it might matter most.

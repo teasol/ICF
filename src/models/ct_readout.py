@@ -46,7 +46,7 @@ three constants stay valid (SS137-3).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import NamedTuple, Sequence
+from typing import Literal, NamedTuple, Sequence
 
 import torch
 
@@ -64,6 +64,18 @@ class CTReadoutConfig:
     # difference it is meant to carry. This is the last of SS148-5's three suspects
     # (token generation was SS157, the distance metric SS149).
     cells_per_bag: int | None = 64
+    # SS165. The cells that FIT the coordinate normalisation and k-means tokens
+    # need not be the cells whose assignments are averaged into each bag's
+    # abundance.  "match" preserves the historical coupled path bit-for-bit;
+    # None uses every cell for abundance while keeping `cells_per_bag` for the
+    # context-only dictionary.  This isolates estimation precision from the
+    # cell-count weighting of the pooled k-means objective.
+    abundance_cells_per_bag: int | None | Literal["match"] = "match"
+    # SS165. "random" draws a reproducible per-bag subset instead of assuming
+    # that storage order makes evenly spaced indices representative.  The seed is
+    # mixed with the bag index, so bags do not all receive the same index pattern.
+    sampling: Literal["even", "random"] = "even"
+    sampling_seed: int = 0
     temperature: float = 0.5
     eps: float = 1e-6
     ridge_lambda: float = 1.0
@@ -119,8 +131,16 @@ class CTMargins(NamedTuple):
     separation: torch.Tensor      # scalar, class-swap INVARIANT (head weight 0)
 
 
-def sample_cells(bag: torch.Tensor, config: CTReadoutConfig) -> torch.Tensor:
-    """Evenly spaced, never random -- the whole pipeline stays deterministic.
+_CONFIG_CELL_LIMIT = object()
+
+
+def sample_cells(
+    bag: torch.Tensor,
+    config: CTReadoutConfig,
+    cells_per_bag: int | None | object = _CONFIG_CELL_LIMIT,
+    sampling_seed: int | None = None,
+) -> torch.Tensor:
+    """Select a capped subset using the configured reproducible policy.
 
     `cells_per_bag=None` keeps every cell (docs SS159); the bag is already capped
     upstream by the encoder's `max_cells`, so this is not unbounded.
@@ -128,11 +148,29 @@ def sample_cells(bag: torch.Tensor, config: CTReadoutConfig) -> torch.Tensor:
     values = bag.float()
     if values.shape[0] == 0:
         raise ValueError("Every bag must contain at least one cell.")
-    if config.cells_per_bag is None or values.shape[0] <= config.cells_per_bag:
+    limit = config.cells_per_bag if cells_per_bag is _CONFIG_CELL_LIMIT else cells_per_bag
+    if limit is not None and (not isinstance(limit, int) or limit < 1):
+        raise ValueError("cells_per_bag must be a positive integer or None.")
+    if limit is None or values.shape[0] <= limit:
         return values
-    index = torch.linspace(
-        0, values.shape[0] - 1, config.cells_per_bag, device=values.device
-    ).round().long()
+    if config.sampling == "even":
+        index = torch.linspace(
+            0, values.shape[0] - 1, limit, device=values.device
+        ).round().long()
+    elif config.sampling == "random":
+        generator = torch.Generator(device=values.device)
+        generator.manual_seed(
+            config.sampling_seed if sampling_seed is None else sampling_seed
+        )
+        # Sorting restores storage order AFTER drawing the subset.  This keeps
+        # accumulation order stable and makes sampling the only changed variable.
+        index = torch.randperm(
+            values.shape[0], generator=generator, device=values.device
+        )[:limit].sort().values
+    else:
+        raise ValueError(
+            f"sampling must be 'even' or 'random', got {config.sampling!r}"
+        )
     return values.index_select(0, index)
 
 
@@ -141,6 +179,10 @@ def prepare_cells(
     query_bags: Sequence[torch.Tensor],
     config: CTReadoutConfig,
     pca_basis: torch.Tensor | None = None,
+    *,
+    cells_per_bag: int | None | object = _CONFIG_CELL_LIMIT,
+    normalisation: tuple[torch.Tensor, torch.Tensor] | None = None,
+    return_normalisation: bool = False,
 ):
     """Steps 1-2: sample cells, optionally project, then standardise on context.
 
@@ -148,8 +190,21 @@ def prepare_cells(
     are chosen from. Recomputing this in a diagnostic instead is how SS149's first
     contrast table came to measure token-to-token distance by mistake.
     """
-    context = [sample_cells(bag, config) for bag in context_bags]
-    query = [sample_cells(bag, config) for bag in query_bags]
+    context = [
+        sample_cells(
+            bag, config, cells_per_bag, sampling_seed=config.sampling_seed + index
+        )
+        for index, bag in enumerate(context_bags)
+    ]
+    query = [
+        sample_cells(
+            bag,
+            config,
+            cells_per_bag,
+            sampling_seed=config.sampling_seed + 1_000_000_007 + index,
+        )
+        for index, bag in enumerate(query_bags)
+    ]
     projected = pca_basis is not None and config.pca_dim is not None
     if projected:
         # Project the RAW cells: the basis was built in unstandardised UNI2 space,
@@ -158,21 +213,27 @@ def prepare_cells(
         basis = pca_basis[:, : config.pca_dim].to(context[0].dtype)
         context = [bag @ basis for bag in context]
         query = [bag @ basis for bag in query]
-    pooled = torch.cat(context, dim=0)
-    centre = pooled.mean(dim=0, keepdim=True)
-    if config.pca_scaling == "standardise" or not projected:
-        scale = (pooled - centre).square().mean(dim=0, keepdim=True).sqrt()
-    elif config.pca_scaling == "raw":
-        # One shared scale: centres the cloud without flattening the eigenvalue
-        # spectrum, so leading components keep their larger share of the distance.
-        scale = (pooled - centre).square().mean().sqrt().reshape(1, 1)
+    if normalisation is None:
+        pooled = torch.cat(context, dim=0)
+        centre = pooled.mean(dim=0, keepdim=True)
+        if config.pca_scaling == "standardise" or not projected:
+            scale = (pooled - centre).square().mean(dim=0, keepdim=True).sqrt()
+        elif config.pca_scaling == "raw":
+            # One shared scale: centres the cloud without flattening the eigenvalue
+            # spectrum, so leading components keep their larger share of the distance.
+            scale = (pooled - centre).square().mean().sqrt().reshape(1, 1)
+        else:
+            raise ValueError(
+                f"pca_scaling must be 'standardise' or 'raw', got {config.pca_scaling!r}"
+            )
+        scale = scale.clamp_min(config.eps)
     else:
-        raise ValueError(
-            f"pca_scaling must be 'standardise' or 'raw', got {config.pca_scaling!r}"
-        )
-    scale = scale.clamp_min(config.eps)
-    return ([(bag - centre) / scale for bag in context],
-            [(bag - centre) / scale for bag in query])
+        centre, scale = normalisation
+    result = ([(bag - centre) / scale for bag in context],
+              [(bag - centre) / scale for bag in query])
+    if return_normalisation:
+        return (*result, (centre, scale))
+    return result
 
 
 def farthest_point_tokens(pooled: torch.Tensor, config: CTReadoutConfig) -> torch.Tensor:
@@ -253,11 +314,32 @@ def ct_abundance(
     basis must come from CONTEXT cells only; nothing here checks that, because the
     caller owns it -- v107 passes the within-slide PCA the CV branch already built.
     """
-    context, query = prepare_cells(context_bags, query_bags, config, pca_basis)
-    pooled = torch.cat(context, dim=0)
+    token_context, token_query, normalisation = prepare_cells(
+        context_bags, query_bags, config, pca_basis, return_normalisation=True
+    )
+    pooled = torch.cat(token_context, dim=0)
     tokens = farthest_point_tokens(pooled, config)
     if config.kmeans_iterations > 0:
         tokens, _ = lloyd_refine(pooled, tokens, config.kmeans_iterations)
+
+    if config.abundance_cells_per_bag == "match":
+        context, query = token_context, token_query
+    else:
+        abundance_limit = config.abundance_cells_per_bag
+        if abundance_limit is not None and (
+            not isinstance(abundance_limit, int) or abundance_limit < 1
+        ):
+            raise ValueError(
+                "abundance_cells_per_bag must be 'match', a positive integer, or None."
+            )
+        context, query = prepare_cells(
+            context_bags,
+            query_bags,
+            config,
+            pca_basis,
+            cells_per_bag=abundance_limit,
+            normalisation=normalisation,
+        )
 
     def abundance(bags):
         # Chunked for the same reason as `_assign`, and identically exact: the mean
