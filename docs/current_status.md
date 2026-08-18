@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-18` (Codex) — §171까지. 사용자가 의도한 random-64 dictionary + full abundance **HDBSCAN**을 4 seeds/3,400 folds로 다시 평가했다. DBSCAN과 같은 문제가 아니라 반대 실패였다: noise 평균 **93.6%**, K 중앙값 2, **30.2%가 all-noise K=1 fallback**이었다. 전체 평균 **0.64819±0.00052**로 v110보다 **−0.01894 (3/14)**, 동일 random64/all k-means보다 **−0.01641**, DBSCAN보다 **−0.00157**여서 기각하고 v110을 유지한다. 활성 구성은 **v110 = v109에서 CT cluster 16→32, 학습 파라미터 0**(§161, 사용자 결정, 정식 경로 macro **0.7070**, 홀드아웃 **0.6103**). 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다. **독립 최소 구현 `src/models/training_free.py`가 기존 경로와 등가임을 테스트로 고정했다**(§140).
+**Last updated**: `2026-08-18` (Codex) — §172 handoff checkpoint. §171까지의 random sampling/tokenizer 실험은 모두 문서화·검증·커밋됐고 활성 구성은 계속 **v110 = v109에서 CT cluster 16→32, 학습 파라미터 0**(§161, 정식 경로 macro **0.7070**, 홀드아웃 **0.6103**)이다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -6790,3 +6790,23 @@ random 64-cell 표본은 HDBSCAN의 density hierarchy를 안정적으로 추정�
 로그/예측: `logs/20260818_ct_hdbscan_random64_all/{seal,heldout}/` (40+28 task, 3,400 folds).
 BagPFN Python 직접 실행 full **303 tests in 38.833s, OK**
 (`logs/20260818_ct_hdbscan_random64_all/tests/full_tests.log`).
+
+---
+
+## 172. 2026-08-18 — 세션 종료 handoff checkpoint
+
+§165–§171의 CT sampling/tokenizer 탐색 결과, 실행 설정, 비교 수치, 판정을 living docs 네 곳에
+동기화했다. 새 세션은 [`agent_handoff.md`](agent_handoff.md) 맨 위의 “새 세션 60초 재개 절차”를
+따르면 된다.
+
+- 활성 baseline: **v110**, SEAL 0.7070 / held-out 0.6103
+- 마지막 실험: §171 random64/all HDBSCAN, 전체 0.64819±0.00052로 기각
+- 필수 Python: `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`
+- 마지막 검증: 303 tests, OK (38.833s)
+- 실행 중 실험: 없음
+- 인계 시 GPU: B200 8장 모두 memory used 0 MiB/utilization 0% — 새 세션에서 재확인 필수
+- 사용자 dirty 파일: `scripts/eval_v110.sh`, `scripts/run_sketch_dim_sweep.sh` — 보존할 것
+- 다음 연구 후보 우선순위: CV 비대각 가중 → CT 독립 부분공간 → CT 기반 CV cell weighting
+
+이 checkpoint는 새로운 실험 판정이 아니라, 다른 세션이 중복 실행이나 사용자 변경 손상 없이
+즉시 이어갈 수 있게 현재 상태를 고정한 문서 인계다.

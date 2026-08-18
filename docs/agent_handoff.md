@@ -1,6 +1,38 @@
 # Agent handoff guide
 
-**Last updated**: 2026-08-18 (Codex) — §171. corrected random64/all HDBSCAN은 noise 93.6%, K 중앙값 2, 전체 −0.01894로 기각.
+**Last updated**: 2026-08-18 (Codex) — §172 handoff checkpoint. §171까지 문서·검증·커밋 완료, 활성 baseline은 v110.
+
+---
+
+# 새 세션 60초 재개 절차
+
+1. 작업 디렉터리는 `/NHNHOME/WORKSPACE/26msit005_C/kimds/ICF`다.
+2. Python은 앞으로도 **반드시 아래 실행 파일을 직접 호출**한다. `python`, `python3`, `conda run`으로
+   우회하지 않는다.
+
+   ```bash
+   /NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python
+   ```
+
+3. 읽는 순서는 이 문서 §0 → [`current_architecture.md` §0](current_architecture.md) →
+   [`current_experiments.md` §0](current_experiments.md) → 세부 수치가 필요할 때만
+   [`current_status.md` §165–§172](current_status.md)다.
+4. 기준 커밋은 `5823864`(§171 HDBSCAN)이며, §172는 문서 인계 커밋이다. 인계 시점 worktree의
+   `scripts/eval_v110.sh`, `scripts/run_sketch_dim_sweep.sh` 수정은 **사용자 소유 변경**이므로
+   되돌리거나 이번 작업에 섞지 않는다.
+5. 활성 모델은 **v110**이다. §165–§171의 random sampling, hierarchical tree, HDBSCAN, DBSCAN은
+   모두 기각됐으며 실행 중인 평가 프로세스는 없다. 같은 arm을 다시 돌리지 않는다.
+6. 2026-08-18 인계 시점에는 GPU 0–7이 모두 NVIDIA B200 183,359 MiB이고 사용량 0 MiB였다.
+   자원 상태는 변하므로 새 세션 시작 때 `nvidia-smi`로 다시 확인한다. 8-GPU 사용 가능 여부는
+   그 시점의 다른 사용자 프로세스를 보고 결정한다.
+7. 마지막 검증은 BagPFN Python으로 **303 tests, OK (38.833s)**였고 로그는
+   `logs/20260818_ct_hdbscan_random64_all/tests/full_tests.log`다.
+
+새 세션에 전달할 최소 문장:
+
+> `/NHNHOME/WORKSPACE/26msit005_C/kimds/ICF`에서 `docs/agent_handoff.md`의 “새 세션 60초 재개 절차”와
+> §0을 읽고 이어서 작업해줘. Python은 BagPFN 환경 실행 파일을 직접 사용하고, 기존 사용자 dirty
+> 파일 2개는 보존해줘. 활성 baseline은 v110이고 §165–§171 arm은 모두 종료됐다.
 
 ---
 
@@ -34,8 +66,9 @@
 
 ```bash
 . scripts/node_env.sh && echo "$PYTHON_BIN / $ICF_DATA_ROOT / $ICF_CKPT / NGPU=$NGPU"
-"$ICF_PYTHON" -m unittest discover -s tests -p "test_*.py"     # 291 tests, 0 failures
-bash scripts/eval_v110.sh 0 smoke cptac_ccrcc/VHL_mutation     # fold-mean 0.5233 이어야 함
+/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python \
+  -m unittest discover -s tests -p "test_*.py"                  # 303 tests, 0 failures
+bash scripts/eval_v110.sh 0 smoke cptac_ccrcc/VHL_mutation      # fold-mean 0.5233 이어야 함
 ```
 
 세 개가 다 맞으면 환경이 옳다. VHL 0.5233은 **결정론적**이라 자릿수까지 같아야 한다.
