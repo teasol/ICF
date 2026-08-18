@@ -31,7 +31,9 @@ OFFICIAL=/NHNHOME/BASE/kimds/Data/PathoBench/official
 FEATURES=/NHNHOME/BASE/kimds/Data/PathoBench/features
 CKPT=$(ls checkpoints/20260815_113422/v98_p1_reverse_seed42/periodic-epoch=049*.ckpt)
 CONFIG=configs/train_v98_p1_reverse_1536_1gpu.yaml
-NGPU=${NGPU:-8}
+# GPUs 4-7 host other users' jobs on this node -- default to 0-3.
+NGPU=${NGPU:-4}
+GPU_OFFSET=${GPU_OFFSET:-0}
 
 OUT="$1"; shift
 mkdir -p "$OUT"
@@ -74,7 +76,7 @@ run_job() {
 i=0
 for job in "${jobs[@]}"; do
   cell="${job%%|*}"; t="${job##*|}"
-  run_job "$((i % NGPU))" "${cell%%:*}" "${cell##*:}" "$t" &
+  run_job "$(((i % NGPU) + GPU_OFFSET))" "${cell%%:*}" "${cell##*:}" "$t" &
   i=$((i + 1))
   while [ "$(jobs -rp | wc -l)" -ge "$NGPU" ]; do sleep 5; done
 done

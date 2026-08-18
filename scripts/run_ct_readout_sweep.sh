@@ -23,7 +23,9 @@ OFFICIAL=/NHNHOME/BASE/kimds/Data/PathoBench/official
 FEATURES=/NHNHOME/BASE/kimds/Data/PathoBench/features
 CKPT=$(ls checkpoints/20260815_113422/v98_p1_reverse_seed42/periodic-epoch=049*.ckpt)
 CONFIG=configs/train_v98_p1_reverse_1536_1gpu.yaml
-NGPU=${NGPU:-8}
+# GPUs 4-7 host other users' jobs on this node -- default to 0-3.
+NGPU=${NGPU:-4}
+GPU_OFFSET=${GPU_OFFSET:-0}
 
 OUT="$1"; shift
 mkdir -p "$OUT"
@@ -78,6 +80,19 @@ run_job() {
     # SS158 candidate: v108 + k-means tokens at weight 0.7 + off-diagonal-only CV.
     # The two live in DIFFERENT branches, but SS150 showed knobs interact, so the
     # combination is measured rather than assumed additive.
+    # SS162: CV on the correlation matrix's off-diagonal, on top of v110.
+    v110)                vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_CT_TOKENS=32
+                                ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
+                                ICF_CV_BLOCKS=offdiag) ;;
+    corr)                vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_CT_TOKENS=32
+                                ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
+                                ICF_CV_BLOCKS=offdiag ICF_CV_CORR=1) ;;
+    corr_cvonly)         vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_CT_TOKENS=32
+                                ICF_CT_KMEANS=30 ICF_CV_BLOCKS=offdiag ICF_CV_CORR=1
+                                ICF_FIXED_HEAD_DD_WEIGHT=0 ICF_FIXED_HEAD_CT_WEIGHT=0) ;;
+    v110_cvonly)         vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_CT_TOKENS=32
+                                ICF_CT_KMEANS=30 ICF_CV_BLOCKS=offdiag
+                                ICF_FIXED_HEAD_DD_WEIGHT=0 ICF_FIXED_HEAD_CT_WEIGHT=0) ;;
     v109)                vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
                                 ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
                                 ICF_CV_BLOCKS=offdiag) ;;
@@ -160,7 +175,7 @@ run_job() {
 i=0
 for job in "${jobs[@]}"; do
   arm="${job%%|*}"; t="${job##*|}"
-  run_job "$((i % NGPU))" "$arm" "$t" &
+  run_job "$(((i % NGPU) + GPU_OFFSET))" "$arm" "$t" &
   i=$((i + 1))
   while [ "$(jobs -rp | wc -l)" -ge "$NGPU" ]; do sleep 5; done
 done

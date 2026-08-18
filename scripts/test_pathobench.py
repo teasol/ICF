@@ -709,9 +709,27 @@ def evaluate_trial(
         #       shape. `parent` normalises the FULL covariance and mean blocks first
         #       and then selects columns, so diag/offdiag differ from `cov` in CONTENT
         #       ONLY. Running both separates content from normalisation.
+        # docs SS162. `ICF_CV_CORR=1` gives the CV ridge the CORRELATION matrix's
+        # off-diagonal instead of the covariance's:
+        #
+        #     corr[i,j] = C[i,j] / sqrt(C[i,i] * C[j,j]),   C = B^T C_bag B
+        #
+        # SS156 removed the diagonal ENTRIES, but the diagonal still sets the SCALE of
+        # every off-diagonal: C[i,j] grows with sqrt(lambda_i lambda_j), so leading
+        # PCA pairs are automatically larger and an unweighted ridge reads that size
+        # as importance. Dividing it out is the completion of SS156's logic, and it is
+        # the smallest possible change -- one transform on the raw descriptor.
+        #
+        # ⚠️ Per BAG: each bag is normalised by its OWN variance profile, so a bag's
+        # overall spread along each direction stops contributing. If that spread was
+        # signal (tumour heterogeneity, say) rather than nuisance, this loses it --
+        # which is exactly the question.
+        # ⚠️ DD is untouched; it reads the raw triangle from `context` (SS156-1).
         cv_blocks = os.environ.get("ICF_CV_BLOCKS")
+        cv_corr = os.environ.get("ICF_CV_CORR") == "1"
         saved_normalize = None
-        if cv_blocks is not None:
+        if cv_blocks is not None or cv_corr:
+            cv_blocks = cv_blocks or "cov+mean"
             covariance_dim = int(inner.covariance_descriptor_dim)
             mean_dim = int(inner.mean_descriptor_dim)
             row, column = inner._covariance_triangle
@@ -735,8 +753,23 @@ def evaluate_trial(
             if block_norm not in ("blockwise", "parent"):
                 raise ValueError("ICF_CV_BLOCK_NORM must be blockwise or parent")
             saved_normalize = inner._normalize_descriptors
+            # Triangle slot of C[i,i], in increasing i -- `triu_indices` emits the
+            # diagonal in that order, so this indexes straight by direction.
+            diagonal_slot = torch.where(is_diagonal)[0]
 
-            def masked_normalize(context, query, _sel=selection, _norm=block_norm):
+            def to_correlation(descriptor):
+                triangle_block = descriptor[..., :covariance_dim]
+                variances = triangle_block.index_select(-1, diagonal_slot).clamp_min(1e-12)
+                scale = (variances.index_select(-1, row) * variances.index_select(-1, column)).sqrt()
+                return torch.cat(
+                    (triangle_block / scale.clamp_min(1e-12), descriptor[..., covariance_dim:]),
+                    dim=-1,
+                )
+
+            def masked_normalize(context, query, _sel=selection, _norm=block_norm,
+                                 _corr=cv_corr):
+                if _corr:
+                    context, query = to_correlation(context), to_correlation(query)
                 if _norm == "parent":
                     # Normalise the two ORIGINAL blocks, then select columns, so a
                     # sub-block keeps the scale it had inside the full descriptor.
@@ -753,7 +786,7 @@ def evaluate_trial(
                 return torch.cat(parts_c, dim=-1), torch.cat(parts_q, dim=-1)
 
             inner._normalize_descriptors = masked_normalize
-            print(f"ICF_CV_BLOCKS={cv_blocks} norm={block_norm} "
+            print(f"ICF_CV_BLOCKS={cv_blocks} norm={block_norm} corr={cv_corr} "
                   f"dims={sum(int(i.numel()) for i in selection)}", flush=True)
         dd_relative = os.environ.get("ICF_DD_RELATIVE") == "1"
         saved_relative_features = None
