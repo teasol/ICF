@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: 2026-08-18 (Codex) — §170. random64/all adaptive DBSCAN은 84.5% fold가 K=1, 전체 −0.01737로 기각.
+**Last updated**: 2026-08-18 (Codex) — §171. corrected random64/all HDBSCAN은 noise 93.6%, K 중앙값 2, 전체 −0.01894로 기각.
 
 ---
 
@@ -102,6 +102,7 @@ head margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
 | **§168** hierarchical full-cell K=8..256 | 0.65087→0.66070, K64 이후 plateau. 최고도 v110 대비 −0.00643이라 전부 기각 |
 | **§169** GPU HDBSCAN full-cell 자동 K | K=1..19(중앙값 8), noise 96.2%, 전체 0.64991(−0.01722, 3/14). 기각 |
 | **§170** DBSCAN random64/all 자동 K | 4 seeds, K 평균 1.16(84.5%가 K1), 전체 0.64976±0.00041(−0.01737). 기각 |
+| **§171** HDBSCAN random64/all 자동 K | 4 seeds, noise 93.6%, K 평균 2.84/중앙값 2, 30.2% all-noise. 전체 0.64819±0.00052(−0.01894). 기각 |
 
 ## 0-6. 다음에 할 일 (근거 순)
 

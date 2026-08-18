@@ -187,6 +187,19 @@ run_job() {
                                 ICF_CT_CELLS=all ICF_CT_ABUNDANCE_CELLS=all
                                 ICF_CT_TOKENIZER=hdbscan
                                 ICF_CT_DISTANCE_KERNEL=gemm) ;;
+    # SS171: corrected density experiment requested as HDBSCAN, not DBSCAN.
+    # 64 pooled cells is the smallest stable leaf; K remains unconstrained.
+    hdb64all_s*)         vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
+                                ICF_FIXED_HEAD_CT_WEIGHT=0.7 ICF_CV_BLOCKS=offdiag
+                                ICF_CT_CELLS=64 ICF_CT_ABUNDANCE_CELLS=all
+                                ICF_CT_SAMPLING=random
+                                ICF_CT_SAMPLING_SEED="${arm#hdb64all_s}"
+                                ICF_CT_TOKENIZER=hdbscan
+                                ICF_CT_HDBSCAN_MIN_CLUSTER_SIZE=64
+                                ICF_CT_HDBSCAN_MIN_CLUSTER_FRACTION=0
+                                ICF_CT_HDBSCAN_MIN_SAMPLES=16
+                                ICF_CT_HDBSCAN_SELECTION=leaf
+                                ICF_CT_DISTANCE_KERNEL=gemm) ;;
     # SS170: random 64-cell dictionary per context bag, adaptive-eps DBSCAN,
     # then full-cell abundance. Suffix is the reproducible sampling seed.
     db64all_s*)          vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge

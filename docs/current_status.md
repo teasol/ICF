@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-18` (Codex) — §170까지. random-64 dictionary + full abundance에 adaptive-eps GPU DBSCAN을 적용한 4-seed arm은 3,400 folds의 **84.5%에서 K=1**(평균 1.16), 전체 평균 **0.64976±0.00041**로 v110보다 **−0.01737 (5/12)**, 동일 random64/all k-means보다 **−0.01484 (6/11)**였다. DBSCAN이 PCA32 cell manifold를 하나의 density-connected cluster로 합쳐 CT abundance가 상수화되므로 기각하고 v110을 유지한다. §169 HDBSCAN도 전체 −0.01722였지만 반대로 noise 96.2%/K 중앙값 8이었다. 즉 이 공간에서 단일 density rule은 predictive resolution을 찾지 못한다. 활성 구성은 **v110 = v109에서 CT cluster 16→32, 학습 파라미터 0**(§161, 사용자 결정, 정식 경로 macro **0.7070**, 홀드아웃 **0.6103**). 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다. **독립 최소 구현 `src/models/training_free.py`가 기존 경로와 등가임을 테스트로 고정했다**(§140).
+**Last updated**: `2026-08-18` (Codex) — §171까지. 사용자가 의도한 random-64 dictionary + full abundance **HDBSCAN**을 4 seeds/3,400 folds로 다시 평가했다. DBSCAN과 같은 문제가 아니라 반대 실패였다: noise 평균 **93.6%**, K 중앙값 2, **30.2%가 all-noise K=1 fallback**이었다. 전체 평균 **0.64819±0.00052**로 v110보다 **−0.01894 (3/14)**, 동일 random64/all k-means보다 **−0.01641**, DBSCAN보다 **−0.00157**여서 기각하고 v110을 유지한다. 활성 구성은 **v110 = v109에서 CT cluster 16→32, 학습 파라미터 0**(§161, 사용자 결정, 정식 경로 macro **0.7070**, 홀드아웃 **0.6103**). 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다. **독립 최소 구현 `src/models/training_free.py`가 기존 경로와 등가임을 테스트로 고정했다**(§140).
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -6745,3 +6745,48 @@ cluster에 연결했다. PCA32에서 density-only 방식 어느 쪽도 predictiv
 로그/예측: `logs/20260818_ct_dbscan_random64_all/{seal,heldout}/` (40+28 task, 3,400 folds).
 BagPFN Python 직접 실행 full **303 tests in 33.346s, OK**
 (`logs/20260818_ct_dbscan_random64_all/tests/full_tests.log`).
+
+---
+
+## 171. 2026-08-18 — corrected random-64 HDBSCAN: **noise 93.6%, 전체 −0.01894로 기각**
+
+*작성: Codex, 2026-08-18 — §170의 DBSCAN은 사용자 의도와 달랐으므로 HDBSCAN으로 바로잡아 재평가.*
+
+### 1. 설계
+
+§167/§170과 같은 context bag별 random 64-cell dictionary와 context/query 전체-cell abundance를
+사용했다. HDBSCAN은 K를 지정하지 않으며, 64-cell 표본에서 full-cell 기본값이 과도하지 않도록
+`min_cluster_size=64`, `min_samples=16`, `cluster_selection_method=leaf`, fraction 0으로 고정했다.
+PCA32 standardised cell, class-balanced ridge λ=1, CT weight 0.7과 seed 42–45도 동일하다.
+
+### 2. 결과
+
+| seed | SEAL 10 | held-out 7 | 전체 17 |
+|---:|---:|---:|---:|
+| 42 | 0.68431 | 0.59499 | 0.64753 |
+| 43 | 0.68566 | 0.59594 | 0.64872 |
+| 44 | 0.68766 | 0.59296 | 0.64866 |
+| 45 | 0.68544 | 0.59413 | 0.64784 |
+| **4-seed 평균** | **0.68577±0.00121** | **0.59450±0.00110** | **0.64819±0.00052** |
+
+| 비교 기준 | 전체 17 | HDBSCAN Δ |
+|---|---:|---:|
+| v110 | 0.66713 | **−0.01894** (3/14) |
+| random64/all k-means (§167) | 0.66460 | **−0.01641** |
+| full-cell HDBSCAN (§169) | 0.64991 | **−0.00172** |
+| random64/all DBSCAN (§170) | 0.64976 | **−0.00157** |
+
+3,400 folds에서 K 범위는 1–8, 평균 2.84, 중앙값 2였다. K별 fold 수는
+`K1=1028 / K2=902 / K3=365 / K4=313 / K5=402 / K6=277 / K7=97 / K8=16`이며,
+noise 평균은 **0.93576**였다. K1 1,028 folds(30.2%)는 전부 all-noise global-mean fallback이다.
+
+### 3. 판단
+
+**HDBSCAN random64/all arm 기각, v110 유지.** §170 DBSCAN의 84.5% K1은 eps가 거의 모든 cell을
+하나로 연결한 실패였고, 이번 HDBSCAN은 반대로 대부분을 noise로 제거해 hierarchy가 빈약해진 실패다.
+메커니즘은 반대지만 둘 다 CT의 유효 차원을 1–2개 수준으로 붕괴시켜 비슷하게 낮은 최종 성능을 냈다.
+random 64-cell 표본은 HDBSCAN의 density hierarchy를 안정적으로 추정하기에도 너무 희소하다.
+
+로그/예측: `logs/20260818_ct_hdbscan_random64_all/{seal,heldout}/` (40+28 task, 3,400 folds).
+BagPFN Python 직접 실행 full **303 tests in 38.833s, OK**
+(`logs/20260818_ct_hdbscan_random64_all/tests/full_tests.log`).

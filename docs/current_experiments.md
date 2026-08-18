@@ -5,7 +5,7 @@ CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 
 ---
 
-## 0. CT sampling/tokenizer 최근 결론 (§165–§170)
+## 0. CT sampling/tokenizer 최근 결론 (§165–§171)
 
 활성 v110은 결정론적이지만 CT dictionary cell을 무작위로 뽑는 arm은 다시 seed 분산이 생긴다.
 따라서 단일 seed나 task 반복을 근거로 삼지 않고 **sampling seed 42–45를 같은 17 task에서 반복**한다.
@@ -43,6 +43,12 @@ hierarchical K8 대비도 −0.00096이었다. density 기반 dynamic K가 predi
 4 seeds × 17 tasks에서 fold의 84.5%가 K=1(평균 1.16)이었고 전체 0.64976±0.00041로 v110 대비
 −0.01737, 같은 random64/all k-means 대비 −0.01484였다. 단일 cluster로 CT가 상수화되어 기각했다.
 로그는 `logs/20260818_ct_dbscan_random64_all/{seal,heldout}/`이다.
+
+§171은 사용자가 의도한 HDBSCAN으로 §170을 바로잡았다. random64/all 4-seed 3,400 folds에서 noise가
+평균 93.6%, K 중앙값 2였고 30.2%는 all-noise K1 fallback이었다. 전체 0.64819±0.00052로 v110 대비
+−0.01894, random64/all k-means 대비 −0.01641, DBSCAN 대비 −0.00157이었다. DBSCAN은 모두 연결하고
+HDBSCAN은 대부분 버리는 반대 실패지만 둘 다 CT를 저차원으로 붕괴시켜 기각했다. 로그는
+`logs/20260818_ct_hdbscan_random64_all/{seal,heldout}/`이다.
 
 ---
 
