@@ -32,7 +32,7 @@ SKETCH = 8
 # The configuration the lineage `_ct_features` implements -- v108's defaults differ.
 V107 = TrainingFreeConfig(
     sketch_dim=SKETCH, ct_readout="extreme", ct_pca_dim=None,
-    ct_kmeans_iterations=0, cv_blocks="cov+mean", weight_ct=0.286,
+    ct_kmeans_iterations=0, cv_blocks="cov+mean", weight_ct=0.286, ct_num_tokens=16,
 )
 
 
@@ -99,12 +99,15 @@ class DefaultTest(unittest.TestCase):
         """The default IS the baseline; if it drifts, `TrainingFreeClassifier()`
         silently stops being the active configuration. SS142 promoted K=128 -> 256;
         SS152 promoted CT to the ridge readout inside a 32-d PCA subspace; SS158
-        added k-means tokens at weight 0.7 and off-diagonal-only CV."""
+        added k-means tokens at weight 0.7 and off-diagonal-only CV; SS161 took the
+        cluster count 16 -> 32 while KEEPING the 64-cell sample."""
         config = TrainingFreeConfig()
         self.assertEqual(config.sketch_dim, 256)
         self.assertEqual(config.ct_readout, "ridge")
         self.assertEqual(config.ct_pca_dim, 32)
         self.assertEqual(config.ct_kmeans_iterations, 30)
+        self.assertEqual(config.ct_num_tokens, 32)
+        self.assertEqual(config.ct_cells_per_bag, 64)
         self.assertEqual(config.cv_blocks, "offdiag")
         self.assertEqual(config.weight_ct, 0.7)
 

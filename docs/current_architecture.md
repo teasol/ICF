@@ -1,25 +1,99 @@
-# Current architecture — 활성 relation 계보와 역사적 비교군 (2026-08-16)
+# Current architecture (2026-08-18)
 
-> [!IMPORTANT]
-> **활성 구성은 v109 — 학습 파라미터 0 (§139·§140·§142·§152·§158).** 아래 Active-1~6은 **학습을 포함하던 직전
-> 계보(v83~v98)** 의 명세이고 historical 참조다. 현재 구성은:
->
-> ```
-> 기저   fold의 CONTEXT cell 공분산을 bag별 자기 평균으로 센터링해 풀링 → 상위 **256** 고유벡터
-> descriptor  bag마다 [triu(BᵀC_bag B), μ_bag]  = **32,896** + 1,536
->        (K=128이면 8,256+1,536 = v106. K는 §142에서 평가 시점 노브가 됐다)
-> CV     클래스 균형 ridge (dual). ⚠️ 공분산 블록과 평균 블록을 **각각 따로** RMS 정규화
-> DD     rank-1 분산 방향까지의 정규화 제곱**거리** (logit 아님 → head가 음수 계수)
-> CT     결정론적 farthest-point 토큰 16개, bag당 64 cell 등간격 추출
->        ⚠️ v109: 거리를 **상위 32 PCA 방향**에서 재고, token은 **k-means(Lloyd 30)**,
->        16-d abundance **전체**를 class-balanced ridge로 읽으며 head weight는 **0.7**
->        (v107은 raw 1536 + FPS + 극단 2개 token, §150·§152·§157·§158)
-> head   margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.286·(q1−q0)   ← 라벨 반대칭이 강제
-> ```
-> 구현: **`src/models/training_free.py` (315줄, 파라미터 0)**. 기존 경로(2,419줄)와의 등가성은
-> `tests/test_training_free.py`가 고정한다 — margin `allclose`, 순위 완전 일치, 실제 데이터에서
-> 차이 −0.0003/−0.0005.
-> 정식 채점은 `ICF_COVARIANCE_BASIS=pca_within ICF_FIXED_HEAD=1`로 기존 경로를 써도 등가다.
+**활성 구성 v110 — 학습 파라미터 0, 완전 결정론적.** 아래 §0이 현행 명세이고, 그 뒤의
+`Historical-*` / `A` / `B` 절은 **학습을 포함하던 직전 계보(v83~v98)** 의 명세로 참조용이다.
+그 절들의 gradient·학습 모듈·checkpoint 계약은 **v110에 적용되지 않는다.**
+
+---
+
+# §0. v110 명세 (활성)
+
+## 0-1. 한 눈에
+
+```
+입력    fold의 context bag(라벨 있음) + query bag(라벨 없음). bag = [cells, 1536] UNI2 타일.
+        전 과정에서 query는 기저·토큰·정규화 통계에 절대 들어가지 않는다.
+
+기저 B  context cell을 bag별 자기 평균으로 센터링해 풀링한 공분산의 상위 256 고유벡터
+        (1536×256). between-slide 항을 버린다 — 그게 nuisance이기 때문(§139-4, §123-4).
+
+CV      descriptor = triu(BᵀC_bag B)의 **비대각 32,640차원만**
+        → 클래스 균형 dual ridge (λ=1) → logit 2개
+        ⚠️ 대각 256차원과 raw bag mean 1,536차원은 **뺐다** (§156)
+
+DD      같은 triangle(**전체**, 대각 포함)에서 K×K 공분산을 재구성 →
+        rank-1 분산 방향 1개 → log(uᵀC_bu)의 클래스별 1-D 가우시안 →
+        정규화 제곱 **거리** 2개 (logit이 아니다 → head 계수가 음수)
+
+CT      bag당 64 cell 등간격 → B의 상위 **32 PCA 방향**으로 사영 → context로 좌표 표준화 →
+        farthest-point 32개를 초기값으로 **k-means(Lloyd 30회)** → soft assignment →
+        bag별 32차원 abundance → 클래스 균형 ridge → logit 2개
+
+head    margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
+        logits = (−margin/2, +margin/2)
+```
+
+**실행**: `bash scripts/eval_v110.sh <gpu> <tag> [tasks...]`
+**구현**: `src/models/training_free.py` (파라미터 0). 정식 채점은 환경변수로 기존 경로를 써도 된다 —
+`tests/test_training_free.py`가 두 경로의 등가성을 고정한다.
+
+## 0-2. 수치
+
+| | SEAL 10 | 홀드아웃 7 | seed std |
+|---|---:|---:|---:|
+| **v110** | **0.7070** | **0.6103** | **0.00000** |
+| v109 | 0.7027 | 0.6042 | 0.00000 |
+| v108 | 0.6967 | 0.5893 | 0.00000 |
+| v107 | 0.6945 | 0.5836 | 0.00000 |
+| v106 | 0.6864 | 0.5767 | 0.00000 |
+| 참고: ABMIL(지도학습) | 0.727 | — | — |
+
+⚠️ **결정론적이므로 t·p·CI를 쓰지 않는다**(§151-1). 판정은 **부호 일치 수**와
+**독립 집단 재현**(SEAL 10 / 홀드아웃 7)으로 한다.
+
+## 0-3. 각 상수가 왜 그 값인가
+
+| 값 | 근거 |
+|---|---|
+| 기저 = within-slide PCA | pooled 대비 +0.0020. between-slide는 ICC 31.6% nuisance (§139-4, §123-4) |
+| K = 256 | 64~768 스윕의 plateau 중 가장 싼 지점. 홀드아웃에서 재현되는 유일한 값 (§142) |
+| CV = 비대각만 | mean은 무용(+0.0019), 대각은 유해(+0.0052, 13/17) (§156) |
+| DD = rank-1 | r>1은 이득 없음, K는 128에서 포화, \|t\| 게이트·selector 모두 패배 (§145~§147) |
+| CT = 32 PCA 차원 | raw 1536은 거리 집중(rel_std 0.229 vs 0.368) (§149) |
+| CT = k-means 30회 | FPS는 32개 중 사실상 2개만 사용 (§157) |
+| CT = 32 token | 16·32·64·128 중 정점, 15/17 (§160) |
+| CT = 64 cell | 전체 cell은 **모든** token 수에서 손해 (§159, §160-3) |
+| head = 3 상수 | 라벨 반대칭이 SEP 가중 0과 쌍의 등가·반대를 강제 (§137-3) |
+| CT weight 0.7 | k-means token에서만 성립. FPS token에서는 부호가 무너졌다 (§157-5, §151-2) |
+
+## 0-4. ⚠️ 구조적 제약 — 건드리기 전에 알아야 할 것
+
+1. **DD는 CV descriptor의 triangle을 읽는다.** descriptor를 전역으로 마스킹하면 CV를 좁히는 게
+   아니라 **DD를 부순다**. CV 마스킹은 `_normalize_descriptors` 안에서만 걸어야 한다 (§156-1).
+2. **DD의 K는 CV의 K를 넘을 수 없다** — 부분블록을 읽기 때문이다 (§145-1).
+3. **CT와 CV가 같은 기저를 공유한다.** CT 개선이 macro에 잘 안 닿는 상한 요인이다 (§149-4).
+4. **에피소드마다 상수를 더하는 변경은 fold-mean AUROC를 움직일 수 없다** (§154-5).
+5. **cell↔token 거리는 cell 축으로 chunk된다**(2²⁷ 원소). chunking은 원소별 산술을 안 바꾸므로
+   정확하고, v110 설정은 단일 chunk에 들어간다 (§160-1).
+
+## 0-5. 닫힌 축 (재시도 금지)
+
+| 축 | 결과 |
+|---|---|
+| 합성 데이터 분포 | 격차를 닫을수록 단조로 나빠진다 (§129) |
+| DD 전반 | K·rank·게이트·selector 네 갈래 모두 (§145~§147) |
+| CT cell 샘플링 | 전체 cell이 4개 token 수 전부에서 손해 (§159, §160) |
+| CT two-token readout | ridge로 대체됨. 단 raw 1536에서만 "무관"이었다 (§148·§150) |
+
+## 0-6. 열려 있는 갈래
+
+- **CV 비대각 32,640차원의 가중** — 지금은 무가중 ridge다. 학습을 넣는다면 여기다 (§156-6).
+- **CT에 CV와 다른 부분공간** — 대각/스펙트럼 쪽을 주면 §149-4의 중복을 깰 수 있다.
+- **DD의 코호트 의존성** — DD는 SEAL에서 도움, 홀드아웃에서 해롭다. 에피소드별 게이트가
+  가능한지 (§153).
+- **λ 재확인** — CT ridge가 16→32차원으로 커졌는데 λ=1 고정이다 (§156-5, §160-5).
+
+---
 
 > [!IMPORTANT]
 > **활성 baseline은 v83 linear head의 4 seed × `epoch 49` checkpoint**
@@ -80,7 +154,10 @@
 
 ---
 
-# Active. v83 linear-head learnable-P CV+DD+CT relation model
+# Historical. v83 linear-head learnable-P CV+DD+CT relation model
+
+⚠️ **v110에 적용되지 않는다.** 아래는 학습을 포함하던 직전 계보의 명세다 — gradient 계약,
+학습 모듈, checkpoint 호환성은 전부 그 시절 것이다. 현행 명세는 §0.
 
 v83 승격은 §109에서 사용자 결정으로 이뤄졌으며 **§107-3 판정 게이트(4/4 시드 부호 일치 +
 |t|≥2.5)를 충족하지 못한 상태의 승격**이다(§108: v82 대비 Δ+0.0045, t≈1.15) — 인용 시 이 점을
@@ -97,7 +174,7 @@ canonical checkpoint는 **4 seed × epoch 49** `checkpoints/20260813_153750/v83_
 과거 `PopulationTokenResidualModel`은 이제 **retired provisional v77-pop-residual**로만 부르며,
 그 클래스의 내부 version 55 역시 과거 checkpoint replay를 위해 유지한다.
 
-## Active-1. Forward 경로
+## Historical-1. Forward 경로
 
 ```text
 bag cells x_b (N_b × 1536)
@@ -126,7 +203,7 @@ CV ridge coefficient는 real/synthetic episode의 support label로 매번 다시
 고정 classifier weight를 저장하는 구조가 아니다. raw mean과 covariance block은 context-only로
 각각 center/scalar-RMS 정규화한다.
 
-## Active-2. Gradient와 학습 계약
+## Historical-2. Gradient와 학습 계약
 
 활성 baseline v83에서 학습되는 것은 다음뿐이다.
 
@@ -150,7 +227,7 @@ head 파라미터 수뿐이고 P·gradient 경로는 동일하다.
 - `train_ridge_calibration: true`는 이 두 scalar만 동결 해제한다. 이 opt-in arm은 197,059개이며
   기존 checkpoint/config의 학습 계약은 바꾸지 않는다.
 
-## Active-3. 현재 synthetic data 계약
+## Historical-3. 현재 synthetic data 계약
 
 활성 baseline(v83 linear head, 데이터 계약은 v82 Medium과 동일) 실험의 공통 조건은 다음과 같다.
 
@@ -167,7 +244,7 @@ head 파라미터 수뿐이고 P·gradient 경로는 동일하다.
 | donor shift | 0.35 — bag마다 latent 벡터 하나를 그 bag 전 cell에 더하는 강체 이동. 축 전체가 노이즈 안에서 평평(§128-2) |
 | training | **1-GPU × 4 seed(42–45)**, GPU 0–3에 하나씩, bf16, 50 epochs (§107) |
 
-### Active-3z. ⚠️ 서브샘플링 계약 — 학습과 평가가 다르다 (§138-1)
+### Historical-3z. ⚠️ 서브샘플링 계약 — 학습과 평가가 다르다 (§138-1)
 
 **평가**: relation 계보(v83~)는 **tile 서브샘플링을 하지 않는다.** `eval_seal_tasks.sh`가
 `--max-tiles`를 안 넘기므로 스크립트 상한은 `None`이고, 모델의 `max_cells: 8192`는
@@ -188,7 +265,7 @@ farthest-point라 결정론적이다.
 본다.** 의도된 설계가 아니라 계보가 진화하며 남은 비대칭이고, §123-3의 "cell 축이 실제보다 짧다"의
 정확한 출처다. **이 비대칭 자체는 아직 arm으로 검정된 적이 없다.**
 
-### Active-3a. 이후 추가된 생성기 knob (전부 기본값 inert)
+### Historical-3a. 이후 추가된 생성기 knob (전부 기본값 inert)
 
 | knob | 기본 | 하는 일 | 판정 |
 |---|---|---|---|
@@ -227,7 +304,7 @@ norm sd 0 vs 2.56), **닫을수록 단조로 나빠진다.** 재현 진단: `scr
 3-layer nonlinear MLP를 썼다. 현재 Hard는 per-bag cardinality와 4,096 cap을 쓰므로 v41과 v76의
 성능 차이를 아키텍처만의 차이로 해석하면 안 된다.
 
-## Active-4. 현재 실험과 판정
+## Historical-4. 현재 실험과 판정
 
 - 활성 실행: 없음.
 - **활성 baseline = v98 (`donor_shift_scale` 0.15), 1-GPU 8 seed 평균 0.6852** (§131).
@@ -263,7 +340,7 @@ norm sd 0 vs 2.56), **닫을수록 단조로 나빠진다.** 재현 진단: `scr
   CI**로 한다 — `scripts/compare_arms_paired.py` (§99).
 - GPU 정책: ICF는 GPU 0–3만 사용하고 4–7은 사용하지 않는다.
 
-## Active-5. Large-bag ragged fine-tuning 계약
+## Historical-5. Large-bag ragged fine-tuning 계약
 
 `data.ragged_training: true`는 `episode_batch_size=1`에서만 허용되며, training collator가
 list-of-bags를 padding tensor로 바꾸지 않고 그대로 모델의 ragged forward에 전달한다. 기본값은
@@ -278,7 +355,7 @@ false이므로 기존 dense masked training 계약은 유지된다. 현재 large
 epoch 34 best의 공식 SEAL macro는 **0.6885**로 baseline 대비 +0.0012에 그쳐, large-ragged
 파생 실험으로 유지하고 canonical baseline으로 승격하지 않는다.
 
-## Active-6. v79 dual projection — **기각** (`DualProjectionCVDDCTMLPModel`, version 56)
+## Historical-6. v79 dual projection — **기각** (`DualProjectionCVDDCTMLPModel`, version 56)
 
 v77은 learnable P 하나를 CV와 DD가 공유하므로 subspace가 CV의 readout에 맞춰 최적화되고 DD는
 그것을 물려받는다. v78은 그 갈등을 **gradient weight로 중재**하려다 단조 악화로 기각됐다(G-5).

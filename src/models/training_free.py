@@ -128,7 +128,11 @@ class TrainingFreeConfig:
     ridge_scale: float = 2.0
     dd_shrinkage: float = 0.25
     dd_eps: float = 1e-6
-    ct_num_tokens: int = 16
+    # SS161 (v110, user decision). 16 -> 32 clusters. Every token count from 16 to
+    # 128 was swept at both 64 cells and full cells; 32 is the peak of BOTH columns
+    # and 64-cell wins every row, so the gain is the cluster count, not more cells
+    # (SS160-2/3). +0.0051 over v109 at 15/17 -- the highest sign agreement measured.
+    ct_num_tokens: int = 32
     # SS159: None = every cell. 64 is v109's value (the reproduction path).
     ct_cells_per_bag: int | None = 64
     ct_temperature: float = 0.5

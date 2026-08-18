@@ -1,10 +1,10 @@
 # Documentation map
 
 **Last updated**: `2026-08-18`
-**Active 구성**: **v109 — 학습 파라미터 0** (§158, 사용자 결정). within-slide PCA(K=256) 사영 +
-고정 head + **CV는 off-diagonal 32,640만** + **CT는 k-means token(30회) @ weight 0.7**.
-정식 경로 SEAL macro **0.7027**, 홀드아웃 7 **0.6042**, **seed std 0.00000**.
-실행: `bash scripts/eval_v109.sh <gpu> <tag>`.
+**Active 구성**: **v110 — 학습 파라미터 0** (§161, 사용자 결정). within-slide PCA(K=256) 사영 +
+고정 head + **CV는 off-diagonal 32,640만** + **CT는 k-means token 32개 @ weight 0.7**.
+정식 경로 SEAL macro **0.7070**, 홀드아웃 7 **0.6103**, **seed std 0.00000**.
+실행: `bash scripts/eval_v110.sh <gpu> <tag>`. 전체 명세는 `current_architecture.md` **§0**.
 ⚠️ **결정론적이므로 t·p·CI 금지**(§151-1) — 부호 일치와 독립 집단 재현으로 판정.
 v107(0.6945)·v106(0.6864)과 직전 baseline v98(8 seed 0.6852)은 historical.
 ⚠️ v98 8 seed 평균 대비 +0.0093이지만 **v98 상위 두 시드와 4-seed 앙상블(0.6951)에는 아직 진다** —
