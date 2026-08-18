@@ -1,0 +1,2 @@
+# Optional SS169 GPU HDBSCAN dependency for the CUDA 13 BagPFN environment.
+cuml-cu13==26.8.0

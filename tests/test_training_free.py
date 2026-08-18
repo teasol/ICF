@@ -116,6 +116,12 @@ class DefaultTest(unittest.TestCase):
         self.assertEqual(config.ct_bisect_iterations, 2)
         self.assertEqual(config.ct_bisect_power_iterations, 3)
         self.assertEqual(config.ct_tree_reduction, "segment")
+        self.assertEqual(config.ct_hdbscan_min_cluster_size, 256)
+        self.assertEqual(config.ct_hdbscan_min_cluster_fraction, 0.001)
+        self.assertEqual(config.ct_hdbscan_min_samples, 32)
+        self.assertEqual(config.ct_hdbscan_cluster_selection_method, "leaf")
+        self.assertEqual(config.ct_hdbscan_build_algo, "nn_descent")
+        self.assertFalse(config.ct_hdbscan_allow_single_cluster)
         self.assertEqual(config.cv_blocks, "offdiag")
         self.assertEqual(config.weight_ct, 0.7)
 

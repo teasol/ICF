@@ -5,7 +5,7 @@ CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 
 ---
 
-## 0. CT sampling/tokenizer 최근 결론 (§165–§168)
+## 0. CT sampling/tokenizer 최근 결론 (§165–§169)
 
 활성 v110은 결정론적이지만 CT dictionary cell을 무작위로 뽑는 arm은 다시 seed 분산이 생긴다.
 따라서 단일 seed나 task 반복을 근거로 삼지 않고 **sampling seed 42–45를 같은 17 task에서 반복**한다.
@@ -33,6 +33,11 @@ v110 대비 −0.00253이다. 따라서 random arm의 하락은 512라는 표본
 최고 K256도 v110보다 −0.00643이라 전부 기각했다. task별 oracle K는 v110과 같지만 label 사후 선택이라
 arm이 아니다. `h2T{8,16,32,64,128,256}`, 로그는
 `logs/20260818_ct_hierarchical_low_tokens/{seal,heldout}/`이다.
+
+§169는 GPU HDBSCAN/NN-descent로 K 자체를 지정하지 않았다. full-cell/full-abundance 850 folds에서
+K=1..19(중앙값 8), noise 평균 96.2%였고 전체 17은 0.64991로 v110 대비 −0.01722(3/14),
+hierarchical K8 대비도 −0.00096이었다. density 기반 dynamic K가 predictive K를 찾지 못해 기각했다.
+로그는 `logs/20260818_ct_hdbscan_fullcell/{seal,heldout}/`이다.
 
 ---
 

@@ -96,13 +96,22 @@ class CTReadoutConfig:
     distance_kernel: Literal["broadcast", "gemm"] = "broadcast"
     # SS168. Hierarchical PCA-initialised 2-means reads every context cell in
     # O(N D log K), avoiding the 30 x O(N K D) Lloyd sweep at large K.
-    tokenizer: Literal["fps_lloyd", "hierarchical_2means"] = "fps_lloyd"
+    tokenizer: Literal["fps_lloyd", "hierarchical_2means", "hdbscan"] = "fps_lloyd"
     bisect_iterations: int = 2
     bisect_power_iterations: int = 3
     # "segment" is bit-reproducible but sorts ~N cells at every tree update.
     # "atomic" uses fast CUDA index_add; it guarantees non-empty leaves but can
     # differ slightly between runs because floating-point atomic order is free.
     tree_reduction: Literal["segment", "atomic"] = "segment"
+    # SS169. GPU HDBSCAN chooses K from the context-cell density hierarchy.
+    # The relative floor makes the density scale comparable across folds while
+    # the absolute floor avoids tiny, unstable cell groups on small contexts.
+    hdbscan_min_cluster_size: int = 256
+    hdbscan_min_cluster_fraction: float = 0.001
+    hdbscan_min_samples: int = 32
+    hdbscan_cluster_selection_method: Literal["eom", "leaf"] = "leaf"
+    hdbscan_build_algo: Literal["brute_force", "nn_descent"] = "nn_descent"
+    hdbscan_allow_single_cluster: bool = False
     temperature: float = 0.5
     eps: float = 1e-6
     ridge_lambda: float = 1.0
@@ -418,6 +427,96 @@ def hierarchical_2means_tokens(
     return tokens
 
 
+def hdbscan_tokens(pooled: torch.Tensor, config: CTReadoutConfig) -> torch.Tensor:
+    """Fit GPU HDBSCAN on every context cell and return its stable centroids.
+
+    HDBSCAN determines the number of clusters from its condensed density tree;
+    ``num_tokens`` is deliberately ignored. Cluster membership probabilities
+    weight the centroids, so boundary points contribute less. Noise is excluded
+    from fitting the centroids but still participates in the later full-cell
+    soft-abundance calculation against those centroids.
+    """
+    if not pooled.is_cuda:
+        raise RuntimeError("The full-cell HDBSCAN tokenizer requires a CUDA tensor.")
+    if config.hdbscan_min_cluster_size < 2:
+        raise ValueError("hdbscan_min_cluster_size must be at least 2.")
+    if not 0.0 <= config.hdbscan_min_cluster_fraction <= 1.0:
+        raise ValueError("hdbscan_min_cluster_fraction must be in [0, 1].")
+    if config.hdbscan_min_samples < 1:
+        raise ValueError("hdbscan_min_samples must be positive.")
+
+    try:
+        import cupy as cp  # noqa: PLC0415
+        from cuml.cluster import HDBSCAN  # noqa: PLC0415
+    except ImportError as error:
+        raise RuntimeError(
+            "HDBSCAN tokenizer needs RAPIDS; install requirements-hdbscan.txt "
+            "into the BagPFN environment."
+        ) from error
+
+    cells = pooled.shape[0]
+    relative_floor = math.ceil(config.hdbscan_min_cluster_fraction * cells)
+    min_cluster_size = min(
+        cells, max(config.hdbscan_min_cluster_size, relative_floor)
+    )
+    min_samples = min(config.hdbscan_min_samples, min_cluster_size)
+    if config.hdbscan_build_algo == "nn_descent" and min_samples >= 64:
+        raise ValueError(
+            "NN-descent uses graph degree 64, so hdbscan_min_samples must be < 64."
+        )
+
+    model = HDBSCAN(
+        min_cluster_size=min_cluster_size,
+        min_samples=min_samples,
+        cluster_selection_method=config.hdbscan_cluster_selection_method,
+        allow_single_cluster=config.hdbscan_allow_single_cluster,
+        build_algo=config.hdbscan_build_algo,
+        build_kwds=(
+            {
+                "nnd_graph_degree": 64,
+                "nnd_intermediate_graph_degree": 128,
+                "nnd_max_iterations": 20,
+                "nnd_termination_threshold": 1e-4,
+            }
+            if config.hdbscan_build_algo == "nn_descent" else None
+        ),
+        output_type="cupy",
+        prediction_data=False,
+        gen_min_span_tree=False,
+    )
+    values = cp.from_dlpack(pooled.detach().contiguous())
+    labels = torch.from_dlpack(model.fit_predict(values)).clone()
+    probabilities = torch.from_dlpack(model.probabilities_).to(pooled.dtype).clone()
+    valid = labels >= 0
+    noise_fraction = (~valid).float().mean().item()
+
+    if not bool(valid.any()):
+        print(
+            f"ICF_CT_HDBSCAN cells={cells} min_cluster_size={min_cluster_size} "
+            "clusters=1 noise=1.000000 fallback=global_mean",
+            flush=True,
+        )
+        return pooled.mean(dim=0, keepdim=True)
+
+    cluster_ids, inverse = torch.unique(labels[valid], sorted=True, return_inverse=True)
+    weights = probabilities[valid].clamp_min(config.eps)
+    weighted_sums = torch.zeros(
+        cluster_ids.numel(), pooled.shape[1], device=pooled.device, dtype=pooled.dtype
+    ).index_add_(0, inverse, pooled[valid] * weights[:, None])
+    weight_sums = torch.zeros(
+        cluster_ids.numel(), device=pooled.device, dtype=pooled.dtype
+    ).index_add_(0, inverse, weights)
+    tokens = weighted_sums / weight_sums.clamp_min(config.eps)[:, None]
+    print(
+        f"ICF_CT_HDBSCAN cells={cells} min_cluster_size={min_cluster_size} "
+        f"min_samples={min_samples} clusters={tokens.shape[0]} "
+        f"noise={noise_fraction:.6f} build={config.hdbscan_build_algo} "
+        f"selection={config.hdbscan_cluster_selection_method}",
+        flush=True,
+    )
+    return tokens
+
+
 # docs SS160. Element budget for the cell-to-token distance block. The 3-D
 # broadcast allocates [chunk, tokens, dims], and at 128 tokens over a full-cell
 # context (~1.6M cells) the unchunked form asked for 24.4 GiB and OOM'd on a shared
@@ -525,9 +624,11 @@ def ct_abundance(
             )
     elif config.tokenizer == "hierarchical_2means":
         tokens = hierarchical_2means_tokens(pooled, config)
+    elif config.tokenizer == "hdbscan":
+        tokens = hdbscan_tokens(pooled, config)
     else:
         raise ValueError(
-            "tokenizer must be 'fps_lloyd' or 'hierarchical_2means', "
+            "tokenizer must be 'fps_lloyd', 'hierarchical_2means', or 'hdbscan', "
             f"got {config.tokenizer!r}"
         )
 

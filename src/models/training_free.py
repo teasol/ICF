@@ -145,6 +145,12 @@ class TrainingFreeConfig:
     ct_bisect_iterations: int = 2
     ct_bisect_power_iterations: int = 3
     ct_tree_reduction: str = "segment"
+    ct_hdbscan_min_cluster_size: int = 256
+    ct_hdbscan_min_cluster_fraction: float = 0.001
+    ct_hdbscan_min_samples: int = 32
+    ct_hdbscan_cluster_selection_method: str = "leaf"
+    ct_hdbscan_build_algo: str = "nn_descent"
+    ct_hdbscan_allow_single_cluster: bool = False
     ct_temperature: float = 0.5
     ct_eps: float = 1e-6
     # SS137-3: CV : DD : CT. Sign of the DD term is required by DD returning
@@ -293,6 +299,14 @@ class TrainingFreeClassifier:
                 bisect_iterations=config.ct_bisect_iterations,
                 bisect_power_iterations=config.ct_bisect_power_iterations,
                 tree_reduction=config.ct_tree_reduction,
+                hdbscan_min_cluster_size=config.ct_hdbscan_min_cluster_size,
+                hdbscan_min_cluster_fraction=config.ct_hdbscan_min_cluster_fraction,
+                hdbscan_min_samples=config.ct_hdbscan_min_samples,
+                hdbscan_cluster_selection_method=(
+                    config.ct_hdbscan_cluster_selection_method
+                ),
+                hdbscan_build_algo=config.ct_hdbscan_build_algo,
+                hdbscan_allow_single_cluster=config.ct_hdbscan_allow_single_cluster,
                 temperature=config.ct_temperature,
                 eps=config.ct_eps,
                 pca_dim=config.ct_pca_dim,

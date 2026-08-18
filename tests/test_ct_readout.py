@@ -25,6 +25,7 @@ from src.models.ct_readout import (
     readout_extreme,
     farthest_point_tokens,
     hierarchical_2means_tokens,
+    hdbscan_tokens,
     lloyd_refine,
     prepare_cells,
     readout_prototype,
@@ -540,6 +541,28 @@ class ChunkingTest(unittest.TestCase):
         self.assertTrue(torch.allclose(broadcast.context, gemm.context, atol=2e-5))
         self.assertTrue(torch.allclose(broadcast.query, gemm.query, atol=2e-5))
 
+    def test_chunked_abundance_matches_unchunked(self):
+        import src.models.ct_readout as module
+        context_bags, _, query_bags = episode(50, cells=400)
+        config = CTReadoutConfig(num_tokens=12, cells_per_bag=None,
+                                 temperature=0.5, eps=1e-6, kmeans_iterations=3)
+        saved = module._DISTANCE_ELEMENT_BUDGET
+        try:
+            reference = ct_abundance(context_bags, query_bags, config)
+            module._DISTANCE_ELEMENT_BUDGET = 12 * DIM * 5
+            chunked = ct_abundance(context_bags, query_bags, config)
+        finally:
+            module._DISTANCE_ELEMENT_BUDGET = saved
+        self.assertTrue(torch.equal(reference.tokens, chunked.tokens))
+        self.assertTrue(torch.allclose(reference.context, chunked.context, atol=1e-6))
+        self.assertTrue(torch.allclose(reference.query, chunked.query, atol=1e-6))
+
+    def test_v109_setting_stays_in_one_chunk(self):
+        """64 cells/bag x 16 tokens must never chunk, so v109 is bit-identical."""
+        import src.models.ct_readout as module
+        rows = module._DISTANCE_ELEMENT_BUDGET // (16 * 32)
+        self.assertGreater(rows, 200 * 64)
+
 
 class HierarchicalTwoMeansTest(unittest.TestCase):
     def test_exact_power_of_two_count_and_determinism(self):
@@ -584,28 +607,32 @@ class HierarchicalTwoMeansTest(unittest.TestCase):
                 CTReadoutConfig(num_tokens=24, tokenizer="hierarchical_2means"),
             )
 
-    def test_chunked_abundance_matches_unchunked(self):
-        import src.models.ct_readout as module
-        context_bags, _, query_bags = episode(50, cells=400)
-        config = CTReadoutConfig(num_tokens=12, cells_per_bag=None,
-                                 temperature=0.5, eps=1e-6, kmeans_iterations=3)
-        saved = module._DISTANCE_ELEMENT_BUDGET
+
+@unittest.skipUnless(torch.cuda.is_available(), "GPU HDBSCAN requires CUDA")
+class HDBSCANTest(unittest.TestCase):
+    def test_two_obvious_blobs_choose_two_clusters_without_fixed_k(self):
         try:
-            reference = ct_abundance(context_bags, query_bags, config)
-            module._DISTANCE_ELEMENT_BUDGET = 12 * DIM * 5
-            chunked = ct_abundance(context_bags, query_bags, config)
-        finally:
-            module._DISTANCE_ELEMENT_BUDGET = saved
-        self.assertTrue(torch.equal(reference.tokens, chunked.tokens))
-        self.assertTrue(torch.allclose(reference.context, chunked.context, atol=1e-6))
-        self.assertTrue(torch.allclose(reference.query, chunked.query, atol=1e-6))
-
-    def test_v109_setting_stays_in_one_chunk(self):
-        """64 cells/bag x 16 tokens must never chunk, so v109 is bit-identical."""
-        import src.models.ct_readout as module
-        rows = module._DISTANCE_ELEMENT_BUDGET // (16 * 32)
-        self.assertGreater(rows, 200 * 64)
-
+            import cuml  # noqa: F401, PLC0415
+        except ImportError:
+            self.skipTest("RAPIDS cuML is not installed")
+        generator = torch.Generator(device="cuda").manual_seed(169)
+        pooled = torch.cat([
+            torch.randn(512, 8, generator=generator, device="cuda") * 0.1 - 3,
+            torch.randn(512, 8, generator=generator, device="cuda") * 0.1 + 3,
+        ])
+        config = CTReadoutConfig(
+            tokenizer="hdbscan",
+            num_tokens=777,
+            hdbscan_min_cluster_size=64,
+            hdbscan_min_cluster_fraction=0.0,
+            hdbscan_min_samples=16,
+        )
+        tokens = hdbscan_tokens(pooled, config)
+        self.assertEqual(tokens.shape, (2, 8))
+        self.assertTrue(torch.allclose(
+            tokens.sort(dim=0).values.mean(dim=1),
+            torch.tensor([-3.0, 3.0], device="cuda"), atol=0.1,
+        ))
 
 if __name__ == "__main__":
     unittest.main()

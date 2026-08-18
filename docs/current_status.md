@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-18` (Codex) — §168까지. full-cell/full-abundance Hierarchical PCA/2-means tree의 K=8/16/32/64/128/256 전체 17 평균은 **0.65087/0.65219/0.65713/0.66034/0.66062/0.66070**으로 64 이후 plateau이며, 최고 K256도 v110 대비 **−0.00643**이라 기각했다. task별 oracle K는 0.66737로 v110과 같지만 label 사후 선택이라 arm이 아니며 multi-resolution 진단일 뿐이다. 활성 v110은 유지한다. 구현은 exact-K/non-empty tree와 opt-in FP32 GEMM을 제공하고, tree reduction은 reproducible `segment`와 빠른 `atomic`을 모두 지원한다. 활성 구성은 **v110 = v109에서 CT cluster 16→32, 학습 파라미터 0**(§161, 사용자 결정, 정식 경로 macro **0.7070**, 홀드아웃 **0.6103**). 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다. **독립 최소 구현 `src/models/training_free.py`가 기존 경로와 등가임을 테스트로 고정했다**(§140).
+**Last updated**: `2026-08-18` (Codex) — §169까지. GPU HDBSCAN으로 K를 density hierarchy에서 자동 선택한 full-cell/full-abundance arm은 fold별 **K=1..19 (중앙값 8)**, noise 평균 **96.2%**, 전체 17 평균 **0.64991**로 v110보다 **−0.01722 (3/14)**였다. 고정 hierarchical K8(0.65087)보다도 −0.00096이라 기각하고 v110을 유지한다. 즉 task별 최적 K가 다르다는 §168의 간접 증거는 있었지만, **label-free density 기준이 predictive K를 찾아주지는 않았다**. 활성 구성은 **v110 = v109에서 CT cluster 16→32, 학습 파라미터 0**(§161, 사용자 결정, 정식 경로 macro **0.7070**, 홀드아웃 **0.6103**). 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다. **독립 최소 구현 `src/models/training_free.py`가 기존 경로와 등가임을 테스트로 고정했다**(§140).
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -6600,3 +6600,72 @@ K=64 이후 더 세밀하게 나눠도 평균은 늘지 않는다.
 다음에 이 결과를 살린다면 label로 K를 고르는 것이 아니라, 한 번 만든 tree의 여러 depth abundance를
 동시에 제공하는 **multi-resolution readout**을 context-only 규칙으로 설계해야 한다. oracle +0.00024는
 상한조차 매우 작으므로 우선순위는 낮다.
+
+---
+
+## 169. 2026-08-18 — full-cell GPU HDBSCAN 자동 K: **K 중앙값 8, 전체 −0.01722로 기각**
+
+*작성: Codex, 2026-08-18 — §168에서 task별 최적 K가 달랐던 관찰을 label-free dynamic K로 검증.*
+
+### 1. 구현 및 고정 프로토콜
+
+BagPFN Python 3.12/CUDA 13 환경에 `cuml-cu13==26.8.0`을 설치하고, context 전체 cell에서 GPU
+HDBSCAN을 fit했다. 백만~수백만 cell의 brute-force kNN은 불가능하므로 cuML의 **NN-descent** graph를
+썼다. 이는 HDBSCAN condensed density tree를 쓰지만 이웃 graph는 근사다.
+
+- 입력: context-only PCA32 standardised cell, **dictionary=all / abundance=all**
+- `min_cluster_size=max(256, ceil(0.001·N))`, `min_samples=32`
+- `cluster_selection_method=leaf`, `allow_single_cluster=False`; K 상한/목표 없음
+- cluster membership probability로 centroid를 가중 평균
+- HDBSCAN noise는 centroid fit에서 제외하지만 최종 soft abundance에는 context/query **모든 cell** 사용
+- all-noise fold는 global-mean 1 token fallback(850 folds 중 2회)
+- readout/head: class-balanced ridge λ=1, CT weight 0.7, 나머지는 v110과 동일
+
+초기 VHL pilot에서 `allow_single_cluster=True + EOM`은 K=1을 골라 폐기했다. leaf에서 희귀 허용
+`min_cluster_size=256, min_samples=16`도 첫 3 fold K=40–47, AUROC 0.5067/0.5319/0.5264로,
+상대 density scale의 K=10–14, 0.5167/0.5597/0.5667보다 모두 낮아 최종 설정으로 쓰지 않았다.
+
+### 2. 전체 17-task 결과
+
+| split | HDBSCAN | v110 | Δ |
+|---|---:|---:|---:|
+| SEAL 10 | 0.68584 | 0.70692 | −0.02108 |
+| held-out 7 | 0.59857 | 0.61029 | −0.01171 |
+| **전체 17** | **0.64991** | **0.66713** | **−0.01722** |
+
+task별 HDBSCAN / Δ vs v110:
+
+| task | AUROC | Δ | fold K 범위 (평균) |
+|---|---:|---:|---:|
+| ER | 0.6868 | −0.0146 | 4–6 (4.42) |
+| grade | 0.7193 | −0.0240 | 3–6 (4.40) |
+| HER2 | 0.6572 | −0.0231 | 4–6 (4.38) |
+| PIK3CA | 0.5444 | **+0.0063** | 9–16 (12.92) |
+| BRCA TP53 | 0.8283 | **+0.0028** | 8–16 (12.90) |
+| BAP1 | 0.6014 | −0.0736 | 12–18 (15.58) |
+| VHL | 0.4887 | −0.0346 | 10–19 (15.08) |
+| EGFR | 0.7699 | −0.0123 | 4–8 (6.12) |
+| STK11 | 0.8829 | −0.0219 | 3–9 (6.34) |
+| LUAD TP53 | 0.6795 | −0.0158 | 4–9 (6.32) |
+| PBRM1 | 0.5308 | −0.0218 | 11–18 (14.82) |
+| ARID1A | 0.5294 | **+0.0194** | 6–11 (9.06) |
+| Histologic Grade | 0.6286 | −0.0122 | 6–11 (8.82) |
+| KEAP1 | 0.5643 | −0.0227 | 6–11 (8.84) |
+| KRAS | 0.6979 | −0.0157 | 4–8 (6.08) |
+| SMAD4 | 0.4660 | −0.0220 | 6–13 (8.98) |
+| progression | 0.7730 | −0.0070 | 1–4 (2.76) |
+
+850 folds의 K는 **1–19, 평균 8.70, 중앙값 8**, noise 비율은 평균 **0.96225**
+(범위 0.91312–1.00000)였다. task 승패는 **3/14**다. HDBSCAN 0.64991은 §168의 고정
+hierarchical K8 0.65087보다도 −0.00096 낮다.
+
+### 3. 판단
+
+**HDBSCAN arm 기각, v110 유지.** 자동 K는 fold/task에 따라 실제로 변했지만, standardised PCA32 cell
+공간은 대부분 연속 manifold처럼 보여 안정 density core가 전체의 약 3.8%에 불과했고 K도 낮게
+수축했다. §168의 “predictive 최적 K가 task마다 다름”과 “cell density가 정한 K”는 서로 다른 문제다.
+label-free HDBSCAN은 후자를 해결하지만 전자를 해결하지 못했다.
+
+로그/예측: `logs/20260818_ct_hdbscan_fullcell/{seal,heldout}/` (10+7 task, 850 folds 완료).
+BagPFN Python 직접 실행 full **302 tests in 40.813s, OK**
+(`logs/20260818_ct_hdbscan_fullcell/tests/full_tests.log`).

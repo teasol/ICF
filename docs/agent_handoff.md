@@ -1,6 +1,6 @@
 # Agent handoff guide
 
-**Last updated**: 2026-08-18 (Codex) — §168. full-cell hierarchical K=8..256은 K64 이후 plateau, 최고도 v110보다 −0.00643이라 전부 기각.
+**Last updated**: 2026-08-18 (Codex) — §169. full-cell GPU HDBSCAN 자동 K는 전체 −0.01722, density K가 predictive K를 찾지 못해 기각.
 
 ---
 
@@ -100,6 +100,7 @@ head margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
 | **§166** random 512 + abundance 512 | 같은 seed의 abundance-all 대비 전체 −0.00014(사실상 동률). **full abundance는 하락 원인 아님** |
 | **§167** random 64 + full abundance | random512/all 대비 전체 −0.00011(동률), v110 대비 −0.00253. **64→512 크기는 원인 아님** |
 | **§168** hierarchical full-cell K=8..256 | 0.65087→0.66070, K64 이후 plateau. 최고도 v110 대비 −0.00643이라 전부 기각 |
+| **§169** GPU HDBSCAN full-cell 자동 K | K=1..19(중앙값 8), noise 96.2%, 전체 0.64991(−0.01722, 3/14). 기각 |
 
 ## 0-6. 다음에 할 일 (근거 순)
 

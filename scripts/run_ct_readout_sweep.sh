@@ -21,6 +21,18 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$PROJECT_RO
 . "$(dirname "${BASH_SOURCE[0]}")/node_env.sh"   # docs SS164: node paths in one place
 PY="$PYTHON_BIN"
 
+# Optional non-contiguous assignment, e.g. GPU_LIST="0 1 3 4" while GPU 2 is
+# finishing a pilot. Without it, preserve node_env.sh's NGPU/GPU_OFFSET policy.
+GPU_IDS=()
+if [ -n "${GPU_LIST:-}" ]; then
+  read -r -a GPU_IDS <<< "$GPU_LIST"
+  NGPU="${#GPU_IDS[@]}"
+else
+  for ((gpu_index=0; gpu_index<NGPU; gpu_index++)); do
+    GPU_IDS+=("$((gpu_index + GPU_OFFSET))")
+  done
+fi
+
 
 CKPT="$ICF_CKPT"
 CONFIG="$ICF_CONFIG"
@@ -167,6 +179,14 @@ run_job() {
                                 ICF_CT_TOKENS="${arm#h2T}"
                                 ICF_CT_TOKENIZER=hierarchical_2means
                                 ICF_CT_DISTANCE_KERNEL=gemm) ;;
+    # SS169: K-free density hierarchy on every context cell. HDBSCAN noise is
+    # excluded from centroid fitting; every context/query cell still contributes
+    # to the final soft abundance against the automatically selected centroids.
+    hdbscan)             vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
+                                ICF_FIXED_HEAD_CT_WEIGHT=0.7 ICF_CV_BLOCKS=offdiag
+                                ICF_CT_CELLS=all ICF_CT_ABUNDANCE_CELLS=all
+                                ICF_CT_TOKENIZER=hdbscan
+                                ICF_CT_DISTANCE_KERNEL=gemm) ;;
     v109_cells*)         vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
                                 ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
                                 ICF_CV_BLOCKS=offdiag
@@ -235,7 +255,7 @@ run_worker() {
   for ((index=slot; index<${#jobs[@]}; index+=NGPU)); do
     job="${jobs[$index]}"
     arm="${job%%|*}"; t="${job##*|}"
-    run_job "$((slot + GPU_OFFSET))" "$arm" "$t"
+    run_job "${GPU_IDS[$slot]}" "$arm" "$t"
   done
 }
 
