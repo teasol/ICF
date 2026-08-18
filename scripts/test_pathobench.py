@@ -865,6 +865,10 @@ def evaluate_trial(
             # is the question worth asking now that SS145-147 closed every way of
             # improving it -- K saturates by 128, r=1 is the peak, and both the |t|
             # gate and the |t| selector lose to |lambda| alone.
+            # `ICF_FIXED_HEAD_CV_WEIGHT` completes the set, so any single branch can
+            # be isolated by zeroing the other two (docs SS163). CV is the dominant
+            # branch at 1.442, so zeroing it is the only way to see CT or DD alone.
+            cv_weight = float(os.environ.get("ICF_FIXED_HEAD_CV_WEIGHT", "1.442"))
             ct_weight = float(os.environ.get("ICF_FIXED_HEAD_CT_WEIGHT", "0.286"))
             dd_weight = float(os.environ.get("ICF_FIXED_HEAD_DD_WEIGHT", "0.343"))
             head = inner.cv_dd_ct_head[0]
@@ -872,11 +876,11 @@ def evaluate_trial(
             with torch.no_grad():
                 head.weight.zero_()
                 head.bias.zero_()
-                for slot, value in ((0, -1.442), (1, 1.442), (4, dd_weight),
+                for slot, value in ((0, -cv_weight), (1, cv_weight), (4, dd_weight),
                                     (5, -dd_weight), (8, -ct_weight), (9, ct_weight)):
                     head.weight[0, slot] = value
-            if ct_weight != 0.286 or dd_weight != 0.343:
-                print(f"fixed head: cv=1.442 dd={dd_weight} ct={ct_weight}", flush=True)
+            if (cv_weight, dd_weight, ct_weight) != (1.442, 0.343, 0.286):
+                print(f"fixed head: cv={cv_weight} dd={dd_weight} ct={ct_weight}", flush=True)
         try:
             with torch.no_grad(), autocast:
                 logits = model.model(episode_bags, episode_y, query_index)

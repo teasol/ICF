@@ -84,6 +84,26 @@ run_job() {
     v110)                vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_CT_TOKENS=32
                                 ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
                                 ICF_CV_BLOCKS=offdiag) ;;
+    # SS163: CT ridge lambda sensitivity. CT's ridge is only 32-dimensional now, and
+    # SS156-5 showed lambda comes alive at low dimension (+0.012 at 256 dims), so
+    # lambda=1 was never checked where it might matter most.
+    ctlam*)              vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_CT_TOKENS=32
+                                ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
+                                ICF_CV_BLOCKS=offdiag
+                                ICF_CT_RIDGE_LAMBDA="${arm#ctlam}") ;;
+    # SS163-3: same lambda sweep at 16 tokens (v109). If lambda=1 were suboptimal
+    # there but optimal at 32, SS160's token comparison would have been unfair.
+    t16lam*)             vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_CT_TOKENS=16
+                                ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
+                                ICF_CV_BLOCKS=offdiag
+                                ICF_CT_RIDGE_LAMBDA="${arm#t16lam}") ;;
+    ctolam*)             vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_CT_TOKENS=32
+                                ICF_CT_KMEANS=30 ICF_CV_BLOCKS=offdiag
+                                ICF_CT_RIDGE_LAMBDA="${arm#ctolam}"
+                                ICF_FIXED_HEAD_CV_WEIGHT=0 ICF_FIXED_HEAD_DD_WEIGHT=0) ;;
+    v110_ctonly)         vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_CT_TOKENS=32
+                                ICF_CT_KMEANS=30 ICF_CV_BLOCKS=offdiag
+                                ICF_FIXED_HEAD_CV_WEIGHT=0 ICF_FIXED_HEAD_DD_WEIGHT=0) ;;
     corr)                vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_CT_TOKENS=32
                                 ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
                                 ICF_CV_BLOCKS=offdiag ICF_CV_CORR=1) ;;
