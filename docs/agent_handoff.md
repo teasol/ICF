@@ -1,19 +1,124 @@
 # Agent handoff guide
 
-> [!NOTE]
-> **문서 기록 규칙 — 모든 노드 공통**
->
-> 이 리포(`~/ICF`)는 여러 노드(NEXGEM, SMC, EWHA 등)가 같은 공유 스토리지를 마운트해서
-> 동시에 세션을 돌린다. `docs/` 아래 문서(`agent_handoff.md`, `current_status.md`,
-> `current_experiments.md`, `current_architecture.md`, `history.md`, `README.md`)를
-> 수정할 때는 **어느 노드의 세션이 기록했는지 명시**할 것 — 형식은 `nhn-<NODE>-claude`
-> (예: `nhn-EWHA-claude`, `nhn-NEXGEM-claude`, `nhn-SMC-claude`) + 날짜 및 시각(타임스탬프,
-> `YYYY-MM-DD HH:MM`).
->
-> 예: `_Recorded by: nhn-EWHA-claude — 2026-08-13 17:20_`
->
-> 여러 노드가 같은 공유 문서에 동시에 쓸 수 있어서, 서명이 없으면 어느 항목을 어느 노드가
-> 기록했는지 구분할 수 없다.
+**Last updated**: 2026-08-18 (nhn-NEXGEM-claude) — §164. 서버 이동 대비로 최상단을 새로 씀.
+
+---
+
+# §0. 서버를 옮긴 직후 읽을 것
+
+## 0-1. 노드 종속 항목은 한 파일로 모았다
+
+```bash
+. scripts/node_env.sh    # 모든 runner가 이걸 source 한다
+```
+
+자동 해석하고, **이미 설정된 환경변수는 덮어쓰지 않는다.** 새 노드에서 자동 탐지가 실패하면
+그 변수만 export 하거나 `scripts/node_env.local.sh`(git-ignored)에 적으면 된다.
+
+| 변수 | 무엇 | 자동 탐지 방식 |
+|---|---|---|
+| `ICF_PYTHON` | torch+lightning이 있는 인터프리터 | 후보를 돌며 `import torch, lightning` 성공하는 첫 번째 |
+| `ICF_DATA_ROOT` | `official/`·`features/`의 부모 | 알려진 마운트 후보를 순회 |
+| `ICF_CKPT` | v98 체크포인트 (**껍데기일 뿐**) | `checkpoints/*/v98_p1_reverse_seed42/periodic-epoch=049*.ckpt` |
+| `ICF_CONFIG` | 그 체크포인트의 model config | 고정 기본값 |
+| `NGPU` / `GPU_OFFSET` | 쓸 GPU 개수 / 시작 인덱스 | **기본 4/0** |
+
+⚠️ **`NGPU=4`는 능력이 아니라 예의다.** 이 노드는 GPU 4–7에 다른 사용자의 학습이 있었다.
+**혼자 쓰는 노드라면 `export NGPU=8`** 로 올릴 것.
+
+⚠️ **`python3`로 테스트를 돌리지 말 것.** lightning이 없으면 14개 모듈이 통째로 import 실패하는데
+출력은 `Ran 158 tests ... FAILED (errors=14)`로 **75개가 사라진 걸 말해주지 않는다**(§141-3).
+`node_env.sh`가 인터프리터를 고르는 기준이 정확히 이것이다.
+
+## 0-2. 이동 후 30초 안에 확인할 것
+
+```bash
+. scripts/node_env.sh && echo "$PYTHON_BIN / $ICF_DATA_ROOT / $ICF_CKPT / NGPU=$NGPU"
+"$ICF_PYTHON" -m unittest discover -s tests -p "test_*.py"     # 291 tests, 0 failures
+bash scripts/eval_v110.sh 0 smoke cptac_ccrcc/VHL_mutation     # fold-mean 0.5233 이어야 함
+```
+
+세 개가 다 맞으면 환경이 옳다. VHL 0.5233은 **결정론적**이라 자릿수까지 같아야 한다.
+
+## 0-3. 지금 상태 한 눈에
+
+**활성 = v110, 학습 파라미터 0, seed std 0.00000.** 전체 명세는
+[`current_architecture.md` **§0**](current_architecture.md) — 거기가 SSOT다.
+
+```
+CV   기저 = context cell의 within-slide PCA 상위 256
+     descriptor = triu(BᵀC_bag B)의 비대각 32,640차원만 (대각·raw mean 제거)
+     → 클래스 균형 dual ridge (λ=1)
+DD   같은 triangle 전체에서 rank-1 분산 방향 → 정규화 제곱 거리 (변경 금지 상태)
+CT   64 cell → 32 PCA 방향 → k-means 32개(Lloyd 30) → abundance → ridge (λ=1)
+head margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
+```
+
+| | SEAL 10 | 홀드아웃 7 | ABMIL 0.727 대비 |
+|---|---:|---:|---:|
+| **v110** | **0.7070** | **0.6103** | **−0.0200** |
+| v109 | 0.7027 | 0.6042 | −0.0243 |
+| v108 | 0.6967 | 0.5893 | −0.0303 |
+| v107 | 0.6945 | 0.5836 | −0.0321 |
+| v106 | 0.6864 | 0.5767 | −0.0406 |
+
+실행: `bash scripts/eval_v110.sh <gpu> <tag> [tasks...]`
+
+## 0-4. ⚠️ 판정 규칙이 바뀌었다 — 결정론적 arm에 t를 쓰지 말 것
+
+§107-3의 t는 **seed-paired** 통계이고 시드 분산이 분모인데, v106 이후 시드 std가 **정확히 0**이다.
+§142~§150에서 내가 task를 반복 단위로 끼워넣어 계산한 t는 **근거가 없어 철회했다**(§151-1).
+
+| 쓸 것 | 쓰지 말 것 |
+|---|---|
+| task별 Δ (오차 없는 실측) | t, p, CI |
+| **부호 일치 수** (17개 중 몇 개) | §107-3 게이트 (\|t\|≥2.5) |
+| **독립 집단 재현** (SEAL 10 / 홀드아웃 7) | §131-2 검출 한계 |
+
+홀드아웃 7개는 `seal_univ2_baseline_17tasks.csv`의 `in_seal=no` 행이다. SEAL 대응 수치가 없어
+판정에서 빠져 있고 **바로 그래서 선택 편향 없는 검증 집단**이다.
+
+## 0-5. 이번 세션(§142~§163)에서 확정된 것
+
+| | 결과 |
+|---|---|
+| **§142** K=128→256 | 채택. 사영이 학습을 벗어나며 K가 평가 노브가 됨 |
+| **§145** K의 분기 귀속 | 이득은 **전부 CV**. DD는 128에서 포화 |
+| **§146·§147** DD rank·\|t\| 게이트/selector | 전부 기각. **DD 축 종료** |
+| **§148·§150** CT readout | two-token은 raw 1536에서만 무관. PCA와 **함께** 바꿔야 함 |
+| **§149** CT 거리 집중 | 실재(rel_std 0.229→0.637). CV와 기저 공유가 상한 |
+| **§151** 판정 프로토콜 | **결정론적 arm에 t 금지** |
+| **§153** DD weight | **코호트 의존**: SEAL에서 도움, 홀드아웃에서 해로움 (둘 다 단조) |
+| **§154** DD의 LLR log-det 항 | 이론상 옳으나 **에피소드 상수라 fold-mean에 원리적으로 안 닿음** |
+| **§155** 상대 거리 | 기각 |
+| **§156** CV descriptor 해부 | **비대각이 전부.** mean 무용, 대각 유해 |
+| **§157** CT token 생성 | **FPS가 16개 중 1.9개만 사용.** k-means로 CT-only +0.037 |
+| **§159·§160** cell 수 / token 수 | 전체 cell 기각(4개 token 수 전부). **token 32가 정점** |
+| **§162** CV 상관행렬 | 기각. `√(λᵢλⱼ)` 크기는 **정보였다** |
+| **§163** CT λ | λ=1이 최적. §160 이득의 30%는 λ 효과 (+0.0051 → +0.0036) |
+
+## 0-6. 다음에 할 일 (근거 순)
+
+1. **CV 비대각 32,640차원의 가중** — 지금 무가중 ridge다. §162가 출발점을 정해줬다:
+   **균등이 아니라 현재의 `√(λᵢλⱼ)`** 에서 시작할 것.
+2. **CT에 CV와 다른 부분공간** — 대각/스펙트럼 쪽. §149-4의 중복 상한을 깨는 유일한 길.
+3. **CT 클러스터로 CV의 cell 가중** — ABMIL의 attention에 대응하는 무학습 장치.
+4. **DD의 에피소드별 게이트** — §153의 코호트 의존에 근거. ⚠️ **context 표본 분할이 전제**
+   (§146-2의 사후 선택 편향).
+5. **결정론적 구성 앙상블** — K∈{256,384,512}, token∈{32,64} 등 노이즈 안 동률 구성의 평균.
+
+## 0-7. 건드리기 전 반드시 알아야 할 구조적 제약
+
+`current_architecture.md` §0-4에 모아 뒀다. 요약:
+
+1. **DD는 CV descriptor의 triangle을 읽는다** — 전역 마스킹은 CV를 좁히는 게 아니라 DD를 부순다.
+2. **K_dd ≤ K_cv** — DD는 부분블록을 읽는다.
+3. **CT·CV가 기저를 공유한다** — CT 개선이 macro에 잘 안 닿는 이유.
+4. **에피소드 상수는 fold-mean AUROC를 못 움직인다** — 돌리기 전 query 의존성을 따질 것.
+5. **부분 fold로 방향을 읽지 말 것** — 이 세션에서 **세 번** 속았다.
+6. **단독 arm 둘이 음성이어도 축을 닫지 말 것** — 대각선 한 칸은 확인 (§150-4).
+
+---
 
 > [!IMPORTANT]
 > **§115 진단 (2026-08-14) — 지금 작업의 최전선. 새 arm을 설계하기 전에 이걸 먼저 읽을 것**

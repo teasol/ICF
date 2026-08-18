@@ -76,3 +76,4 @@ Thumbs.db
 .agents/
 .codex/
 .claude/
+scripts/node_env.local.sh

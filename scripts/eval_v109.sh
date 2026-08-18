@@ -29,8 +29,9 @@
 set -uo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$PROJECT_ROOT"
 
-CKPT="${ICF_V109_CKPT:-$(ls checkpoints/20260815_113422/v98_p1_reverse_seed42/periodic-epoch=049*.ckpt)}"
-CONFIG="${ICF_V109_CONFIG:-configs/train_v98_p1_reverse_1536_1gpu.yaml}"
+. "$(dirname "${BASH_SOURCE[0]}")/node_env.sh"   # docs SS164
+CKPT="${ICF_V109_CKPT:-$ICF_CKPT}"
+CONFIG="${ICF_V109_CONFIG:-$ICF_CONFIG}"
 GPU="${1:?usage: eval_v109.sh <gpu> <tag> [task]...}"
 TAG="${2:?usage: eval_v109.sh <gpu> <tag> [task]...}"
 shift 2

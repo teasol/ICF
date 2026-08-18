@@ -1,6 +1,7 @@
 # Documentation map
 
 **Last updated**: `2026-08-18`
+⚠️ **서버를 옮겼다면 `agent_handoff.md` §0을 먼저 읽을 것** — 노드 종속 설정은 `scripts/node_env.sh` 하나로 모았다.
 **Active 구성**: **v110 — 학습 파라미터 0** (§161, 사용자 결정). within-slide PCA(K=256) 사영 +
 고정 head + **CV는 off-diagonal 32,640만** + **CT는 k-means token 32개 @ weight 0.7**.
 정식 경로 SEAL macro **0.7070**, 홀드아웃 7 **0.6103**, **seed std 0.00000**.

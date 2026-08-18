@@ -13,9 +13,10 @@
 # Usage: bash scripts/eval_seal_tasks.sh <gpu> <ckpt> <config> <tag> <task>...
 set -uo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$PROJECT_ROOT"
-PY="${PYTHON_BIN:-/home/aibio_3/miniconda3/envs/BagPFN/bin/python}"
-OFFICIAL=/NHNHOME/BASE/kimds/Data/PathoBench/official
-FEATURES=/NHNHOME/BASE/kimds/Data/PathoBench/features
+. "$(dirname "${BASH_SOURCE[0]}")/node_env.sh"   # docs SS164: node paths in one place
+PY="$PYTHON_BIN"
+
+
 GPU="$1"; CKPT="$2"; CONFIG="$3"; TAG="$4"; shift 4
 mkdir -p logs/official50 predictions
 for task in "$@"; do

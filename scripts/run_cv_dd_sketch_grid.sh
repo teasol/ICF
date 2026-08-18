@@ -26,14 +26,12 @@
 #   e.g. bash scripts/run_cv_dd_sketch_grid.sh out 256:256 256:128 128:128
 set -uo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$PROJECT_ROOT"
-PY="${PYTHON_BIN:-/home/aibio_3/miniconda3/envs/BagPFN/bin/python}"
-OFFICIAL=/NHNHOME/BASE/kimds/Data/PathoBench/official
-FEATURES=/NHNHOME/BASE/kimds/Data/PathoBench/features
-CKPT=$(ls checkpoints/20260815_113422/v98_p1_reverse_seed42/periodic-epoch=049*.ckpt)
-CONFIG=configs/train_v98_p1_reverse_1536_1gpu.yaml
-# GPUs 4-7 host other users' jobs on this node -- default to 0-3.
-NGPU=${NGPU:-4}
-GPU_OFFSET=${GPU_OFFSET:-0}
+. "$(dirname "${BASH_SOURCE[0]}")/node_env.sh"   # docs SS164: node paths in one place
+PY="$PYTHON_BIN"
+
+
+CKPT="$ICF_CKPT"
+CONFIG="$ICF_CONFIG"
 
 OUT="$1"; shift
 mkdir -p "$OUT"
