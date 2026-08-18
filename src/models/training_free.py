@@ -140,6 +140,11 @@ class TrainingFreeConfig:
     ct_abundance_cells_per_bag: int | None | str = "match"
     ct_sampling: str = "even"
     ct_sampling_seed: int = 0
+    ct_distance_kernel: str = "broadcast"
+    ct_tokenizer: str = "fps_lloyd"
+    ct_bisect_iterations: int = 2
+    ct_bisect_power_iterations: int = 3
+    ct_tree_reduction: str = "segment"
     ct_temperature: float = 0.5
     ct_eps: float = 1e-6
     # SS137-3: CV : DD : CT. Sign of the DD term is required by DD returning
@@ -283,6 +288,11 @@ class TrainingFreeClassifier:
                 abundance_cells_per_bag=config.ct_abundance_cells_per_bag,
                 sampling=config.ct_sampling,
                 sampling_seed=config.ct_sampling_seed,
+                distance_kernel=config.ct_distance_kernel,
+                tokenizer=config.ct_tokenizer,
+                bisect_iterations=config.ct_bisect_iterations,
+                bisect_power_iterations=config.ct_bisect_power_iterations,
+                tree_reduction=config.ct_tree_reduction,
                 temperature=config.ct_temperature,
                 eps=config.ct_eps,
                 pca_dim=config.ct_pca_dim,

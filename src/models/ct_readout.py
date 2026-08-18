@@ -46,11 +46,24 @@ three constants stay valid (SS137-3).
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Literal, NamedTuple, Sequence
 
 import torch
 
 MODES = ("extreme", "prototype", "ridge")
+
+
+def _fp32_matmul(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+    """GEMM without TF32 so the alternative distance is as close to fp32 as possible."""
+    if not left.is_cuda:
+        return left @ right
+    previous = torch.backends.cuda.matmul.allow_tf32
+    torch.backends.cuda.matmul.allow_tf32 = False
+    try:
+        return left @ right
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = previous
 
 
 @dataclass(frozen=True)
@@ -76,6 +89,20 @@ class CTReadoutConfig:
     # mixed with the bag index, so bags do not all receive the same index pattern.
     sampling: Literal["even", "random"] = "even"
     sampling_seed: int = 0
+    # SS168. The historical broadcast kernel is the reproduction path.  "gemm"
+    # computes the same token-dependent squared distance with
+    # ||c||^2 - 2 x.c; ||x||^2 is omitted because it is constant across tokens
+    # for both argmin and softmax. This avoids materialising [cells,tokens,dims].
+    distance_kernel: Literal["broadcast", "gemm"] = "broadcast"
+    # SS168. Hierarchical PCA-initialised 2-means reads every context cell in
+    # O(N D log K), avoiding the 30 x O(N K D) Lloyd sweep at large K.
+    tokenizer: Literal["fps_lloyd", "hierarchical_2means"] = "fps_lloyd"
+    bisect_iterations: int = 2
+    bisect_power_iterations: int = 3
+    # "segment" is bit-reproducible but sorts ~N cells at every tree update.
+    # "atomic" uses fast CUDA index_add; it guarantees non-empty leaves but can
+    # differ slightly between runs because floating-point atomic order is free.
+    tree_reduction: Literal["segment", "atomic"] = "segment"
     temperature: float = 0.5
     eps: float = 1e-6
     ridge_lambda: float = 1.0
@@ -241,12 +268,154 @@ def farthest_point_tokens(pooled: torch.Tensor, config: CTReadoutConfig) -> torc
     count = min(config.num_tokens, pooled.shape[0])
     first = (pooled - pooled.mean(dim=0, keepdim=True)).square().mean(dim=1).argmin()
     selected = [first]
-    nearest = (pooled - pooled[first]).square().mean(dim=1)
+    if config.distance_kernel == "gemm":
+        pooled_norm = pooled.square().mean(dim=1)
+
+        def distance_to(index):
+            token = pooled[index]
+            return (pooled_norm + token.square().mean()
+                    - (2.0 / pooled.shape[1]) * _fp32_matmul(pooled, token))
+    elif config.distance_kernel == "broadcast":
+        def distance_to(index):
+            return (pooled - pooled[index]).square().mean(dim=1)
+    else:
+        raise ValueError(
+            "distance_kernel must be 'broadcast' or 'gemm', "
+            f"got {config.distance_kernel!r}"
+        )
+    nearest = distance_to(first)
     for _ in range(1, count):
         index = nearest.argmax()
         selected.append(index)
-        nearest = torch.minimum(nearest, (pooled - pooled[index]).square().mean(dim=1))
+        nearest = torch.minimum(nearest, distance_to(index))
     return pooled[torch.stack(selected)]
+
+
+def hierarchical_2means_tokens(
+    pooled: torch.Tensor, config: CTReadoutConfig
+) -> torch.Tensor:
+    """Deterministic full-cell PCA/2-means tree with exactly K non-empty leaves.
+
+    Requested SS168 token counts are powers of two, so every leaf is split once
+    per level. A short power iteration estimates each node's principal direction;
+    two deterministic 2-means updates then follow. If a natural split would leave
+    too few cells to complete the remaining tree, a stable median projection split
+    supplies the cardinality guarantee without inventing an empty centroid.
+    """
+    target = min(config.num_tokens, pooled.shape[0])
+    if target < 1 or target & (target - 1):
+        raise ValueError(
+            "hierarchical_2means requires a positive power-of-two token count "
+            "not exceeding the number of pooled cells."
+        )
+    if config.bisect_iterations < 0 or config.bisect_power_iterations < 1:
+        raise ValueError("bisect iterations must be non-negative and power iterations positive.")
+
+    levels = int(math.log2(target))
+    dimension = pooled.shape[1]
+    initial = torch.full(
+        (dimension,), 1.0 / math.sqrt(dimension),
+        device=pooled.device, dtype=pooled.dtype,
+    )
+    labels = torch.zeros(pooled.shape[0], device=pooled.device, dtype=torch.long)
+
+    def group_means(group_labels, groups):
+        counts_long = torch.bincount(group_labels, minlength=groups)
+        if config.tree_reduction == "atomic":
+            sums = torch.zeros(
+                groups, dimension, device=pooled.device, dtype=pooled.dtype
+            ).index_add_(0, group_labels, pooled)
+            means = sums / counts_long.to(pooled.dtype).clamp_min(1.0)[:, None]
+            return means, counts_long.to(pooled.dtype), None
+        if config.tree_reduction != "segment":
+            raise ValueError(
+                "tree_reduction must be 'segment' or 'atomic', "
+                f"got {config.tree_reduction!r}"
+            )
+        order = torch.argsort(group_labels, stable=True)
+        means = torch.segment_reduce(
+            pooled.index_select(0, order), reduce="mean", lengths=counts_long
+        )
+        return means, counts_long.to(pooled.dtype), order
+
+    def enforce_capacity(right, projection, parent_labels, counts, minimum_child):
+        groups = counts.shape[0]
+        right_counts = torch.bincount(
+            parent_labels[right], minlength=groups
+        )
+        bad = ((right_counts < minimum_child)
+               | ((counts.long() - right_counts) < minimum_child)).nonzero().flatten()
+        # Continuous UNI2 features almost never enter this path. It exists to
+        # guarantee K even for identical/pathological cells; only bad parents pay
+        # for a stable sort and host synchronisation.
+        for parent in bad.tolist():
+            members = (parent_labels == parent).nonzero().flatten()
+            order = torch.argsort(projection.index_select(0, members), stable=True)
+            cut = members.shape[0] // 2
+            right[members] = False
+            right[members.index_select(0, order[cut:])] = True
+        return right
+
+    for level in range(levels):
+        groups = 1 << level
+        minimum_child = 1 << (levels - level - 1)
+        means, counts, parent_order = group_means(labels, groups)
+        centred = pooled - means.index_select(0, labels)
+        directions = initial.expand(groups, -1).clone()
+        for _ in range(config.bisect_power_iterations):
+            projection = (
+                centred * directions.index_select(0, labels)
+            ).sum(dim=1)
+            weighted = centred * projection[:, None]
+            if config.tree_reduction == "atomic":
+                covariance_times_direction = torch.zeros_like(directions).index_add_(
+                    0, labels, weighted
+                )
+            else:
+                covariance_times_direction = torch.segment_reduce(
+                    weighted.index_select(0, parent_order),
+                    reduce="sum", lengths=counts.long(),
+                )
+            norms = covariance_times_direction.square().sum(dim=1).sqrt()
+            usable = norms > config.eps
+            directions = torch.where(
+                usable[:, None],
+                covariance_times_direction / norms.clamp_min(config.eps)[:, None],
+                directions,
+            )
+
+        projection = (
+            centred * directions.index_select(0, labels)
+        ).sum(dim=1)
+        if config.tree_reduction == "atomic":
+            projected_energy = torch.zeros(
+                groups, device=pooled.device, dtype=pooled.dtype
+            ).index_add_(0, labels, projection.square())
+        else:
+            projected_energy = torch.segment_reduce(
+                projection.square().index_select(0, parent_order),
+                reduce="sum", lengths=counts.long(),
+            )
+        scale = (projected_energy / counts.clamp_min(1.0)).sqrt().clamp_min(config.eps)
+        left_centres = means - scale[:, None] * directions
+        right_centres = means + scale[:, None] * directions
+        right = projection > 0
+
+        for _ in range(config.bisect_iterations):
+            right = enforce_capacity(right, projection, labels, counts, minimum_child)
+            child_labels = labels * 2 + right.long()
+            child_centres, _, _ = group_means(child_labels, groups * 2)
+            left_centres = child_centres.index_select(0, labels * 2)
+            right_centres = child_centres.index_select(0, labels * 2 + 1)
+            left_distance = (pooled - left_centres).square().mean(dim=1)
+            right_distance = (pooled - right_centres).square().mean(dim=1)
+            right = right_distance < left_distance
+
+        right = enforce_capacity(right, projection, labels, counts, minimum_child)
+        labels = labels * 2 + right.long()
+
+    tokens, _, _ = group_means(labels, target)
+    return tokens
 
 
 # docs SS160. Element budget for the cell-to-token distance block. The 3-D
@@ -259,19 +428,49 @@ def farthest_point_tokens(pooled: torch.Tensor, config: CTReadoutConfig) -> torc
 _DISTANCE_ELEMENT_BUDGET = 1 << 27
 
 
-def _assign(pooled: torch.Tensor, tokens: torch.Tensor) -> torch.Tensor:
+def _distance_rows(tokens: torch.Tensor, distance_kernel: str) -> int:
+    elements_per_row = tokens.shape[0]
+    if distance_kernel == "broadcast":
+        elements_per_row *= tokens.shape[1]
+    elif distance_kernel != "gemm":
+        raise ValueError(
+            "distance_kernel must be 'broadcast' or 'gemm', "
+            f"got {distance_kernel!r}"
+        )
+    return max(1, _DISTANCE_ELEMENT_BUDGET // max(1, elements_per_row))
+
+
+def _token_distance(pooled: torch.Tensor, tokens: torch.Tensor,
+                    distance_kernel: str) -> torch.Tensor:
+    """Token-dependent mean squared distance; sufficient for argmin/softmax."""
+    if distance_kernel == "broadcast":
+        return (pooled[:, None, :] - tokens[None]).square().mean(-1)
+    if distance_kernel == "gemm":
+        distance = _fp32_matmul(pooled, tokens.T)
+        distance.mul_(-2.0 / pooled.shape[1])
+        distance.add_(tokens.square().mean(dim=1).unsqueeze(0))
+        return distance
+    raise ValueError(
+        "distance_kernel must be 'broadcast' or 'gemm', "
+        f"got {distance_kernel!r}"
+    )
+
+
+def _assign(pooled: torch.Tensor, tokens: torch.Tensor,
+            distance_kernel: str = "broadcast") -> torch.Tensor:
     """Nearest-token index per cell, chunked over cells (docs SS160)."""
-    rows = max(1, _DISTANCE_ELEMENT_BUDGET // max(1, tokens.shape[0] * tokens.shape[1]))
+    rows = _distance_rows(tokens, distance_kernel)
     if rows >= pooled.shape[0]:
-        return (pooled[:, None, :] - tokens[None]).square().mean(-1).argmin(dim=1)
+        return _token_distance(pooled, tokens, distance_kernel).argmin(dim=1)
     parts = [
-        (pooled[start:start + rows, None, :] - tokens[None]).square().mean(-1).argmin(dim=1)
+        _token_distance(pooled[start:start + rows], tokens, distance_kernel).argmin(dim=1)
         for start in range(0, pooled.shape[0], rows)
     ]
     return torch.cat(parts)
 
 
-def lloyd_refine(pooled: torch.Tensor, tokens: torch.Tensor, iterations: int):
+def lloyd_refine(pooled: torch.Tensor, tokens: torch.Tensor, iterations: int,
+                 distance_kernel: str = "broadcast"):
     """Move tokens to their cluster means, `iterations` times (docs SS157).
 
     Deterministic throughout: assignment is a hard argmin and the update is a plain
@@ -283,7 +482,7 @@ def lloyd_refine(pooled: torch.Tensor, tokens: torch.Tensor, iterations: int):
     """
     counts = None
     for _ in range(iterations):
-        assignment = _assign(pooled, tokens)
+        assignment = _assign(pooled, tokens, distance_kernel)
         sums = torch.zeros_like(tokens).index_add_(0, assignment, pooled)
         counts = torch.zeros(
             tokens.shape[0], device=pooled.device, dtype=pooled.dtype
@@ -293,7 +492,7 @@ def lloyd_refine(pooled: torch.Tensor, tokens: torch.Tensor, iterations: int):
             occupied[:, None], sums / counts.clamp_min(1.0)[:, None], tokens
         )
     if counts is None:
-        assignment = _assign(pooled, tokens)
+        assignment = _assign(pooled, tokens, distance_kernel)
         counts = torch.zeros(
             tokens.shape[0], device=pooled.device, dtype=pooled.dtype
         ).index_add_(0, assignment, torch.ones_like(assignment, dtype=pooled.dtype))
@@ -318,9 +517,19 @@ def ct_abundance(
         context_bags, query_bags, config, pca_basis, return_normalisation=True
     )
     pooled = torch.cat(token_context, dim=0)
-    tokens = farthest_point_tokens(pooled, config)
-    if config.kmeans_iterations > 0:
-        tokens, _ = lloyd_refine(pooled, tokens, config.kmeans_iterations)
+    if config.tokenizer == "fps_lloyd":
+        tokens = farthest_point_tokens(pooled, config)
+        if config.kmeans_iterations > 0:
+            tokens, _ = lloyd_refine(
+                pooled, tokens, config.kmeans_iterations, config.distance_kernel
+            )
+    elif config.tokenizer == "hierarchical_2means":
+        tokens = hierarchical_2means_tokens(pooled, config)
+    else:
+        raise ValueError(
+            "tokenizer must be 'fps_lloyd' or 'hierarchical_2means', "
+            f"got {config.tokenizer!r}"
+        )
 
     if config.abundance_cells_per_bag == "match":
         context, query = token_context, token_query
@@ -344,13 +553,12 @@ def ct_abundance(
     def abundance(bags):
         # Chunked for the same reason as `_assign`, and identically exact: the mean
         # over cells is accumulated as a weighted sum of per-chunk means.
-        rows = max(1, _DISTANCE_ELEMENT_BUDGET
-                   // max(1, tokens.shape[0] * tokens.shape[1]))
+        rows = _distance_rows(tokens, config.distance_kernel)
         outputs = []
         for bag in bags:
             if rows >= bag.shape[0]:
                 outputs.append(
-                    (-(bag[:, None, :] - tokens[None]).square().mean(-1)
+                    (-_token_distance(bag, tokens, config.distance_kernel)
                      / config.temperature).softmax(dim=-1).mean(dim=0)
                 )
                 continue
@@ -358,7 +566,7 @@ def ct_abundance(
             for start in range(0, bag.shape[0], rows):
                 block = bag[start:start + rows]
                 total = total + (
-                    -(block[:, None, :] - tokens[None]).square().mean(-1)
+                    -_token_distance(block, tokens, config.distance_kernel)
                     / config.temperature
                 ).softmax(dim=-1).sum(dim=0)
             outputs.append(total / bag.shape[0])

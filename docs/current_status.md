@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-18` (Codex) — §167까지. random-64/full-abundance는 random-512/full 대비 전체 17에서 **−0.00011**로 동률이고 v110 대비 **−0.00253**이라, 64→512 표본 수는 원인이 아니며 random sampling policy가 남은 유력 축이다(단 `random64/match`로 최종 분리 필요). §166에서 abundance `all→512`도 −0.00014로 동률임을 확인했다. 활성 v110은 유지한다. 활성 구성은 **v110 = v109에서 CT cluster 16→32, 학습 파라미터 0**(§161, 사용자 결정, 정식 경로 macro **0.7070**, 홀드아웃 **0.6103**). 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다. 직전 v107은(§142, 사용자 결정, 정식 경로 macro **0.6945**, seed std 0.00000). K는 v106에서 사영이 학습을 벗어나며 **평가 시점 노브**가 됐고, 스윕 결과 128은 최적이 아니었다 — 전체 17 task에서 +0.0076(t=3.01, 12/17), 선택에 쓰지 않은 홀드아웃 7개에서 재현(§142). **독립 최소 구현 `src/models/training_free.py`가 기존 경로와 등가임을 테스트로 고정했다**(§140).
+**Last updated**: `2026-08-18` (Codex) — §168까지. full-cell/full-abundance Hierarchical PCA/2-means tree의 K=8/16/32/64/128/256 전체 17 평균은 **0.65087/0.65219/0.65713/0.66034/0.66062/0.66070**으로 64 이후 plateau이며, 최고 K256도 v110 대비 **−0.00643**이라 기각했다. task별 oracle K는 0.66737로 v110과 같지만 label 사후 선택이라 arm이 아니며 multi-resolution 진단일 뿐이다. 활성 v110은 유지한다. 구현은 exact-K/non-empty tree와 opt-in FP32 GEMM을 제공하고, tree reduction은 reproducible `segment`와 빠른 `atomic`을 모두 지원한다. 활성 구성은 **v110 = v109에서 CT cluster 16→32, 학습 파라미터 0**(§161, 사용자 결정, 정식 경로 macro **0.7070**, 홀드아웃 **0.6103**). 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다. **독립 최소 구현 `src/models/training_free.py`가 기존 경로와 등가임을 테스트로 고정했다**(§140).
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -6532,3 +6532,71 @@ task-mean 부호도 8/17만 양수다.
 남은 직접적인 차이는 v110의 `sampling=even`과 새 arm의 `sampling=random`이다. 다만 v110은
 `abundance=match(64)`이고 이 arm은 `all`이므로 최종 단일변수 확인은 `random64/match`가 필요하다.
 현재 결과만으로 random 자체를 확정 기각하지는 않으며 활성 v110은 유지한다.
+
+---
+
+## 168. 2026-08-18 — full-cell Hierarchical PCA Bisection × K=8..256: **64 이후 plateau, 전부 기각**
+
+*작성: Codex, 2026-08-18 — DPC/계층 PCA/Facility Location/Density-FPS 중 실제 N에 맞는 방법을 선택하고, 사용자 지시로 낮은 K를 재스윕.*
+
+### 1. 선택과 구현
+
+VHL fold 1의 실제 context는 **189 bags, 1,148,534 cells**, query는 553,548 cells였다(D=32 PCA).
+exact DPC `O(N²D)`는 불가능하고 k-NN DPC용 FAISS·SciPy·sklearn·torch-cluster·pynndescent도
+환경에 없었다. Facility Location과 Density-Weighted FPS는 큰 K에서 순차 `O(KND)`다. 그래서
+모든 context cell을 depth마다 한 번 읽는 **Hierarchical PCA-initialized 2-means tree**를 택했다.
+
+- leaf별 주방향: 3-step power iteration
+- deterministic 2-means update 2회
+- child가 너무 작으면 stable projection median fallback → 항상 exact K/non-empty
+- query는 tree에 들어가지 않고 context/query abundance 모두 모든 cell 사용
+- `h2T*`는 `PCA32 / CT ridge λ=1 / weight=0.7 / full cells / full abundance`
+
+### 2. 계산 최적화와 안정성 선택
+
+512-token FPS+Lloyd profiler에서 CUDA 시간의 `mean/sub/square`가 각각 **58.9/21.4/11.0%**였고
+ridge solve는 6.4 ms뿐이었다. `[cells,tokens,32]` broadcast를 만들지 않는 opt-in FP32 GEMM
+`||c||²−2x·c` 커널을 추가했다. 기본은 `broadcast`라 v110은 그대로다.
+
+tree reduction은 두 모드를 지원한다.
+
+- `segment`: label stable-sort + segment reduce. 같은 fold 반복이 **bit-exact**였지만 매우 느리다.
+- `atomic`: CUDA `index_add`, exact-K/non-empty는 유지하지만 합산 순서 때문에 같은 fold 확률이
+  최대 약 0.00122 달라질 수 있다.
+
+사용자 지시대로 이미 실행 중이던 **25개 SEAL job은 segment로 끝까지 유지**했고, 나머지 SEAL 35개와
+held-out 42개는 atomic으로 실행했다. 따라서 이 sweep의 10⁻⁴ 차이는 해석하지 않는다. runner도
+GPU별 고정 worker queue로 고쳐, 긴 task 때문에 동일 GPU에 job이 겹치고 다른 GPU가 노는 문제를 제거했다.
+
+### 3. 결과
+
+| K | SEAL 10 | 홀드아웃 7 | 전체 17 | Δ vs v110 | W/T/L vs v110 |
+|---:|---:|---:|---:|---:|---:|
+| 8 | 0.69088 | 0.59371 | 0.65087 | −0.01626 | 3/0/14 |
+| 16 | 0.69576 | 0.58996 | 0.65219 | −0.01494 | 3/0/14 |
+| 32 | 0.70172 | 0.59343 | 0.65713 | −0.01000 | 4/0/13 |
+| **64** | 0.70296 | **0.59944** | 0.66034 | −0.00679 | 6/0/11 |
+| 128 | 0.70389 | 0.59881 | 0.66062 | −0.00651 | 6/0/11 |
+| 256 | **0.70453** | 0.59809 | **0.66070** | **−0.00643** | 4/0/13 |
+| **v110** | **0.70692** | **0.61029** | **0.66713** | — | — |
+
+증분은 `16−8 +0.00132`, `32−16 +0.00494`, `64−32 +0.00321`, 이후
+`128−64 +0.00029`, `256−128 +0.00008`이다. **K=64 이후 완전히 plateau**이며 atomic 변동보다도 작다.
+
+task별 최적 K는 크게 달랐다: VHL·ARID1A는 K8, grade·TP53는 K32, PBRM1·Histologic Grade·KEAP1·
+STK11·progression은 K64, ER·HER2·BAP1·EGFR·KRAS는 K256이었다. 각 task label을 보고 최적 K를
+사후 선택한 oracle 평균은 **0.66737 (v110 대비 +0.00024)**지만 유효한 모델/arm이 아니다.
+
+로그/예측: `logs/20260818_ct_hierarchical_low_tokens/{seal,heldout}/` (60+42 완료).
+BagPFN Python 직접 실행: focused **58 tests OK**, full **301 tests in 39.430s, OK**
+(`logs/20260818_ct_hierarchical_low_tokens/full_tests.log`). v110 VHL도 **0.5233** 재현했다.
+
+### 4. 판단
+
+**모든 단일 K arm 기각, v110 유지.** 전체 cell hierarchical representation 자체는 계산 가능하고 일부
+task에서는 v110을 이기지만, 하나의 K를 전 task에 고정하면 홀드아웃 손실을 회복하지 못한다.
+K=64 이후 더 세밀하게 나눠도 평균은 늘지 않는다.
+
+다음에 이 결과를 살린다면 label로 K를 고르는 것이 아니라, 한 번 만든 tree의 여러 depth abundance를
+동시에 제공하는 **multi-resolution readout**을 context-only 규칙으로 설계해야 한다. oracle +0.00024는
+상한조차 매우 작으므로 우선순위는 낮다.

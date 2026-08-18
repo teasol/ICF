@@ -24,6 +24,7 @@ from src.models.ct_readout import (
     discriminative_score,
     readout_extreme,
     farthest_point_tokens,
+    hierarchical_2means_tokens,
     lloyd_refine,
     prepare_cells,
     readout_prototype,
@@ -509,6 +510,79 @@ class ChunkingTest(unittest.TestCase):
         finally:
             module._DISTANCE_ELEMENT_BUDGET = saved
         self.assertTrue(torch.equal(reference, chunked))
+
+    def test_gemm_distance_matches_broadcast(self):
+        import src.models.ct_readout as module
+        torch.manual_seed(168)
+        pooled = torch.randn(91, 13)
+        tokens = torch.randn(17, 13)
+        broadcast = module._token_distance(pooled, tokens, "broadcast")
+        gemm = module._token_distance(pooled, tokens, "gemm")
+        # GEMM intentionally omits ||x||^2, which is constant across tokens.
+        restored = gemm + pooled.square().mean(dim=1, keepdim=True)
+        self.assertTrue(torch.allclose(broadcast, restored, atol=2e-6, rtol=2e-6))
+        self.assertTrue(torch.equal(
+            module._assign(pooled, tokens, "broadcast"),
+            module._assign(pooled, tokens, "gemm"),
+        ))
+
+    def test_gemm_abundance_matches_broadcast(self):
+        context_bags, _, query_bags = episode(168, cells=37)
+        common = dict(num_tokens=12, cells_per_bag=None, kmeans_iterations=3)
+        broadcast = ct_abundance(
+            context_bags, query_bags,
+            CTReadoutConfig(**common, distance_kernel="broadcast"),
+        )
+        gemm = ct_abundance(
+            context_bags, query_bags,
+            CTReadoutConfig(**common, distance_kernel="gemm"),
+        )
+        self.assertTrue(torch.allclose(broadcast.context, gemm.context, atol=2e-5))
+        self.assertTrue(torch.allclose(broadcast.query, gemm.query, atol=2e-5))
+
+
+class HierarchicalTwoMeansTest(unittest.TestCase):
+    def test_exact_power_of_two_count_and_determinism(self):
+        generator = torch.Generator().manual_seed(168)
+        pooled = torch.randn(1024, 12, generator=generator)
+        config = CTReadoutConfig(
+            num_tokens=64, tokenizer="hierarchical_2means",
+            bisect_iterations=2, bisect_power_iterations=3,
+        )
+        first = hierarchical_2means_tokens(pooled, config)
+        second = hierarchical_2means_tokens(pooled, config)
+        self.assertEqual(first.shape, (64, 12))
+        self.assertTrue(torch.equal(first, second))
+        self.assertTrue(torch.isfinite(first).all())
+
+    def test_identical_points_use_nonempty_fallback(self):
+        pooled = torch.ones(128, 7)
+        config = CTReadoutConfig(
+            num_tokens=32, tokenizer="hierarchical_2means",
+            bisect_iterations=2, bisect_power_iterations=2,
+        )
+        tokens = hierarchical_2means_tokens(pooled, config)
+        self.assertEqual(tokens.shape, (32, 7))
+        self.assertTrue(torch.equal(tokens, torch.ones_like(tokens)))
+
+    def test_atomic_reduction_still_guarantees_exact_count(self):
+        pooled = torch.randn(4096, 9, generator=torch.Generator().manual_seed(169))
+        tokens = hierarchical_2means_tokens(
+            pooled,
+            CTReadoutConfig(
+                num_tokens=128, tokenizer="hierarchical_2means",
+                tree_reduction="atomic",
+            ),
+        )
+        self.assertEqual(tokens.shape, (128, 9))
+        self.assertTrue(torch.isfinite(tokens).all())
+
+    def test_non_power_of_two_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "power-of-two"):
+            hierarchical_2means_tokens(
+                torch.randn(100, 5),
+                CTReadoutConfig(num_tokens=24, tokenizer="hierarchical_2means"),
+            )
 
     def test_chunked_abundance_matches_unchunked(self):
         import src.models.ct_readout as module

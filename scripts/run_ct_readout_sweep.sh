@@ -51,6 +51,10 @@ run_job() {
   local gpu="$1" arm="$2" task="$3" d rest blocks suffix
   local name="${task//\//_}"
   local log="$OUT/${arm}_${name}.log"
+  if [ "${RESUME:-0}" = 1 ] && grep -aq 'fold-mean AUROC:' "$log" 2>/dev/null; then
+    echo "$arm $name  SKIP completed"
+    return
+  fi
   local vars=(ICF_COVARIANCE_BASIS=pca_within ICF_FIXED_HEAD=1 ICF_SKETCH_DIM=256)
   case "$arm" in
     ct_extreme)          ;;
@@ -155,6 +159,14 @@ run_job() {
                                 ICF_CV_BLOCKS=offdiag ICF_CT_CELLS=all
                                 ICF_CT_TOKENS="${rest%%_*}")
                          case "$rest" in *_lam*) vars+=(ICF_CT_RIDGE_LAMBDA="${rest#*_lam}") ;; esac ;;
+    # SS168: full-cell hierarchical PCA/2-means tree, full-cell abundance.
+    # h2T512/h2T1024/h2T2048 are one-pass-per-level alternatives to 30 Lloyd passes.
+    h2T*)                vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
+                                ICF_FIXED_HEAD_CT_WEIGHT=0.7 ICF_CV_BLOCKS=offdiag
+                                ICF_CT_CELLS=all ICF_CT_ABUNDANCE_CELLS=all
+                                ICF_CT_TOKENS="${arm#h2T}"
+                                ICF_CT_TOKENIZER=hierarchical_2means
+                                ICF_CT_DISTANCE_KERNEL=gemm) ;;
     v109_cells*)         vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
                                 ICF_CT_KMEANS=30 ICF_FIXED_HEAD_CT_WEIGHT=0.7
                                 ICF_CV_BLOCKS=offdiag
@@ -215,12 +227,20 @@ run_job() {
   echo "$arm $name  $(grep -ao 'fold-mean AUROC: [0-9.]*' "$log" | tail -1 || echo FAILED)"
 }
 
-i=0
-for job in "${jobs[@]}"; do
-  arm="${job%%|*}"; t="${job##*|}"
-  run_job "$(((i % NGPU) + GPU_OFFSET))" "$arm" "$t" &
-  i=$((i + 1))
-  while [ "$(jobs -rp | wc -l)" -ge "$NGPU" ]; do sleep 5; done
+# One sequential queue per GPU. The old global completion queue assigned GPU by
+# job index, so unequal task runtimes could overlap job i and i+NGPU on one GPU
+# while another GPU sat idle. Fixed workers make occupancy and memory predictable.
+run_worker() {
+  local slot="$1" index job arm t
+  for ((index=slot; index<${#jobs[@]}; index+=NGPU)); do
+    job="${jobs[$index]}"
+    arm="${job%%|*}"; t="${job##*|}"
+    run_job "$((slot + GPU_OFFSET))" "$arm" "$t"
+  done
+}
+
+for ((slot=0; slot<NGPU; slot++)); do
+  run_worker "$slot" &
 done
 wait
 echo "SWEEP DONE"

@@ -111,6 +111,11 @@ class DefaultTest(unittest.TestCase):
         self.assertEqual(config.ct_abundance_cells_per_bag, "match")
         self.assertEqual(config.ct_sampling, "even")
         self.assertEqual(config.ct_sampling_seed, 0)
+        self.assertEqual(config.ct_distance_kernel, "broadcast")
+        self.assertEqual(config.ct_tokenizer, "fps_lloyd")
+        self.assertEqual(config.ct_bisect_iterations, 2)
+        self.assertEqual(config.ct_bisect_power_iterations, 3)
+        self.assertEqual(config.ct_tree_reduction, "segment")
         self.assertEqual(config.cv_blocks, "offdiag")
         self.assertEqual(config.weight_ct, 0.7)
 
