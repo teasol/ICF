@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-19` — §180 raw1536 spherical/cosine k-means + random512/full-abundance 4-seed 평가 완료. 전체 **0.65618±0.00018**, v110 대비 −0.01095(7/17)로 미승격이다. 활성 구성은 계속 **historical v110 = 학습 파라미터 0**(§161, SEAL **0.70692**, 홀드아웃 **0.61029**, 전체 **0.66713**)이고 실행 중인 job은 없다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
+**Last updated**: `2026-08-19` — §181 사용자 결정으로 **v111 = full-cell/full-abundance hierarchical PCA32/K256**을 활성 baseline으로 승격했다. selection bias와 sampling randomness가 없으며 SEAL **0.70453**, 홀드아웃 **0.59809**, 전체 **0.66070**, seed std 0.00000이다. 예측 수치가 더 높은 v110(전체 0.66713)은 historical control이다. CT 분기는 종료했고 실행 중인 job은 없다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -18,15 +18,15 @@
 >    **사용자 판단**이다. 보고 형식도 정해져 있다(§118-3).
 
 > [!IMPORTANT]
-> **활성 구성은 v110(§161, 사용자 결정) — 학습 파라미터 0이다.**
+> **활성 구성은 v111(§181, 사용자 결정) — 학습 파라미터 0이다.**
 > ```
 > 사영 : fold의 CONTEXT cell을 bag별 자기 평균으로 센터링해 풀링한 공분산의 상위 256 고유벡터
 > head : margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
 > CV   : off-diagonal 32,640차원만 (대각 256·raw mean 1,536 제거) ⚠️ DD는 전체 triangle
-> CT   : 32 PCA 방향에서 거리 → k-means token **32개**(Lloyd 30회, bag당 64 cell) → ridge
-> 정식 경로 SEAL 10-task macro = 0.7070,  홀드아웃 7 = 0.6103,  seed std 0.00000
+> CT   : **전체 cell** → 32 PCA 방향 → hierarchical 2-means **256 token** → 전체 abundance → ridge
+> 정식 경로 SEAL 10-task macro = 0.70453, 홀드아웃 7 = 0.59809, 전체 17 = 0.66070
 >
-> bash scripts/eval_v110.sh <gpu> <tag> [tasks...]     # 정의가 사는 단 하나의 자리
+> bash scripts/eval_v111.sh <gpu> <tag> [tasks...]     # 활성 baseline entry point
 >
 > # 위 스크립트가 하는 일 전부:
 > ICF_COVARIANCE_BASIS=pca_within ICF_FIXED_HEAD=1 ICF_SKETCH_DIM=256 \
@@ -7048,3 +7048,45 @@ k-means 자체의 순효과를 분리하지 못하며, 이 결과만으로 cosin
 실행 arm은 `sphraw512all_s{42..45}`, 로그/예측은
 `logs/20260819_ct_spherical_raw512_full_abundance/{seal,heldout}/`에 있다. 68개 로그 모두 final 1개,
 traceback 0이다. 구현 전 BagPFN Python full test는 **310 tests, OK (68.011s)**였다.
+
+---
+
+## 181. 2026-08-19 — **v111 승격 확정: full-cell hierarchical PCA32/K256, CT 분기 종료**
+
+사용자 결정으로 예측 macro가 가장 높은 v110 대신, **cell selection bias가 없고 random sampling의
+영향도 없는 구성 중 최고**인 full-cell/full-abundance hierarchical PCA32/K256을 앞으로의 공식
+baseline으로 선택했다.
+
+```
+CT dictionary/statistics : 모든 context cell
+CT abundance              : context/query의 모든 cell
+projection                : CV와 공유하는 within-slide PCA의 상위 32방향
+tokenizer                 : deterministic hierarchical PCA/2-means tree
+tokens                    : K=256
+readout                   : class-balanced ridge, λ=1
+head weight               : 0.7
+```
+
+| | SEAL 10 | 홀드아웃 7 | 전체 17 | seed std |
+|---|---:|---:|---:|---:|
+| **v111 (활성)** | **0.70453** | **0.59809** | **0.66070** | **0.00000** |
+| v110 (historical predictive best) | 0.70692 | 0.61029 | 0.66713 | 0.00000 |
+| Δ v111−v110 | −0.00239 | −0.01220 | −0.00643 | — |
+
+이 승격은 성능 우월성 주장이 아니라 **운영 불변성에 대한 사용자 선택**이다. 전체 cell을 사용하므로
+`sampling=even/random`과 sampling seed는 실제 cell 집합에 관여하지 않는다. CT 분기는 이 구성에서
+종료하며 PCA24 보간, CT 독립 부분공간, 추가 tokenizer/λ 탐색은 다음 action에서 제거한다.
+
+구현:
+
+- `TrainingFreeConfig()` 기본값을 full cells / full abundance / PCA32 / hierarchical K256 / GEMM으로 변경
+- 활성 runner `scripts/eval_v111.sh` 추가
+- `scripts/eval_v110.sh`는 historical even64/FPS+Lloyd30/K32 재현 전용으로 복구
+- VHL 50-fold smoke `0.5116`으로 기존 `h2T256` 로그와 정확히 일치
+- BagPFN Python full **310 tests, OK (66.011s)**
+
+활성 실행:
+
+```bash
+bash scripts/eval_v111.sh <gpu> <tag> [tasks...]
+```

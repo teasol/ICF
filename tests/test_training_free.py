@@ -100,20 +100,20 @@ class DefaultTest(unittest.TestCase):
         """The default IS the baseline; if it drifts, `TrainingFreeClassifier()`
         silently stops being the active configuration. SS142 promoted K=128 -> 256;
         SS152 promoted CT to the ridge readout inside a 32-d PCA subspace; SS158
-        added k-means tokens at weight 0.7 and off-diagonal-only CV; SS161 took the
-        cluster count 16 -> 32 while KEEPING the 64-cell sample."""
+        added k-means tokens at weight 0.7 and off-diagonal-only CV; SS181 promotes
+        full-cell hierarchical PCA32/K256 to remove sampling bias and randomness."""
         config = TrainingFreeConfig()
         self.assertEqual(config.sketch_dim, 256)
         self.assertEqual(config.ct_readout, "ridge")
         self.assertEqual(config.ct_pca_dim, 32)
-        self.assertEqual(config.ct_kmeans_iterations, 30)
-        self.assertEqual(config.ct_num_tokens, 32)
-        self.assertEqual(config.ct_cells_per_bag, 64)
-        self.assertEqual(config.ct_abundance_cells_per_bag, "match")
-        self.assertEqual(config.ct_sampling, "random")
+        self.assertEqual(config.ct_kmeans_iterations, 0)
+        self.assertEqual(config.ct_num_tokens, 256)
+        self.assertIsNone(config.ct_cells_per_bag)
+        self.assertIsNone(config.ct_abundance_cells_per_bag)
+        self.assertEqual(config.ct_sampling, "even")
         self.assertEqual(config.ct_sampling_seed, 0)
-        self.assertEqual(config.ct_distance_kernel, "broadcast")
-        self.assertEqual(config.ct_tokenizer, "kmeans_plusplus")
+        self.assertEqual(config.ct_distance_kernel, "gemm")
+        self.assertEqual(config.ct_tokenizer, "hierarchical_2means")
         self.assertEqual(config.ct_kmeans_max_iterations, 8)
         self.assertEqual(config.ct_kmeans_tolerance, 1e-4)
         self.assertEqual(config.ct_kmeans_seed, 0)

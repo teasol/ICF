@@ -5,7 +5,11 @@ CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 
 ---
 
-## 0. CT sampling/tokenizer 및 full-cell PCA/K 최근 결론 (§165–§180)
+## 0. CT sampling/tokenizer 및 full-cell PCA/K 최근 결론 (§165–§181)
+
+**§181 사용자 결정으로 CT 분기는 종료됐다.** 활성 baseline은 v111 full-cell/full-abundance
+hierarchical PCA32/K256이다. 이후 절의 v110 대비 기각 표기는 당시의 예측성능 판정 기록이며,
+v111 승격은 selection bias와 sampling randomness 제거를 우선한 별도 운영 기준이다.
 
 활성 v110은 결정론적이지만 CT dictionary cell을 무작위로 뽑는 arm은 다시 seed 분산이 생긴다.
 따라서 단일 seed나 task 반복을 근거로 삼지 않고 **sampling seed 42–45를 같은 17 task에서 반복**한다.
@@ -76,8 +80,11 @@ cosine metric을 함께 바꾼 조합이므로 cosine 단독 효과는 미분리
 `sphraw512all_s{42..45}`, 로그는
 `logs/20260819_ct_spherical_raw512_full_abundance/{seal,heldout}/`이다.
 
-현재 실행 중인 job은 없다. PCA/K 보간을 계속한다면 다음 미실행 후보는 **PCA24/K256**이지만,
-사용자 확인 없이 자동 실행하지 않는다.
+§181에서 full-cell arm 중 전체 17 최고인 hierarchical PCA32/K256(SEAL 0.70453 / 홀드아웃
+0.59809 / 전체 0.66070)을 v111로 승격했다. v110보다 전체 −0.00643이지만 cell selection과 random
+sampling이 전혀 없다는 운영 불변성을 사용자가 우선했다. 실행은 `scripts/eval_v111.sh`다.
+
+현재 실행 중인 job은 없다. §181 사용자 결정에 따라 CT의 추가 PCA/K 보간은 실행하지 않는다.
 
 ---
 
@@ -259,7 +266,8 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 | v103 GELU head | v98에서 head `Linear(12,1)`→`12→32→1`(GELU), 197,057 | 0.6828 | 0.0059 | v98(42–45) 기준 −0.0073 (t=−2.01, 1/4) **측정 불가**(<0.0121). 단 v83 vs v82(+0.0045)와 **부호 반복** — linear 유지 (§132) |
 | v104 fixed P | `model_src` learnable P 제거, **trainable 196,621→13** | 0.6775 | **0.00013** | v98(42–45) 기준 **−0.0126 (t=−3.59, 0/4) 기각**. §105 이후 **처음으로 게이트+검출한계 동시 통과**. ⚠️ seed std가 55배 작다 — **분산의 출처가 P** (§133) |
 | v105 MLP 사영 h128 | P → `GELU(x@W1)@QR(W2).Q`, 213,005 | 0.6870 | 0.00424 | v98 기준 epoch39에서 −0.0030 (t=−0.83, 2/4) **측정 불가**. 부호가 epoch마다 뒤집힘, 합성 val_ce도 동일 — **비선형성이 아무 일도 안 함** (§135) |
-| **v110 = v109에 CT cluster 32** | CT의 cluster(=token=feature) 16→32, cell은 64 유지 | **0.7070** | **0.00000** | **활성 구성 (§161, 사용자 결정)**. `scripts/eval_v110.sh`. 홀드아웃 0.6103, 전체 17 **+0.0051 (15/17)** — 세션 최고 부호 일치. ⚠️ 전체 cell은 **미포함**(4개 token 수 전부에서 손해, §160) |
+| **v111 full-cell hierarchical PCA32/K256** | selection 없음, full abundance, deterministic tree | **0.70453** | **0.00000** | **활성 구성 (§181, 사용자 결정)**. `scripts/eval_v111.sh`. 홀드아웃 0.59809, 전체 0.66070. 예측 우위가 아니라 bias/randomness 제거 기준으로 승격 |
+| v110 = v109에 CT cluster 32 | CT의 cluster 16→32, even64/FPS+Lloyd30 | 0.70692 | 0.00000 | historical predictive best. `scripts/eval_v110.sh`. 홀드아웃 0.61029, 전체 0.66713 |
 | v109 = CV offdiag + CT k-means @0.7 | CV는 off-diagonal 32,640만, CT는 k-means token(Lloyd 30) + weight 0.7 | 0.7027 | 0.00000 | historical — §161에서 v110으로 대체. `scripts/eval_v109.sh`. 홀드아웃 0.6042, 전체 17 **+0.0096 (13/17)** — 세션 최고 부호 일치. 단독 +0.0070·+0.0030이 **가법적**(예측 0.6624 vs 실측 0.6621). ABMIL 대비 −0.0243 |
 | v108 = v107의 CT 교체 | CT 거리를 32-d PCA 부분공간에서 재고 16-d abundance 전체를 ridge로 읽음 | 0.6967 | 0.00000 | historical — §158에서 v109로 대체. `scripts/eval_v108.sh`. SEAL 10 +0.0022, 홀드아웃 7 +0.0057, 전체 17 **+0.0037 (11/17)**. ⚠️ t 미보고(결정론적, §151-1). PCA·ridge **단독은 각각 +0.0019/+0.0008** — 반드시 함께 (§150) |
 | v107 = v106에 K=256 | v106과 동일, K 128→256만 | 0.6945 | 0.00000 | historical — §152에서 v108로 대체. `scripts/eval_v107.sh`. SEAL 10 +0.0081 (t=2.98, 8/10), 홀드아웃 7 +0.0069, 전체 17 **+0.0076 (t=3.01, 12/17)**. 런타임 동일(24→25초). K는 v106에서 처음으로 **평가 시점 노브**가 됐다 |

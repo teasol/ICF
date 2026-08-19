@@ -1,20 +1,15 @@
 # Current architecture (2026-08-19)
 
-> **코드 기본값 candidate (평가 완료, 미승격)**: CT의 64-cell 선택은 seeded random으로,
-> tokenizer는 seeded k-means++ 초기화 + Lloyd 최대 8회 + centroid RMS 이동
-> `1e-4` 조기 종료로 바뀌었다. 빈 cluster는 가장 큰 cluster의 최고 오차 cell로 복구한다.
-> 아래 v110 수치와 §0 명세의 even/FPS+30 경로는 historical reference이며, 새 경로의
-> 17-task 결과는 SEAL 0.70370 / 홀드아웃 0.60667 / 전체 0.66375로 v110보다 −0.00338이라
-> **활성 baseline으로 승격되지 않았다**. historical replay는
-> `ICF_CT_SAMPLING=even ICF_CT_TOKENIZER=fps_lloyd ICF_CT_KMEANS=30`이다.
-
-**활성 구성 v110 — 학습 파라미터 0, 완전 결정론적.** 아래 §0이 현행 명세이고, 그 뒤의
+**활성 구성 v111 — 학습 파라미터 0, 완전 결정론적.** 사용자가 예측 macro보다
+**selection bias 제거와 sampling randomness 제거**를 우선해 full-cell hierarchical
+PCA32/K256을 승격했다(§181). v110은 더 높은 예측 baseline이지만 historical control이다.
+아래 §0이 현행 명세이고, 그 뒤의
 `Historical-*` / `A` / `B` 절은 **학습을 포함하던 직전 계보(v83~v98)** 의 명세로 참조용이다.
-그 절들의 gradient·학습 모듈·checkpoint 계약은 **v110에 적용되지 않는다.**
+그 절들의 gradient·학습 모듈·checkpoint 계약은 **v111에 적용되지 않는다.**
 
 ---
 
-# §0. v110 명세 (활성)
+# §0. v111 명세 (활성)
 
 ## 0-1. 한 눈에
 
@@ -33,15 +28,15 @@ DD      같은 triangle(**전체**, 대각 포함)에서 K×K 공분산을 재�
         rank-1 분산 방향 1개 → log(uᵀC_bu)의 클래스별 1-D 가우시안 →
         정규화 제곱 **거리** 2개 (logit이 아니다 → head 계수가 음수)
 
-CT      bag당 64 cell 등간격 → B의 상위 **32 PCA 방향**으로 사영 → context로 좌표 표준화 →
-        farthest-point 32개를 초기값으로 **k-means(Lloyd 30회)** → soft assignment →
-        bag별 32차원 abundance → 클래스 균형 ridge → logit 2개
+CT      bag의 **전체 cell** → B의 상위 **32 PCA 방향**으로 사영 → context로 좌표 표준화 →
+        hierarchical PCA/2-means tree로 **256 token** → 전체 cell soft assignment →
+        bag별 256차원 abundance → 클래스 균형 ridge(λ=1) → logit 2개
 
 head    margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
         logits = (−margin/2, +margin/2)
 ```
 
-**실행**: `bash scripts/eval_v110.sh <gpu> <tag> [tasks...]`
+**실행**: `bash scripts/eval_v111.sh <gpu> <tag> [tasks...]`
 **구현**: `src/models/training_free.py` (파라미터 0). 정식 채점은 환경변수로 기존 경로를 써도 된다 —
 `tests/test_training_free.py`가 두 경로의 등가성을 고정한다.
 
@@ -49,7 +44,8 @@ head    margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
 
 | | SEAL 10 | 홀드아웃 7 | seed std |
 |---|---:|---:|---:|
-| **v110** | **0.7070** | **0.6103** | **0.00000** |
+| **v111** | **0.70453** | **0.59809** | **0.00000** |
+| v110 (historical predictive best) | 0.70692 | 0.61029 | 0.00000 |
 | v109 | 0.7027 | 0.6042 | 0.00000 |
 | v108 | 0.6967 | 0.5893 | 0.00000 |
 | v107 | 0.6945 | 0.5836 | 0.00000 |
@@ -68,9 +64,9 @@ head    margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
 | CV = 비대각만 | mean은 무용(+0.0019), 대각은 유해(+0.0052, 13/17) (§156) |
 | DD = rank-1 | r>1은 이득 없음, K는 128에서 포화, \|t\| 게이트·selector 모두 패배 (§145~§147) |
 | CT = 32 PCA 차원 | raw 1536은 거리 집중(rel_std 0.229 vs 0.368) (§149) |
-| CT = k-means 30회 | FPS는 32개 중 사실상 2개만 사용 (§157) |
-| CT = 32 token | 16·32·64·128 중 정점, 15/17 (§160) |
-| CT = 64 cell | 전체 cell은 **모든** token 수에서 손해 (§159, §160-3) |
+| CT = full cell | selection policy 자체를 없애 storage-order bias와 sampling randomness 제거 (§181 사용자 결정) |
+| CT = hierarchical 2-means | full-cell에서 label-free하고 결정론적인 대규모 K tokenizer (§168) |
+| CT = 256 token | full-cell hierarchical 스윕의 전체 17 최고 0.66070 (§168, §175) |
 | head = 3 상수 | 라벨 반대칭이 SEP 가중 0과 쌍의 등가·반대를 강제 (§137-3) |
 | CT weight 0.7 | k-means token에서만 성립. FPS token에서는 부호가 무너졌다 (§157-5, §151-2) |
 
@@ -82,7 +78,7 @@ head    margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
 3. **CT와 CV가 같은 기저를 공유한다.** CT 개선이 macro에 잘 안 닿는 상한 요인이다 (§149-4).
 4. **에피소드마다 상수를 더하는 변경은 fold-mean AUROC를 움직일 수 없다** (§154-5).
 5. **cell↔token 거리는 cell 축으로 chunk된다**(2²⁷ 원소). chunking은 원소별 산술을 안 바꾸므로
-   정확하고, v110 설정은 단일 chunk에 들어간다 (§160-1).
+   정확하다 (§160-1).
 
 ## 0-5. 닫힌 축 (재시도 금지)
 
@@ -90,8 +86,9 @@ head    margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
 |---|---|
 | 합성 데이터 분포 | 격차를 닫을수록 단조로 나빠진다 (§129) |
 | DD 전반 | K·rank·게이트·selector 네 갈래 모두 (§145~§147) |
-| CT cell 샘플링 | random64/all ≈ random512/all(−0.00011), abundance512 ≈ all(−0.00014). §174의 matched 2×2에서 even→random이 전체 −0.00339로 하락 원인임을 분리했다. v110은 even 유지 (§159, §160, §165–§167, §174) |
-| CT hierarchical | full-cell 최고는 PCA32/K256 0.66070. random512/full-abundance 교차도 4-seed 0.66034±0.00025(3/17)로 미승격. PCA8/16/64/128 및 K8..2048 어디서도 v110을 넘지 못함 (§168, §175–§179) |
+| **CT 분기 전체** | §181 사용자 결정으로 종료. 예측 최고 v110 대신 bias/randomness 없는 full-cell hierarchical PCA32/K256을 v111로 승격 |
+| CT cell 샘플링 | v111은 전체 cell을 사용하므로 selection policy와 sampling seed가 연산에 관여하지 않음 |
+| CT hierarchical sweep | full-cell 최고는 PCA32/K256 0.66070. PCA8/16/64/128 및 K8..2048 탐색 완료 (§168, §175–§179) |
 | CT spherical raw1536 조합 | random512/full-abundance, K32의 4-seed 전체 0.65618±0.00018(7/17), v110 대비 −0.01095로 미승격. raw 차원과 cosine을 함께 바꿔 metric 단독 효과는 미분리 (§180) |
 | CT HDBSCAN full-cell | GPU NN-descent, 32D는 noise 96.2%(§169), 3D도 noise 75~97%에 SEAL 0.6849(−0.0221)(§173). 밀도 기반 K는 연속 공간에서 노이즈 폭증으로 기각 |
 | CT DBSCAN random64/all | adaptive k-distance knee eps, fold 84.5%가 K=1. 전체 0.64976±0.00041, v110 대비 −0.01737 (§170) |
@@ -100,13 +97,9 @@ head    margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
 
 ## 0-6. 열려 있는 갈래
 
-- **PCA24/K256 보간** — 사용자가 PCA/K 탐색을 계속한다면 PCA16/K256(held-out 우세)과
-  PCA32/K256(전체 우세) 사이의 유일한 자연스러운 미실행 점이다. 아직 실행하지 않았다 (§178).
 - **CV 비대각 32,640차원의 가중** — 지금은 무가중 ridge다. 학습을 넣는다면 여기다 (§156-6).
-- **CT에 CV와 다른 부분공간** — 대각/스펙트럼 쪽을 주면 §149-4의 중복을 깰 수 있다.
 - **DD의 코호트 의존성** — DD는 SEAL에서 도움, 홀드아웃에서 해롭다. 에피소드별 게이트가
   가능한지 (§153).
-- **λ 재확인** — CT ridge가 16→32차원으로 커졌는데 λ=1 고정이다 (§156-5, §160-5).
 
 ---
 

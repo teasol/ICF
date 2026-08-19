@@ -128,25 +128,17 @@ class TrainingFreeConfig:
     ridge_scale: float = 2.0
     dd_shrinkage: float = 0.25
     dd_eps: float = 1e-6
-    # SS161 (v110, user decision). 16 -> 32 clusters. Every token count from 16 to
-    # 128 was swept at both 64 cells and full cells; 32 is the peak of BOTH columns
-    # and 64-cell wins every row, so the gain is the cluster count, not more cells
-    # (SS160-2/3). +0.0051 over v109 at 15/17 -- the highest sign agreement measured.
-    ct_num_tokens: int = 32
-    # SS159: None = every cell. 64 is v109's value (the reproduction path).
-    ct_cells_per_bag: int | None = 64
-    # SS165: "match" is the exact v110 path. None keeps the 64-cell dictionary
-    # above but averages assignments over every cell in each bag.
-    ct_abundance_cells_per_bag: int | None | str = "match"
-    # Random sampling avoids storage-order bias. A fixed seed, mixed with each
-    # bag index by ct_readout.prepare_cells, keeps the zero-parameter path fully
-    # reproducible. Set "even" explicitly only for historical replay.
-    ct_sampling: str = "random"
+    # SS181 (v111, user decision). Promote the best fully deterministic CT arm:
+    # full-cell hierarchical PCA/2-means at PCA32/K256. It scores below v110 but
+    # removes both storage-order selection bias and sampling-seed dependence.
+    ct_num_tokens: int = 256
+    ct_cells_per_bag: int | None = None
+    ct_abundance_cells_per_bag: int | None | str = None
+    # Inactive when every cell is used; retained only as a valid explicit policy.
+    ct_sampling: str = "even"
     ct_sampling_seed: int = 0
-    ct_distance_kernel: str = "broadcast"
-    # Seeded k-means++ + at most eight early-stopped Lloyd passes replaces the
-    # outlier-biased FPS + 30-pass historical tokenizer.
-    ct_tokenizer: str = "kmeans_plusplus"
+    ct_distance_kernel: str = "gemm"
+    ct_tokenizer: str = "hierarchical_2means"
     ct_bisect_iterations: int = 2
     ct_bisect_power_iterations: int = 3
     ct_tree_reduction: str = "segment"
@@ -177,10 +169,8 @@ class TrainingFreeConfig:
     # groups (SS150-2). v107's values were "extreme" and None.
     ct_readout: str = "ridge"
     ct_pca_dim: int | None = 32
-    # SS158 (v109, user decision). Lloyd iterations refining the farthest-point
-    # tokens. FPS was using ~1.9 of its 16 tokens (SS157-2); 30 iterations brings
-    # that to ~13 and lifts CT-only by +0.037.
-    ct_kmeans_iterations: int = 30
+    # Historical FPS/Lloyd and k-means++ controls; inactive under v111's tree.
+    ct_kmeans_iterations: int = 0
     ct_kmeans_max_iterations: int = 8
     ct_kmeans_tolerance: float = 1e-4
     ct_kmeans_seed: int = 0
