@@ -569,9 +569,9 @@ def evaluate_trial(
         #                            the two disagree, so they are complementary.
         #   ICF_DD_TSTAT_RANGE=1:16  |lambda|-rank window the |t| argmax comes from
         rank_max = int(os.environ.get("ICF_DD_RANK_MAX", "1"))
-        selection = os.environ.get("ICF_DD_SELECT", "eigenvalue")
+        dd_selection = os.environ.get("ICF_DD_SELECT", "eigenvalue")
         saved_rank_features = None
-        if rank_max > 1 or selection != "eigenvalue":
+        if rank_max > 1 or dd_selection != "eigenvalue":
             from src.models.dd_adaptive_rank import (  # noqa: PLC0415
                 AdaptiveRankConfig,
                 adaptive_dd_distance_features,
@@ -590,10 +590,10 @@ def evaluate_trial(
                 scale_by_rank=os.environ.get("ICF_DD_RANK_SCALE") == "1",
                 shrinkage=float(inner.dd_shrinkage),
                 eps=float(inner.dd_eps),
-                selection=selection,
+                selection=dd_selection,
                 tstat_range=(int(low), int(high)),
             )
-            print(f"ICF_DD_SELECT={selection} range=({low},{high}) rank_max={rank_max}",
+            print(f"ICF_DD_SELECT={dd_selection} range=({low},{high}) rank_max={rank_max}",
                   flush=True)
 
             def dd_with_adaptive_rank(
@@ -865,7 +865,7 @@ def evaluate_trial(
         dd_ordered_typicality = os.environ.get("ICF_DD_ORDERED_TYPICALITY") == "1"
         saved_ordered_features = None
         if dd_ordered_typicality:
-            if dd_relative or dd_llr or rank_max != 1 or selection != "eigenvalue":
+            if dd_relative or dd_llr or rank_max != 1 or dd_selection != "eigenvalue":
                 raise ValueError(
                     "ICF_DD_ORDERED_TYPICALITY cannot be combined with another DD arm"
                 )

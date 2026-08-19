@@ -19,6 +19,7 @@ PY="$PYTHON_BIN"
 
 GPU="$1"; CKPT="$2"; CONFIG="$3"; TAG="$4"; shift 4
 mkdir -p logs/official50 predictions
+overall_rc=0
 for task in "$@"; do
   name="${task//\//_}"
   out="predictions/pathobench_${name}_${TAG}_official50_bf16.pt"
@@ -29,6 +30,8 @@ for task in "$@"; do
     --official-folds "$OFFICIAL/$task" --features "$FEATURES" \
     --input-dim 1536 --precision bf16-mixed --output "$out" > "$log" 2>&1
   rc=$?
+  if [ "$rc" -ne 0 ]; then overall_rc="$rc"; fi
   res=$(grep -aoE "fold-mean AUROC: [0-9.]+ ± [0-9.]+   pooled AUROC: [0-9.]+" "$log" | tail -1)
   echo "=== END   ${task} rc=$rc $(date +%H:%M:%S)  ${res:-$(tail -2 "$log")}"
 done
+exit "$overall_rc"
