@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Score the ACTIVE configuration, v110 (docs SS161). Zero learned parameters.
+# Working-tree default: random-64 + seeded k-means++ (max 8, tol 1e-4).
+# Historical v110 replay: ICF_CT_SAMPLING=even ICF_CT_TOKENIZER=fps_lloyd.
+# Score the zero-parameter CT working candidate based on v110 (docs SS174).
 #
 # v110 = v109 with CT's cluster count raised 16 -> 32 (SS161). v109 itself was v108
 # plus two changes, one per branch:
@@ -56,8 +58,14 @@ export ICF_SKETCH_DIM=256
 export ICF_CT_PCA_DIM=32
 export ICF_CT_READOUT=ridge
 export ICF_CT_KMEANS=30
+export ICF_CT_SAMPLING="${ICF_CT_SAMPLING:-random}"
+export ICF_CT_SAMPLING_SEED="${ICF_CT_SAMPLING_SEED:-0}"
+export ICF_CT_TOKENIZER="${ICF_CT_TOKENIZER:-kmeans_plusplus}"
+export ICF_CT_KMEANS_MAX_ITER="${ICF_CT_KMEANS_MAX_ITER:-8}"
+export ICF_CT_KMEANS_TOL="${ICF_CT_KMEANS_TOL:-1e-4}"
+export ICF_CT_KMEANS_SEED="${ICF_CT_KMEANS_SEED:-0}"
 export ICF_FIXED_HEAD_CT_WEIGHT=0.7
 export ICF_CT_TOKENS=32
 export ICF_CV_BLOCKS=offdiag
-echo "v110: CV=offdiag(32,640)  DD=full triangle  CT=pca32/ridge/kmeans30/32tok/64cell w=0.7"
+echo "CT eval: CV=offdiag DD=full sampling=$ICF_CT_SAMPLING tokenizer=$ICF_CT_TOKENIZER max_iter=$ICF_CT_KMEANS_MAX_ITER tol=$ICF_CT_KMEANS_TOL seed=$ICF_CT_KMEANS_SEED"
 exec bash scripts/eval_seal_tasks.sh "$GPU" "$CKPT" "$CONFIG" "$TAG" "$@"

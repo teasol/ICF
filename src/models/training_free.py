@@ -138,10 +138,15 @@ class TrainingFreeConfig:
     # SS165: "match" is the exact v110 path. None keeps the 64-cell dictionary
     # above but averages assignments over every cell in each bag.
     ct_abundance_cells_per_bag: int | None | str = "match"
-    ct_sampling: str = "even"
+    # Random sampling avoids storage-order bias. A fixed seed, mixed with each
+    # bag index by ct_readout.prepare_cells, keeps the zero-parameter path fully
+    # reproducible. Set "even" explicitly only for historical replay.
+    ct_sampling: str = "random"
     ct_sampling_seed: int = 0
     ct_distance_kernel: str = "broadcast"
-    ct_tokenizer: str = "fps_lloyd"
+    # Seeded k-means++ + at most eight early-stopped Lloyd passes replaces the
+    # outlier-biased FPS + 30-pass historical tokenizer.
+    ct_tokenizer: str = "kmeans_plusplus"
     ct_bisect_iterations: int = 2
     ct_bisect_power_iterations: int = 3
     ct_tree_reduction: str = "segment"
@@ -176,6 +181,9 @@ class TrainingFreeConfig:
     # tokens. FPS was using ~1.9 of its 16 tokens (SS157-2); 30 iterations brings
     # that to ~13 and lifts CT-only by +0.037.
     ct_kmeans_iterations: int = 30
+    ct_kmeans_max_iterations: int = 8
+    ct_kmeans_tolerance: float = 1e-4
+    ct_kmeans_seed: int = 0
     # Which blocks of the descriptor the CV RIDGE sees (SS156). "offdiag" drops the
     # 256 diagonal entries AND the 1,536 raw bag mean: the mean adds nothing
     # (+0.0019 to remove) and the diagonal is actively harmful (+0.0052 to remove,
@@ -315,6 +323,9 @@ class TrainingFreeClassifier:
                 eps=config.ct_eps,
                 pca_dim=config.ct_pca_dim,
                 kmeans_iterations=config.ct_kmeans_iterations,
+                kmeans_max_iterations=config.ct_kmeans_max_iterations,
+                kmeans_tolerance=config.ct_kmeans_tolerance,
+                kmeans_seed=config.ct_kmeans_seed,
             ),
             mode=config.ct_readout,
             # The SAME within-slide basis the CV branch uses, sliced to

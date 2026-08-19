@@ -107,6 +107,15 @@ run_job() {
                                 ICF_CV_BLOCKS=offdiag ICF_CT_CELLS=512
                                 ICF_CT_ABUNDANCE_CELLS=all ICF_CT_SAMPLING=random
                                 ICF_CT_SAMPLING_SEED="$rest") ;;
+    # Random-512 dictionary/full-abundance crossed with the hierarchical PCA/2-means
+    # tokenizer at PCA32/K256.  The suffix is the reproducible sampling seed.
+    h2r512all_s*)        rest="${arm##*_s}"
+                         vars+=(ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge
+                                ICF_FIXED_HEAD_CT_WEIGHT=0.7 ICF_CV_BLOCKS=offdiag
+                                ICF_CT_CELLS=512 ICF_CT_ABUNDANCE_CELLS=all
+                                ICF_CT_SAMPLING=random ICF_CT_SAMPLING_SEED="$rest"
+                                ICF_CT_TOKENS=256 ICF_CT_TOKENIZER=hierarchical_2means
+                                ICF_CT_DISTANCE_KERNEL=gemm) ;;
     # SS167: retain v110's 64-cell dictionary budget but replace deterministic
     # even spacing with seeded random sampling; abundance still uses every cell.
     r64all_s*)           rest="${arm##*_s}"
@@ -186,6 +195,25 @@ run_job() {
                                 ICF_FIXED_HEAD_CT_WEIGHT=0.7 ICF_CV_BLOCKS=offdiag
                                 ICF_CT_CELLS=all ICF_CT_ABUNDANCE_CELLS=all
                                 ICF_CT_TOKENIZER=hdbscan
+                                ICF_CT_DISTANCE_KERNEL=gemm) ;;
+    # SS173: PCA 3D full-cell HDBSCAN (raw eigenvalue scaling vs standardise)
+    hdb3_raw)            vars+=(ICF_CT_PCA_DIM=3 ICF_CT_READOUT=ridge
+                                ICF_FIXED_HEAD_CT_WEIGHT=0.7 ICF_CV_BLOCKS=offdiag
+                                ICF_CT_CELLS=all ICF_CT_ABUNDANCE_CELLS=all
+                                ICF_CT_TOKENIZER=hdbscan
+                                ICF_CT_PCA_SCALING=raw
+                                ICF_CT_HDBSCAN_MIN_CLUSTER_SIZE=256
+                                ICF_CT_HDBSCAN_MIN_SAMPLES=15
+                                ICF_CT_HDBSCAN_SELECTION=leaf
+                                ICF_CT_DISTANCE_KERNEL=gemm) ;;
+    hdb3_std)            vars+=(ICF_CT_PCA_DIM=3 ICF_CT_READOUT=ridge
+                                ICF_FIXED_HEAD_CT_WEIGHT=0.7 ICF_CV_BLOCKS=offdiag
+                                ICF_CT_CELLS=all ICF_CT_ABUNDANCE_CELLS=all
+                                ICF_CT_TOKENIZER=hdbscan
+                                ICF_CT_PCA_SCALING=standardise
+                                ICF_CT_HDBSCAN_MIN_CLUSTER_SIZE=256
+                                ICF_CT_HDBSCAN_MIN_SAMPLES=15
+                                ICF_CT_HDBSCAN_SELECTION=leaf
                                 ICF_CT_DISTANCE_KERNEL=gemm) ;;
     # SS171: corrected density experiment requested as HDBSCAN, not DBSCAN.
     # 64 pooled cells is the smallest stable leaf; K remains unconstrained.

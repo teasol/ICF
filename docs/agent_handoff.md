@@ -1,6 +1,8 @@
 # Agent handoff guide
 
-**Last updated**: 2026-08-18 (Codex) — §172 handoff checkpoint. §171까지 문서·검증·커밋 완료, 활성 baseline은 v110.
+**Last updated**: 2026-08-19 — §179 random512/full-abundance + hierarchical PCA32/K256
+4-seed 평가 완료(전체 0.66034±0.00025, v110 대비 −0.00679, 3/17). 활성 baseline은 계속
+v110이며 실행 중인 job은 없다.
 
 ---
 
@@ -16,23 +18,25 @@
 
 3. 읽는 순서는 이 문서 §0 → [`current_architecture.md` §0](current_architecture.md) →
    [`current_experiments.md` §0](current_experiments.md) → 세부 수치가 필요할 때만
-   [`current_status.md` §165–§172](current_status.md)다.
-4. 기준 커밋은 `5823864`(§171 HDBSCAN)이며, §172는 문서 인계 커밋이다. 인계 시점 worktree의
-   `scripts/eval_v110.sh`, `scripts/run_sketch_dim_sweep.sh` 수정은 **사용자 소유 변경**이므로
-   되돌리거나 이번 작업에 섞지 않는다.
-5. 활성 모델은 **v110**이다. §165–§171의 random sampling, hierarchical tree, HDBSCAN, DBSCAN은
-   모두 기각됐으며 실행 중인 평가 프로세스는 없다. 같은 arm을 다시 돌리지 않는다.
-6. 2026-08-18 인계 시점에는 GPU 0–7이 모두 NVIDIA B200 183,359 MiB이고 사용량 0 MiB였다.
+   [`current_status.md` §173–§179](current_status.md)다.
+4. §173–§179의 코드·평가·문서는 정리 커밋에 반영됐다. 새 세션은 `git status --short`가 비어
+   있는지와 `git log -n 3 --oneline`의 최신 커밋부터 확인한다.
+5. 활성 모델은 **historical v110**이다. 코드 기본값은 §174의 random64+k-means++ candidate지만
+   공식 전체가 0.66375로 v110 0.66713보다 낮아 승격되지 않았다. §175–§178 full-cell hierarchical
+   arm과 §179 random512/hierarchical 4-seed arm도 모두 v110을 넘지 못했다. 실행 중 평가
+   프로세스는 없고 같은 tag를 다시 돌리지 않는다.
+6. 2026-08-19 인계 시점에는 GPU 0–7이 모두 NVIDIA B200 183,359 MiB이고 사용량 0 MiB였다.
    자원 상태는 변하므로 새 세션 시작 때 `nvidia-smi`로 다시 확인한다. 8-GPU 사용 가능 여부는
    그 시점의 다른 사용자 프로세스를 보고 결정한다.
-7. 마지막 검증은 BagPFN Python으로 **303 tests, OK (38.833s)**였고 로그는
-   `logs/20260818_ct_hdbscan_random64_all/tests/full_tests.log`다.
+7. 마지막 코드 검증은 BagPFN Python으로 **308 tests, OK (68.073s)**였다. §179의 68개 평가
+   로그도 모두 final 1개, traceback 0으로 확인했다.
 
 새 세션에 전달할 최소 문장:
 
 > `/NHNHOME/WORKSPACE/26msit005_C/kimds/ICF`에서 `docs/agent_handoff.md`의 “새 세션 60초 재개 절차”와
-> §0을 읽고 이어서 작업해줘. Python은 BagPFN 환경 실행 파일을 직접 사용하고, 기존 사용자 dirty
-> 파일 2개는 보존해줘. 활성 baseline은 v110이고 §165–§171 arm은 모두 종료됐다.
+> §0을 읽고 이어서 작업해줘. Python은 BagPFN 환경 실행 파일을 직접 사용해줘. 활성 baseline은
+> historical v110이고 §173–§179 arm은 모두 종료됐다. 마지막 결과는 random512/full-abundance +
+> hierarchical PCA32/K256 4-seed 전체 0.66034±0.00025이며, 다음 미실행 보간 후보는 PCA24/K256이다.
 
 ---
 
@@ -67,8 +71,9 @@
 ```bash
 . scripts/node_env.sh && echo "$PYTHON_BIN / $ICF_DATA_ROOT / $ICF_CKPT / NGPU=$NGPU"
 /NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python \
-  -m unittest discover -s tests -p "test_*.py"                  # 303 tests, 0 failures
-bash scripts/eval_v110.sh 0 smoke cptac_ccrcc/VHL_mutation      # fold-mean 0.5233 이어야 함
+  -m unittest discover -s tests -p "test_*.py"                  # 308 tests, 0 failures
+ICF_CT_SAMPLING=even ICF_CT_TOKENIZER=fps_lloyd ICF_CT_KMEANS=30 \
+  bash scripts/eval_v110.sh 0 smoke cptac_ccrcc/VHL_mutation    # historical v110: 0.5233
 ```
 
 세 개가 다 맞으면 환경이 옳다. VHL 0.5233은 **결정론적**이라 자릿수까지 같아야 한다.
@@ -136,16 +141,24 @@ head margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
 | **§169** GPU HDBSCAN full-cell 자동 K | K=1..19(중앙값 8), noise 96.2%, 전체 0.64991(−0.01722, 3/14). 기각 |
 | **§170** DBSCAN random64/all 자동 K | 4 seeds, K 평균 1.16(84.5%가 K1), 전체 0.64976±0.00041(−0.01737). 기각 |
 | **§171** HDBSCAN random64/all 자동 K | 4 seeds, noise 93.6%, K 평균 2.84/중앙값 2, 30.2% all-noise. 전체 0.64819±0.00052(−0.01894). 기각 |
+| **§173** HDBSCAN PCA 3D full-cell | 3D로 줄여도 noise 75~97%, SEAL 0.6849/0.6855(v110 대비 −0.0221/−0.0215), 280만 cell 병목. 기각 |
+| **§174** random64 + seeded k-means++≤8 | 전체 0.66375. k-means++ 자체는 FPS+30과 동률(+0.00001), 하락은 random sampling에서 발생. working-tree candidate지만 v110 미승격 |
+| **§175** PCA64/128 × K256..2048 | 최고 PCA64/K256 0.65744. 동일 K PCA32보다 전부 낮아 PCA32 feature 부족 가설 기각 |
+| **§176** PCA8/16 × K8/16 | 최고 PCA16/K16 0.65219. 너무 작은 PCA/K에서는 capacity 부족; 단조 감소 가설 기각 |
+| **§177** PCA64 × K16/32 | K32 0.65357 > K16 0.64945이나 동일 K PCA32보다 각각 −0.00356/−0.00275 |
+| **§178** PCA16/K256 | SEAL 0.70035 / held-out **0.60101** / 전체 0.65945. PCA32/K256보다 전체 −0.00125, held-out +0.00293 |
 
 ## 0-6. 다음에 할 일 (근거 순)
 
-1. **CV 비대각 32,640차원의 가중** — 지금 무가중 ridge다. §162가 출발점을 정해줬다:
+1. **사용자가 PCA/K 보간을 계속 원하면 PCA24/K256** — PCA16/K256은 held-out 최고 0.60101,
+   PCA32/K256은 전체 최고 0.66070이라 두 점 사이의 미실행 조합이다. 아직 실행하지 않았다.
+2. **CV 비대각 32,640차원의 가중** — 지금 무가중 ridge다. §162가 출발점을 정해줬다:
    **균등이 아니라 현재의 `√(λᵢλⱼ)`** 에서 시작할 것.
-2. **CT에 CV와 다른 부분공간** — 대각/스펙트럼 쪽. §149-4의 중복 상한을 깨는 유일한 길.
-3. **CT 클러스터로 CV의 cell 가중** — ABMIL의 attention에 대응하는 무학습 장치.
-4. **DD의 에피소드별 게이트** — §153의 코호트 의존에 근거. ⚠️ **context 표본 분할이 전제**
+3. **CT에 CV와 다른 부분공간** — 대각/스펙트럼 쪽. §149-4의 중복 상한을 깨는 유일한 길.
+4. **CT 클러스터로 CV의 cell 가중** — ABMIL의 attention에 대응하는 무학습 장치.
+5. **DD의 에피소드별 게이트** — §153의 코호트 의존에 근거. ⚠️ **context 표본 분할이 전제**
    (§146-2의 사후 선택 편향).
-5. **결정론적 구성 앙상블** — K∈{256,384,512}, token∈{32,64} 등 노이즈 안 동률 구성의 평균.
+6. **결정론적 구성 앙상블** — K∈{256,384,512}, token∈{32,64} 등 노이즈 안 동률 구성의 평균.
 
 ## 0-7. 건드리기 전 반드시 알아야 할 구조적 제약
 

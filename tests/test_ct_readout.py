@@ -27,6 +27,7 @@ from src.models.ct_readout import (
     hierarchical_2means_tokens,
     hdbscan_tokens,
     dbscan_tokens,
+    kmeans_plusplus_tokens,
     lloyd_refine,
     prepare_cells,
     readout_prototype,
@@ -37,7 +38,11 @@ from src.models.ct_readout import (
 from src.models.set_transformer_ridge import CovarianceMeanLearnablePDDCTMLPModel
 
 DIM = 40
-CONFIG = CTReadoutConfig(num_tokens=8, cells_per_bag=24, temperature=0.5, eps=1e-6)
+# Historical lineage equivalence intentionally keeps the old even sampler. The
+# active CTReadoutConfig default is tested separately below.
+CONFIG = CTReadoutConfig(
+    num_tokens=8, cells_per_bag=24, temperature=0.5, eps=1e-6, sampling="even"
+)
 
 
 def episode(seed=0, context=16, query=6, cells=30):
@@ -64,6 +69,9 @@ def lineage_model():
 
 
 class BaselineUnchangedTest(unittest.TestCase):
+    def test_active_default_uses_random_sampling(self):
+        self.assertEqual(CTReadoutConfig().sampling, "random")
+
     def test_extreme_matches_the_lineage_ct_features(self):
         """The refactor must not move v107 by a float."""
         model = lineage_model()
@@ -301,6 +309,7 @@ class KMeansTest(unittest.TestCase):
             num_tokens=CONFIG.num_tokens, cells_per_bag=CONFIG.cells_per_bag,
             temperature=CONFIG.temperature, eps=CONFIG.eps,
             pca_dim=pca_dim, kmeans_iterations=iterations,
+            sampling=CONFIG.sampling,
         )
 
     def test_zero_iterations_is_farthest_point_exactly(self):
@@ -309,6 +318,47 @@ class KMeansTest(unittest.TestCase):
             a, _ = ct_margins(context_bags, labels, query_bags, self._config(0), mode)
             b, _ = ct_margins(context_bags, labels, query_bags, CONFIG, mode)
             self.assertTrue(torch.equal(a.query, b.query), mode)
+
+    def test_kmeans_plusplus_is_reproducible_and_seeded(self):
+        pooled = torch.randn(200, DIM, generator=torch.Generator().manual_seed(51))
+        first = kmeans_plusplus_tokens(
+            pooled, CTReadoutConfig(num_tokens=12, kmeans_seed=7)
+        )
+        repeated = kmeans_plusplus_tokens(
+            pooled, CTReadoutConfig(num_tokens=12, kmeans_seed=7)
+        )
+        other = kmeans_plusplus_tokens(
+            pooled, CTReadoutConfig(num_tokens=12, kmeans_seed=8)
+        )
+        self.assertTrue(torch.equal(first, repeated))
+        self.assertFalse(torch.equal(first, other))
+        self.assertEqual(first.shape, (12, DIM))
+
+    def test_kmeans_plusplus_handles_a_degenerate_cloud(self):
+        pooled = torch.ones(20, 4)
+        tokens = kmeans_plusplus_tokens(
+            pooled, CTReadoutConfig(num_tokens=8, kmeans_seed=3)
+        )
+        self.assertEqual(tokens.shape, (8, 4))
+        self.assertTrue(torch.equal(tokens, torch.ones_like(tokens)))
+
+    def test_lloyd_early_stopping_matches_one_update(self):
+        pooled = torch.randn(80, 5, generator=torch.Generator().manual_seed(52))
+        initial = pooled[:6].clone()
+        one, _ = lloyd_refine(pooled, initial, 1)
+        stopped, _ = lloyd_refine(pooled, initial, 8, tolerance=1e9)
+        self.assertTrue(torch.equal(one, stopped))
+
+    def test_lloyd_recovers_empty_cluster_from_high_error_cell(self):
+        pooled = torch.tensor([[0.0], [0.1], [4.0], [9.0], [10.0]])
+        initial = torch.tensor([[0.0], [0.0], [10.0]])
+        kept, _ = lloyd_refine(pooled, initial, 1)
+        recovered, _ = lloyd_refine(
+            pooled, initial, 1, recover_empty=True
+        )
+        self.assertTrue(torch.equal(kept[1], initial[1]))
+        self.assertFalse(torch.equal(recovered[1], initial[1]))
+        self.assertTrue(bool((pooled == recovered[1]).all(dim=1).any()))
 
     def test_refinement_moves_the_tokens(self):
         context_bags, _, query_bags = episode(31)

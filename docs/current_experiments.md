@@ -1,11 +1,11 @@
-# Current experiments (2026-08-18)
+# Current experiments (2026-08-19)
 
 CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 **그 문서의 판정 절차는 폐기됐다** — 합성 지표로 arm을 고르는 방식이 반복적으로 실패했다.
 
 ---
 
-## 0. CT sampling/tokenizer 최근 결론 (§165–§171)
+## 0. CT sampling/tokenizer 및 full-cell PCA/K 최근 결론 (§165–§179)
 
 활성 v110은 결정론적이지만 CT dictionary cell을 무작위로 뽑는 arm은 다시 seed 분산이 생긴다.
 따라서 단일 seed나 task 반복을 근거로 삼지 않고 **sampling seed 42–45를 같은 17 task에서 반복**한다.
@@ -49,6 +49,28 @@ hierarchical K8 대비도 −0.00096이었다. density 기반 dynamic K가 predi
 −0.01894, random64/all k-means 대비 −0.01641, DBSCAN 대비 −0.00157이었다. DBSCAN은 모두 연결하고
 HDBSCAN은 대부분 버리는 반대 실패지만 둘 다 CT를 저차원으로 붕괴시켜 기각했다. 로그는
 `logs/20260818_ct_hdbscan_random64_all/{seal,heldout}/`이다.
+
+§174에서 storage-order bias를 피하는 seeded random64와 seeded k-means++≤8을 구현했다. 공식 전체는
+0.66375로 v110보다 −0.00338이었다. 같은 random sampling에서 k-means++는 FPS+30과 전체 +0.00001로
+동률이므로 하락은 tokenizer가 아니라 even→random sampling에서 발생했다. 이 경로는 working-tree
+기본값이지만 활성 baseline으로 승격되지 않았다. full test는 BagPFN Python **308 tests, OK**였다.
+
+§175–§178은 full-cell/full-abundance hierarchical 2-means에서 PCA dim과 K를 교차 탐색했다.
+PCA64/128 × K256..2048은 동일 K PCA32보다 전부 낮았고, PCA8/16 × K8/16에서는 너무 낮은 차원/K의
+capacity 부족이 확인됐다. PCA64에서는 K32 0.65357 > K16 0.64945였지만 동일 K PCA32보다 낮았다.
+마지막 PCA16/K256은 SEAL 0.70035 / held-out **0.60101** / 전체 0.65945로, PCA32/K256보다 전체
+−0.00125지만 held-out +0.00293이었다. 전체 최고 full-cell arm은 여전히 PCA32/K256 0.66070이고
+모든 arm이 v110 0.66713을 넘지 못했다. 세부 표와 로그 tag는 `current_status.md` §175–§178에 있다.
+
+§179는 random512/full-abundance와 hierarchical PCA32/K256을 교차해 sampling seed 42–45로
+평가했다. 평균은 SEAL 0.702890±0.000404 / 홀드아웃 0.599560±0.000155 / 전체
+0.660343±0.000254로 v110 대비 각각 −0.00403 / −0.01073 / −0.00679였고 3/17 task만 상승했다.
+full-cell hierarchical PCA32/K256과는 전체 −0.00036로 동률권이지만 random512/Lloyd
+k-means보다 −0.00437 낮아 미승격이다. arm은 `h2r512all_s{42..45}`, 로그는
+`logs/20260819_ct_h2_random512_full_abundance/{seal,heldout}/`이다.
+
+현재 실행 중인 job은 없다. PCA/K 보간을 계속한다면 다음 미실행 후보는 **PCA24/K256**이지만,
+사용자 확인 없이 자동 실행하지 않는다.
 
 ---
 

@@ -1,20 +1,19 @@
 """CT readouts: is the bottleneck the tokens, or throwing away 14 of 16 dims?
 
-WHAT CT DOES TODAY (docs SS140 step 5, `_ct_features` in both the lineage and
-`training_free.py`). Per episode, with no labels until the last step:
+WHAT THE SHARED CT PIPELINE DOES (docs SS140 step 5, `_ct_features` in both the
+lineage and `training_free.py`). Per episode, with no labels until the last step:
 
-  1. sample <= 64 cells per bag, evenly spaced (deterministic)
+  1. sample the configured number of cells per bag (active candidate: random 64)
   2. standardise the 1,536 coordinates on CONTEXT cells only
-  3. farthest-point sample 16 tokens from the pooled context cells
-  4. soft-assign every cell to the tokens (softmax of -distance / temperature)
-  5. average per bag -> a 16-d ABUNDANCE vector
+  3. build configured tokens (active candidate: seeded k-means++ + Lloyd, K=32)
+  4. soft-assign configured abundance cells to the tokens
+  5. average per bag -> a K-dimensional ABUNDANCE vector
   6. score each token by (mean_0 - mean_1) / standard_error
   7. keep the argmax and argmin token only, and emit q1 - q0
 
-Step 7 builds a 16-dimensional representation and then reads two coordinates off
-it. This module keeps steps 1-5 EXACTLY as they are -- one shared
-`ct_abundance()` so no arm can accidentally differ in the representation -- and
-varies only step 6-7:
+The historical extreme readout builds a K-dimensional representation and then
+reads two coordinates off it. This module routes every representation arm through
+one shared `ct_abundance()` and varies only step 6-7 when comparing readouts:
 
   extreme    q1 - q0, today's readout. The baseline, unchanged.
   prototype  class prototypes over all 16 standardised dims; margin is the
@@ -84,10 +83,12 @@ class CTReadoutConfig:
     # context-only dictionary.  This isolates estimation precision from the
     # cell-count weighting of the pooled k-means objective.
     abundance_cells_per_bag: int | None | Literal["match"] = "match"
-    # SS165. "random" draws a reproducible per-bag subset instead of assuming
-    # that storage order makes evenly spaced indices representative.  The seed is
-    # mixed with the bag index, so bags do not all receive the same index pattern.
-    sampling: Literal["even", "random"] = "even"
+    # Random is the active default: evenly spaced indices are biased whenever
+    # storage order carries slide/location/batch structure. The fixed seed is
+    # mixed with the bag index, so evaluation remains reproducible while bags do
+    # not all receive the same index pattern. "even" remains available only for
+    # replaying historical v107-v110 results.
+    sampling: Literal["even", "random"] = "random"
     sampling_seed: int = 0
     # SS168. The historical broadcast kernel is the reproduction path.  "gemm"
     # computes the same token-dependent squared distance with
@@ -97,7 +98,7 @@ class CTReadoutConfig:
     # SS168. Hierarchical PCA-initialised 2-means reads every context cell in
     # O(N D log K), avoiding the 30 x O(N K D) Lloyd sweep at large K.
     tokenizer: Literal[
-        "fps_lloyd", "hierarchical_2means", "hdbscan", "dbscan"
+        "fps_lloyd", "kmeans_plusplus", "hierarchical_2means", "hdbscan", "dbscan"
     ] = "fps_lloyd"
     bisect_iterations: int = 2
     bisect_power_iterations: int = 3
@@ -159,6 +160,11 @@ class CTReadoutConfig:
     # on stroma, losing rare-but-informative ones. Partial refinement sits between,
     # which is why the count is swept rather than set to convergence.
     kmeans_iterations: int = 0
+    # Active efficient tokenizer. k-means++ avoids FPS's outlier-biased starting
+    # points; convergence usually happens before this eight-pass ceiling.
+    kmeans_max_iterations: int = 8
+    kmeans_tolerance: float = 1e-4
+    kmeans_seed: int = 0
 
 
 class CTAbundance(NamedTuple):
@@ -303,6 +309,50 @@ def farthest_point_tokens(pooled: torch.Tensor, config: CTReadoutConfig) -> torc
         index = nearest.argmax()
         selected.append(index)
         nearest = torch.minimum(nearest, distance_to(index))
+    return pooled[torch.stack(selected)]
+
+
+def kmeans_plusplus_tokens(
+    pooled: torch.Tensor, config: CTReadoutConfig
+) -> torch.Tensor:
+    """Seed K centroids with reproducible D-squared sampling.
+
+    Unlike FPS, D-squared sampling still favours uncovered regions without
+    deterministically spending every early centroid on the most extreme outlier.
+    A tiny fallback mass makes degenerate clouds sample uniformly among the
+    remaining cells, guaranteeing K distinct source indices without a host sync.
+    """
+    count = min(config.num_tokens, pooled.shape[0])
+    if count < 1:
+        raise ValueError("k-means++ requires at least one pooled cell.")
+    generator = torch.Generator(device=pooled.device)
+    generator.manual_seed(config.kmeans_seed)
+    first = torch.randint(
+        pooled.shape[0], (1,), generator=generator, device=pooled.device
+    ).squeeze(0)
+    selected = [first]
+    chosen = torch.zeros(pooled.shape[0], device=pooled.device, dtype=torch.bool)
+    chosen[first] = True
+    nearest = _token_distance(
+        pooled, pooled[first].unsqueeze(0), config.distance_kernel
+    ).squeeze(1).clamp_min_(0)
+
+    for _ in range(1, count):
+        weights = nearest.masked_fill(chosen, 0)
+        # Keeping selection on-device matters: reading `weights.sum()` in Python
+        # would force one CUDA synchronisation per centroid. The epsilon mass is
+        # negligible for a non-degenerate D-squared distribution and becomes a
+        # reproducible uniform fallback when all remaining distances are zero.
+        weights = weights + (~chosen).to(weights.dtype) * config.eps
+        index = torch.multinomial(
+            weights, 1, replacement=False, generator=generator
+        ).squeeze(0)
+        selected.append(index)
+        chosen[index] = True
+        distance = _token_distance(
+            pooled, pooled[index].unsqueeze(0), config.distance_kernel
+        ).squeeze(1).clamp_min_(0)
+        nearest = torch.minimum(nearest, distance)
     return pooled[torch.stack(selected)]
 
 
@@ -654,17 +704,42 @@ def _assign(pooled: torch.Tensor, tokens: torch.Tensor,
     return torch.cat(parts)
 
 
-def lloyd_refine(pooled: torch.Tensor, tokens: torch.Tensor, iterations: int,
-                 distance_kernel: str = "broadcast"):
+def _assigned_error(
+    pooled: torch.Tensor,
+    tokens: torch.Tensor,
+    assignment: torch.Tensor,
+    distance_kernel: str,
+) -> torch.Tensor:
+    """Squared error to each cell's assigned token without a full N x K matrix."""
+    rows = _distance_rows(tokens, distance_kernel)
+    outputs = []
+    for start in range(0, pooled.shape[0], rows):
+        stop = min(start + rows, pooled.shape[0])
+        distances = _token_distance(pooled[start:stop], tokens, distance_kernel)
+        outputs.append(distances.gather(1, assignment[start:stop, None]).squeeze(1))
+    return torch.cat(outputs)
+
+
+def lloyd_refine(
+    pooled: torch.Tensor,
+    tokens: torch.Tensor,
+    iterations: int,
+    distance_kernel: str = "broadcast",
+    *,
+    tolerance: float = 0.0,
+    recover_empty: bool = False,
+):
     """Move tokens to their cluster means, `iterations` times (docs SS157).
 
-    Deterministic throughout: assignment is a hard argmin and the update is a plain
-    mean, so nothing here depends on a seed. A cluster that loses every member keeps
-    its previous position -- the standard fix, and the only one that stays
-    deterministic. Returns the tokens and the final cluster sizes, since how BALANCED
-    the clusters are is the diagnostic that separates "k-means helped" from
-    "k-means collapsed onto the dominant population".
+    Deterministic after initialisation. The efficient active path restores empty
+    clusters from the highest-error cells and stops when the largest centroid RMS
+    movement falls below `tolerance`. Historical callers retain the old behaviour
+    through the defaults (`recover_empty=False`, `tolerance=0`).
     """
+    if iterations < 0:
+        raise ValueError("iterations must be non-negative.")
+    if tolerance < 0:
+        raise ValueError("tolerance must be non-negative.")
     counts = None
     for _ in range(iterations):
         assignment = _assign(pooled, tokens, distance_kernel)
@@ -673,9 +748,27 @@ def lloyd_refine(pooled: torch.Tensor, tokens: torch.Tensor, iterations: int,
             tokens.shape[0], device=pooled.device, dtype=pooled.dtype
         ).index_add_(0, assignment, torch.ones_like(assignment, dtype=pooled.dtype))
         occupied = counts > 0
-        tokens = torch.where(
+        updated = torch.where(
             occupied[:, None], sums / counts.clamp_min(1.0)[:, None], tokens
         )
+        if recover_empty and not bool(occupied.all()):
+            errors = _assigned_error(pooled, tokens, assignment, distance_kernel)
+            empty = (~occupied).nonzero().flatten()
+            donor = counts.argmax()
+            donor_cells = (assignment == donor).nonzero().flatten()
+            donor_order = torch.argsort(
+                errors.index_select(0, donor_cells), descending=True, stable=True
+            )
+            candidates = donor_cells.index_select(0, donor_order)
+            # Pathological K ~= N can leave the largest cluster too small. Keep
+            # the normal policy exact, with a deterministic global fallback.
+            if candidates.numel() < empty.numel():
+                candidates = torch.argsort(errors, descending=True, stable=True)
+            updated[empty] = pooled[candidates[: empty.numel()]]
+        movement = (updated - tokens).square().mean(dim=1).sqrt().max()
+        tokens = updated
+        if tolerance > 0 and float(movement) <= tolerance:
+            break
     if counts is None:
         assignment = _assign(pooled, tokens, distance_kernel)
         counts = torch.zeros(
@@ -708,6 +801,16 @@ def ct_abundance(
             tokens, _ = lloyd_refine(
                 pooled, tokens, config.kmeans_iterations, config.distance_kernel
             )
+    elif config.tokenizer == "kmeans_plusplus":
+        tokens = kmeans_plusplus_tokens(pooled, config)
+        tokens, _ = lloyd_refine(
+            pooled,
+            tokens,
+            config.kmeans_max_iterations,
+            config.distance_kernel,
+            tolerance=config.kmeans_tolerance,
+            recover_empty=True,
+        )
     elif config.tokenizer == "hierarchical_2means":
         tokens = hierarchical_2means_tokens(pooled, config)
     elif config.tokenizer == "hdbscan":
@@ -716,8 +819,8 @@ def ct_abundance(
         tokens = dbscan_tokens(pooled, config)
     else:
         raise ValueError(
-            "tokenizer must be 'fps_lloyd', 'hierarchical_2means', 'hdbscan', "
-            "or 'dbscan', "
+            "tokenizer must be 'fps_lloyd', 'kmeans_plusplus', "
+            "'hierarchical_2means', 'hdbscan', or 'dbscan', "
             f"got {config.tokenizer!r}"
         )
 

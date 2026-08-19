@@ -657,10 +657,12 @@ def evaluate_trial(
                     else None if ct_abundance_cells == "all"
                     else int(ct_abundance_cells)
                 ),
-                sampling=os.environ.get("ICF_CT_SAMPLING", "even"),
+                # Random is the active default; even spacing is retained behind
+                # ICF_CT_SAMPLING=even for historical v110 reproduction.
+                sampling=os.environ.get("ICF_CT_SAMPLING", "random"),
                 sampling_seed=int(os.environ.get("ICF_CT_SAMPLING_SEED", "0")),
                 distance_kernel=os.environ.get("ICF_CT_DISTANCE_KERNEL", "broadcast"),
-                tokenizer=os.environ.get("ICF_CT_TOKENIZER", "fps_lloyd"),
+                tokenizer=os.environ.get("ICF_CT_TOKENIZER", "kmeans_plusplus"),
                 bisect_iterations=int(os.environ.get("ICF_CT_BISECT_ITERS", "2")),
                 bisect_power_iterations=int(
                     os.environ.get("ICF_CT_BISECT_POWER_ITERS", "3")
@@ -698,6 +700,13 @@ def evaluate_trial(
                 pca_scaling=os.environ.get("ICF_CT_PCA_SCALING", "standardise"),
                 # SS157: Lloyd iterations refining the farthest-point tokens.
                 kmeans_iterations=int(os.environ.get("ICF_CT_KMEANS", "0")),
+                kmeans_max_iterations=int(
+                    os.environ.get("ICF_CT_KMEANS_MAX_ITER", "8")
+                ),
+                kmeans_tolerance=float(
+                    os.environ.get("ICF_CT_KMEANS_TOL", "1e-4")
+                ),
+                kmeans_seed=int(os.environ.get("ICF_CT_KMEANS_SEED", "0")),
             )
             if ct_pca_dim is not None and basis_mode not in ("pca", "pca_within"):
                 raise ValueError(
@@ -727,13 +736,16 @@ def evaluate_trial(
                   f"lambda={readout_config.ridge_lambda} "
                   f"pca_dim={readout_config.pca_dim} "
                   f"scaling={readout_config.pca_scaling} "
+                  f"tokenizer={readout_config.tokenizer} "
                   f"kmeans={readout_config.kmeans_iterations} "
+                  f"kmeans_max={readout_config.kmeans_max_iterations} "
+                  f"kmeans_tol={readout_config.kmeans_tolerance} "
+                  f"kmeans_seed={readout_config.kmeans_seed} "
                   f"cells={readout_config.cells_per_bag} "
                   f"abundance_cells={readout_config.abundance_cells_per_bag} "
                   f"sampling={readout_config.sampling} "
                   f"sampling_seed={readout_config.sampling_seed} "
                   f"distance_kernel={readout_config.distance_kernel} "
-                  f"tokenizer={readout_config.tokenizer} "
                   f"tree_reduction={readout_config.tree_reduction} "
                   f"hdbscan_min_cluster_size={readout_config.hdbscan_min_cluster_size} "
                   f"hdbscan_min_cluster_fraction="

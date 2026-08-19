@@ -1,4 +1,12 @@
-# Current architecture (2026-08-18)
+# Current architecture (2026-08-19)
+
+> **코드 기본값 candidate (평가 완료, 미승격)**: CT의 64-cell 선택은 seeded random으로,
+> tokenizer는 seeded k-means++ 초기화 + Lloyd 최대 8회 + centroid RMS 이동
+> `1e-4` 조기 종료로 바뀌었다. 빈 cluster는 가장 큰 cluster의 최고 오차 cell로 복구한다.
+> 아래 v110 수치와 §0 명세의 even/FPS+30 경로는 historical reference이며, 새 경로의
+> 17-task 결과는 SEAL 0.70370 / 홀드아웃 0.60667 / 전체 0.66375로 v110보다 −0.00338이라
+> **활성 baseline으로 승격되지 않았다**. historical replay는
+> `ICF_CT_SAMPLING=even ICF_CT_TOKENIZER=fps_lloyd ICF_CT_KMEANS=30`이다.
 
 **활성 구성 v110 — 학습 파라미터 0, 완전 결정론적.** 아래 §0이 현행 명세이고, 그 뒤의
 `Historical-*` / `A` / `B` 절은 **학습을 포함하던 직전 계보(v83~v98)** 의 명세로 참조용이다.
@@ -82,15 +90,17 @@ head    margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
 |---|---|
 | 합성 데이터 분포 | 격차를 닫을수록 단조로 나빠진다 (§129) |
 | DD 전반 | K·rank·게이트·selector 네 갈래 모두 (§145~§147) |
-| CT cell 샘플링 | random64/all ≈ random512/all(−0.00011), abundance512 ≈ all(−0.00014). 표본 수는 원인이 아니며 남은 축은 even/random policy다. 단 random64/match로 최종 분리 필요 (§159, §160, §165–§167) |
-| CT hierarchical full-cell | K=8/16/32/64/128/256이 0.65087→0.66070, K64 이후 plateau. 최고도 v110 대비 −0.00643 (§168) |
-| CT HDBSCAN full-cell | GPU NN-descent, K=1..19(중앙값 8), noise 96.2%. 전체 0.64991로 v110 대비 −0.01722; density K ≠ predictive K (§169) |
+| CT cell 샘플링 | random64/all ≈ random512/all(−0.00011), abundance512 ≈ all(−0.00014). §174의 matched 2×2에서 even→random이 전체 −0.00339로 하락 원인임을 분리했다. v110은 even 유지 (§159, §160, §165–§167, §174) |
+| CT hierarchical | full-cell 최고는 PCA32/K256 0.66070. random512/full-abundance 교차도 4-seed 0.66034±0.00025(3/17)로 미승격. PCA8/16/64/128 및 K8..2048 어디서도 v110을 넘지 못함 (§168, §175–§179) |
+| CT HDBSCAN full-cell | GPU NN-descent, 32D는 noise 96.2%(§169), 3D도 noise 75~97%에 SEAL 0.6849(−0.0221)(§173). 밀도 기반 K는 연속 공간에서 노이즈 폭증으로 기각 |
 | CT DBSCAN random64/all | adaptive k-distance knee eps, fold 84.5%가 K=1. 전체 0.64976±0.00041, v110 대비 −0.01737 (§170) |
 | CT HDBSCAN random64/all | noise 93.6%, K 중앙값 2, 30.2% all-noise fallback. 전체 0.64819±0.00052, v110 대비 −0.01894 (§171) |
 | CT two-token readout | ridge로 대체됨. 단 raw 1536에서만 "무관"이었다 (§148·§150) |
 
 ## 0-6. 열려 있는 갈래
 
+- **PCA24/K256 보간** — 사용자가 PCA/K 탐색을 계속한다면 PCA16/K256(held-out 우세)과
+  PCA32/K256(전체 우세) 사이의 유일한 자연스러운 미실행 점이다. 아직 실행하지 않았다 (§178).
 - **CV 비대각 32,640차원의 가중** — 지금은 무가중 ridge다. 학습을 넣는다면 여기다 (§156-6).
 - **CT에 CV와 다른 부분공간** — 대각/스펙트럼 쪽을 주면 §149-4의 중복을 깰 수 있다.
 - **DD의 코호트 의존성** — DD는 SEAL에서 도움, 홀드아웃에서 해롭다. 에피소드별 게이트가

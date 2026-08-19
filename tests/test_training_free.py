@@ -33,6 +33,7 @@ SKETCH = 8
 V107 = TrainingFreeConfig(
     sketch_dim=SKETCH, ct_readout="extreme", ct_pca_dim=None,
     ct_kmeans_iterations=0, cv_blocks="cov+mean", weight_ct=0.286, ct_num_tokens=16,
+    ct_sampling="even", ct_tokenizer="fps_lloyd",
 )
 
 
@@ -109,10 +110,13 @@ class DefaultTest(unittest.TestCase):
         self.assertEqual(config.ct_num_tokens, 32)
         self.assertEqual(config.ct_cells_per_bag, 64)
         self.assertEqual(config.ct_abundance_cells_per_bag, "match")
-        self.assertEqual(config.ct_sampling, "even")
+        self.assertEqual(config.ct_sampling, "random")
         self.assertEqual(config.ct_sampling_seed, 0)
         self.assertEqual(config.ct_distance_kernel, "broadcast")
-        self.assertEqual(config.ct_tokenizer, "fps_lloyd")
+        self.assertEqual(config.ct_tokenizer, "kmeans_plusplus")
+        self.assertEqual(config.ct_kmeans_max_iterations, 8)
+        self.assertEqual(config.ct_kmeans_tolerance, 1e-4)
+        self.assertEqual(config.ct_kmeans_seed, 0)
         self.assertEqual(config.ct_bisect_iterations, 2)
         self.assertEqual(config.ct_bisect_power_iterations, 3)
         self.assertEqual(config.ct_tree_reduction, "segment")

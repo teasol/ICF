@@ -1,11 +1,13 @@
 # Documentation map
 
-**Last updated**: `2026-08-18`
+**Last updated**: `2026-08-19`
 ⚠️ **서버를 옮겼다면 `agent_handoff.md` §0을 먼저 읽을 것** — 노드 종속 설정은 `scripts/node_env.sh` 하나로 모았다.
 **Active 구성**: **v110 — 학습 파라미터 0** (§161, 사용자 결정). within-slide PCA(K=256) 사영 +
 고정 head + **CV는 off-diagonal 32,640만** + **CT는 k-means token 32개 @ weight 0.7**.
 정식 경로 SEAL macro **0.7070**, 홀드아웃 7 **0.6103**, **seed std 0.00000**.
-실행: `bash scripts/eval_v110.sh <gpu> <tag>`. 전체 명세는 `current_architecture.md` **§0**.
+historical v110 재현: `ICF_CT_SAMPLING=even ICF_CT_TOKENIZER=fps_lloyd ICF_CT_KMEANS=30 bash scripts/eval_v110.sh <gpu> <tag>`.
+환경변수 없는 runner는 §174의 미승격 random64+k-means++ 코드 기본값을 평가한다. 전체 명세는
+`current_architecture.md` **§0**.
 ⚠️ **결정론적이므로 t·p·CI 금지**(§151-1) — 부호 일치와 독립 집단 재현으로 판정.
 v107(0.6945)·v106(0.6864)과 직전 baseline v98(8 seed 0.6852)은 historical.
 ⚠️ v98 8 seed 평균 대비 +0.0093이지만 **v98 상위 두 시드와 4-seed 앙상블(0.6951)에는 아직 진다** —

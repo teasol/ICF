@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-18` (Codex) — §172 handoff checkpoint. §171까지의 random sampling/tokenizer 실험은 모두 문서화·검증·커밋됐고 활성 구성은 계속 **v110 = v109에서 CT cluster 16→32, 학습 파라미터 0**(§161, 정식 경로 macro **0.7070**, 홀드아웃 **0.6103**)이다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
+**Last updated**: `2026-08-19` — §179 random512/full-abundance + hierarchical PCA32/K256의 4-seed 평가 완료. 전체 **0.66034±0.00025**, v110 대비 −0.00679(3/17)로 미승격이다. 활성 구성은 계속 **historical v110 = 학습 파라미터 0**(§161, SEAL **0.70692**, 홀드아웃 **0.61029**, 전체 **0.66713**)이고 실행 중인 job은 없다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -6796,17 +6796,221 @@ BagPFN Python 직접 실행 full **303 tests in 38.833s, OK**
 ## 172. 2026-08-18 — 세션 종료 handoff checkpoint
 
 §165–§171의 CT sampling/tokenizer 탐색 결과, 실행 설정, 비교 수치, 판정을 living docs 네 곳에
-동기화했다. 새 세션은 [`agent_handoff.md`](agent_handoff.md) 맨 위의 “새 세션 60초 재개 절차”를
-따르면 된다.
+동기화했다.
 
-- 활성 baseline: **v110**, SEAL 0.7070 / held-out 0.6103
-- 마지막 실험: §171 random64/all HDBSCAN, 전체 0.64819±0.00052로 기각
-- 필수 Python: `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`
-- 마지막 검증: 303 tests, OK (38.833s)
-- 실행 중 실험: 없음
-- 인계 시 GPU: B200 8장 모두 memory used 0 MiB/utilization 0% — 새 세션에서 재확인 필수
-- 사용자 dirty 파일: `scripts/eval_v110.sh`, `scripts/run_sketch_dim_sweep.sh` — 보존할 것
-- 다음 연구 후보 우선순위: CV 비대각 가중 → CT 독립 부분공간 → CT 기반 CV cell weighting
+---
 
-이 checkpoint는 새로운 실험 판정이 아니라, 다른 세션이 중복 실행이나 사용자 변경 손상 없이
-즉시 이어갈 수 있게 현재 상태를 고정한 문서 인계다.
+## 173. 2026-08-18 — Full-cell PCA 3D HDBSCAN: **Noise 75~97%, SEAL 0.6849/0.6855로 기각**
+
+*작성: Codex / Antigravity, 2026-08-18 — 32D HDBSCAN의 거리 집중(거리 편차 소멸)을 해결하기 위해 PCA를 D=3으로 대폭 축소하여 평가.*
+
+### 1. 실험 설계
+- 입력: Context 전체 cell (최대 280만 개), PCA 3D 사영
+- `hdb3_raw`: `pca_scaling="raw"` (고유값 분산 크기 비율 유지)
+- `hdb3_std`: `pca_scaling="standardise"` (3개 축 단위 분산 표준화)
+- HDBSCAN: `min_samples=15`, `min_cluster_size=256` (relative floor $\approx 0.001 \cdot N$), `cluster_selection_method="leaf"`, `distance_kernel="gemm"`
+- Readout: CT ridge $\lambda=1.0$, Fixed Head CT weight $= 0.7$
+
+### 2. SEAL 10-Task 결과
+
+| arm | SEAL 10 Macro | v110 대비 Δ | 평균 Noise 비율 | 주요 병목 |
+|---|---:|---:|:---:|---|
+| **v110 (baseline)** | **0.7070** | — | **0.0%** | Fold당 ~5ms (SEAL 20초) |
+| **`hdb3_raw`** | **0.6849** | **−0.0221** | **75% ~ 97%** | 280만 cell NN-descent (SEAL 37분) |
+| **`hdb3_std`** | **0.6855** | **−0.0215** | **75% ~ 97%** | 280만 cell NN-descent (SEAL 37분) |
+
+Task별 `hdb3_raw` / `hdb3_std` AUROC:
+- `bc_therapy/er_status`: 0.6680 / 0.6653
+- `bc_therapy/grade`: 0.7455 / 0.7419
+- `bc_therapy/her2_status`: 0.6399 / 0.6403
+- `cptac_brca/PIK3CA_mutation`: 0.5556 / 0.5623
+- `cptac_brca/TP53_mutation`: 0.8054 / 0.8048
+- `cptac_luad/EGFR_mutation`: 0.7732 / 0.7739
+- `cptac_luad/STK11_mutation`: 0.8421 / 0.8459
+- `cptac_luad/TP53_mutation`: 0.6570 / 0.6568
+- `cptac_ccrcc/BAP1_mutation`: 0.6750 / 0.6723
+- `cptac_ccrcc/VHL_mutation`: 0.4871 / 0.4911
+
+### 3. 판단 및 교훈
+**PCA 3D HDBSCAN 기각, v110 유지.**
+1. **연속 분포(Continuous Cloud) 한계**: 차원을 $D=3$으로 낮추어도 세포 공간은 명확한 섬 모양의 밀도 피크가 아닌 넓은 연속체 형태를 띠며, HDBSCAN은 국소 밀도가 완만한 영역(전체의 75%~97%)을 노이즈로 잘라내어 세포 다양성(Abundance) 정보를 잃는다.
+2. **계산 병목**: 슬라이드당 최대 280만 세포에 대한 $k$-NN 그래프 생성으로 연산 시간이 과도하게 증가한다.
+3. 밀도 기반 K 탐색(DBSCAN, HDBSCAN)은 차원과 무관하게 병리 MIL 문제에 부적합함이 최종 확정되어, 이 축을 완전히 종료한다.
+
+---
+
+## 174. 2026-08-18 — CT sampling/tokenizer working candidate: random-64 + seeded k-means++
+
+사용자 결정으로 storage-order bias가 있는 균등 간격 64-cell 선택을 seeded random sampling으로
+교체했다. 이어서 FPS 초기화 + Lloyd 30회 대신 다음 경로를 활성 기본값으로 구현했다.
+
+- context/query bag별 random 64 cell, seed 0을 bag index와 섞어 재현성과 bag별 독립 pattern을 유지
+- seeded k-means++ D² 초기화, K=32
+- Lloyd 최대 8회, centroid RMS 이동 최대값이 `1e-4` 이하면 조기 종료
+- 빈 cluster는 가장 큰 cluster에서 현재 centroid 오차가 가장 큰 실제 cell로 복구
+- 기존 FPS+30/even 경로는 명시적 historical replay 옵션으로 보존
+
+### 공식 17-task 결과와 2×2 원인 분리
+
+| sampling / tokenizer | SEAL 10 | 홀드아웃 7 | 전체 17 | Δ vs v110 | W/T/L |
+|---|---:|---:|---:|---:|---:|
+| even / FPS+30 (v110) | 0.70692 | 0.61029 | 0.66713 | — | — |
+| random / FPS+30 | 0.70273 | 0.60804 | 0.66374 | −0.00339 | 5/0/12 |
+| even / k-means+++≤8 | 0.70780 | 0.60694 | 0.66627 | −0.00086 | 7/1/9 |
+| **random / k-means+++≤8** | **0.70370** | **0.60667** | **0.66375** | **−0.00338** | **4/0/13** |
+
+같은 random sampling 안에서 FPS+30 → k-means+++≤8의 순효과는 전체 **+0.00001**
+(SEAL +0.00097, 홀드아웃 −0.00137, 10/17 양수)로 완전 동률이다. 따라서 결합 경로의 하락은
+k-means++가 아니라 **균등→random sampling 변경**에 귀속된다. k-means++는 품질을 유지하면서
+CPU 계산을 줄이므로 유지할 수 있다. random sampling은 storage-order bias 제거와 전체 −0.0034의
+명시적 트레이드오프다.
+
+v110의 SEAL 0.7070 / 홀드아웃 0.6103은 계속 **even-64 + FPS 초기화 + Lloyd30의 historical
+수치**이며 새 candidate 수치로 인용하면 안 된다.
+
+검증: BagPFN Python full **308 tests in 67.984s, OK**. 대표 `12,000×32`, K=32 tokenizer
+microbenchmark에서 CPU는 FPS+30 **2275.9 ms** → k-means+++≤8 **612.8 ms**(3.7×), B200 GPU는
+약 6.8 ms → 6.7 ms로 거의 동률이었다. GPU에서는 작은 문제 크기의 kernel-launch 고정비가 지배한다.
+공식 runner VHL 50-fold smoke도 새 설정이 실제로 주입됨을 로그에서 확인했고 **0.5227**로 완료했다
+(`logs/official50/cptac_ccrcc_VHL_mutation_ct_kpp_random64_smoke.log`). 전체 평가 로그는
+`logs/official50/*_ct_{random64_fps30_s0,even64_kpp8_s0,kpp_random64_s0}.log`다.
+
+---
+
+## 175. 2026-08-19 — full-cell hierarchical 2-means PCA64/128 × K256..2048: **차원 확장 가설 기각**
+
+K가 커질수록 PCA32의 feature가 부족해진다는 가설을 검증하기 위해, context/query abundance 모두
+전체 cell을 사용하는 hierarchical 2-means에서 PCA 차원 64/128과 K=256/512/1024/2048의 8개
+arm을 B200 GPU 8장에 하나씩 배정해 공식 17-task를 실행했다. 공통 조건은 CT ridge λ=1,
+CT weight=0.7, standardise scaling, GEMM distance, 2회 bisection update, 3회 power iteration이다.
+
+| PCA dim | K | SEAL 10 | 홀드아웃 7 | 전체 17 | Δ vs 동일 K PCA32 | Δ vs v110 |
+|---:|---:|---:|---:|---:|---:|---:|
+| **64** | **256** | **0.70242** | **0.59319** | **0.65744** | **−0.00326** | **−0.00969** |
+| 64 | 512 | 0.70150 | 0.59254 | 0.65664 | −0.00339 | −0.01049 |
+| 64 | 1024 | 0.69936 | 0.59091 | 0.65471 | −0.00501 | −0.01242 |
+| 64 | 2048 | 0.69818 | 0.59006 | 0.65366 | −0.00501 | −0.01347 |
+| 128 | 256 | 0.69875 | 0.58164 | 0.65053 | −0.01017 | −0.01660 |
+| 128 | 512 | 0.69887 | 0.58350 | 0.65136 | −0.00866 | −0.01577 |
+| 128 | 1024 | 0.69791 | 0.58500 | 0.65142 | −0.00829 | −0.01571 |
+| 128 | 2048 | 0.69570 | 0.58569 | 0.65040 | −0.00827 | −0.01673 |
+
+동일 K의 기존 PCA32 전체 macro는 K256/512/1024/2048에서 각각
+0.66070/0.66003/0.65971/0.65867이다. PCA64는 네 K 모두 이를 밑돌았고, PCA128은 더 크게
+하락했다. 동일 K PCA32 대비 전체 task 부호도 PCA64가 각각 8/17, 6/17, 8/17, 9/17만 양수,
+PCA128은 6/17, 6/17, 6/17(1 tie), 6/17만 양수였다. PCA64 안에서도 K256→2048은 전체
+−0.00378(6/17 상승), PCA128은 −0.00013(4/17 상승)이므로 고차원이 큰 K의 이득을 복원하지 않는다.
+
+**가설 기각, v110 유지.** PCA32 정보 병목이 K>256 하락의 원인이라는 증거는 없고, 오히려 차원
+확장은 finite-context PCA/거리 추정의 잡음을 늘리는 방향으로 보인다. 이번 arm은 bit-reproducible
+`tree_reduction=segment`를 사용했고 기존 PCA32 sweep은 segment/atomic이 섞였으므로 1e-3 이하
+차이는 해석하지 않는다. 그러나 관측된 −0.0033~−0.0102의 동일-K 하락과 독립 held-out의 일관된
+하락은 그 수치 변동 범위를 넘는다. 로그는
+`logs/official50/*_h2_pca{64,128}_k{256,512,1024,2048}_fullcell.log`에 있다.
+
+---
+
+## 176. 2026-08-19 — full-cell hierarchical 2-means PCA8/16 × K8/16: **저구간은 감소 추세 반전**
+
+§175의 고차원·대형 K 하락을 바탕으로 PCA dim=8/16 × K=8/16의 4개 arm을 추가 평가했다.
+각 arm의 17개 task를 두 worker로 분할하여 B200 GPU 8장을 동시에 사용했다. 나머지 조건은 §175와
+동일한 full-cell/full-abundance, standardise PCA, hierarchical 2-means, segment reduction이다.
+
+| PCA dim | K | SEAL 10 | 홀드아웃 7 | 전체 17 | Δ vs 동일 K PCA32 | Δ vs v110 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 8 | 8 | 0.68514 | 0.58373 | 0.64338 | −0.00749 | −0.02375 |
+| 8 | 16 | 0.69317 | **0.59156** | 0.65133 | −0.00086 | −0.01580 |
+| 16 | 8 | 0.69167 | 0.58544 | 0.64793 | −0.00294 | −0.01920 |
+| **16** | **16** | **0.69508** | 0.59091 | **0.65219** | **−0.00001** | **−0.01494** |
+| 32 (기존) | 8 | 0.69088 | **0.59371** | 0.65087 | — | −0.01626 |
+| 32 (기존) | 16 | **0.69576** | 0.58996 | **0.65219** | — | −0.01494 |
+
+저구간에서는 K8→16이 PCA8에서 전체 +0.00795(14/17 상승), PCA16에서 +0.00426(12/17 상승)이다.
+PCA8→16도 K8에서 +0.00455, K16에서 +0.00086이며 두 비교 모두 10/17 task가 상승했다. 따라서
+**PCA dim과 K가 낮을수록 계속 좋아진다는 단조 추세는 성립하지 않는다.** 너무 작은 K=8과 PCA8은
+representation capacity 부족으로 손실이 커진다. PCA16/K16과 PCA32/K16은 전체 macro가 반올림상
+완전히 같지만, 둘 다 v110보다 −0.01494이므로 활성 baseline은 유지한다.
+
+68개 로그 모두 정상 종료했고 traceback은 없었다. 로그는
+`logs/official50/*_h2_pca{8,16}_k{8,16}_fullcell.log`에 있다.
+
+---
+
+## 177. 2026-08-19 — full-cell hierarchical 2-means PCA64 × K16/32: **K32 우세, PCA32보다 열세**
+
+PCA64에서 K=16/32를 공식 17-task로 평가했다. 각 arm을 네 worker로 분할해 B200 GPU 8장을
+동시에 사용했고, 나머지는 §175–§176과 동일한 full-cell/full-abundance, standardise PCA,
+hierarchical 2-means, segment reduction 조건이다.
+
+| PCA dim | K | SEAL 10 | 홀드아웃 7 | 전체 17 | Δ vs 동일 K PCA32 | Δ vs v110 |
+|---:|---:|---:|---:|---:|---:|---:|
+| 64 | 16 | 0.69129 | 0.58967 | 0.64945 | −0.00275 | −0.01768 |
+| **64** | **32** | **0.69805** | **0.59003** | **0.65357** | −0.00356 | −0.01356 |
+| 32 (기존) | 16 | 0.69576 | 0.58996 | 0.65219 | — | −0.01494 |
+| 32 (기존) | 32 | **0.70172** | **0.59343** | **0.65713** | — | −0.01000 |
+
+PCA64 안에서는 K16→32가 SEAL +0.00676, 홀드아웃 +0.00036, 전체 +0.00412이며 13/17 task가
+상승했다. 특히 BAP1 +0.0262, KEAP1 +0.0245, ER +0.0153이 컸고, ARID1A −0.0163,
+VHL −0.0138, SMAD4 −0.0131은 하락했다. 그러나 동일 K의 PCA32와 비교하면 PCA64/K16은
+전체 −0.00275(7/17 상승), PCA64/K32는 −0.00356(8/17 상승)이다.
+
+따라서 **PCA64에서는 K32가 K16보다 낫지만, 차원을 32→64로 늘리는 이득은 없다.** 두 arm 모두
+v110보다 낮아 활성 baseline은 유지한다. 34개 로그 모두 정상 종료했고 traceback은 없었다. 로그는
+`logs/official50/*_h2_pca64_k{16,32}_fullcell.log`에 있다.
+
+---
+
+## 178. 2026-08-19 — full-cell hierarchical 2-means PCA16 × K256: **held-out 개선, PCA32/K256과 근접**
+
+PCA16/K256 하나의 arm을 8개 worker로 task 분할하여 B200 GPU 8장에서 공식 17-task 평가했다.
+조건은 이전 sweep과 동일한 full-cell/full-abundance, standardise PCA, hierarchical 2-means,
+segment reduction이다.
+
+| arm | SEAL 10 | 홀드아웃 7 | 전체 17 | Δ vs v110 |
+|---|---:|---:|---:|---:|
+| PCA16 / K16 | 0.69508 | 0.59091 | 0.65219 | −0.01494 |
+| **PCA16 / K256** | 0.70035 | **0.60101** | **0.65945** | −0.00768 |
+| PCA32 / K256 (기존) | **0.70453** | 0.59809 | **0.66070** | −0.00643 |
+| PCA64 / K256 | 0.70242 | 0.59319 | 0.65744 | −0.00969 |
+
+PCA16에서 K16→256은 SEAL +0.00527, 홀드아웃 +0.01010, 전체 +0.00726이며 10/17 task가
+상승했다. PCA64/K256 대비 전체 +0.00201, 홀드아웃 +0.00783이다. PCA32/K256 대비로는 SEAL
+−0.00418, 홀드아웃 +0.00293, 전체 −0.00125이고 6/17 task가 상승했다. 특히 ER +0.0194,
+ARID1A +0.0142, KRAS +0.0110, SMAD4 +0.0207였지만 BAP1 −0.0343이 전체 평균을 크게 낮췄다.
+
+따라서 **PCA16에서도 K256의 세분화 이득은 재현되며 held-out은 K256 차원 조합 중 최고**지만,
+전체 macro는 PCA32/K256을 넘지 못하고 v110보다 −0.00768이다. 활성 baseline은 유지한다.
+17개 로그 모두 정상 종료했고 traceback은 없었다. 로그는
+`logs/official50/*_h2_pca16_k256_fullcell.log`에 있다.
+
+---
+
+## 179. 2026-08-19 — random512 + full abundance + hierarchical PCA32/K256, 4 seed: **미승격**
+
+사용자 요청으로 §165의 random-512 dictionary/full-cell abundance와 §168의 hierarchical
+PCA/2-means tokenizer를 교차했다. bag마다 sampling seed 42–45로 무작위 512 cell을 뽑아
+dictionary와 표준화 통계를 만들고, PCA32에서 hierarchical 2-means K=256 token을 만든 뒤 모든
+cell의 assignment를 abundance에 평균했다. 나머지는 v110의 CV off-diagonal, DD full triangle,
+CT ridge λ=1, CT weight 0.7을 유지했다.
+
+| seed | SEAL 10 | 홀드아웃 7 | 전체 17 |
+|---:|---:|---:|---:|
+| 42 | 0.702910 | 0.599514 | 0.660335 |
+| 43 | 0.703360 | 0.599771 | 0.660706 |
+| 44 | 0.702250 | 0.599614 | 0.659988 |
+| 45 | 0.703040 | 0.599343 | 0.660341 |
+| **평균±population std** | **0.702890±0.000404** | **0.599560±0.000155** | **0.660343±0.000254** |
+| **Δ vs v110** | **−0.004030** | **−0.010730** | **−0.006787** |
+
+task별 4-seed 평균은 v110 대비 **SEAL 2/10, 홀드아웃 1/7, 전체 3/17만 상승**했다. 상승은
+cptac_brca TP53 +0.00508, cptac_luad EGFR +0.00185, held-out KRAS +0.01290이고, 큰 하락은
+SMAD4 −0.03625, ARID1A −0.02260, PBRM1 −0.01795, ER −0.01150이다. 양쪽 독립 집단 평균이 모두
+음수이며 전체 14/17 task가 하락하므로 미승격, v110을 유지한다.
+
+full-cell hierarchical PCA32/K256(전체 0.66070)과는 전체 −0.00036로 사실상 동률이지만,
+random512 + Lloyd k-means/full abundance(전체 0.66471)보다 −0.00437 낮다. 즉 random512에서
+hierarchical tokenizer가 기존 Lloyd tokenizer를 회복시키지 못했다.
+
+실행 arm은 `h2r512all_s{42..45}`이고 로그/예측은
+`logs/20260819_ct_h2_random512_full_abundance/{seal,heldout}/`에 있다. 68개 로그 모두 final 1개,
+traceback 0으로 확인했다. 재현용 arm은 `scripts/run_ct_readout_sweep.sh`에 추가했다.
