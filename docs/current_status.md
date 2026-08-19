@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-19` — §182에서 DD의 **ordered coordinate × nearest-class typicality** 후보를 구현했다. 별도 `r_task` 없이 `h_eff=max(h, sigma_pool)`에 작은 prototype gap 감쇠를 흡수하며, 외분점은 typicality로 감쇠한다. 아직 평가는 시작하지 않았고 **활성 baseline은 계속 v111**(전체 0.66070)이다. CT 분기는 종료했고 실행 중인 job은 없다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
+**Last updated**: `2026-08-19` — §182 DD **ordered coordinate × nearest-class typicality**의 공식 17-task 평가를 실행 중이다. 완전 이탈형 부모 PID/SID **1981165**, GPU 0–7의 8 worker, launcher log `logs/20260819_dd_ordered_typicality_k1/launcher.out`, task log `logs/official50/*_dd_ordered_typicality_k1.log`, prediction tag `dd_ordered_typicality_k1`. 별도 `r_task` 없이 `h_eff=max(h, sigma_pool)`에 작은 prototype gap 감쇠를 흡수하며, 외분점은 typicality로 감쇠한다. 결과 전까지 **활성 baseline은 계속 v111**(전체 0.66070)이다. CT 분기는 종료했다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -7125,6 +7125,23 @@ M_DD(q) = a(q) * o(q)
 
 테스트는 작은 gap 감쇠, 외분 OOD 감쇠, label antisymmetry, 겹친 prototype의 0 evidence,
 boundedness, 정식/독립 구현 일치, legacy v111 동등성을 고정한다. 관련 **89 tests, OK**, 전체
-**318 tests, OK (72.356s)**. **아직 macro를 측정하지 않았으므로 승격하지 않았고 v111 기본
-`distance` readout은 보존했다.** 다음 Action은 SEAL 10과 홀드아웃 7을 같은 deterministic
-protocol로 평가해 v111 대비 task별 부호 일치와 두 집단 macro를 확인하는 것이다.
+**318 tests, OK (72.356s)**. **아직 macro 결과가 없으므로 승격하지 않았고 v111 기본
+`distance` readout은 보존했다.**
+
+### 182-1. 17-task 평가 실행 중
+
+```text
+started       2026-08-19 10:11:52 KST
+parent PID    1981165
+session ID    1981165 (nohup + setsid, terminal-independent)
+workers       GPU 0..7, one sequential queue per GPU
+jobs          SEAL 10 + held-out 7 = 17 deterministic evaluations
+tag           dd_ordered_typicality_k1
+launcher log  logs/20260819_dd_ordered_typicality_k1/launcher.out
+task logs     logs/official50/*_dd_ordered_typicality_k1.log
+predictions   predictions/pathobench_*_dd_ordered_typicality_k1_official50_bf16.pt
+```
+
+시작 직후 부모와 8 worker가 살아 있고 첫 8 task가 `START`된 것을 확인했다. 다음 Action은 launcher의
+`EVALUATION DONE`, 17개 log 각각 final 1개와 traceback 0을 확인한 뒤 v111 대비 task별 delta,
+SEAL/held-out/전체 macro와 부호 일치를 집계하는 것이다.
