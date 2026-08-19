@@ -2,10 +2,12 @@
 
 **Last updated**: `2026-08-19`
 ⚠️ **서버를 옮겼다면 `agent_handoff.md` §0을 먼저 읽을 것** — 노드 종속 설정은 `scripts/node_env.sh` 하나로 모았다.
-**Active 구성**: **v111 — 학습 파라미터 0** (§181, 사용자 결정). within-slide PCA(K=256) 사영 +
-고정 head + **CV off-diagonal 32,640** + **CT full-cell hierarchical PCA32/K256 @ weight 0.7**.
-정식 경로 SEAL macro **0.70453**, 홀드아웃 7 **0.59809**, 전체 17 **0.66070**, seed std 0.00000.
-실행: `bash scripts/eval_v111.sh <gpu> <tag>`. 예측 수치가 더 높은 v110은 historical control이며
+**Active 구성**: **v112 — 학습 파라미터 0** (§183, 사용자 결정). within-slide PCA(K=256) 사영 +
+고정 head + **CV off-diagonal 32,640** + **CT full-cell hierarchical PCA32/K256 @ weight 0.7**
+(v111과 동일) + **DD ordered-coordinate × nearest-class typicality, κ=1, weight=1**.
+정식 경로 SEAL macro **0.70432**, 홀드아웃 7 **0.60181**, 전체 17 **0.66211**, seed std 0.00000.
+실행: `bash scripts/eval_v112.sh <gpu> <tag>`. distance DD readout이던 v111은 previous baseline이며
+`bash scripts/eval_v111.sh <gpu> <tag>`로 재현하고, 예측 수치가 더 높은 v110은 historical control로
 `bash scripts/eval_v110.sh <gpu> <tag>`로 재현한다. 전체 명세는 `current_architecture.md` **§0**.
 ⚠️ **결정론적이므로 t·p·CI 금지**(§151-1) — 부호 일치와 독립 집단 재현으로 판정.
 v107(0.6945)·v106(0.6864)과 직전 baseline v98(8 seed 0.6852)은 historical.

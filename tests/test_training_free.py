@@ -31,10 +31,15 @@ from src.models.training_free import TrainingFreeClassifier, TrainingFreeConfig
 DIM = 48
 SKETCH = 8
 # The configuration the lineage `_ct_features` implements -- v108's defaults differ.
+# `dd_readout`/`weight_dd` are pinned to the pre-SS183 distance readout for the
+# same reason: `lineage_margins` below hardcodes the OLD distance-based fixed
+# head (0.343/-0.343), so this is a statement about that configuration, not
+# about the live SS183 default.
 V107 = TrainingFreeConfig(
     sketch_dim=SKETCH, ct_readout="extreme", ct_pca_dim=None,
     ct_kmeans_iterations=0, cv_blocks="cov+mean", weight_ct=0.286, ct_num_tokens=16,
     ct_sampling="even", ct_tokenizer="fps_lloyd",
+    dd_readout="distance", weight_dd=-0.343,
 )
 
 
@@ -102,7 +107,8 @@ class DefaultTest(unittest.TestCase):
         silently stops being the active configuration. SS142 promoted K=128 -> 256;
         SS152 promoted CT to the ridge readout inside a 32-d PCA subspace; SS158
         added k-means tokens at weight 0.7 and off-diagonal-only CV; SS181 promotes
-        full-cell hierarchical PCA32/K256 to remove sampling bias and randomness."""
+        full-cell hierarchical PCA32/K256 to remove sampling bias and randomness;
+        SS183 promotes DD's bounded ordered_typicality readout at unit weight."""
         config = TrainingFreeConfig()
         self.assertEqual(config.sketch_dim, 256)
         self.assertEqual(config.ct_readout, "ridge")
@@ -131,8 +137,9 @@ class DefaultTest(unittest.TestCase):
         self.assertEqual(config.ct_dbscan_min_samples, 16)
         self.assertEqual(config.cv_blocks, "offdiag")
         self.assertEqual(config.weight_ct, 0.7)
-        self.assertEqual(config.dd_readout, "distance")
+        self.assertEqual(config.dd_readout, "ordered_typicality")
         self.assertEqual(config.dd_separation_floor, 1.0)
+        self.assertEqual(config.weight_dd, -1.0)
 
 
 class OrderedTypicalityDDTest(unittest.TestCase):
@@ -183,7 +190,7 @@ class OrderedTypicalityDDTest(unittest.TestCase):
             weight_cv=0.0, weight_ct=0.0,
         )).margins(context_bags, labels, query_bags)
         self.assertFalse(torch.allclose(legacy, arm))
-        self.assertTrue(bool((arm.abs() <= 0.343 + 1e-6).all()))
+        self.assertTrue(bool((arm.abs() <= 1.0 + 1e-6).all()))
 
     def test_training_free_arm_preserves_label_antisymmetry(self):
         context_bags, labels, query_bags = episode(32)

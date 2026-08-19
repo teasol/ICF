@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-19` — §182 DD **ordered coordinate × nearest-class typicality**의 공식 17-task 평가를 실행 중이다. 완전 이탈형 부모 PID/SID **1991184**, GPU 0–7의 8 worker, launcher log `logs/20260819_dd_ordered_typicality_k1/launcher.out`, task log `logs/official50/*_dd_ordered_typicality_k1.log`, prediction tag `dd_ordered_typicality_k1`. 별도 `r_task` 없이 `h_eff=max(h, sigma_pool)`에 작은 prototype gap 감쇠를 흡수하며, 외분점은 typicality로 감쇠한다. 결과 전까지 **활성 baseline은 계속 v111**(전체 0.66070)이다. CT 분기는 종료했다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
+**Last updated**: `2026-08-19` — §183 사용자 결정으로 **v112 = v111 + DD ordered-coordinate × nearest-class typicality (κ=1, fixed-head weight=1)**를 활성 baseline으로 승격했다. 전체 17-task macro **0.66211**(v111 대비 +0.00141), SEAL 10 **0.70432**(−0.00021, 사실상 flat), 홀드아웃 7 **0.60181**(+0.00372)이다. `TrainingFreeConfig` 기본값을 `dd_readout="ordered_typicality"`, `weight_dd=-1.0`으로 변경했고 활성 runner `scripts/eval_v112.sh`를 추가했다. `scripts/eval_v111.sh`는 historical distance-readout 재현 전용으로 유지한다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -7151,3 +7151,103 @@ selector 문자열 변수 `selection`을 뒤의 CV column-selection list가 덮�
 재실행 직후 부모와 8 worker가 살아 있고 첫 8 task가 `START`된 것을 확인했다. 다음 Action은 launcher의
 `EVALUATION DONE`, 17개 log 각각 final 1개와 traceback 0을 확인한 뒤 v111 대비 task별 delta,
 SEAL/held-out/전체 macro와 부호 일치를 집계하는 것이다.
+
+### 182-2. 17-task 평가 완료 — DD weight가 legacy 0.343 그대로였음을 발견
+
+`EVALUATION DONE`, 17개 log 모두 `fold-mean AUROC` 1회·`Saved official-fold predictions` 1회·
+traceback 0으로 정상 종료했다. 그런데 로그의 `fixed head: cv=1.442 dd=0.343 ct=0.7` 줄을 보면
+`ICF_FIXED_HEAD_DD_WEIGHT`를 어디서도 오버라이드하지 않아 **DD 항이 여전히 legacy distance
+readout용으로 fit된 0.343 magnitude를 그대로 쓰고 있었다.** `ordered_typicality` margin은
+`[-1,1]`로 bounded된 반면 0.343은 옛 distance-squared 출력 스케일에 맞춘 값이므로, 재사용은
+근거가 없다. 사용자 지시로 이 항을 없애고(=1로 설정) 재평가했다(§182-3).
+
+이 시점의 (미승격) 결과는 v111 대비 SEAL 10 −0.00231, 홀드아웃 7 **+0.00920**, 전체 17 **+0.00243**
+이었고, 두 독립 집단의 부호가 반대(SEAL 하락/홀드아웃 상승)라 §182-3 전까지는 승격 신호로 보지
+않았다.
+
+### 182-3. DD weight=1로 수정 후 17-task 재평가 — **v112으로 승격**
+
+`scripts/eval_dd_ordered_typicality.sh`에 `ICF_FIXED_HEAD_DD_WEIGHT=1`을 추가하고 새 tag
+`dd_ordered_typicality_k1_ddw1`으로 17-task를 재실행했다(PID/SID `2052454`, launcher log
+`logs/20260819_dd_ordered_typicality_k1_ddw1/launcher.out`). 17개 log 모두 `fixed head: cv=1.442
+dd=1.0 ct=0.7`을 확인했고 `fold-mean AUROC`/`Saved official-fold predictions` 각 1회, traceback
+0으로 정상 종료했다.
+
+| 그룹 | task | v111 | dd=0.343 (§182-2) | **dd=1.0 (v112)** | Δ v112−v111 |
+|---|---|---:|---:|---:|---:|
+| SEAL | bc_therapy/er_status | 0.6875 | 0.6823 | 0.6834 | −0.0041 |
+| SEAL | bc_therapy/grade | 0.7387 | 0.7305 | 0.7329 | −0.0058 |
+| SEAL | bc_therapy/her2_status | 0.6787 | 0.6633 | 0.6736 | −0.0051 |
+| SEAL | cptac_brca/PIK3CA_mutation | 0.5357 | 0.5460 | 0.5400 | +0.0043 |
+| SEAL | cptac_brca/TP53_mutation | 0.8309 | 0.8243 | 0.8270 | −0.0039 |
+| SEAL | cptac_ccrcc/BAP1_mutation | 0.6821 | 0.7193 | 0.7019 | +0.0198 |
+| SEAL | cptac_ccrcc/VHL_mutation | 0.5116 | 0.5004 | 0.5095 | −0.0021 |
+| SEAL | cptac_luad/EGFR_mutation | 0.7828 | 0.7721 | 0.7825 | −0.0003 |
+| SEAL | cptac_luad/STK11_mutation | 0.9029 | 0.8918 | 0.9006 | −0.0023 |
+| SEAL | cptac_luad/TP53_mutation | 0.6944 | 0.6922 | 0.6918 | −0.0026 |
+| 홀드아웃 | cptac_ccrcc/PBRM1_mutation | 0.5359 | 0.5250 | 0.5266 | −0.0093 |
+| 홀드아웃 | cptac_lscc/ARID1A_mutation | 0.4710 | 0.4802 | 0.4747 | +0.0037 |
+| 홀드아웃 | cptac_lscc/Histologic_Grade | 0.6367 | 0.6577 | 0.6519 | +0.0152 |
+| 홀드아웃 | cptac_lscc/KEAP1_mutation | 0.5858 | 0.6161 | 0.6002 | +0.0144 |
+| 홀드아웃 | cptac_luad/KRAS_mutation | 0.7257 | 0.7371 | 0.7311 | +0.0054 |
+| 홀드아웃 | cptac_pda/SMAD4_mutation | 0.4578 | 0.4743 | 0.4654 | +0.0076 |
+| 홀드아웃 | ucla_lung/progression_regression | 0.7737 | 0.7606 | 0.7628 | −0.0109 |
+
+| | SEAL 10 | 홀드아웃 7 | 전체 17 |
+|---|---:|---:|---:|
+| v111 | 0.70453 | 0.59809 | 0.66070 |
+| **v112 (dd weight=1)** | **0.70432** | **0.60181** | **0.66211** |
+| Δ v112−v111 | −0.00021 | +0.00372 | +0.00141 |
+
+DD weight를 0.343→1로 고치자 §182-2의 SEAL 하락과 홀드아웃 상승 폭이 모두 절반 가까이
+줄었다 — §182-2의 효과 일부가 legacy magnitude-fit 계수의 인위적 스케일링이었다는 뜻이다. 상승
+부호 패턴(전체 7/17: PIK3CA, BAP1, ARID1A, Histologic Grade, KEAP1, KRAS, SMAD4)은 §182-2와
+동일하게 유지된다. SEAL macro는 −0.00021로 사실상 flat(결정론적 arm이므로 seed 변동은 없다)이고
+홀드아웃은 +0.00372로 뚜렷하게 양수다.
+
+---
+
+## 183. 2026-08-19 — **v112 승격 확정: v111 + DD ordered-coordinate × typicality (κ=1, weight=1)**
+
+사용자 결정으로 §182-3의 결과를 새 활성 baseline으로 승격했다.
+
+```
+CV/CT                     : v111과 동일 (offdiag CV, full-cell hierarchical PCA32/K256 CT, ridge λ=1, CT weight 0.7)
+DD readout                : ordered-coordinate evidence × nearest-class typicality (§182)
+DD separation floor (κ)   : 1.0
+DD fixed-head weight      : 1.0 (legacy distance-readout의 0.343 magnitude-fit 제거)
+```
+
+| | SEAL 10 | 홀드아웃 7 | 전체 17 | seed std |
+|---|---:|---:|---:|---:|
+| **v112 (활성)** | **0.70432** | **0.60181** | **0.66211** | **0.00000** |
+| v111 (previous baseline) | 0.70453 | 0.59809 | 0.66070 | 0.00000 |
+| Δ v112−v111 | −0.00021 | +0.00372 | +0.00141 | — |
+
+SEAL macro는 사실상 flat, 홀드아웃 macro가 전체 상승을 이끈다. 17개 중 7개 task가 상승했고
+(PIK3CA, BAP1, ARID1A, Histologic Grade, KEAP1, KRAS, SMAD4), 나머지 10개는 소폭 하락했다 —
+그중 BAP1 +0.0198과 Histologic Grade +0.0152, KEAP1 +0.0144가 상승분의 대부분을 차지한다.
+
+구현:
+
+- `src/models/training_free.py::TrainingFreeConfig` 기본값 변경: `dd_readout="distance"` →
+  `"ordered_typicality"`, `weight_dd=-0.343` → `-1.0`. `dd_separation_floor=1.0`은 변경 없음(이미
+  κ=1과 일치).
+- 활성 runner `scripts/eval_v112.sh` 추가 (v111과 CV/CT 설정 동일, DD만 다름).
+- `scripts/eval_v111.sh`는 historical distance-readout 재현 전용으로 유지(변경 없음).
+- `scripts/eval_dd_ordered_typicality.sh`에 `ICF_FIXED_HEAD_DD_WEIGHT=1` 추가(§182-3).
+- `tests/test_training_free.py`: lineage 동등성 fixture `V107`에 `dd_readout="distance",
+  weight_dd=-0.343`을 명시적으로 고정(그 lineage 경로는 옛 distance 고정 head만 구현하므로, 이는
+  "이 configuration에 대한 진술"이지 default에 대한 진술이 아니다 — 파일 상단 주석과 동일한 근거).
+  `DefaultTest`는 새 기본값(`ordered_typicality`, `weight_dd=-1.0`)을 pin하도록 갱신, 경계 테스트의
+  하드코딩된 bound도 0.343→1.0으로 갱신.
+- BagPFN Python full **318 tests, OK (42.524s)**.
+- v112 VHL 50-fold smoke가 §182-3의 `dd=1.0` 로그 값(0.5095)과 정확히 일치하는지 확인 중.
+
+CT 분기는 §181에서 이미 종료됐고 이번 승격은 DD 분기에 한정된다. 다음 action은 v112를 baseline
+으로 놓고 추가 DD 탐색(다른 κ 값, seed 없는 결정론적 arm이므로 반복 불필요) 또는 CV/CT 재탐색
+여부를 사용자와 논의하는 것이다.
+
+_Recorded by: nhn-YLC-claude — 2026-08-19 11:35_
+
+---

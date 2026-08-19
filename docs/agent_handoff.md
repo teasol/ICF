@@ -1,7 +1,8 @@
 # Agent handoff guide
 
-**Last updated**: 2026-08-19 — §181 사용자 결정으로 full-cell hierarchical PCA32/K256을
-**v111 활성 baseline**으로 승격하고 CT 분기를 종료했다. 전체 0.66070, seed std 0.00000이며
+**Last updated**: 2026-08-19 — §183 사용자 결정으로 v111 + DD ordered-coordinate × typicality
+(κ=1, fixed-head weight=1)를 **v112 활성 baseline**으로 승격했다. 전체 0.66211(v111 대비
++0.00141), SEAL 10 0.70432(−0.00021, flat), 홀드아웃 7 0.60181(+0.00372), seed std 0.00000이며
 실행 중인 job은 없다.
 
 ---
@@ -18,25 +19,26 @@
 
 3. 읽는 순서는 이 문서 §0 → [`current_architecture.md` §0](current_architecture.md) →
    [`current_experiments.md` §0](current_experiments.md) → 세부 수치가 필요할 때만
-   [`current_status.md` §181](current_status.md)다.
-4. §173–§179의 코드·평가·문서는 `c34dfe2`에 반영됐다. §180도 완료 후 별도 커밋했다. 새 세션은
-   `git status --short`가 비어
-   있는지와 `git log -n 3 --oneline`의 최신 커밋부터 확인한다.
-5. 활성 모델은 **v111 = full-cell/full-abundance hierarchical PCA32/K256**이다. 사용자가
-   selection bias와 sampling randomness 제거를 예측 macro보다 우선해 승격했다. v110은 더 높은
-   historical predictive control이며 CT 분기는 종료됐다.
+   [`current_status.md` §183](current_status.md)다.
+4. §173–§179의 코드·평가·문서는 `c34dfe2`에 반영됐다. §180, §182, §183도 완료 후 각각 별도
+   커밋했다. 새 세션은 `git status --short`가 비어 있는지와 `git log -n 3 --oneline`의 최신
+   커밋부터 확인한다.
+5. 활성 모델은 **v112 = v111 + DD ordered-coordinate × nearest-class typicality (κ=1,
+   fixed-head weight=1)**다. CV/CT는 v111과 동일(full-cell/full-abundance hierarchical
+   PCA32/K256)하고 CT 분기는 §181에서 이미 종료됐다. v111의 distance DD readout은
+   `scripts/eval_v111.sh`로 재현 가능하지만 더 이상 활성이 아니다.
 6. 2026-08-19 인계 시점에는 GPU 0–7이 모두 NVIDIA B200 183,359 MiB이고 사용량 0 MiB였다.
    자원 상태는 변하므로 새 세션 시작 때 `nvidia-smi`로 다시 확인한다. 8-GPU 사용 가능 여부는
    그 시점의 다른 사용자 프로세스를 보고 결정한다.
-7. 마지막 코드 검증은 BagPFN Python으로 **310 tests, OK (66.011s)**였다. v111 VHL smoke는
-   0.5116으로 기존 h2T256과 일치했다.
+7. 마지막 코드 검증은 BagPFN Python으로 **318 tests, OK (42.524s)**였다. v112 VHL smoke는
+   §182-3의 `dd=1.0` 로그 값(0.5095)과 일치해야 한다 — 승격 커밋 전 확인할 것.
 
 새 세션에 전달할 최소 문장:
 
 > `/NHNHOME/WORKSPACE/26msit005_C/kimds/ICF`에서 `docs/agent_handoff.md`의 “새 세션 60초 재개 절차”와
 > §0을 읽고 이어서 작업해줘. Python은 BagPFN 환경 실행 파일을 직접 사용해줘. 활성 baseline은
-> v111 full-cell hierarchical PCA32/K256이고 CT 분기는 종료됐다. 활성 runner는
-> `scripts/eval_v111.sh`, historical v110 runner는 `scripts/eval_v110.sh`다.
+> v112 = v111 + DD ordered-coordinate × typicality(κ=1, weight=1)이고 CT 분기는 종료됐다. 활성
+> runner는 `scripts/eval_v112.sh`, historical v111 runner는 `scripts/eval_v111.sh`다.
 
 ---
 
@@ -79,28 +81,30 @@ bash scripts/eval_v111.sh 0 smoke cptac_ccrcc/VHL_mutation     # v111: 0.5116
 
 ## 0-3. 지금 상태 한 눈에
 
-**활성 = v111, 학습 파라미터 0, seed std 0.00000.** 전체 명세는
+**활성 = v112, 학습 파라미터 0, seed std 0.00000.** 전체 명세는
 [`current_architecture.md` **§0**](current_architecture.md) — 거기가 SSOT다.
 
 ```
 CV   기저 = context cell의 within-slide PCA 상위 256
      descriptor = triu(BᵀC_bag B)의 비대각 32,640차원만 (대각·raw mean 제거)
      → 클래스 균형 dual ridge (λ=1)
-DD   같은 triangle 전체에서 rank-1 분산 방향 → 정규화 제곱 거리 (변경 금지 상태)
+DD   같은 triangle 전체에서 rank-1 분산 방향 → ordered-coordinate × nearest-class
+     typicality 유계 evidence M_DD∈[-1,1] (κ=1). 옛 distance readout은 eval_v111.sh로 재현
 CT   전체 cell → 32 PCA 방향 → hierarchical 2-means K256 → 전체 abundance → ridge (λ=1)
-head margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
+head margin = 1.442·(CV1−CV0) − 1.0·M_DD + 0.7·(CT1−CT0)
 ```
 
 | | SEAL 10 | 홀드아웃 7 | ABMIL 0.727 대비 |
 |---|---:|---:|---:|
-| **v111** | **0.70453** | **0.59809** | **−0.02247** |
+| **v112** | **0.70432** | **0.60181** | **−0.02268** |
+| v111 (previous baseline) | 0.70453 | 0.59809 | −0.02247 |
 | v110 (historical) | 0.70692 | 0.61029 | −0.02008 |
 | v109 | 0.7027 | 0.6042 | −0.0243 |
 | v108 | 0.6967 | 0.5893 | −0.0303 |
 | v107 | 0.6945 | 0.5836 | −0.0321 |
 | v106 | 0.6864 | 0.5767 | −0.0406 |
 
-실행: `bash scripts/eval_v111.sh <gpu> <tag> [tasks...]`
+실행: `bash scripts/eval_v112.sh <gpu> <tag> [tasks...]`
 
 ## 0-4. ⚠️ 판정 규칙이 바뀌었다 — 결정론적 arm에 t를 쓰지 말 것
 

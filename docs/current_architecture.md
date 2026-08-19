@@ -1,15 +1,16 @@
 # Current architecture (2026-08-19)
 
-**활성 구성 v111 — 학습 파라미터 0, 완전 결정론적.** 사용자가 예측 macro보다
-**selection bias 제거와 sampling randomness 제거**를 우선해 full-cell hierarchical
-PCA32/K256을 승격했다(§181). v110은 더 높은 예측 baseline이지만 historical control이다.
-아래 §0이 현행 명세이고, 그 뒤의
+**활성 구성 v112 — 학습 파라미터 0, 완전 결정론적.** CV/CT는 v111과 동일하다(§181, 사용자가
+예측 macro보다 selection bias/sampling randomness 제거를 우선해 승격). v112는 DD readout만
+바꿔 bounded ordered-coordinate × nearest-class typicality (κ=1, fixed-head weight=1)를
+승격했다(§183) — 전체 17-task macro 0.66211, v111 대비 +0.00141. v110은 더 높은 예측
+baseline이지만 historical control이다. 아래 §0이 현행 명세이고, 그 뒤의
 `Historical-*` / `A` / `B` 절은 **학습을 포함하던 직전 계보(v83~v98)** 의 명세로 참조용이다.
-그 절들의 gradient·학습 모듈·checkpoint 계약은 **v111에 적용되지 않는다.**
+그 절들의 gradient·학습 모듈·checkpoint 계약은 **v112에 적용되지 않는다.**
 
 ---
 
-# §0. v111 명세 (활성)
+# §0. v112 명세 (활성)
 
 ## 0-1. 한 눈에
 
@@ -25,87 +26,28 @@ CV      descriptor = triu(BᵀC_bag B)의 **비대각 32,640차원만**
         ⚠️ 대각 256차원과 raw bag mean 1,536차원은 **뺐다** (§156)
 
 DD      같은 triangle(**전체**, 대각 포함)에서 K×K 공분산을 재구성 →
-        rank-1 분산 방향 1개 → log(uᵀC_bu)의 클래스별 1-D 가우시안 →
-        정규화 제곱 **거리** 2개 (logit이 아니다 → head 계수가 음수)
+        rank-1 분산 방향 1개 → log(uᵀC_bu)의 클래스별 1-D 가우시안 → 표준화 scalar $q$,
+        prototype $p_c$, class variance $\sigma_c^2$ → **bounded ordered-coordinate ×
+        nearest-class typicality** evidence $M_{DD}(q)\in[-1,1]$ (§183, 상세 수식은 0-1b).
+        옛 정규화 제곱 거리 readout은 `distance`로 남아 있고 `scripts/eval_v111.sh`로
+        재현 가능하지만 더 이상 활성이 아니다.
 
 CT      bag의 **전체 cell** → B의 상위 **32 PCA 방향**으로 사영 → context로 좌표 표준화 →
         hierarchical PCA/2-means tree로 **256 token** → 전체 cell soft assignment →
         bag별 256차원 abundance → 클래스 균형 ridge(λ=1) → logit 2개
 
-head    margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
+head    margin = 1.442·(CV1−CV0) − 1.0·M_DD + 0.7·(CT1−CT0)
         logits = (−margin/2, +margin/2)
 ```
 
-**실행**: `bash scripts/eval_v111.sh <gpu> <tag> [tasks...]`
+**실행**: `bash scripts/eval_v112.sh <gpu> <tag> [tasks...]`
 **구현**: `src/models/training_free.py` (파라미터 0). 정식 채점은 환경변수로 기존 경로를 써도 된다 —
 `tests/test_training_free.py`가 두 경로의 등가성을 고정한다.
 
-## 0-2. 수치
+## 0-1b. DD ordered × typicality 수식 (§182, §183 승격)
 
-| | SEAL 10 | 홀드아웃 7 | seed std |
-|---|---:|---:|---:|
-| **v111** | **0.70453** | **0.59809** | **0.00000** |
-| v110 (historical predictive best) | 0.70692 | 0.61029 | 0.00000 |
-| v109 | 0.7027 | 0.6042 | 0.00000 |
-| v108 | 0.6967 | 0.5893 | 0.00000 |
-| v107 | 0.6945 | 0.5836 | 0.00000 |
-| v106 | 0.6864 | 0.5767 | 0.00000 |
-| 참고: ABMIL(지도학습) | 0.727 | — | — |
-
-⚠️ **결정론적이므로 t·p·CI를 쓰지 않는다**(§151-1). 판정은 **부호 일치 수**와
-**독립 집단 재현**(SEAL 10 / 홀드아웃 7)으로 한다.
-
-## 0-3. 각 상수가 왜 그 값인가
-
-| 값 | 근거 |
-|---|---|
-| 기저 = within-slide PCA | pooled 대비 +0.0020. between-slide는 ICC 31.6% nuisance (§139-4, §123-4) |
-| K = 256 | 64~768 스윕의 plateau 중 가장 싼 지점. 홀드아웃에서 재현되는 유일한 값 (§142) |
-| CV = 비대각만 | mean은 무용(+0.0019), 대각은 유해(+0.0052, 13/17) (§156) |
-| DD = rank-1 | r>1은 이득 없음, K는 128에서 포화, \|t\| 게이트·selector 모두 패배 (§145~§147) |
-| CT = 32 PCA 차원 | raw 1536은 거리 집중(rel_std 0.229 vs 0.368) (§149) |
-| CT = full cell | selection policy 자체를 없애 storage-order bias와 sampling randomness 제거 (§181 사용자 결정) |
-| CT = hierarchical 2-means | full-cell에서 label-free하고 결정론적인 대규모 K tokenizer (§168) |
-| CT = 256 token | full-cell hierarchical 스윕의 전체 17 최고 0.66070 (§168, §175) |
-| head = 3 상수 | 라벨 반대칭이 SEP 가중 0과 쌍의 등가·반대를 강제 (§137-3) |
-| CT weight 0.7 | k-means token에서만 성립. FPS token에서는 부호가 무너졌다 (§157-5, §151-2) |
-
-## 0-4. ⚠️ 구조적 제약 — 건드리기 전에 알아야 할 것
-
-1. **DD는 CV descriptor의 triangle을 읽는다.** descriptor를 전역으로 마스킹하면 CV를 좁히는 게
-   아니라 **DD를 부순다**. CV 마스킹은 `_normalize_descriptors` 안에서만 걸어야 한다 (§156-1).
-2. **DD의 K는 CV의 K를 넘을 수 없다** — 부분블록을 읽기 때문이다 (§145-1).
-3. **CT와 CV가 같은 기저를 공유한다.** CT 개선이 macro에 잘 안 닿는 상한 요인이다 (§149-4).
-4. **에피소드마다 상수를 더하는 변경은 fold-mean AUROC를 움직일 수 없다** (§154-5).
-5. **cell↔token 거리는 cell 축으로 chunk된다**(2²⁷ 원소). chunking은 원소별 산술을 안 바꾸므로
-   정확하다 (§160-1).
-
-## 0-5. 닫힌 축 (재시도 금지)
-
-| 축 | 결과 |
-|---|---|
-| 합성 데이터 분포 | 격차를 닫을수록 단조로 나빠진다 (§129) |
-| DD 전반 | K·rank·게이트·selector 네 갈래 모두 (§145~§147) |
-| **CT 분기 전체** | §181 사용자 결정으로 종료. 예측 최고 v110 대신 bias/randomness 없는 full-cell hierarchical PCA32/K256을 v111로 승격 |
-| CT cell 샘플링 | v111은 전체 cell을 사용하므로 selection policy와 sampling seed가 연산에 관여하지 않음 |
-| CT hierarchical sweep | full-cell 최고는 PCA32/K256 0.66070. PCA8/16/64/128 및 K8..2048 탐색 완료 (§168, §175–§179) |
-| CT spherical raw1536 조합 | random512/full-abundance, K32의 4-seed 전체 0.65618±0.00018(7/17), v110 대비 −0.01095로 미승격. raw 차원과 cosine을 함께 바꿔 metric 단독 효과는 미분리 (§180) |
-| CT HDBSCAN full-cell | GPU NN-descent, 32D는 noise 96.2%(§169), 3D도 noise 75~97%에 SEAL 0.6849(−0.0221)(§173). 밀도 기반 K는 연속 공간에서 노이즈 폭증으로 기각 |
-| CT DBSCAN random64/all | adaptive k-distance knee eps, fold 84.5%가 K=1. 전체 0.64976±0.00041, v110 대비 −0.01737 (§170) |
-| CT HDBSCAN random64/all | noise 93.6%, K 중앙값 2, 30.2% all-noise fallback. 전체 0.64819±0.00052, v110 대비 −0.01894 (§171) |
-| CT two-token readout | ridge로 대체됨. 단 raw 1536에서만 "무관"이었다 (§148·§150) |
-
-## 0-6. 열려 있는 갈래
-
-- **CV 비대각 32,640차원의 가중** — 지금은 무가중 ridge다. 학습을 넣는다면 여기다 (§156-6).
-- **DD의 코호트 의존성** — DD는 SEAL에서 도움, 홀드아웃에서 해롭다. 에피소드별 게이트가
-  가능한지 (§153). §182의 `ordered × typicality` arm이 첫 재개 후보다. 별도 post-selection
-  `r_task`는 두지 않고, 작은 prototype gap의 감쇠를 query 좌표의 분모에 흡수한다.
-
-### 0-7. DD ordered × typicality 후보 (§182, 미승격)
-
-rank-1 방향과 표준화된 scalar $q$, prototype $p_c$, class variance
-$\sigma_c^2$까지는 v111과 같다. 이후의 QDA 거리 차이만 다음 유계 evidence로 바꾼다.
+rank-1 방향과 표준화된 scalar $q$, prototype $p_c$, class variance $\sigma_c^2$까지는 v111과
+같다. 이후의 QDA 거리 차이만 다음 유계 evidence로 바꾼다.
 
 \[
 m=\frac{p_0+p_1}{2},\quad h=\frac{|p_1-p_0|}{2},\quad
@@ -133,9 +75,77 @@ M_{DD}(q)=a(q)o(q)
 - 같은 context로 방향을 고르고 separation confidence를 다시 재는 post-selection gate는 쓰지 않는다.
 - 정확히 겹친 prototype은 $s=0$이므로 DD evidence가 0이다. 라벨 교환은 $M_{DD}$의 부호만
   반전시킨다.
-- v111은 아직 유지한다. 실행은
-  `bash scripts/eval_dd_ordered_typicality.sh <gpu> <tag> [tasks...]`이고 환경변수는
-  `ICF_DD_ORDERED_TYPICALITY=1`, `ICF_DD_SEPARATION_FLOOR=1.0`이다.
+- fixed-head weight는 **1.0**이다(§183) — 옛 `distance` readout에 fit된 0.343 magnitude는
+  bounded margin에 재사용할 근거가 없어 제거했다(§182-2/182-3).
+
+## 0-2. 수치
+
+| | SEAL 10 | 홀드아웃 7 | 전체 17 | seed std |
+|---|---:|---:|---:|---:|
+| **v112 (활성)** | **0.70432** | **0.60181** | **0.66211** | **0.00000** |
+| v111 (previous baseline, distance DD readout) | 0.70453 | 0.59809 | 0.66070 | 0.00000 |
+| v110 (historical predictive best) | 0.70692 | 0.61029 | 0.66713 | 0.00000 |
+| v109 | 0.7027 | 0.6042 | — | 0.00000 |
+| v108 | 0.6967 | 0.5893 | — | 0.00000 |
+| v107 | 0.6945 | 0.5836 | — | 0.00000 |
+| v106 | 0.6864 | 0.5767 | — | 0.00000 |
+| 참고: ABMIL(지도학습) | 0.727 | — | — | — |
+
+⚠️ **결정론적이므로 t·p·CI를 쓰지 않는다**(§151-1). 판정은 **부호 일치 수**와
+**독립 집단 재현**(SEAL 10 / 홀드아웃 7)으로 한다.
+
+## 0-3. 각 상수가 왜 그 값인가
+
+| 값 | 근거 |
+|---|---|
+| 기저 = within-slide PCA | pooled 대비 +0.0020. between-slide는 ICC 31.6% nuisance (§139-4, §123-4) |
+| K = 256 | 64~768 스윕의 plateau 중 가장 싼 지점. 홀드아웃에서 재현되는 유일한 값 (§142) |
+| CV = 비대각만 | mean은 무용(+0.0019), 대각은 유해(+0.0052, 13/17) (§156) |
+| DD = rank-1 | r>1은 이득 없음, K는 128에서 포화, \|t\| 게이트·selector 모두 패배 (§145~§147) |
+| DD = ordered × typicality, κ=1 | bounded evidence가 distance readout보다 홀드아웃에서 +0.00372, SEAL은 flat(−0.00021), 전체 +0.00141 (§182, §183 사용자 결정) |
+| DD fixed-head weight = 1.0 | 옛 distance readout에 fit된 0.343 magnitude는 bounded margin 스케일에 근거가 없어 제거 (§182-2/182-3) |
+| CT = 32 PCA 차원 | raw 1536은 거리 집중(rel_std 0.229 vs 0.368) (§149) |
+| CT = full cell | selection policy 자체를 없애 storage-order bias와 sampling randomness 제거 (§181 사용자 결정) |
+| CT = hierarchical 2-means | full-cell에서 label-free하고 결정론적인 대규모 K tokenizer (§168) |
+| CT = 256 token | full-cell hierarchical 스윕의 전체 17 최고 0.66070 (§168, §175) |
+| head = 3 상수 | 라벨 반대칭이 SEP 가중 0과 쌍의 등가·반대를 강제 (§137-3) |
+| CT weight 0.7 | k-means token에서만 성립. FPS token에서는 부호가 무너졌다 (§157-5, §151-2) |
+
+## 0-4. ⚠️ 구조적 제약 — 건드리기 전에 알아야 할 것
+
+1. **DD는 CV descriptor의 triangle을 읽는다.** descriptor를 전역으로 마스킹하면 CV를 좁히는 게
+   아니라 **DD를 부순다**. CV 마스킹은 `_normalize_descriptors` 안에서만 걸어야 한다 (§156-1).
+2. **DD의 K는 CV의 K를 넘을 수 없다** — 부분블록을 읽기 때문이다 (§145-1).
+3. **CT와 CV가 같은 기저를 공유한다.** CT 개선이 macro에 잘 안 닿는 상한 요인이다 (§149-4).
+4. **에피소드마다 상수를 더하는 변경은 fold-mean AUROC를 움직일 수 없다** (§154-5).
+5. **cell↔token 거리는 cell 축으로 chunk된다**(2²⁷ 원소). chunking은 원소별 산술을 안 바꾸므로
+   정확하다 (§160-1).
+
+## 0-5. 닫힌 축 (재시도 금지)
+
+| 축 | 결과 |
+|---|---|
+| 합성 데이터 분포 | 격차를 닫을수록 단조로 나빠진다 (§129) |
+| DD 전반 | K·rank·게이트·selector 네 갈래 모두 (§145~§147) |
+| DD `distance` readout | §183 사용자 결정으로 `ordered_typicality`가 대체. `scripts/eval_v111.sh`로 historical 재현만 가능 |
+| **CT 분기 전체** | §181 사용자 결정으로 종료. 예측 최고 v110 대신 bias/randomness 없는 full-cell hierarchical PCA32/K256을 v111로 승격 |
+| CT cell 샘플링 | v111은 전체 cell을 사용하므로 selection policy와 sampling seed가 연산에 관여하지 않음 |
+| CT hierarchical sweep | full-cell 최고는 PCA32/K256 0.66070. PCA8/16/64/128 및 K8..2048 탐색 완료 (§168, §175–§179) |
+| CT spherical raw1536 조합 | random512/full-abundance, K32의 4-seed 전체 0.65618±0.00018(7/17), v110 대비 −0.01095로 미승격. raw 차원과 cosine을 함께 바꿔 metric 단독 효과는 미분리 (§180) |
+| CT HDBSCAN full-cell | GPU NN-descent, 32D는 noise 96.2%(§169), 3D도 noise 75~97%에 SEAL 0.6849(−0.0221)(§173). 밀도 기반 K는 연속 공간에서 노이즈 폭증으로 기각 |
+| CT DBSCAN random64/all | adaptive k-distance knee eps, fold 84.5%가 K=1. 전체 0.64976±0.00041, v110 대비 −0.01737 (§170) |
+| CT HDBSCAN random64/all | noise 93.6%, K 중앙값 2, 30.2% all-noise fallback. 전체 0.64819±0.00052, v110 대비 −0.01894 (§171) |
+| CT two-token readout | ridge로 대체됨. 단 raw 1536에서만 "무관"이었다 (§148·§150) |
+
+## 0-6. 열려 있는 갈래
+
+- **CV 비대각 32,640차원의 가중** — 지금은 무가중 ridge다. 학습을 넣는다면 여기다 (§156-6).
+- **DD의 코호트 의존성은 §183 이후에도 남아 있다.** ordered × typicality로 바꿔도 SEAL은
+  flat(−0.00021)이고 홀드아웃만 상승(+0.00372)한다 — 코호트 의존성 자체를 없애지는 못했고
+  홀드아웃 쪽으로 균형을 옮겼을 뿐이다. 에피소드별 게이트가 가능한지는 여전히 열려 있다 (§153).
+  별도 post-selection `r_task`는 두지 않는다는 §182의 결정은 §183에서도 유지된다.
+- **DD ordered × typicality의 다른 κ 값** — 첫 구현은 κ=1 하나만 평가했다(§182, §183). κ를
+  키우면 작은-gap 감쇠가 더 강해지는 방향이라 다음 재개 후보다.
 
 ---
 

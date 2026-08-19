@@ -129,9 +129,14 @@ class TrainingFreeConfig:
     ridge_scale: float = 2.0
     dd_shrinkage: float = 0.25
     dd_eps: float = 1e-6
-    # Experimental DD readout from SS182. ``distance`` is the promoted v111
-    # baseline; ``ordered_typicality`` is the bounded candidate under evaluation.
-    dd_readout: str = "distance"
+    # SS183 (v112, user decision). ``ordered_typicality`` replaces ``distance``:
+    # bounded ordered-coordinate x nearest-class typicality evidence, kappa=1.
+    # Official 17-task macro: SEAL 0.70432 (-0.00021 vs v111), held-out 0.60181
+    # (+0.00372), all-17 0.66211 (+0.00141). 7/17 tasks improve (BAP1 +0.0198,
+    # KEAP1 +0.0144, Histologic Grade +0.0152 lead); SEAL is flat, held-out is
+    # the clear driver. ``distance`` remains available for historical repro
+    # (see scripts/eval_v111.sh).
+    dd_readout: str = "ordered_typicality"
     dd_separation_floor: float = 1.0
     # SS181 (v111, user decision). Promote the best fully deterministic CT arm:
     # full-cell hierarchical PCA/2-means at PCA32/K256. It scores below v110 but
@@ -158,9 +163,13 @@ class TrainingFreeConfig:
     ct_temperature: float = 0.5
     ct_eps: float = 1e-6
     # SS137-3: CV : DD : CT. Sign of the DD term is required by DD returning
-    # distances rather than logits.
+    # distances rather than logits (the ``distance`` readout); for
+    # ``ordered_typicality`` the same negative sign cancels against the pseudo
+    # -pair encoding (SS183) so this stays the coefficient on class-1-positive
+    # margin. -0.343 was fitted against the old distance magnitude; SS183 (v112)
+    # removes that unjustified scaling and takes the bounded margin at |weight|=1.
     weight_cv: float = 1.442
-    weight_dd: float = -0.343
+    weight_dd: float = -1.0
     # SS157-5: 0.286 was fitted against the collapsed FPS tokens. With k-means
     # tokens the branch earns more weight -- sign agreement HOLDS at 11/17 for
     # 0.5-0.7 where on FPS tokens it fell to 7/17. 0.5/0.7/1.0 sit within 0.002 of
