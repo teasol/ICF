@@ -7120,7 +7120,8 @@ M_DD(q) = a(q) * o(q)
 - `src/models/set_transformer_ridge.py::_dd_ordered_typicality_features` — 정식 평가 계보 경로
 - `scripts/test_pathobench.py` — `ICF_DD_ORDERED_TYPICALITY=1`,
   `ICF_DD_SEPARATION_FLOOR=1.0` 훅
-- `scripts/eval_dd_ordered_typicality.sh` — v111에서 DD만 바꾸는 runner
+- `scripts/eval_dd_ordered_typicality.sh` — v111에서 DD만 바꾸는 단일 GPU runner
+- `scripts/run_dd_ordered_typicality_eval.sh` — 17-task GPU worker runner
 
 테스트는 작은 gap 감쇠, 외분 OOD 감쇠, label antisymmetry, 겹친 prototype의 0 evidence,
 boundedness, 정식/독립 구현 일치, legacy v111 동등성을 고정한다. 관련 **89 tests, OK**, 전체
