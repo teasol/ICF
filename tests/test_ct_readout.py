@@ -29,11 +29,14 @@ from src.models.ct_readout import (
     dbscan_tokens,
     kmeans_plusplus_tokens,
     lloyd_refine,
+    parse_cell_budget,
     prepare_cells,
     readout_prototype,
     readout_ridge,
+    resolve_cells_per_bag,
     ridge_coefficients,
     sample_cells,
+    typical_bag_size,
 )
 from src.models.set_transformer_ridge import CovarianceMeanLearnablePDDCTMLPModel
 
@@ -558,6 +561,19 @@ class FullCellTest(unittest.TestCase):
         )
         self.assertFalse(torch.equal(context[0], context[1]))
 
+    def test_integer_and_none_ignore_unused_fraction_knobs(self):
+        bag = torch.arange(80 * DIM, dtype=torch.float32).reshape(80, DIM)
+        historical = CTReadoutConfig(cells_per_bag=32, sampling="random", sampling_seed=3)
+        unused = CTReadoutConfig(
+            cells_per_bag=32, sampling="random", sampling_seed=3,
+            cells_min=7, cells_scale="median",
+        )
+        self.assertTrue(torch.equal(sample_cells(bag, historical), sample_cells(bag, unused)))
+        self.assertTrue(torch.equal(
+            sample_cells(bag, CTReadoutConfig(cells_per_bag=None, cells_min=7)),
+            bag.float(),
+        ))
+
     def test_query_cannot_reach_tokens_or_statistics_at_full_cells(self):
         context_bags, labels, query_bags = episode(44, cells=45)
         config = self._config(None, kmeans_iterations=8)
@@ -570,6 +586,115 @@ class FullCellTest(unittest.TestCase):
     def test_deterministic_and_antisymmetric_at_full_cells(self):
         context_bags, labels, query_bags = episode(45, context=20, cells=45)
         config = self._config(None, kmeans_iterations=10)
+        a, _ = ct_margins(context_bags, labels, query_bags, config, "ridge")
+        b, _ = ct_margins(context_bags, labels, query_bags, config, "ridge")
+        flipped, _ = ct_margins(context_bags, 1 - labels, query_bags, config, "ridge")
+        self.assertTrue(torch.equal(a.query, b.query))
+        self.assertTrue(torch.allclose(a.query, -flipped.query, atol=1e-4))
+
+
+class SizeAwareSamplingTest(unittest.TestCase):
+    """A fixed 512-style cap ignored bag size. The fraction path must not."""
+
+    def test_parse_keeps_historical_tokens_and_reads_fractions(self):
+        self.assertEqual(parse_cell_budget("all"), (None, None, None))
+        self.assertEqual(parse_cell_budget("64"), (64, None, None))
+        self.assertEqual(parse_cell_budget("0.125"), (None, 0.125, None))
+        self.assertEqual(parse_cell_budget("frac:0.2"), (None, 0.2, None))
+        self.assertEqual(parse_cell_budget("own:0.1"), (None, 0.1, "own"))
+        self.assertEqual(parse_cell_budget("median:0.25"), (None, 0.25, "median"))
+        with self.assertRaises(ValueError):
+            parse_cell_budget("1.5")
+        with self.assertRaises(ValueError):
+            parse_cell_budget("0")
+
+    def test_larger_bags_draw_more_cells_under_the_same_fraction(self):
+        small = torch.arange(80 * DIM, dtype=torch.float32).reshape(80, DIM)
+        large = torch.arange(400 * DIM, dtype=torch.float32).reshape(400, DIM)
+        config = CTReadoutConfig(
+            cells_per_bag=None, cells_fraction=0.25, sampling="random", sampling_seed=4,
+        )
+        self.assertEqual(sample_cells(small, config).shape[0], 20)
+        self.assertEqual(sample_cells(large, config).shape[0], 100)
+
+    def test_fraction_sampling_is_reproducible_and_seeded(self):
+        bag = torch.arange(200 * DIM, dtype=torch.float32).reshape(200, DIM)
+        config = CTReadoutConfig(
+            cells_per_bag=None, cells_fraction=0.2, sampling="random", sampling_seed=7,
+        )
+        first = sample_cells(bag, config)
+        repeated = sample_cells(bag, config)
+        other = sample_cells(
+            bag,
+            CTReadoutConfig(
+                cells_per_bag=None, cells_fraction=0.2, sampling="random", sampling_seed=8,
+            ),
+        )
+        self.assertTrue(torch.equal(first, repeated))
+        self.assertFalse(torch.equal(first, other))
+        self.assertEqual(first.shape, (40, DIM))
+
+    def test_query_bags_do_not_set_the_median_budget(self):
+        context = [
+            torch.arange(i * 40 * DIM, (i + 1) * 40 * DIM, dtype=torch.float32).reshape(40, DIM)
+            for i in range(4)
+        ]
+        huge_query = [torch.randn(4000, DIM)]
+        config = CTReadoutConfig(
+            cells_per_bag=None,
+            cells_fraction=0.5,
+            cells_scale="median",
+            sampling="random",
+            sampling_seed=5,
+        )
+        sampled_context, sampled_query = prepare_cells(context, huge_query, config, None)
+        self.assertEqual(typical_bag_size(context), 40.0)
+        self.assertTrue(all(bag.shape[0] == 20 for bag in sampled_context))
+        self.assertEqual(sampled_query[0].shape[0], 20)
+        other_query = [torch.randn(9, DIM)]
+        again_context, again_query = prepare_cells(context, other_query, config, None)
+        self.assertTrue(all(
+            torch.equal(left, right) for left, right in zip(sampled_context, again_context)
+        ))
+        self.assertEqual(again_query[0].shape[0], 9)
+
+    def test_median_budget_is_shared_across_unequal_bags(self):
+        bags = [
+            torch.randn(10, DIM),
+            torch.randn(80, DIM),
+            torch.randn(40, DIM),
+        ]
+        config = CTReadoutConfig(
+            cells_per_bag=None,
+            cells_fraction=0.5,
+            cells_scale="median",
+            sampling="even",
+        )
+        sampled, _ = prepare_cells(bags, [torch.randn(100, DIM)], config, None)
+        # Median context n is 40, so the shared budget is 20. The 10-cell bag
+        # cannot exceed its own length.
+        self.assertEqual([bag.shape[0] for bag in sampled], [10, 20, 20])
+
+    def test_own_fraction_clamps_to_the_bag_and_the_floor(self):
+        config = CTReadoutConfig(
+            cells_per_bag=None, cells_fraction=0.5, cells_min=8, cells_scale="own",
+        )
+        self.assertEqual(resolve_cells_per_bag(10, config), 8)
+        self.assertEqual(resolve_cells_per_bag(6, config), 6)
+        self.assertEqual(resolve_cells_per_bag(40, config), 20)
+
+    def test_kmeans_plusplus_fraction_path_is_deterministic_and_antisymmetric(self):
+        context_bags, labels, query_bags = episode(61, context=20, cells=48)
+        config = CTReadoutConfig(
+            num_tokens=8,
+            cells_per_bag=None,
+            cells_fraction=0.5,
+            sampling="random",
+            sampling_seed=2,
+            tokenizer="kmeans_plusplus",
+            kmeans_seed=3,
+            kmeans_max_iterations=4,
+        )
         a, _ = ct_margins(context_bags, labels, query_bags, config, "ridge")
         b, _ = ct_margins(context_bags, labels, query_bags, config, "ridge")
         flipped, _ = ct_margins(context_bags, 1 - labels, query_bags, config, "ridge")

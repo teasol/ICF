@@ -829,13 +829,13 @@ class CovarianceMeanDDRidgeModel(CovarianceMeanRidgeModel):
         query_covariance,
         separation_floor=1.0,
     ):
-        """SS182 bounded DD arm, encoded for the historical 12-slot head.
+        """SS182 bounded DD arm, returned as LOGITS like CV and CT (SS183).
 
         Recompute the same rank-1 scalar statistics as the canonical distance
         path, then replace its unbounded QDA distance difference with an ordered
-        coordinate times nearest-class typicality.  The returned pair satisfies
-        ``d0 - d1 == class_1_positive_margin`` so the existing fixed-head DD
-        magnitude and sign convention remain untouched.
+        coordinate times nearest-class typicality.  The returned pair is
+        ``(dd0, dd1)`` with ``dd1 - dd0 == class_1_positive_margin``, so the
+        fixed head consumes it at a positive weight exactly like CV and CT.
         """
         from src.models.dd_adaptive_rank import ordered_typicality_margin
 
@@ -862,7 +862,7 @@ class CovarianceMeanDDRidgeModel(CovarianceMeanRidgeModel):
         margin = ordered_typicality_margin(
             query_feature, prototypes, dispersions, self.dd_eps, separation_floor
         )
-        pair = torch.stack((0.5 * margin, -0.5 * margin), dim=-1)
+        pair = torch.stack((-0.5 * margin, 0.5 * margin), dim=-1)
         return pair, (prototypes[1] - prototypes[0]).abs()
 
     def _ridge_logits(self, context, context_labels, query):

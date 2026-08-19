@@ -25,8 +25,12 @@ for task in "$@"; do
   out="predictions/pathobench_${name}_${TAG}_official50_bf16.pt"
   log="logs/official50/${name}_${TAG}.log"
   echo "=== START ${task} $(date +%H:%M:%S)"
+  ckpt_args=()
+  if [ -n "$CKPT" ]; then
+    ckpt_args=(--checkpoint "$CKPT")
+  fi
   CUDA_VISIBLE_DEVICES="$GPU" "$PY" scripts/test_pathobench.py \
-    --checkpoint "$CKPT" --config "$CONFIG" \
+    "${ckpt_args[@]}" --config "$CONFIG" \
     --official-folds "$OFFICIAL/$task" --features "$FEATURES" \
     --input-dim 1536 --precision bf16-mixed --output "$out" > "$log" 2>&1
   rc=$?

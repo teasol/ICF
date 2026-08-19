@@ -3,9 +3,9 @@
 WHAT THE SHARED CT PIPELINE DOES (docs SS140 step 5, `_ct_features` in both the
 lineage and `training_free.py`). Per episode, with no labels until the last step:
 
-  1. sample the configured number of cells per bag (active candidate: random 64)
+  1. sample cells per bag (int cap, all cells, or a fraction of bag / episode size)
   2. standardise the 1,536 coordinates on CONTEXT cells only
-  3. build configured tokens (active candidate: seeded k-means++ + Lloyd, K=32)
+  3. build configured tokens (fps+Lloyd, k-means++ + Lloyd, hierarchical 2-means, ...)
   4. soft-assign configured abundance cells to the tokens
   5. average per bag -> a K-dimensional ABUNDANCE vector
   6. score each token by (mean_0 - mean_1) / standard_error
@@ -76,13 +76,25 @@ class CTReadoutConfig:
     # difference it is meant to carry. This is the last of SS148-5's three suspects
     # (token generation was SS157, the distance metric SS149).
     cells_per_bag: int | None = 64
+    # Size-aware alternative to a fixed cap. None keeps the historical
+    # integer/`all` path bit-identical. A value in (0, 1] draws
+    # round(fraction * reference) cells, clamped to [cells_min, n_i].
+    # `cells_scale="own"` uses this bag's length (a 5k-cell LUAD slide
+    # contributes more than a 2k-cell therapy slide). `"median"` uses the
+    # CONTEXT-only median length so the episode's typical size sets one
+    # shared budget; query bags never enter that statistic.
+    cells_fraction: float | None = None
+    cells_min: int = 1
+    cells_scale: Literal["own", "median"] = "own"
     # SS165. The cells that FIT the coordinate normalisation and k-means tokens
     # need not be the cells whose assignments are averaged into each bag's
     # abundance.  "match" preserves the historical coupled path bit-for-bit;
     # None uses every cell for abundance while keeping `cells_per_bag` for the
     # context-only dictionary.  This isolates estimation precision from the
-    # cell-count weighting of the pooled k-means objective.
-    abundance_cells_per_bag: int | None | Literal["match"] = "match"
+    # cell-count weighting of the pooled k-means objective. A float in (0, 1]
+    # is the same size-aware policy as `cells_fraction`, applied only to the
+    # abundance average.
+    abundance_cells_per_bag: int | float | None | Literal["match"] = "match"
     # Random is the active default: evenly spaced indices are biased whenever
     # storage order carries slide/location/batch structure. The fixed seed is
     # mixed with the bag index, so evaluation remains reproducible while bags do
@@ -183,23 +195,147 @@ class CTMargins(NamedTuple):
 _CONFIG_CELL_LIMIT = object()
 
 
+def parse_cell_budget(
+    raw: str,
+) -> tuple[int | None, float | None, str | None]:
+    """Parse an `ICF_CT_CELLS` / abundance token.
+
+    Returns `(cells_per_bag, cells_fraction, cells_scale)`. Historical values
+    stay exact: ``all`` -> ``(None, None, None)``, ``64`` -> ``(64, None, None)``.
+    Size-aware forms: ``0.125``, ``frac:0.125``, ``own:0.125``, ``median:0.125``.
+    """
+    text = raw.strip().lower()
+    if text == "all":
+        return None, None, None
+    scale = None
+    payload = text
+    for prefix, named_scale in (
+        ("fraction:", None),
+        ("frac:", None),
+        ("own:", "own"),
+        ("median:", "median"),
+        ("scale:", "own"),
+    ):
+        if text.startswith(prefix):
+            payload = text[len(prefix):]
+            scale = named_scale
+            break
+    if payload == "" or payload == "match":
+        raise ValueError(f"unrecognised cell budget {raw!r}")
+    if any(marker in payload for marker in (".", "e", "E")):
+        try:
+            fraction = float(payload)
+        except ValueError as error:
+            raise ValueError(f"unrecognised cell budget {raw!r}") from error
+        if not 0.0 < fraction <= 1.0:
+            raise ValueError(
+                f"cell fraction must be in (0, 1], got {raw!r}"
+            )
+        return None, fraction, scale
+    try:
+        count = int(payload)
+    except ValueError as error:
+        raise ValueError(f"unrecognised cell budget {raw!r}") from error
+    if count < 1:
+        raise ValueError("cells_per_bag must be a positive integer or None.")
+    return count, None, None
+
+
+def typical_bag_size(bags: Sequence[torch.Tensor]) -> float:
+    """Median cell count. Caller must pass CONTEXT bags only."""
+    if not bags:
+        raise ValueError("Need at least one context bag to set the sampling scale.")
+    lengths = sorted(int(bag.shape[0]) for bag in bags)
+    middle = len(lengths) // 2
+    if len(lengths) % 2:
+        return float(lengths[middle])
+    return 0.5 * (lengths[middle - 1] + lengths[middle])
+
+
+def _uses_fraction(
+    config: CTReadoutConfig,
+    cells_per_bag: int | float | None | object,
+) -> bool:
+    if cells_per_bag is _CONFIG_CELL_LIMIT:
+        return config.cells_fraction is not None
+    return isinstance(cells_per_bag, float)
+
+
+def resolve_cells_per_bag(
+    bag_size: int,
+    config: CTReadoutConfig,
+    cells_per_bag: int | float | None | object = _CONFIG_CELL_LIMIT,
+    typical_size: float | None = None,
+) -> int | None:
+    """How many cells to keep from a bag of `bag_size`. None keeps every cell."""
+    if bag_size < 1:
+        raise ValueError("Every bag must contain at least one cell.")
+    if config.cells_min < 1:
+        raise ValueError("cells_min must be a positive integer.")
+    if cells_per_bag is _CONFIG_CELL_LIMIT:
+        limit: int | float | None = (
+            config.cells_fraction
+            if config.cells_fraction is not None
+            else config.cells_per_bag
+        )
+        scale = config.cells_scale
+    else:
+        limit = cells_per_bag
+        scale = config.cells_scale
+    if isinstance(limit, float):
+        if not 0.0 < limit <= 1.0:
+            raise ValueError("cells_fraction must be in (0, 1].")
+        if scale == "median":
+            if typical_size is None:
+                raise ValueError(
+                    "median sampling needs a context-only typical bag size."
+                )
+            reference = float(typical_size)
+        elif scale == "own":
+            reference = float(bag_size)
+        else:
+            raise ValueError(
+                f"cells_scale must be 'own' or 'median', got {scale!r}"
+            )
+        target = int(math.floor(limit * reference + 0.5))
+        return min(bag_size, max(config.cells_min, target))
+    if limit is not None and (not isinstance(limit, int) or limit < 1):
+        raise ValueError("cells_per_bag must be a positive integer or None.")
+    return limit
+
+
+def _project_sampled_bag(bag: torch.Tensor, basis: torch.Tensor) -> torch.Tensor:
+    """Project one sampled bag onto `basis`, matching the basis device.
+
+    Official eval keeps raw 1536-d tiles on CPU. The sampled subset is
+    small (a fraction of the bag, or already reduced) so uploading it for
+    the GEMM is cheap, and the reduced cells stay next to the tokenizer.
+    """
+    if bag.device == basis.device and bag.dtype == basis.dtype:
+        return bag @ basis
+    return bag.to(device=basis.device, dtype=basis.dtype) @ basis
+
+
 def sample_cells(
     bag: torch.Tensor,
     config: CTReadoutConfig,
-    cells_per_bag: int | None | object = _CONFIG_CELL_LIMIT,
+    cells_per_bag: int | float | None | object = _CONFIG_CELL_LIMIT,
     sampling_seed: int | None = None,
+    typical_size: float | None = None,
 ) -> torch.Tensor:
     """Select a capped subset using the configured reproducible policy.
 
     `cells_per_bag=None` keeps every cell (docs SS159); the bag is already capped
-    upstream by the encoder's `max_cells`, so this is not unbounded.
+    upstream by the encoder's `max_cells`, so this is not unbounded. A fraction
+    (config `cells_fraction`, or a float override) scales with bag / episode size
+    instead of repeating a global 512-style cap.
     """
     values = bag.float()
     if values.shape[0] == 0:
         raise ValueError("Every bag must contain at least one cell.")
-    limit = config.cells_per_bag if cells_per_bag is _CONFIG_CELL_LIMIT else cells_per_bag
-    if limit is not None and (not isinstance(limit, int) or limit < 1):
-        raise ValueError("cells_per_bag must be a positive integer or None.")
+    limit = resolve_cells_per_bag(
+        values.shape[0], config, cells_per_bag, typical_size
+    )
     if limit is None or values.shape[0] <= limit:
         return values
     if config.sampling == "even":
@@ -229,7 +365,7 @@ def prepare_cells(
     config: CTReadoutConfig,
     pca_basis: torch.Tensor | None = None,
     *,
-    cells_per_bag: int | None | object = _CONFIG_CELL_LIMIT,
+    cells_per_bag: int | float | None | object = _CONFIG_CELL_LIMIT,
     normalisation: tuple[torch.Tensor, torch.Tensor] | None = None,
     return_normalisation: bool = False,
 ):
@@ -238,10 +374,20 @@ def prepare_cells(
     Returned so diagnostics can measure distances among the SAME cells the tokens
     are chosen from. Recomputing this in a diagnostic instead is how SS149's first
     contrast table came to measure token-to-token distance by mistake.
+
+    Size-aware sampling (`cells_fraction` / a float override) may use the
+    CONTEXT-only median bag length. Query bags never enter that statistic.
     """
+    typical_size = None
+    if _uses_fraction(config, cells_per_bag) and config.cells_scale == "median":
+        typical_size = typical_bag_size(context_bags)
     context = [
         sample_cells(
-            bag, config, cells_per_bag, sampling_seed=config.sampling_seed + index
+            bag,
+            config,
+            cells_per_bag,
+            sampling_seed=config.sampling_seed + index,
+            typical_size=typical_size,
         )
         for index, bag in enumerate(context_bags)
     ]
@@ -251,6 +397,7 @@ def prepare_cells(
             config,
             cells_per_bag,
             sampling_seed=config.sampling_seed + 1_000_000_007 + index,
+            typical_size=typical_size,
         )
         for index, bag in enumerate(query_bags)
     ]
@@ -259,9 +406,12 @@ def prepare_cells(
         # Project the RAW cells: the basis was built in unstandardised UNI2 space,
         # so that is the space it is orthonormal in. Per-coordinate standardisation
         # then happens below, on the retained components instead of on all 1,536.
-        basis = pca_basis[:, : config.pca_dim].to(context[0].dtype)
-        context = [bag @ basis for bag in context]
-        query = [bag @ basis for bag in query]
+        # Official eval keeps the 1536-d tiles on CPU; only this sampled bag
+        # is uploaded, the GEMM runs next to the basis, and the reduced cells
+        # stay on that device for the tokenizer.
+        basis = pca_basis[:, : config.pca_dim].to(dtype=context[0].dtype)
+        context = [_project_sampled_bag(bag, basis) for bag in context]
+        query = [_project_sampled_bag(bag, basis) for bag in query]
     if normalisation is None:
         pooled = torch.cat(context, dim=0)
         centre = pooled.mean(dim=0, keepdim=True)
@@ -860,11 +1010,13 @@ def ct_abundance(
         context, query = token_context, token_query
     else:
         abundance_limit = config.abundance_cells_per_bag
-        if abundance_limit is not None and (
-            not isinstance(abundance_limit, int) or abundance_limit < 1
+        if abundance_limit is not None and not (
+            isinstance(abundance_limit, int) and abundance_limit >= 1
+            or isinstance(abundance_limit, float) and 0.0 < abundance_limit <= 1.0
         ):
             raise ValueError(
-                "abundance_cells_per_bag must be 'match', a positive integer, or None."
+                "abundance_cells_per_bag must be 'match', a positive integer, "
+                "a fraction in (0, 1], or None."
             )
         context, query = prepare_cells(
             context_bags,

@@ -23,14 +23,16 @@ bags of UNI2 tiles (each bag is [cells, 1536]):
                 (bags number ~200 against a descriptor of ~34k), giving two logits
                 per query.
   4. DD         A rank-1 dispersion direction from the sketched covariances, then
-                normalised squared DISTANCES from each query to the two class
-                prototypes. Distances, not logits — which is why the head weighs
-                them negatively.
+                LOGITS per class, like CV and CT: the class-1-positive
+                ordered-coordinate x nearest-class typicality evidence (SS183),
+                or the negated normalised distances for the historical
+                ``distance`` readout. The head weighs the logit difference
+                (DD1-DD0) positively.
   5. CT         Deterministic farthest-point tokens over context cells (labels
                 never enter the selection), each bag summarised by its soft
                 abundance over those tokens, and the two most class-separating
                 tokens read off.
-  6. HEAD       margin = 1.442*(CV1-CV0) - 0.343*(D1-D0) + 0.286*(q1-q0)
+  6. HEAD       margin = 1.442*(CV1-CV0) + 1.0*(DD1-DD0) + 0.7*(q1-q0)
                 logits = (-margin/2, +margin/2)
 
 WHY THE HEAD IS CONSTANT (SS137-3, confirmed on the official path in SS138-4 at a
@@ -63,6 +65,7 @@ import torch
 
 from src.models.ct_readout import CTReadoutConfig, ct_margins
 from src.models.dd_adaptive_rank import ordered_typicality_margin
+from src.models.stream_eval import covariance_basis_from_bags
 
 
 def _solve_ridge(gram: torch.Tensor, targets: torch.Tensor, penalty: float) -> torch.Tensor:
@@ -143,7 +146,12 @@ class TrainingFreeConfig:
     # removes both storage-order selection bias and sampling-seed dependence.
     ct_num_tokens: int = 256
     ct_cells_per_bag: int | None = None
-    ct_abundance_cells_per_bag: int | None | str = None
+    ct_abundance_cells_per_bag: int | None | str | float = None
+    # Size-aware sampling (v113). None keeps the v111/v112 full-cell path.
+    # A value in (0, 1] draws round(fraction * bag_or_median) cells.
+    ct_cells_fraction: float | None = None
+    ct_cells_min: int = 1
+    ct_cells_scale: str = "own"
     # Inactive when every cell is used; retained only as a valid explicit policy.
     ct_sampling: str = "even"
     ct_sampling_seed: int = 0
@@ -162,14 +170,14 @@ class TrainingFreeConfig:
     ct_dbscan_min_samples: int = 16
     ct_temperature: float = 0.5
     ct_eps: float = 1e-6
-    # SS137-3: CV : DD : CT. Sign of the DD term is required by DD returning
-    # distances rather than logits (the ``distance`` readout); for
-    # ``ordered_typicality`` the same negative sign cancels against the pseudo
-    # -pair encoding (SS183) so this stays the coefficient on class-1-positive
-    # margin. -0.343 was fitted against the old distance magnitude; SS183 (v112)
-    # removes that unjustified scaling and takes the bounded margin at |weight|=1.
+    # SS137-3: CV : DD : CT. DD now emits LOGITS with a class-1-positive
+    # difference (dd1 - dd0), exactly like CV and CT, so the weight is positive.
+    # The ``distance`` readout is negated into logits internally (a large
+    # distance is evidence AGAINST that class). -0.343 was fitted against the old
+    # distance magnitude; SS183 (v112) removes that unjustified scaling and takes
+    # the bounded ordered_typicality margin at weight 1.
     weight_cv: float = 1.442
-    weight_dd: float = -1.0
+    weight_dd: float = 1.0
     # SS157-5: 0.286 was fitted against the collapsed FPS tokens. With k-means
     # tokens the branch earns more weight -- sign agreement HOLDS at 11/17 for
     # 0.5-0.7 where on FPS tokens it fell to 7/17. 0.5/0.7/1.0 sit within 0.002 of
@@ -207,20 +215,17 @@ class TrainingFreeClassifier:
     def within_slide_basis(self, context_bags: Sequence[torch.Tensor]) -> torch.Tensor:
         """Top-K eigenvectors of the WITHIN-slide pooled covariance.
 
-        Accumulated bag by bag: concatenating every context cell first is what
-        SS62-3 identified as an eval OOM driver (~12 GB for a full-tile episode).
+        Accumulated bag by bag, one chunk at a time: concatenating every
+        context cell first is what SS62-3 identified as an eval OOM driver
+        (~12 GB for a full-tile episode), and `bag.double()` of a GPU-resident
+        LUAD slide is what tips a 22 GiB card after the cohort is already up.
         """
-        dim = context_bags[0].shape[-1]
-        device = context_bags[0].device
-        scatter = torch.zeros(dim, dim, dtype=torch.float64, device=device)
-        total = 0
-        for bag in context_bags:
-            values = bag.double()
-            centred = values - values.mean(dim=0, keepdim=True)
-            scatter += centred.T @ centred
-            total += values.shape[0]
-        _, vectors = torch.linalg.eigh(scatter / max(total, 1))
-        return vectors[:, -self.config.sketch_dim:].flip(-1).float()
+        return covariance_basis_from_bags(
+            context_bags,
+            "pca_within",
+            self.config.sketch_dim,
+            context_bags[0].device,
+        )
 
     # ---- 2. descriptors ---------------------------------------------------
     def _descriptor(self, bag: torch.Tensor, basis: torch.Tensor, triangle) -> torch.Tensor:
@@ -290,9 +295,10 @@ class TrainingFreeClassifier:
             / dispersions[None, :]
         )
         if config.dd_readout == "distance":
-            # DISTANCES: small means close to that class, hence the head's
-            # negative weight. This is the promoted v111 behaviour.
-            return distances
+            # Logits, not distances: -d_c is the class-c score, so a large
+            # distance is evidence AGAINST that class and the head weighs the
+            # difference (dd1 - dd0) positively, like CV and CT (SS183).
+            return -distances
         if config.dd_readout == "ordered_typicality":
             margin = ordered_typicality_margin(
                 query_feature,
@@ -301,10 +307,10 @@ class TrainingFreeClassifier:
                 config.dd_eps,
                 config.dd_separation_floor,
             )
-            # Keep the fixed head and its historical negative DD coefficient
-            # unchanged: it consumes d1-d0, so this symmetric pseudo-pair makes
-            # -weight*(d1-d0) equal +weight*margin.
-            return torch.stack((0.5 * margin, -0.5 * margin), dim=-1)
+            # Logits, like CT: the pair is (-margin/2, +margin/2) so its
+            # difference IS the class-1-positive margin, consumed by the head
+            # at a positive weight (SS183).
+            return torch.stack((-0.5 * margin, 0.5 * margin), dim=-1)
         raise ValueError(
             'dd_readout must be "distance" or "ordered_typicality", '
             f"got {config.dd_readout!r}"
@@ -328,6 +334,9 @@ class TrainingFreeClassifier:
                 num_tokens=config.ct_num_tokens,
                 cells_per_bag=config.ct_cells_per_bag,
                 abundance_cells_per_bag=config.ct_abundance_cells_per_bag,
+                cells_fraction=config.ct_cells_fraction,
+                cells_min=config.ct_cells_min,
+                cells_scale=config.ct_cells_scale,
                 sampling=config.ct_sampling,
                 sampling_seed=config.ct_sampling_seed,
                 distance_kernel=config.ct_distance_kernel,

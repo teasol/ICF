@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-19` — §183 사용자 결정으로 **v112 = v111 + DD ordered-coordinate × nearest-class typicality (κ=1, fixed-head weight=1)**를 활성 baseline으로 승격했다. 전체 17-task macro **0.66211**(v111 대비 +0.00141), SEAL 10 **0.70432**(−0.00021, 사실상 flat), 홀드아웃 7 **0.60181**(+0.00372)이다. `TrainingFreeConfig` 기본값을 `dd_readout="ordered_typicality"`, `weight_dd=-1.0`으로 변경했고 활성 runner `scripts/eval_v112.sh`를 추가했다. `scripts/eval_v111.sh`는 historical distance-readout 재현 전용으로 유지한다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
+**Last updated**: `2026-08-20` — §185 사용자 결정으로 **v113 = v112 + CT cell 예산을 bag 자기 크기의 1/8 fraction(floor 64, `ICF_CT_CELLS=0.125`)으로 교체**를 활성 baseline으로 승격했다. 승격 사유는 예측 macro가 아니라 **feasibility**다 — v112의 CT는 bag의 전체 cell을 쓰는데, 22GB급 GPU 노드(gnode3)에서 LUAD처럼 bag당 최대 ~35k cell인 slide가 즉시 `CUDA out of memory`로 죽어(§184) SEAL 10-task를 완주할 수 없었다. v113은 이 OOM을 없애면서 SEAL 10 macro **0.70394**로 v112(0.70432) 대비 **−0.00038**(§183의 "flat" 판정 폭 −0.00021과 같은 급의 잡음 — 예측 성능 손실 없음)을 확인했다. 전체 17-task/홀드아웃 7은 아직 이 arm으로 재측정되지 않았다. 활성 runner `scripts/eval_v113.sh`. `scripts/eval_v112.sh`(전체-cell CT)와 `scripts/eval_v111.sh`(distance DD)는 historical 재현 전용으로 유지한다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -7249,5 +7249,122 @@ CT 분기는 §181에서 이미 종료됐고 이번 승격은 DD 분기에 한�
 여부를 사용자와 논의하는 것이다.
 
 _Recorded by: nhn-YLC-claude — 2026-08-19 11:35_
+
+---
+
+## 184. 2026-08-20 — CT cell 예산을 bag-size 비례 fraction으로: 22GB GPU OOM 해소 + v112 대비 macro sampling-invariance 확인
+
+이 gnode3 22GB GPU 노드에서 v112(§183) SEAL 10-task 평가를 재현하면 LUAD 3개 task
+(EGFR/STK11/TP53_mutation) 전부 `evaluate_trial`의 `pooled = cat(context)` / `centered = values -
+values.mean(...)` 단계에서 즉시 `CUDA out of memory`로 죽었다(`Tried to allocate 278.00 MiB. ...
+this process has 21.82 GiB memory in use`, `logs/official50/cptac_luad_*_v112.log`,
+`logs/official50/cptac_luad_*_v113.log`, `logs/20260819_v112_17task/cptac_luad_*.runner.log`
+전부 동일 실패). v112가 §183에서 측정된 8×B200(180GB/장) 노드에서는 문제없이 돌던 것과 대비된다 —
+원인은 v111/v112가 물려받은 CT의 full-cell/full-abundance hierarchical 샘플링이 LUAD처럼 bag당
+최대 ~35k cell인 slide에서 `prepare_cells`가 CONTEXT 전체를 한 번에 GPU에 올리기 때문이다.
+
+**수정 두 가지 (uncommitted 시점 기준, 이후 커밋 예정)**:
+
+1. `src/models/stream_eval.py` (신규) — raw bag을 CPU에 상주시키고 PCA covariance scatter만
+   1-bag/1-chunk 단위로 GPU에 올려 계산. `test_pathobench.py`의 `ICF_COVARIANCE_BASIS=pca|pca_within`
+   경로가 이걸 통해 basis를 구성하도록 배선.
+2. `src/models/ct_readout.py` — `cells_per_bag`(고정 정수 cap) 대신 **bag/episode 크기에 비례하는
+   fraction 샘플링**을 추가: `cells_fraction`(0,1] + `cells_scale="own"|"median"` + `cells_min`.
+   `scripts/eval_v113.sh`(신규)가 `ICF_CT_CELLS=0.125`(own bag 크기의 1/8, floor 64)로 이를 켠다.
+   LUAD의 최대 35k cell bag이 이 cap으로 ~4,375 cell까지 줄어든다.
+
+**검증**: BagPFN pytest `tests/test_ct_readout.py` + `tests/test_training_free.py` 81 passed, 2
+skipped, 회귀 없음. 이 노드에서 SEAL 10-task 전체를 `eval_v113.sh`로 재실행 — **10개 전부 `rc=0`,
+OOM 0건**(LUAD 3개 포함, 이 노드에서 처음으로 완주).
+
+| task | v112 baseline (§183, B200) | v113 (fraction 샘플링, gnode3) | Δ |
+|---|---:|---:|---:|
+| bc_therapy/er_status | 0.6834 | 0.6885 | +0.0051 |
+| bc_therapy/grade | 0.7329 | 0.7338 | +0.0009 |
+| bc_therapy/her2_status | 0.6736 | 0.6737 | +0.0001 |
+| cptac_brca/PIK3CA_mutation | 0.5400 | 0.5390 | −0.0010 |
+| cptac_brca/TP53_mutation | 0.8270 | 0.8255 | −0.0015 |
+| cptac_ccrcc/BAP1_mutation | 0.7019 | 0.6877 | −0.0142 |
+| cptac_ccrcc/VHL_mutation | 0.5095 | 0.5090 | −0.0005 |
+| cptac_luad/EGFR_mutation | 0.7825 | 0.7862 | +0.0037 |
+| cptac_luad/STK11_mutation | 0.9006 | 0.8949 | −0.0057 |
+| cptac_luad/TP53_mutation | 0.6918 | 0.7011 | +0.0093 |
+| **SEAL 10 macro** | **0.70432** | **0.70394** | **−0.00038** |
+
+**해석 — 이번 기록의 핵심은 OOM이 없어졌다는 것보다 이 Δ다.** v112와 v113은 CT의 cell 선택
+방식이 근본적으로 다르다(전체 cell vs bag 크기의 1/8만 샘플링). 그런데도 SEAL macro 차이가
+−0.00038로, §183에서 v111→v112 승격 때 "사실상 flat"이라 판정한 폭(−0.00021)과 같은 급의
+잡음이다. task별로도 5승 5패로 부호가 갈리고 한쪽으로 치우친 체계적 손실이 없다(가장 큰 하락은
+BAP1_mutation −0.0142, §107-3 게이트 수준에는 못 미친다). 즉 **CT의 abundance/tokenizer 단계는
+cell 개수 자체보다 cell 비율에 더 가깝게 반응한다는 sampling-invariance 증거**이며, 메모리
+제약이 있는 노드에서 `cells_fraction`을 기본값으로 써도 안전하다는 근거가 된다.
+
+⚠️ 이 절 작성 시점 기준 `stream_eval.py`/`ct_readout.py`의 `cells_fraction` 관련 변경은
+**working tree에 uncommitted 상태**다(`scripts/eval_v113.sh`, `src/models/stream_eval.py`는
+untracked). §183의 활성 baseline(v112) 승격 자체를 대체하는 것은 아니고, 같은 v112 DD/CV 설정에
+CT cell 샘플링 policy 하나만 바꾼 별도 arm(v113/`ICF_CT_CELLS`)으로 취급한다.
+
+_by Claude Sonnet 5 on gnode3 at 2026-08-20 01:08:02_
+
+---
+
+## 185. 2026-08-20 — **v113 승격 확정: v112 + CT cell 예산을 bag 크기의 1/8 fraction으로 (사유: feasibility, 예측 macro 아님)**
+
+사용자 결정으로 §184의 arm(CT cell 샘플링을 전체 cell → bag 자기 크기의 1/8 fraction, floor 64로
+교체)을 새 활성 baseline으로 승격했다.
+
+**승격 사유는 명시적으로 feasibility이지, 예측 성능 개선이 아니다.** v112의 CT는 §183 시점
+8×B200(180GB/장) 노드에서 측정됐고 그 하드웨어에서는 문제가 없었다. 그러나 22GB급 GPU
+노드(gnode3)에서 v112를 그대로 재현하면 LUAD 3개 task(EGFR/STK11/TP53_mutation) 전부 CT의
+`prepare_cells`가 bag의 전체 cell(최대 ~35k)을 한 번에 GPU에 올리는 지점에서 `CUDA out of
+memory`로 즉시 죽는다(§184, `logs/official50/cptac_luad_*_v112.log` 등). 즉 **v112는 이 노드
+클래스에서 SEAL 10-task를 완주할 수 없는 arm**이었다 — feasibility 자체가 실패했다. v113의
+승격은 "더 나은 성능"이 아니라 "메모리 제약 노드에서도 채점 가능한 baseline"을 확보하기 위함이다.
+
+```
+CV/DD                     : v112와 동일 (offdiag CV, ordered-coordinate × typicality DD κ=1 weight=1)
+CT cell 예산              : 전체 cell (v112) → bag 자기 크기의 1/8 fraction, floor 64 (v113)
+                            ICF_CT_CELLS=0.125, ICF_CT_CELLS_SCALE=own, ICF_CT_CELLS_MIN=64
+CT abundance              : match (토큰 dictionary와 같은 샘플로 abundance 계산, v112와 동일 정책)
+```
+
+| | SEAL 10 | 홀드아웃 7 | 전체 17 |
+|---|---:|---:|---:|
+| **v113 (활성)** | **0.70394** | 미측정 | 미측정 |
+| v112 (previous baseline) | 0.70432 | 0.60181 | 0.66211 |
+| Δ v113−v112 (SEAL 10) | −0.00038 | — | — |
+
+SEAL 10 macro Δ(−0.00038)는 §183에서 v111→v112 승격을 "사실상 flat"으로 판정한 폭(−0.00021)과
+같은 급의 잡음이다 — task 10개 중 5개는 상승, 5개는 하락으로 부호가 갈리고 한쪽으로 치우친
+체계적 손실이 없다(§184 표). **이 arm은 예측 macro 게이트를 통과해서가 아니라, feasibility가
+없으면 애초에 게이트를 적용할 숫자 자체가 없기 때문에 승격됐다** — §118의 "최종 판정은 통계
+게이트가 아니라 사용자의 종합적 판단"과 같은 원칙이되, 이번엔 macro 비교가 아니라 "완주 가능
+여부"가 판단 근거였다.
+
+⚠️ **홀드아웃 7·전체 17은 아직 v113으로 재측정되지 않았다.** §0-2/§0-3 표의 해당 칸을 v112
+값으로 채우거나 인용하지 말 것 — CT cell 예산이 바뀌었으므로 다시 측정하기 전까지는 미지수로
+남긴다. 다음 action은 (a) 코드(`src/models/ct_readout.py`, `src/models/stream_eval.py`,
+`scripts/eval_v113.sh` 등, 현재 uncommitted)를 커밋하는 것과 (b) 홀드아웃 7·전체 17을
+`eval_v113.sh`로 재측정해 이 표의 빈 칸을 채우는 것이다.
+
+구현:
+
+- `src/models/ct_readout.py`: `CTReadoutConfig`에 `cells_fraction`(0,1]·`cells_scale`("own"|
+  "median")·`cells_min` 추가. `cells_per_bag`(정수 cap)와 상호 배타적 — `cells_fraction`이
+  설정되면 그걸 우선한다. `abundance_cells_per_bag`도 float fraction을 받아 같은 정책을 따를 수
+  있다(§184).
+- `src/models/stream_eval.py`(신규): raw bag을 CPU에 상주시키고 PCA covariance scatter를
+  1-bag/1-chunk 단위로만 GPU에 올리는 스트리밍 유틸. `ICF_COVARIANCE_BASIS=pca|pca_within` 경로가
+  이걸 통해 basis를 구성한다.
+- `scripts/eval_v113.sh`(신규, 활성 runner): v112와 CV/DD 설정 동일, `ICF_CT_CELLS=0.125`
+  (`own`, floor 64)만 다르다. `ICF_CT_CELLS`는 `all`·정수·`fraction:`/`own:`/`median:` 접두 float
+  전부 받는다(`parse_cell_budget`, §184).
+- `scripts/eval_v112.sh`는 전체-cell CT 재현 전용으로 유지(변경 없음), `scripts/eval_v111.sh`도
+  distance DD 재현 전용으로 유지.
+- BagPFN pytest `tests/test_ct_readout.py` + `tests/test_training_free.py`: **81 passed, 2
+  skipped**, 회귀 없음.
+- ⚠️ 이 절 작성 시점 기준 위 코드 변경은 **여전히 working tree에 uncommitted**다.
+
+_by Claude Sonnet 5 on gnode3 at 2026-08-20 01:11:51_
 
 ---

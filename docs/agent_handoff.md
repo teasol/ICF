@@ -1,9 +1,12 @@
 # Agent handoff guide
 
-**Last updated**: 2026-08-19 — §183 사용자 결정으로 v111 + DD ordered-coordinate × typicality
-(κ=1, fixed-head weight=1)를 **v112 활성 baseline**으로 승격했다. 전체 0.66211(v111 대비
-+0.00141), SEAL 10 0.70432(−0.00021, flat), 홀드아웃 7 0.60181(+0.00372), seed std 0.00000이며
-실행 중인 job은 없다.
+**Last updated**: 2026-08-20 — §185 사용자 결정으로 v112의 CT cell 예산(전체 cell)을 bag 자기
+크기의 1/8 fraction(floor 64, `ICF_CT_CELLS=0.125`)으로 바꾼 **v113을 활성 baseline**으로
+승격했다. 승격 사유는 예측 macro 개선이 **아니라 feasibility** — 22GB급 GPU 노드(gnode3)에서
+v112의 전체-cell CT가 LUAD처럼 bag당 최대 ~35k cell인 slide에서 즉시 `CUDA out of memory`로
+죽어(§184) SEAL 10-task를 완주할 수 없었다. SEAL 10 macro는 0.70394로 v112(0.70432) 대비
+−0.00038, §183의 "flat" 판정 폭(−0.00021)과 같은 급의 잡음이라 예측 성능 손실은 사실상 없다.
+전체 17-task macro는 아직 이 arm으로 재측정되지 않았다(§185 참고). 실행 중인 job은 없다.
 
 ---
 
@@ -23,22 +26,26 @@
 4. §173–§179의 코드·평가·문서는 `c34dfe2`에 반영됐다. §180, §182, §183도 완료 후 각각 별도
    커밋했다. 새 세션은 `git status --short`가 비어 있는지와 `git log -n 3 --oneline`의 최신
    커밋부터 확인한다.
-5. 활성 모델은 **v112 = v111 + DD ordered-coordinate × nearest-class typicality (κ=1,
-   fixed-head weight=1)**다. CV/CT는 v111과 동일(full-cell/full-abundance hierarchical
-   PCA32/K256)하고 CT 분기는 §181에서 이미 종료됐다. v111의 distance DD readout은
-   `scripts/eval_v111.sh`로 재현 가능하지만 더 이상 활성이 아니다.
+5. 활성 모델은 **v113 = v112 + CT cell 예산을 bag 자기 크기의 1/8 fraction(floor 64)으로 교체**
+   (§185, feasibility 승격 — 22GB GPU에서 v112의 전체-cell CT가 LUAD 대형 bag에 OOM, §184). CV/DD는
+   v112와 동일. v112의 전체-cell/전체-abundance CT는 `scripts/eval_v112.sh`로 재현 가능하지만 더
+   이상 활성이 아니다. v111의 distance DD readout은 `scripts/eval_v111.sh`로 재현 가능.
 6. 2026-08-19 인계 시점에는 GPU 0–7이 모두 NVIDIA B200 183,359 MiB이고 사용량 0 MiB였다.
    자원 상태는 변하므로 새 세션 시작 때 `nvidia-smi`로 다시 확인한다. 8-GPU 사용 가능 여부는
    그 시점의 다른 사용자 프로세스를 보고 결정한다.
 7. 마지막 코드 검증은 BagPFN Python으로 **318 tests, OK (42.524s)**였다. v112 VHL smoke는
    §182-3의 `dd=1.0` 로그 값(0.5095)과 일치해야 한다 — 승격 커밋 전 확인할 것.
+8. 문서에 **새 단락·긴 내용**을 쓸 때는 작성 직후
+   `_by <LLM Name> on <server name> at <YYYY-MM-DD HH:MM:SS>_` 스탬프를 남긴다.
+   오타·숫자·링크 같은 사소한 수정에는 붙이지 않는다. 상세는 아래 §6-3.
 
 새 세션에 전달할 최소 문장:
 
 > `/NHNHOME/WORKSPACE/26msit005_C/kimds/ICF`에서 `docs/agent_handoff.md`의 “새 세션 60초 재개 절차”와
 > §0을 읽고 이어서 작업해줘. Python은 BagPFN 환경 실행 파일을 직접 사용해줘. 활성 baseline은
-> v112 = v111 + DD ordered-coordinate × typicality(κ=1, weight=1)이고 CT 분기는 종료됐다. 활성
-> runner는 `scripts/eval_v112.sh`, historical v111 runner는 `scripts/eval_v111.sh`다.
+> v113 = v112 + CT cell 예산을 bag 크기의 1/8 fraction(floor 64)으로 교체(feasibility 승격, §185)다.
+> 활성 runner는 `scripts/eval_v113.sh`, historical v112(전체-cell CT) runner는
+> `scripts/eval_v112.sh`, v111(distance DD) runner는 `scripts/eval_v111.sh`다.
 
 ---
 
@@ -81,7 +88,7 @@ bash scripts/eval_v111.sh 0 smoke cptac_ccrcc/VHL_mutation     # v111: 0.5116
 
 ## 0-3. 지금 상태 한 눈에
 
-**활성 = v112, 학습 파라미터 0, seed std 0.00000.** 전체 명세는
+**활성 = v113, 학습 파라미터 0, seed std 0.00000.** 전체 명세는
 [`current_architecture.md` **§0**](current_architecture.md) — 거기가 SSOT다.
 
 ```
@@ -90,21 +97,28 @@ CV   기저 = context cell의 within-slide PCA 상위 256
      → 클래스 균형 dual ridge (λ=1)
 DD   같은 triangle 전체에서 rank-1 분산 방향 → ordered-coordinate × nearest-class
      typicality 유계 evidence M_DD∈[-1,1] (κ=1). 옛 distance readout은 eval_v111.sh로 재현
-CT   전체 cell → 32 PCA 방향 → hierarchical 2-means K256 → 전체 abundance → ridge (λ=1)
+CT   bag 자기 크기의 1/8 fraction(floor 64, ICF_CT_CELLS=0.125) → 32 PCA 방향 →
+     hierarchical 2-means K256 → 같은 샘플로 abundance(match) → ridge (λ=1)
+     ⚠️ v112는 여기서 전체 cell을 썼다 — 22GB GPU에서 LUAD 대형 bag(~35k cell)이 OOM(§184)
 head margin = 1.442·(CV1−CV0) − 1.0·M_DD + 0.7·(CT1−CT0)
 ```
 
 | | SEAL 10 | 홀드아웃 7 | ABMIL 0.727 대비 |
 |---|---:|---:|---:|
-| **v112** | **0.70432** | **0.60181** | **−0.02268** |
-| v111 (previous baseline) | 0.70453 | 0.59809 | −0.02247 |
+| **v113 (활성, feasibility 승격 §185)** | **0.70394** | — | **−0.02306** |
+| v112 (previous baseline, CT 전체-cell) | 0.70432 | 0.60181 | −0.02268 |
+| v111 | 0.70453 | 0.59809 | −0.02247 |
 | v110 (historical) | 0.70692 | 0.61029 | −0.02008 |
 | v109 | 0.7027 | 0.6042 | −0.0243 |
 | v108 | 0.6967 | 0.5893 | −0.0303 |
 | v107 | 0.6945 | 0.5836 | −0.0321 |
 | v106 | 0.6864 | 0.5767 | −0.0406 |
 
-실행: `bash scripts/eval_v112.sh <gpu> <tag> [tasks...]`
+v113은 v112 대비 SEAL 10에서 −0.00038(잡음 수준, §184)이고 **CT cell 예산만** 다르다. 홀드아웃
+7·전체 17은 아직 이 arm으로 재측정되지 않았다 — v112 값을 v113의 것으로 오인해 인용하지 말 것.
+
+실행: `bash scripts/eval_v113.sh <gpu> <tag> [tasks...]` (v112 전체-cell CT 재현은
+`scripts/eval_v112.sh`)
 
 ## 0-4. ⚠️ 판정 규칙이 바뀌었다 — 결정론적 arm에 t를 쓰지 말 것
 
@@ -350,102 +364,9 @@ held-out fold로 결정**하는 방법이 미착수로 남아 있다.
 
 ⚠️ v83의 0.6880은 옛 v77 DDP4 baseline(§104)의 0.6880과 **숫자만 같은 별개 레짐**이다(§107-2).
 
-> [!IMPORTANT]
-> **baseline 숫자 계약 (§109, 2026-08-13) — 이것부터 읽을 것**
->
-> ```
-> config: configs/train_v83_linear_head_1536_1gpu.yaml   (self-contained, canonical)
-> ckpts:  checkpoints/20260813_153750/v83_linear_head_seed4{2..5}/  (epoch 49)
-> tags:   v83_linear_head_seed4{2..5}_ep49
-> SEAL 10-task macro: 0.6905 / 0.6896 / 0.6774 / 0.6944 → mean 0.6880 (seed std 0.0074)
-> ```
-> **활성 baseline은 v83 linear head이고 공식 값은 4 seed 평균 `0.6880`다.**
->
-> **⚠️ 이 승격은 §107-3 판정 게이트를 충족하지 못한 상태에서의 사용자 결정이다.** v82 baseline
-> (0.6846/0.6870/0.6821/0.6802) 대비 seed-paired Δ는 +0.0059/+0.0026/**−0.0047**/+0.0142,
-> 평균 **+0.0045**, **t ≈ 1.15** — seed 44가 부호 반전이고(3/4 양수), 게이트(4/4 부호 일치 +
-> `|t|≥2.5`)에 못 미친다. "뚜렷하진 않아도 올랐다고 보는 게 맞다"는 사용자 판단으로 승격했다
-> (2026-08-13, §109). **인용할 때 이 승격이 통계적 미판정 상태였다는 것을 함께 밝힐 것.**
->
-> **⚠️ 0.6880 < 이전 0.6880(v77 DDP4)은 숫자가 같아 보이지만 다른 것이다.** 완전히 다른 레짐
-> (1-GPU 4 seed vs DDP4 1 seed)의 별개 수치다 — 착시로 "제자리로 돌아왔다"고 읽지 말 것.
->
-> **새 arm은 1-GPU·SEED 42/43/44/45·epoch 49로 돌려 이제는 v83 4 seed와 seed-paired로 비교한다.**
-> 판정 조건은 **4/4 시드 부호 일치 + |t| ≥ 2.5**이고, 부호가 갈리면 **미판정**이다(§107-3, 그대로 유지).
->
-> **왜 epoch 고정인가**: val_ce 곡선이 평평한 arm에서 validation-best 선택이 **과소학습 지점을
-> 고르는 것을 실측**했다 — v80 seed 43은 val-best가 epoch 16을 골라 epoch 49 대비 **−0.0089**를
-> 잃었고, val_ce로는 epoch 16이 0.0014 더 좋아 보였다(§104-2). v77 자신은 이 선택에 둔감했다.
->
-> **직전 baseline**: v82 Medium(1-GPU 4 seed 0.6835, tags `v82_medium_seed4{2..5}_ep49`, §107).
-> **이전 baseline (historical, DDP4 1 seed)**: `v77_hard_ep49` = 0.6880,
-> `checkpoints/20260812_v76_classsep_sweep/hard/periodic-epoch=049-val_ce_loss=0.1717.ckpt`.
-> 같은 run의 epoch 48 validation-best는 0.6873이다(Δ +0.0007 [+0.0000, +0.0014]).
+> [!NOTE]
+> **v83 Linear Head 승격(§109) 및 v84 Deep-Head 기각(§110)** 세부 히스토리는 [`history.md` §25](history.md#25-v83-linear-head-승격--v84-deep-head-기각-2026-08-13-108110)로 이관되었습니다.
 
-> [!IMPORTANT]
-> **활성 baseline: v83 linear head (§109, 사용자 결정 — §107-3 게이트 미달)**
->
-> ⚠️ **v82와의 유일한 차이는 relation head 구조다.** `ct_head_hidden_dims: []`로 hidden layer와
-> GELU를 없애 head가 `12→32→1`(GELU 포함)에서 bare **`Linear(12,1)`**로 줄었다 — trainable
-> **197,057 → 196,621**. 그 외 모델 클래스·텐서 구조·`architecture_version=54`·`class_separation
-> [0.5,1.4]`(Medium)는 v82와 완전히 같다. **head shape가 달라 v82 checkpoint는 v83 arm으로
-> strict-load되지 않는다** (`tests/test_relation_head_depth.py`가 이 실패를 pin한다) — 처음부터
-> 학습했다. canonical config는 `train_v83_linear_head_1536_1gpu.yaml`로 바뀐다.
->
-> DD는 support label로 generalized covariance direction을 만들고 standardized dispersion
-> distances `D0,D1`을 계산한다. CT는 support cells에서 label-free farthest-point 후보
-> token 16개를 만든 뒤, bag-level abundance의 표준화 class 차이로 label-0/label-1
-> discriminative token을 대칭 선택한다. query label은 사용하지 않는다.
->
-> head 입력은 v76부터 동일한 12개 feature다:
-> `[CV0,CV1,CV1-CV0,SEP_CV,D0,D1,D1-D0,SEP_DD,q0,q1,q0-q1,SEP_CT]`
-> — 다만 v83은 이를 `32→1` GELU 은닉층 없이 **바로 `Linear(12,1)`**로 결합한다(§108의 질문:
-> 이 GELU 비선형성이 실제로 기여하는지 검증). P(1536×128)와 head만 학습되어
-> **196,621 trainable parameters**다 (P 196,608 + head 13).
-> P는 CV ridge gradient로 학습되고 DD는 현재 P의 covariance를 읽되 DD→P gradient는 없다.
-> DD/CT 자체는 training-free다.
-> synthetic는 **Medium ClassSep `[0.5,1.4]`**, fresh orthogonal manifold, 50 epochs다.
-> canonical config는 `configs/train_v83_linear_head_1536_1gpu.yaml`(self-contained)이고
-> **판정용 checkpoint는 4 seed × epoch 49**다:
-> `checkpoints/20260813_153750/v83_linear_head_seed4{2..5}/`
-> → 공식 SEAL macro **0.6880** (4 seed 평균, tags `v83_linear_head_seed4{2..5}_ep49`, §109).
-> **§108의 seed-paired 결과(GELU 있는 head 대비)**: 미판정(Δ+0.0045, t≈1.15, seed 44 반전) —
-> 이 승격은 그 미판정 상태에서 내려진 사용자 결정이다.
->
-> **직전 baseline** v82 Medium은 1-GPU 4 seed 0.6835(tags `v82_medium_seed4{2..5}_ep49`, §107).
-> **historical (DDP4 1 seed, 직접 비교 불가)**: v77 Hard `v77_hard_ep49` 0.6880
-> (val-best epoch 48은 0.6873, Δ +0.0007 [+0.0000, +0.0014]);
-> 같은 1-GPU 4 seed 레짐에서 v77은 **0.6781**이다.
-> ⚠️ v83의 1-GPU 4 seed 0.6880과 v77의 DDP4 1 seed 0.6880은 **숫자만 같은 별개 수치**다.
-> v76 easy predecessor는 0.6748, v74는 fixed-P control 0.6731,
-> v70은 재현 control, v71(CV+MLP) 0.6667,
-> v72(nonlinear manifold) 0.6709, v73(+Magnitude) 0.6473으로 승격하지 않는다(전부 DDP4 1 seed).
-> **v80 shallow infinite MLP manifold도 1-GPU 4 seed 평균 0.6722로 기각**이다 — 같은 레짐
-> control 대비 **−0.0059**(t=−2.7)이며, §104-6의 −0.0158은 레이아웃 confound로 부풀려진
-> 값이다(§106-4).
->
-> 이 승격은 head 구조 승격이며 텐서 구조는 v76과 같아 내부 `architecture_version=54`를
-> 유지한다. 예전에 v77이라 부른 `PopulationTokenResidualModel`(0.6750)은 **retired provisional
-> v77-pop-residual**이며 내부 version 55는 replay용으로 보존한다.
-
-> [!IMPORTANT]
-> **v84 deep-head 기각 (§110, 2026-08-13) — relation head 깊이 축 소진**
->
-> §108이 GELU를 없앤 방향(미판정)을 봤다면, **v84는 반대 방향** — `ct_head_hidden_dims: [32, 32]`로
-> hidden layer를 2단으로 늘려 head를 `12→32→32→1`(GELU 2개)로 심화한다. P(196,608)와 그 위는
-> v82/v83과 동일, trainable **197,057 → 198,113**(head 1,505개). v82/v83 checkpoint와는 head shape가
-> 달라 strict-load 불가.
->
-> **판정용 checkpoint는 4 seed × epoch 49**: `checkpoints/20260813_163412/v84_deep_head_seed4{2..5}/`
-> → SEAL macro 0.6786/0.6783/0.6752/0.6789, mean **0.6777**(seed std 0.0018).
->
-> **양쪽 baseline 모두 기준으로 기각**: v82(구 baseline, 0.6835) 대비 Δ**−0.0057**(t≈**−3.63**),
-> v83(현 baseline, 0.6880) 대비 Δ**−0.0102**(t≈**−3.61**) — 둘 다 **4/4 시드 부호 일치 +
-> |t|≥2.5**로 §107-3 게이트를 충족한다(기각 방향으로 판정 확정, §108의 미판정과 다름).
->
-> **종합**: relation head는 얕게 만들면 미판정(§108)이고 깊게 만들면 명확히 손해(§110)다 — 지금
-> `12→32→1`(GELU 하나)이 이미 적정 크기라는 그림과 일치한다. **이 축에서 새 arm을 더 설계하지
-> 말 것.** v83 promotion(§109) 결정 자체는 바뀌지 않는다.
 
 > [!IMPORTANT]
 > **판정 계약 (§107, 2026-08-13, 게이트는 그대로 유지 — 단 §109가 baseline 자체를 미판정 상태로 승격시켰다는 점은 예외로 기록됨) — 판정 단위가 4 seed다**
@@ -1074,6 +995,25 @@ scripts/launch_interactive_training.sh \
    - 아카이빙 시 기준: ① 주요 결정/설계 이유/트레이드오프 ② 현재 문서 관점에서 향후 참조가 필요한
      맥락 ③ 중요 레슨런. 단순 변경 이력이나 현재 스펙과 중복되는 작업 정보는 제외합니다.
    - 출처(원본 파일명·작성 시점)를 함께 기재해 git 이력에서 원문을 되짚을 수 있게 합니다.
+
+3. **문서 작성 스탬프 (2026-08-19, 사용자 결정)**:
+   - 문서에 **단락을 추가하거나 긴 내용을 쓸 때** 작성 직후 이탤릭 한 줄을 남긴다.
+     오타 수정, 숫자·링크 교정, 짧은 문구 다듬기 같은 **사소한 변경에는 붙이지 않는다.**
+   - 형식:
+
+     ```
+     _by <LLM Name> on <server name> at <YYYY-MM-DD HH:MM:SS>_
+     ```
+
+     예: `_by Gemini 3.7 Flash on gnode3 at 2026-08-19 15:45:00_`
+   - `<LLM Name>`은 실제로 쓴 모델명, `<server name>`은 `hostname`, 시각은 그 노드의 로컬
+     wall clock이다. 새 긴 내용(또는 새 절 제목) 바로 아래에 두고, 잘게 나뉜 hunk마다
+     반복하지 않는다.
+   - 적용 범위: `docs/` Living 문서(`agent_handoff.md`, `current_status.md`,
+     `current_architecture.md`, `current_experiments.md`, `README.md`)와 `history.md`.
+   - Agent 메모리 사본: `/memories/doc-stamp.md`.
+
+_by Grok 4.6 on gnode3 at 2026-08-19 15:54:15_
 
 ---
 

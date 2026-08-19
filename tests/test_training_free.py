@@ -31,15 +31,17 @@ from src.models.training_free import TrainingFreeClassifier, TrainingFreeConfig
 DIM = 48
 SKETCH = 8
 # The configuration the lineage `_ct_features` implements -- v108's defaults differ.
-# `dd_readout`/`weight_dd` are pinned to the pre-SS183 distance readout for the
-# same reason: `lineage_margins` below hardcodes the OLD distance-based fixed
-# head (0.343/-0.343), so this is a statement about that configuration, not
-# about the live SS183 default.
+# `dd_readout` is pinned to the pre-SS183 distance readout; `weight_dd` is POSITIVE
+# because this classifier negates the distances into logits and then weighs
+# (dd1 - dd0). `lineage_margins` below hardcodes the OLD distance-based fixed head
+# (0.343 on d0, -0.343 on d1), which consumes the distances directly -- the two
+# conventions produce the same margin, so this is a statement about that
+# configuration, not about the live SS183 default.
 V107 = TrainingFreeConfig(
     sketch_dim=SKETCH, ct_readout="extreme", ct_pca_dim=None,
     ct_kmeans_iterations=0, cv_blocks="cov+mean", weight_ct=0.286, ct_num_tokens=16,
     ct_sampling="even", ct_tokenizer="fps_lloyd",
-    dd_readout="distance", weight_dd=-0.343,
+    dd_readout="distance", weight_dd=0.343,
 )
 
 
@@ -117,6 +119,9 @@ class DefaultTest(unittest.TestCase):
         self.assertEqual(config.ct_num_tokens, 256)
         self.assertIsNone(config.ct_cells_per_bag)
         self.assertIsNone(config.ct_abundance_cells_per_bag)
+        self.assertIsNone(config.ct_cells_fraction)
+        self.assertEqual(config.ct_cells_min, 1)
+        self.assertEqual(config.ct_cells_scale, "own")
         self.assertEqual(config.ct_sampling, "even")
         self.assertEqual(config.ct_sampling_seed, 0)
         self.assertEqual(config.ct_distance_kernel, "gemm")
@@ -139,7 +144,7 @@ class DefaultTest(unittest.TestCase):
         self.assertEqual(config.weight_ct, 0.7)
         self.assertEqual(config.dd_readout, "ordered_typicality")
         self.assertEqual(config.dd_separation_floor, 1.0)
-        self.assertEqual(config.weight_dd, -1.0)
+        self.assertEqual(config.weight_dd, 1.0)
 
 
 class OrderedTypicalityDDTest(unittest.TestCase):

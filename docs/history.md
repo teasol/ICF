@@ -816,3 +816,25 @@ handoff §7의 문서화된 검증 명령이 `if 'base_config' not in p.read_tex
    ⓐ/ⓑ를 가른다.
 2. BAP1 large-bag 붕괴 진단(§99-2), VHL 랜덤 이하 진단(§0 열린 과제 2).
 
+---
+
+## 25. v83 Linear Head 승격 & v84 Deep-Head 기각 (2026-08-13, §108~§110)
+
+> 출처: `docs/agent_handoff.md` (구 baseline 및 기각 callout 아카이빙), `current_status.md` §108~§110.
+
+_by Gemini 3.7 Flash on gnode3 at 2026-08-19 15:45:00_
+
+### 1. v83 Linear Head 승격 (§109)
+
+- **배경**: relation head의 비선형성(GELU 은닉층) 필요성을 검증하기 위해 `ct_head_hidden_dims: []`로 hidden layer와 GELU를 없애고 `12→32→1`에서 bare `Linear(12, 1)`로 축소 (trainable parameters: 197,057 → 196,621).
+- **결과**: SEAL 10-task macro 0.6905 / 0.6896 / 0.6774 / 0.6944 → mean **0.6880** (seed std 0.0074).
+- **판정**: seed-paired Δ = +0.0045, t ≈ 1.15로 §107-3 게이트(4/4 부호 일치 + |t|≥2.5) 미달 상태였으나, "뚜렷하진 않아도 상승으로 보는 것이 타당하다"는 사용자 결정으로 승격됨.
+
+### 2. v84 Deep-Head 기각 (§110)
+- **배경**: head 심화 가설 검증 (`ct_head_hidden_dims: [32, 32]`, `12→32→32→1`, GELU 2개, trainable 198,113).
+- **결과**: 4 seed mean **0.6777** (seed std 0.0018).
+- **판정**: v82 대비 Δ −0.0057 (t ≈ −3.63), v83 대비 Δ −0.0102 (t ≈ −3.61)로 4/4 시드 일치 유의미한 하락 → **기각**.
+- **결론**: Relation head는 얕게 만들면 미판정(§108), 깊게 만들면 명확히 손해(§110)이므로 `Linear(12, 1)` 형태가 적정선으로 확인되었으며 이 축의 추가 탐색은 종료됨.
+
+
+

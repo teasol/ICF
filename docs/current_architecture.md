@@ -1,16 +1,20 @@
-# Current architecture (2026-08-19)
+# Current architecture (2026-08-20)
 
-**활성 구성 v112 — 학습 파라미터 0, 완전 결정론적.** CV/CT는 v111과 동일하다(§181, 사용자가
-예측 macro보다 selection bias/sampling randomness 제거를 우선해 승격). v112는 DD readout만
-바꿔 bounded ordered-coordinate × nearest-class typicality (κ=1, fixed-head weight=1)를
-승격했다(§183) — 전체 17-task macro 0.66211, v111 대비 +0.00141. v110은 더 높은 예측
+**활성 구성 v113 — 학습 파라미터 0, 완전 결정론적.** CV/DD는 v112와 동일(§183). v113은 CT의
+cell 예산만 바꿔 **feasibility 사유로** 승격했다(§185) — v112의 CT가 bag의 **전체 cell**을
+context 통계·GPU 텐서에 올리는데, LUAD처럼 bag당 최대 ~35k cell인 slide가 있는 22GB급 GPU
+노드에서는 이게 즉시 `CUDA out of memory`로 죽는다(§184). v113은 그 전체-cell 예산을 **bag
+자기 크기의 1/8 fraction**(floor 64)으로 바꿔 이 문제를 없앴다. 승격 근거는 예측 macro
+개선이 아니라 **이 arm 없이는 메모리 제약 노드에서 SEAL 10-task를 아예 완주할 수 없었다는
+feasibility**이며, macro 자체는 v112 대비 −0.00038(SEAL 10)로 사실상 flat임이 §184에서
+확인됐다(v112→v111 승격 때 "flat" 판정 폭 −0.00021과 같은 급의 잡음). v110은 더 높은 예측
 baseline이지만 historical control이다. 아래 §0이 현행 명세이고, 그 뒤의
 `Historical-*` / `A` / `B` 절은 **학습을 포함하던 직전 계보(v83~v98)** 의 명세로 참조용이다.
-그 절들의 gradient·학습 모듈·checkpoint 계약은 **v112에 적용되지 않는다.**
+그 절들의 gradient·학습 모듈·checkpoint 계약은 **v113에 적용되지 않는다.**
 
 ---
 
-# §0. v112 명세 (활성)
+# §0. v113 명세 (활성)
 
 ## 0-1. 한 눈에
 
@@ -32,15 +36,20 @@ DD      같은 triangle(**전체**, 대각 포함)에서 K×K 공분산을 재�
         옛 정규화 제곱 거리 readout은 `distance`로 남아 있고 `scripts/eval_v111.sh`로
         재현 가능하지만 더 이상 활성이 아니다.
 
-CT      bag의 **전체 cell** → B의 상위 **32 PCA 방향**으로 사영 → context로 좌표 표준화 →
-        hierarchical PCA/2-means tree로 **256 token** → 전체 cell soft assignment →
-        bag별 256차원 abundance → 클래스 균형 ridge(λ=1) → logit 2개
+CT      bag 자기 크기의 **1/8 fraction**(floor 64, `ICF_CT_CELLS=0.125`/`own`, §185)만 샘플링
+        → B의 상위 **32 PCA 방향**으로 사영 → context로 좌표 표준화 →
+        hierarchical PCA/2-means tree로 **256 token** → 샘플링된 cell만 soft assignment(abundance
+        는 `match` — 토큰 dictionary와 같은 샘플) → bag별 256차원 abundance →
+        클래스 균형 ridge(λ=1) → logit 2개
+        ⚠️ v112는 이 자리에서 **전체 cell**을 썼다 — LUAD 같은 대형 bag(~35k cell)에서 22GB급
+        GPU가 OOM 나던 지점(§184). fraction 샘플링 전환은 macro에 사실상 영향이 없다(§184/§185).
 
 head    margin = 1.442·(CV1−CV0) − 1.0·M_DD + 0.7·(CT1−CT0)
         logits = (−margin/2, +margin/2)
 ```
 
-**실행**: `bash scripts/eval_v112.sh <gpu> <tag> [tasks...]`
+**실행**: `bash scripts/eval_v113.sh <gpu> <tag> [tasks...]` (v112 CV/CT 전체-cell 재현은
+`scripts/eval_v112.sh`, historical)
 **구현**: `src/models/training_free.py` (파라미터 0). 정식 채점은 환경변수로 기존 경로를 써도 된다 —
 `tests/test_training_free.py`가 두 경로의 등가성을 고정한다.
 
@@ -82,8 +91,9 @@ M_{DD}(q)=a(q)o(q)
 
 | | SEAL 10 | 홀드아웃 7 | 전체 17 | seed std |
 |---|---:|---:|---:|---:|
-| **v112 (활성)** | **0.70432** | **0.60181** | **0.66211** | **0.00000** |
-| v111 (previous baseline, distance DD readout) | 0.70453 | 0.59809 | 0.66070 | 0.00000 |
+| **v113 (활성, CT fraction 샘플링)** | **0.70394** | — | — | **0.00000** |
+| v112 (previous baseline, CT 전체-cell) | 0.70432 | 0.60181 | 0.66211 | 0.00000 |
+| v111 (distance DD readout) | 0.70453 | 0.59809 | 0.66070 | 0.00000 |
 | v110 (historical predictive best) | 0.70692 | 0.61029 | 0.66713 | 0.00000 |
 | v109 | 0.7027 | 0.6042 | — | 0.00000 |
 | v108 | 0.6967 | 0.5893 | — | 0.00000 |

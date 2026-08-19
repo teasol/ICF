@@ -49,6 +49,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.models.stream_eval import (  # noqa: E402
+    BagStatsCache,
+    covariance_basis_from_bags,
+    cpu_bag_mapping,
+    project_bags_to_cpu,
+    stream_lineage_forward,
+)
 from src.utils.metrics import auroc, log_loss  # noqa: E402
 from src.utils.utils import (  # noqa: E402
     add_eval_precision_argument,
@@ -72,7 +79,14 @@ DD_LLR_OFFSETS: list[float] = []
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument(
+        "--checkpoint",
+        type=Path,
+        default=None,
+        help="Model checkpoint. Optional: when omitted, a fresh model instance "
+        "is built and used uninitialized -- valid for the training-free "
+        "configuration (v106+), which overrides every learned value (docs SS183).",
+    )
     parser.add_argument(
         "--config",
         type=Path,
@@ -310,6 +324,7 @@ def evaluate_trial(
     batch_queries: bool = False,
     precision: str = "bf16-mixed",
     cache_context: bool = True,
+    bag_stats_cache: BagStatsCache | None = None,
 ) -> dict:
     """Run one all-context (or sample-context) inference pass.
 
@@ -471,26 +486,17 @@ def evaluate_trial(
             #              per-slide mean estimates sharpen the between-slide term
             #              and pull the basis further toward it.
             with torch.no_grad():
-                dim = episode_bags[0].shape[-1]
-                total = 0
-                scatter = torch.zeros(dim, dim, dtype=torch.float64, device=device)
-                if basis_mode == "pca":
-                    summation = torch.zeros(dim, dtype=torch.float64, device=device)
-                    for bag in episode_bags[:n_context]:
-                        summation += bag.double().sum(dim=0)
-                        total += bag.shape[0]
-                    pooled_mean = summation / total
-                    for bag in episode_bags[:n_context]:
-                        centered = bag.double() - pooled_mean
-                        scatter += centered.T @ centered
-                else:
-                    for bag in episode_bags[:n_context]:
-                        values = bag.double()
-                        centered = values - values.mean(dim=0, keepdim=True)
-                        scatter += centered.T @ centered
-                        total += values.shape[0]
-                _, vectors = torch.linalg.eigh(scatter / total)
-                pca = vectors[:, -inner.covariance_sketch_dim:].flip(-1).float()
+                # Stream one bag/chunk to `device`. The raw tiles stay on
+                # CPU; only the D x D scatter and the resulting K-basis
+                # reside on the GPU. Per-bag (n, mean, S) can be reused
+                # across official folds that share the same tensor objects.
+                pca = covariance_basis_from_bags(
+                    episode_bags[:n_context],
+                    basis_mode,
+                    inner.covariance_sketch_dim,
+                    device,
+                    cache=bag_stats_cache,
+                )
             inner._effective_covariance_projection = lambda b=pca: b
         # docs SS145. `ICF_SKETCH_DIM_DD` gives the DD branch its OWN K, so the K
         # effect measured in SS142 can be attributed to a branch instead of to
@@ -639,24 +645,51 @@ def evaluate_trial(
                 or ct_abundance_cells is not None or ct_sampling is not None
                 or ct_sampling_seed is not None or ct_distance_kernel is not None
                 or ct_tokenizer is not None or ct_tokens is not None):
-            from src.models.ct_readout import CTReadoutConfig, ct_margins  # noqa: PLC0415
+            from src.models.ct_readout import (  # noqa: PLC0415
+                CTReadoutConfig,
+                ct_margins,
+                parse_cell_budget,
+            )
+
+            if ct_cells is None:
+                cells_per_bag = inner.ct_cells_per_bag
+                cells_fraction = None
+                cells_scale = os.environ.get("ICF_CT_CELLS_SCALE", "own")
+            else:
+                cells_per_bag, cells_fraction, parsed_scale = parse_cell_budget(
+                    ct_cells
+                )
+                cells_scale = parsed_scale or os.environ.get(
+                    "ICF_CT_CELLS_SCALE", "own"
+                )
+            if ct_abundance_cells is None or ct_abundance_cells == "match":
+                abundance_cells_per_bag = "match"
+            elif ct_abundance_cells == "all":
+                abundance_cells_per_bag = None
+            else:
+                abundance_cap, abundance_fraction, _ = parse_cell_budget(
+                    ct_abundance_cells
+                )
+                abundance_cells_per_bag = (
+                    abundance_fraction
+                    if abundance_fraction is not None
+                    else abundance_cap
+                )
 
             readout_config = CTReadoutConfig(
                 # SS160: ICF_CT_TOKENS sweeps the number of clusters/features.
                 num_tokens=int(os.environ.get("ICF_CT_TOKENS", inner.ct_num_tokens)),
                 # SS159: ICF_CT_CELLS=all uses every cell; a number caps as before.
-                cells_per_bag=(
-                    None if os.environ.get("ICF_CT_CELLS") == "all"
-                    else int(os.environ.get("ICF_CT_CELLS", inner.ct_cells_per_bag))
-                ),
+                # A fraction (0.125, frac:0.125, own:0.125, median:0.125) scales
+                # with bag / episode size instead of repeating a global 512 cap.
+                cells_per_bag=cells_per_bag,
+                cells_fraction=cells_fraction,
+                cells_min=int(os.environ.get("ICF_CT_CELLS_MIN", "1")),
+                cells_scale=cells_scale,
                 # SS165: keep dictionary/statistics at `ICF_CT_CELLS` but use a
                 # separate cap for the per-bag abundance average. "all" supports
                 # the random-512 dictionary / full-abundance diagnostic.
-                abundance_cells_per_bag=(
-                    "match" if ct_abundance_cells is None
-                    else None if ct_abundance_cells == "all"
-                    else int(ct_abundance_cells)
-                ),
+                abundance_cells_per_bag=abundance_cells_per_bag,
                 # Random is the active default; even spacing is retained behind
                 # ICF_CT_SAMPLING=even for historical v110 reproduction.
                 sampling=os.environ.get("ICF_CT_SAMPLING", "random"),
@@ -742,6 +775,9 @@ def evaluate_trial(
                   f"kmeans_tol={readout_config.kmeans_tolerance} "
                   f"kmeans_seed={readout_config.kmeans_seed} "
                   f"cells={readout_config.cells_per_bag} "
+                  f"cells_fraction={readout_config.cells_fraction} "
+                  f"cells_min={readout_config.cells_min} "
+                  f"cells_scale={readout_config.cells_scale} "
                   f"abundance_cells={readout_config.abundance_cells_per_bag} "
                   f"sampling={readout_config.sampling} "
                   f"sampling_seed={readout_config.sampling_seed} "
@@ -955,12 +991,14 @@ def evaluate_trial(
             # weight is only a fifth of CV's 1.442, so the branch is structurally
             # limited in how far it can move the macro at 0.286.
             # Antisymmetry is untouched: the pair stays equal and opposite.
-            # `ICF_FIXED_HEAD_DD_WEIGHT` likewise (docs SS153). 0.343 is a MAGNITUDE:
-            # the sign is fixed by DD returning squared DISTANCES rather than logits,
-            # so a large D1 is evidence AGAINST class 1. 0 ablates DD entirely, which
-            # is the question worth asking now that SS145-147 closed every way of
-            # improving it -- K saturates by 128, r=1 is the peak, and both the |t|
-            # gate and the |t| selector lose to |lambda| alone.
+            # `ICF_FIXED_HEAD_DD_WEIGHT` likewise (docs SS153). 0.343 is a MAGNITUDE
+            # fitted against the old squared-DISTANCE readout, so a large D1 is
+            # evidence AGAINST class 1 and the head weighs (d0 - d1). The
+            # ordered_typicality readout (SS182-3) emits LOGITS like CV/CT, so the
+            # head weighs (d1 - d0) -- see the slot selection below. 0 ablates DD
+            # entirely, which is the question worth asking now that SS145-147
+            # closed every way of improving it -- K saturates by 128, r=1 is the
+            # peak, and both the |t| gate and the |t| selector lose to |lambda|.
             # `ICF_FIXED_HEAD_CV_WEIGHT` completes the set, so any single branch can
             # be isolated by zeroing the other two (docs SS163). CV is the dominant
             # branch at 1.442, so zeroing it is the only way to see CT or DD alone.
@@ -972,14 +1010,23 @@ def evaluate_trial(
             with torch.no_grad():
                 head.weight.zero_()
                 head.bias.zero_()
-                for slot, value in ((0, -cv_weight), (1, cv_weight), (4, dd_weight),
-                                    (5, -dd_weight), (8, -ct_weight), (9, ct_weight)):
+                if dd_ordered_typicality:
+                    dd_slots = ((4, -dd_weight), (5, dd_weight))
+                else:
+                    dd_slots = ((4, dd_weight), (5, -dd_weight))
+                for slot, value in ((0, -cv_weight), (1, cv_weight), *dd_slots,
+                                    (8, -ct_weight), (9, ct_weight)):
                     head.weight[0, slot] = value
             if (cv_weight, dd_weight, ct_weight) != (1.442, 0.343, 0.286):
                 print(f"fixed head: cv={cv_weight} dd={dd_weight} ct={ct_weight}", flush=True)
         try:
             with torch.no_grad(), autocast:
-                logits = model.model(episode_bags, episode_y, query_index)
+                # Official / generic models have no aggregator. Keep the
+                # tiles on CPU and stream one bag through `_descriptors`
+                # so LUAD's 21 GiB of fp32 cells never sit on the GPU.
+                logits = stream_lineage_forward(
+                    model.model, episode_bags, episode_y, query_index, device
+                )
         finally:
             if basis_mode in ("pca", "pca_within") and saved_projection is not None:
                 inner._effective_covariance_projection = saved_projection
@@ -1153,13 +1200,16 @@ def evaluate_cv(
     print(f"CV: {len(fold_states)}-fold over {len(all_ids)} slides "
           f"({', '.join(str(len(state['slide_id'])) for state in fold_states)} "
           f"per fold), raw {FEATURE_DIM}-d, {args.context_mode}-context, all tiles")
-    # Move every slide's features to the device once; fold k queries its own
-    # slides with the other folds as context.
-    projected = {
-        sid: bag.to(device)
-        for state in fold_states
-        for sid, bag in zip(state["slide_id"], state["bag"])
-    }
+    # Keep every slide on CPU. Fold k queries its own slides with the
+    # other folds as context; evaluate_trial streams one bag at a time.
+    projected = cpu_bag_mapping(
+        {
+            sid: bag
+            for state in fold_states
+            for sid, bag in zip(state["slide_id"], state["bag"])
+        }
+    )
+    bag_stats_cache: BagStatsCache = {}
     fold_records: list[dict | None] = []
     pooled_prob: list[torch.Tensor] = []
     pooled_target: list[torch.Tensor] = []
@@ -1186,6 +1236,7 @@ def evaluate_cv(
             context_max_tiles=args.context_max_tiles,
             seed=args.seed + fold_index,
             device=device,
+            bag_stats_cache=bag_stats_cache,
             batch_queries=args.batch_queries,
             precision=args.precision,
             cache_context=args.cache_context,
@@ -1305,7 +1356,8 @@ def evaluate_official_folds(
     if missing:
         print(f"WARNING: dropping {missing} slides with no feature file")
     bags = {sid: load_slide_features(sid, h5_index) for sid in slide_ids}
-    projected = {sid: bag.to(device) for sid, bag in bags.items()}
+    projected = cpu_bag_mapping(bags)
+    bag_stats_cache: BagStatsCache = {}
     print(f"Loaded {len(projected)} slides, {len(fold_cols)} official folds "
           f"({fold_cols[0]}..{fold_cols[-1]}), raw {FEATURE_DIM}-d")
 
@@ -1351,6 +1403,7 @@ def evaluate_official_folds(
             seed=args.seed + k,
             device=device,
             batch_queries=args.batch_queries,
+            bag_stats_cache=bag_stats_cache,
             precision=args.precision,
             cache_context=args.cache_context,
         )
@@ -1476,6 +1529,27 @@ def load_state_dict_for_sketch_dim(model, state_dict: dict) -> None:
         )
 
 
+def load_checkpoint_or_fresh(model, checkpoint_path) -> None:
+    """Load ``--checkpoint`` weights, or skip loading for a fresh instance.
+
+    The training-free configuration (v106+, docs SS183) overrides the projection
+    with per-episode PCA and the head with fixed constants, and the ridge
+    calibration parameters stay at init -- so no learned value from a checkpoint
+    reaches the margin. A fresh instance (random init) is therefore equivalent,
+    and ``--checkpoint`` becomes optional.
+    """
+    if checkpoint_path is None:
+        print("Model: fresh instance (no --checkpoint) -- training-free eval",
+              flush=True)
+        return
+    checkpoint = torch.load(
+        checkpoint_path.expanduser().resolve(), map_location="cpu"
+    )
+    model.on_load_checkpoint(checkpoint)
+    load_state_dict_for_sketch_dim(model, checkpoint["state_dict"])
+    print(f"Model: loaded checkpoint {checkpoint_path.name}", flush=True)
+
+
 def apply_ridge_lambda_override(model) -> None:
     """`ICF_RIDGE_LAMBDA` — set the ridge penalty (docs SS142).
 
@@ -1526,18 +1600,13 @@ def main() -> None:
                 f"FEATURE_DIM {FEATURE_DIM}); PCA-per-fold is not supported."
             )
         model = build_model(config)
-        checkpoint = torch.load(
-            args.checkpoint.expanduser().resolve(), map_location="cpu"
-        )
-        model.on_load_checkpoint(checkpoint)
-        load_state_dict_for_sketch_dim(model, checkpoint["state_dict"])
+        load_checkpoint_or_fresh(model, args.checkpoint)
         apply_ridge_lambda_override(model)
         if args.rare_logits_zero:
             model.model.meta_classifier.force_rare_logits_zero = True
         model.eval()
         model.to(device)
-        print(f"Model: arch v{model.model.architecture_version}, "
-              f"checkpoint {args.checkpoint.name}")
+        print(f"Model: arch v{model.model.architecture_version}")
         evaluate_official_folds(
             model=model, task_dir=args.official_folds, args=args, device=device
         )
@@ -1605,18 +1674,13 @@ def main() -> None:
             for path in cv_fold_paths
         ]
         model = build_model(config)
-        checkpoint = torch.load(
-            args.checkpoint.expanduser().resolve(), map_location="cpu"
-        )
-        model.on_load_checkpoint(checkpoint)
-        load_state_dict_for_sketch_dim(model, checkpoint["state_dict"])
+        load_checkpoint_or_fresh(model, args.checkpoint)
         apply_ridge_lambda_override(model)
         if args.rare_logits_zero:
             model.model.meta_classifier.force_rare_logits_zero = True
         model.eval()
         model.to(device)
-        print(f"Model: arch v{model.model.architecture_version}, "
-              f"checkpoint {args.checkpoint.name}")
+        print(f"Model: arch v{model.model.architecture_version}")
         evaluate_cv(model=model, fold_states=fold_states, args=args, device=device)
         return
 
@@ -1649,9 +1713,9 @@ def main() -> None:
         train_ids = list(train_state["slide_id"])
         test_ids = list(test_state["slide_id"])
         for slide_id, bag in zip(train_state["slide_id"], train_state["bag"]):
-            projected[slide_id] = bag.to(device)
+            projected[slide_id] = bag.cpu() if bag.device.type != "cpu" else bag
         for slide_id, bag in zip(test_state["slide_id"], test_state["bag"]):
-            projected[slide_id] = bag.to(device)
+            projected[slide_id] = bag.cpu() if bag.device.type != "cpu" else bag
         print(f"Loaded preprocessed {args.csv.name}: {len(train_ids)} train / "
               f"{len(test_ids)} test slides (512-d, {cached_train.name})")
     else:
@@ -1701,6 +1765,8 @@ def main() -> None:
     test_y = {sid: int(test_table.loc[test_table["slide_id"] == sid, "label"].iloc[0]) for sid in test_ids}
 
     model = build_model(config)
+    if args.checkpoint is None:
+        raise ValueError("--checkpoint is required for --csv evaluation.")
     checkpoint = torch.load(args.checkpoint.expanduser().resolve(), map_location="cpu")
     model.on_load_checkpoint(checkpoint)
     model.load_state_dict(checkpoint["state_dict"])
@@ -1710,20 +1776,14 @@ def main() -> None:
     model.to(device)
     if not use_cache:
         if pca_needed:
-            # Project every slide once on the GPU (CPU projection is ~1000x
-            # slower); per-episode CPU projection was the eval's main bottleneck.
-            pca_mean_cuda = pca_mean.to(device)
-            pca_components_cuda = pca_components.to(device)
-            projected = {
-                slide_id: (bag.to(device) - pca_mean_cuda) @ pca_components_cuda
-                for slide_id, bag in bags.items()
-            }
-            print(f"Projected {len(projected)} slides to {input_dim}-d on {device}")
+            # Project one bag at a time on the GPU, then park the result on
+            # CPU. Holding every projected slide on device was the eval's
+            # residency cost; the GEMM itself still needs the GPU.
+            projected = project_bags_to_cpu(bags, pca_mean, pca_components, device)
+            print(f"Projected {len(projected)} slides to {input_dim}-d via {device} (CPU-resident)")
         else:
-            projected = {
-                slide_id: bag.to(device) for slide_id, bag in bags.items()
-            }
-            print(f"Moved {len(projected)} slides to {device} as raw {FEATURE_DIM}-d (no PCA)")
+            projected = cpu_bag_mapping(bags)
+            print(f"Keeping {len(projected)} slides on CPU as raw {FEATURE_DIM}-d (no PCA)")
     print(f"Model: arch v{model.model.architecture_version}, checkpoint {args.checkpoint.name}")
 
     if args.cv_folds is not None and args.cv_folds > 1:
