@@ -62,6 +62,7 @@ from typing import Sequence
 import torch
 
 from src.models.ct_readout import CTReadoutConfig, ct_margins
+from src.models.dd_adaptive_rank import ordered_typicality_margin
 
 
 def _solve_ridge(gram: torch.Tensor, targets: torch.Tensor, penalty: float) -> torch.Tensor:
@@ -128,6 +129,10 @@ class TrainingFreeConfig:
     ridge_scale: float = 2.0
     dd_shrinkage: float = 0.25
     dd_eps: float = 1e-6
+    # Experimental DD readout from SS182. ``distance`` is the promoted v111
+    # baseline; ``ordered_typicality`` is the bounded candidate under evaluation.
+    dd_readout: str = "distance"
+    dd_separation_floor: float = 1.0
     # SS181 (v111, user decision). Promote the best fully deterministic CT arm:
     # full-cell hierarchical PCA/2-means at PCA32/K256. It scores below v110 but
     # removes both storage-order selection bias and sampling-seed dependence.
@@ -271,8 +276,30 @@ class TrainingFreeClassifier:
             (context_feature[labels == c] - prototypes[c]).square().mean().clamp_min(config.dd_eps)
             for c in range(2)
         ])
-        # DISTANCES: small means close to that class, hence the head's negative weight.
-        return (query_feature[:, None] - prototypes[None, :]).square() / dispersions[None, :]
+        distances = (
+            (query_feature[:, None] - prototypes[None, :]).square()
+            / dispersions[None, :]
+        )
+        if config.dd_readout == "distance":
+            # DISTANCES: small means close to that class, hence the head's
+            # negative weight. This is the promoted v111 behaviour.
+            return distances
+        if config.dd_readout == "ordered_typicality":
+            margin = ordered_typicality_margin(
+                query_feature,
+                prototypes,
+                dispersions,
+                config.dd_eps,
+                config.dd_separation_floor,
+            )
+            # Keep the fixed head and its historical negative DD coefficient
+            # unchanged: it consumes d1-d0, so this symmetric pseudo-pair makes
+            # -weight*(d1-d0) equal +weight*margin.
+            return torch.stack((0.5 * margin, -0.5 * margin), dim=-1)
+        raise ValueError(
+            'dd_readout must be "distance" or "ordered_typicality", '
+            f"got {config.dd_readout!r}"
+        )
 
     # ---- 5. CT ------------------------------------------------------------
     def _ct_features(self, context_bags, labels, query_bags, basis=None):

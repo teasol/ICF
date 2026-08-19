@@ -25,6 +25,7 @@ import unittest
 import torch
 
 from src.models.set_transformer_ridge import CovarianceMeanLearnablePDDCTMLPModel
+from src.models.dd_adaptive_rank import ordered_typicality_margin
 from src.models.training_free import TrainingFreeClassifier, TrainingFreeConfig
 
 DIM = 48
@@ -130,6 +131,100 @@ class DefaultTest(unittest.TestCase):
         self.assertEqual(config.ct_dbscan_min_samples, 16)
         self.assertEqual(config.cv_blocks, "offdiag")
         self.assertEqual(config.weight_ct, 0.7)
+        self.assertEqual(config.dd_readout, "distance")
+        self.assertEqual(config.dd_separation_floor, 1.0)
+
+
+class OrderedTypicalityDDTest(unittest.TestCase):
+    def test_prototypes_are_attenuated_when_the_gap_is_small(self):
+        prototypes = torch.tensor([-0.05, 0.05])
+        dispersions = torch.ones(2)
+        margin = ordered_typicality_margin(
+            prototypes, prototypes, dispersions, 1e-6
+        )
+        self.assertTrue(torch.allclose(margin, torch.tensor([-0.05, 0.05]), atol=1e-6))
+
+    def test_far_exterior_queries_lose_typicality(self):
+        prototypes = torch.tensor([-2.0, 2.0])
+        dispersions = torch.ones(2)
+        query = torch.tensor([-2.0, -5.0, 2.0, 5.0])
+        margin = ordered_typicality_margin(query, prototypes, dispersions, 1e-6)
+        self.assertAlmostEqual(float(margin[0]), -1.0, places=5)
+        self.assertAlmostEqual(float(margin[2]), 1.0, places=5)
+        self.assertLess(abs(float(margin[1])), abs(float(margin[0])))
+        self.assertLess(abs(float(margin[3])), abs(float(margin[2])))
+
+    def test_label_swap_negates_margin(self):
+        query = torch.tensor([-3.0, -0.5, 0.0, 1.0, 4.0])
+        prototypes = torch.tensor([-1.0, 2.0])
+        dispersions = torch.tensor([0.5, 1.5])
+        original = ordered_typicality_margin(query, prototypes, dispersions, 1e-6)
+        flipped = ordered_typicality_margin(
+            query, prototypes.flip(0), dispersions.flip(0), 1e-6
+        )
+        self.assertTrue(torch.equal(original, -flipped))
+
+    def test_equal_prototypes_are_finite_zero_evidence(self):
+        margin = ordered_typicality_margin(
+            torch.tensor([-1.0, 0.0, 1.0]),
+            torch.zeros(2),
+            torch.ones(2),
+            1e-6,
+        )
+        self.assertTrue(torch.equal(margin, torch.zeros_like(margin)))
+
+    def test_training_free_arm_is_bounded_and_differs_from_distance(self):
+        context_bags, labels, query_bags = episode(31)
+        legacy = TrainingFreeClassifier(TrainingFreeConfig(
+            sketch_dim=SKETCH, dd_readout="distance", weight_cv=0.0, weight_ct=0.0
+        )).margins(context_bags, labels, query_bags)
+        arm = TrainingFreeClassifier(TrainingFreeConfig(
+            sketch_dim=SKETCH, dd_readout="ordered_typicality",
+            weight_cv=0.0, weight_ct=0.0,
+        )).margins(context_bags, labels, query_bags)
+        self.assertFalse(torch.allclose(legacy, arm))
+        self.assertTrue(bool((arm.abs() <= 0.343 + 1e-6).all()))
+
+    def test_training_free_arm_preserves_label_antisymmetry(self):
+        context_bags, labels, query_bags = episode(32)
+        model = TrainingFreeClassifier(TrainingFreeConfig(
+            sketch_dim=SKETCH, dd_readout="ordered_typicality"
+        ))
+        original = model.margins(context_bags, labels, query_bags)
+        flipped = model.margins(context_bags, 1 - labels, query_bags)
+        self.assertTrue(torch.allclose(original, -flipped, atol=1e-4))
+
+    def test_official_and_standalone_dd_arms_match(self):
+        generator = torch.Generator().manual_seed(34)
+        context_factor = torch.randn(10, SKETCH, SKETCH, generator=generator)
+        query_factor = torch.randn(4, SKETCH, SKETCH, generator=generator)
+        context_covariance = context_factor @ context_factor.transpose(-1, -2)
+        query_covariance = query_factor @ query_factor.transpose(-1, -2)
+        labels = torch.tensor([0, 1] * 5)
+
+        standalone = TrainingFreeClassifier(TrainingFreeConfig(
+            sketch_dim=SKETCH, dd_readout="ordered_typicality"
+        ))._dd_features(context_covariance, labels, query_covariance)
+        lineage = CovarianceMeanLearnablePDDCTMLPModel(
+            input_dim=DIM, token_dim=16, num_heads=1, num_layers=1,
+            feedforward_dim=16, num_summary_tokens=1, max_cells=4096,
+            dropout=0.0, covariance_sketch_dim=SKETCH, ridge_lambda=1.0,
+            ridge_logit_scale=2.0, num_classes=2, ct_num_tokens=16,
+            ct_cells_per_bag=64, ct_temperature=0.5, ct_eps=1e-6,
+            ct_head_hidden_dims=[], dd_shrinkage=0.25, dd_eps=1e-6,
+        ).eval()
+        official, _ = lineage._dd_ordered_typicality_features(
+            context_covariance, labels, query_covariance
+        )
+        self.assertTrue(torch.allclose(standalone, official, atol=1e-6))
+
+    def test_unknown_readout_is_rejected(self):
+        context_bags, labels, query_bags = episode(33)
+        model = TrainingFreeClassifier(TrainingFreeConfig(
+            sketch_dim=SKETCH, dd_readout="nope", weight_cv=0.0, weight_ct=0.0
+        ))
+        with self.assertRaisesRegex(ValueError, "dd_readout"):
+            model.margins(context_bags, labels, query_bags)
 
 
 class V109Test(unittest.TestCase):

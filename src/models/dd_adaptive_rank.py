@@ -213,6 +213,54 @@ def relative_margin(distances: torch.Tensor, eps: float) -> torch.Tensor:
     return difference / total
 
 
+def ordered_typicality_margin(
+    query_feature: torch.Tensor,
+    prototypes: torch.Tensor,
+    dispersions: torch.Tensor,
+    eps: float,
+    separation_floor: float = 1.0,
+) -> torch.Tensor:
+    """Bounded, class-1-positive evidence on DD's one-dimensional axis.
+
+    The sign and midpoint encode only the ORDER of the two prototypes.  The
+    denominator folds prototype reliability into the coordinate itself:
+
+        h_eff = max(|p1-p0|/2, separation_floor * sigma_pooled)
+
+    Thus nearly coincident prototypes cannot create an arbitrarily sharp step,
+    without introducing a separately estimated ``r_task`` from the same data
+    that selected the DD direction.  ``typicality`` then suppresses queries far
+    from BOTH class distributions instead of treating every exterior point as
+    maximum confidence.
+
+    This is directional evidence rather than a Gaussian posterior.  Swapping
+    the class labels negates the result exactly; exchanging the two dispersion
+    estimates leaves typicality unchanged.
+    """
+    if separation_floor <= 0.0:
+        raise ValueError("separation_floor must be positive.")
+    if prototypes.shape != (2,) or dispersions.shape != (2,):
+        raise ValueError("prototypes and dispersions must each have shape [2].")
+
+    gap = prototypes[1] - prototypes[0]
+    midpoint = prototypes.mean()
+    half_gap = 0.5 * gap.abs()
+    pooled_sigma = dispersions.mean().clamp_min(eps).sqrt()
+    effective_half_gap = torch.maximum(
+        half_gap, pooled_sigma * float(separation_floor)
+    )
+    ordered = (
+        gap.sign() * (query_feature - midpoint) / effective_half_gap
+    ).clamp(-1.0, 1.0)
+
+    squared_standard_distance = (
+        (query_feature[:, None] - prototypes[None, :]).square()
+        / (dispersions[None, :] + eps)
+    )
+    typicality = torch.exp(-0.5 * squared_standard_distance.amin(dim=-1))
+    return ordered * typicality
+
+
 def adaptive_dd_distance_features(
     context_covariance, context_labels, query_covariance, config
 ):

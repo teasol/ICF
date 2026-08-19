@@ -862,6 +862,29 @@ def evaluate_trial(
             print(f"ICF_CV_BLOCKS={cv_blocks} norm={block_norm} corr={cv_corr} "
                   f"dims={sum(int(i.numel()) for i in selection)}", flush=True)
         dd_relative = os.environ.get("ICF_DD_RELATIVE") == "1"
+        dd_ordered_typicality = os.environ.get("ICF_DD_ORDERED_TYPICALITY") == "1"
+        saved_ordered_features = None
+        if dd_ordered_typicality:
+            if dd_relative or dd_llr or rank_max != 1 or selection != "eigenvalue":
+                raise ValueError(
+                    "ICF_DD_ORDERED_TYPICALITY cannot be combined with another DD arm"
+                )
+            saved_ordered_features = inner._dd_distance_features
+            separation_floor = float(os.environ.get("ICF_DD_SEPARATION_FLOOR", "1.0"))
+
+            def dd_with_ordered_typicality(
+                context_covariance, context_labels, query_covariance,
+                _floor=separation_floor,
+            ):
+                return inner._dd_ordered_typicality_features(
+                    context_covariance, context_labels, query_covariance, _floor
+                )
+
+            inner._dd_distance_features = dd_with_ordered_typicality
+            print(
+                f"ICF_DD_ORDERED_TYPICALITY=1 separation_floor={separation_floor}",
+                flush=True,
+            )
         saved_relative_features = None
         if dd_relative:
             from src.models.dd_adaptive_rank import relative_margin  # noqa: PLC0415
@@ -974,6 +997,8 @@ def evaluate_trial(
                 inner._dd_distance_features = saved_llr_features
             if saved_relative_features is not None:
                 inner._dd_distance_features = saved_relative_features
+            if saved_ordered_features is not None:
+                inner._dd_distance_features = saved_ordered_features
             if saved_normalize is not None:
                 inner._normalize_descriptors = saved_normalize
         scores = torch.softmax(logits.float(), dim=-1)[:, 1]

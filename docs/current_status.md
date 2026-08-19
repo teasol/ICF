@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-19` — §181 사용자 결정으로 **v111 = full-cell/full-abundance hierarchical PCA32/K256**을 활성 baseline으로 승격했다. selection bias와 sampling randomness가 없으며 SEAL **0.70453**, 홀드아웃 **0.59809**, 전체 **0.66070**, seed std 0.00000이다. 예측 수치가 더 높은 v110(전체 0.66713)은 historical control이다. CT 분기는 종료했고 실행 중인 job은 없다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
+**Last updated**: `2026-08-19` — §182에서 DD의 **ordered coordinate × nearest-class typicality** 후보를 구현했다. 별도 `r_task` 없이 `h_eff=max(h, sigma_pool)`에 작은 prototype gap 감쇠를 흡수하며, 외분점은 typicality로 감쇠한다. 아직 평가는 시작하지 않았고 **활성 baseline은 계속 v111**(전체 0.66070)이다. CT 분기는 종료했고 실행 중인 job은 없다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -7090,3 +7090,40 @@ head weight               : 0.7
 ```bash
 bash scripts/eval_v111.sh <gpu> <tag> [tasks...]
 ```
+
+---
+
+## 182. 2026-08-19 — DD ordered coordinate × typicality 구현 (평가 전)
+
+사용자와 합의한 내용은 세 가지다.
+
+1. 같은 context로 DD 방향을 선택한 뒤 같은 표본의 prototype separation을 독립 confidence인
+   `r_task`로 다시 사용하지 않는다.
+2. prototype 순서는 bounded class-direction evidence로 사용하되, prototype 바깥이라는 이유만으로
+   최대 confidence라고 해석하지 않는다.
+3. 작은 gap의 불확실성은 별도 gate 대신
+   `h_eff=max(|p1-p0|/2, κ sigma_pool)`에 흡수하고, 두 클래스 모두에서 먼 query는
+   nearest-class typicality로 감쇠한다. 첫 구현은 κ=1이다.
+
+최종 class-1-positive evidence는 다음이다.
+
+```text
+a(q) = clip(sign(p1-p0) * (q-midpoint) / h_eff, -1, 1)
+o(q) = exp(-0.5 * min_c ((q-p_c)^2 / (sigma_c^2+eps)))
+M_DD(q) = a(q) * o(q)
+```
+
+구현:
+
+- `src/models/dd_adaptive_rank.py::ordered_typicality_margin` — 공통 수식
+- `src/models/training_free.py` — `dd_readout="ordered_typicality"` opt-in
+- `src/models/set_transformer_ridge.py::_dd_ordered_typicality_features` — 정식 평가 계보 경로
+- `scripts/test_pathobench.py` — `ICF_DD_ORDERED_TYPICALITY=1`,
+  `ICF_DD_SEPARATION_FLOOR=1.0` 훅
+- `scripts/eval_dd_ordered_typicality.sh` — v111에서 DD만 바꾸는 runner
+
+테스트는 작은 gap 감쇠, 외분 OOD 감쇠, label antisymmetry, 겹친 prototype의 0 evidence,
+boundedness, 정식/독립 구현 일치, legacy v111 동등성을 고정한다. 관련 **89 tests, OK**, 전체
+**318 tests, OK (72.356s)**. **아직 macro를 측정하지 않았으므로 승격하지 않았고 v111 기본
+`distance` readout은 보존했다.** 다음 Action은 SEAL 10과 홀드아웃 7을 같은 deterministic
+protocol로 평가해 v111 대비 task별 부호 일치와 두 집단 macro를 확인하는 것이다.

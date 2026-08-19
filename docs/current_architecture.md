@@ -99,7 +99,43 @@ head    margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
 
 - **CV 비대각 32,640차원의 가중** — 지금은 무가중 ridge다. 학습을 넣는다면 여기다 (§156-6).
 - **DD의 코호트 의존성** — DD는 SEAL에서 도움, 홀드아웃에서 해롭다. 에피소드별 게이트가
-  가능한지 (§153).
+  가능한지 (§153). §182의 `ordered × typicality` arm이 첫 재개 후보다. 별도 post-selection
+  `r_task`는 두지 않고, 작은 prototype gap의 감쇠를 query 좌표의 분모에 흡수한다.
+
+### 0-7. DD ordered × typicality 후보 (§182, 미승격)
+
+rank-1 방향과 표준화된 scalar $q$, prototype $p_c$, class variance
+$\sigma_c^2$까지는 v111과 같다. 이후의 QDA 거리 차이만 다음 유계 evidence로 바꾼다.
+
+\[
+m=\frac{p_0+p_1}{2},\quad h=\frac{|p_1-p_0|}{2},\quad
+s=\operatorname{sign}(p_1-p_0)
+\]
+
+\[
+\sigma_{pool}=\sqrt{\frac{\sigma_0^2+\sigma_1^2}{2}},\quad
+h_{eff}=\max(h,\kappa\sigma_{pool}),\quad \kappa=1
+\]
+
+\[
+a(q)=\operatorname{clip}\left(s\frac{q-m}{h_{eff}},-1,1\right),\qquad
+o(q)=\exp\left[-\frac12\min_c\frac{(q-p_c)^2}{\sigma_c^2+\epsilon}\right]
+\]
+
+\[
+M_{DD}(q)=a(q)o(q)
+\]
+
+- $a$는 class-1 양의 순서 evidence다. prototype이 가까우면 별도 `r_task` 없이도
+  prototype에서의 크기가 $h/(\kappa\sigma_{pool})$로 줄어든다.
+- $o$는 posterior가 아니라 nearest-class **typicality**다. 외분점에서 방향은 유지하되 두
+  클래스 모두에서 멀어질수록 evidence를 감쇠한다.
+- 같은 context로 방향을 고르고 separation confidence를 다시 재는 post-selection gate는 쓰지 않는다.
+- 정확히 겹친 prototype은 $s=0$이므로 DD evidence가 0이다. 라벨 교환은 $M_{DD}$의 부호만
+  반전시킨다.
+- v111은 아직 유지한다. 실행은
+  `bash scripts/eval_dd_ordered_typicality.sh <gpu> <tag> [tasks...]`이고 환경변수는
+  `ICF_DD_ORDERED_TYPICALITY=1`, `ICF_DD_SEPARATION_FLOOR=1.0`이다.
 
 ---
 

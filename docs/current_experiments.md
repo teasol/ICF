@@ -549,6 +549,19 @@ CovarianceOnlyRidgeModel은 이 결정을 재검증할 historical control로만 
 
 ### 8-1. training-free DD ablation
 
+§182에서 기존 QDA distance difference의 두 문제를 분리한 후보를 구현했다. (1) prototype
+바깥에서 이차 마진이 발산하는 문제는 ordered coordinate를 `[-1,1]`로 제한하고, (2) 두 클래스
+모두에서 먼 query의 과신은 nearest-class typicality를 곱해 감쇠한다. 별도 `r_task`는 동일
+context의 direction-selection 편향을 다시 confidence로 읽게 되므로 두지 않는다. 대신
+`h_eff=max(h, sigma_pool)`로 작은 prototype gap의 감쇠를 좌표 안에 흡수한다.
+
+후보명은 **DD ordered × typicality, κ=1**이다. v111 CT/CV 조건을 그대로 고정하고 DD readout만
+바꾼다. 아직 성능 결과가 없으므로 v111을 대체하지 않는다.
+
+```bash
+bash scripts/eval_dd_ordered_typicality.sh <gpu> <tag> [tasks...]
+```
+
 canonical CV와 같은 fixed P(K128) covariance에서 rank-1 DD를 만들었다. 학습 없이
 support label로 generalized covariance direction을 구하고 query마다 standardized distances
 `D0,D1`을 계산했다.

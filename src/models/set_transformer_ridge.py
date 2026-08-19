@@ -822,6 +822,49 @@ class CovarianceMeanDDRidgeModel(CovarianceMeanRidgeModel):
         separation = (prototypes[1] - prototypes[0]).abs()
         return distances, separation
 
+    def _dd_ordered_typicality_features(
+        self,
+        context_covariance,
+        context_labels,
+        query_covariance,
+        separation_floor=1.0,
+    ):
+        """SS182 bounded DD arm, encoded for the historical 12-slot head.
+
+        Recompute the same rank-1 scalar statistics as the canonical distance
+        path, then replace its unbounded QDA distance difference with an ordered
+        coordinate times nearest-class typicality.  The returned pair satisfies
+        ``d0 - d1 == class_1_positive_margin`` so the existing fixed-head DD
+        magnitude and sign convention remain untouched.
+        """
+        from src.models.dd_adaptive_rank import ordered_typicality_margin
+
+        labels = context_labels.long()
+        direction = self._dd_direction(context_covariance, context_labels)
+        context_feature = torch.einsum(
+            "d,bdk,k->b", direction, context_covariance, direction
+        ).clamp_min(self.dd_eps).log()
+        query_feature = torch.einsum(
+            "d,qdk,k->q", direction, query_covariance, direction
+        ).clamp_min(self.dd_eps).log()
+        center = context_feature.mean()
+        scale = (context_feature - center).square().mean().sqrt().clamp_min(self.dd_eps)
+        context_feature = (context_feature - center) / scale
+        query_feature = (query_feature - center) / scale
+        prototypes = torch.stack(
+            [context_feature[labels == class_index].mean() for class_index in range(2)]
+        )
+        dispersions = torch.stack([
+            (context_feature[labels == class_index] - prototypes[class_index])
+            .square().mean().clamp_min(self.dd_eps)
+            for class_index in range(2)
+        ])
+        margin = ordered_typicality_margin(
+            query_feature, prototypes, dispersions, self.dd_eps, separation_floor
+        )
+        pair = torch.stack((0.5 * margin, -0.5 * margin), dim=-1)
+        return pair, (prototypes[1] - prototypes[0]).abs()
+
     def _ridge_logits(self, context, context_labels, query):
         cv_logits = super()._ridge_logits(context, context_labels, query)
         # CUDA eigh has no bf16 implementation, and whitening should not lose
