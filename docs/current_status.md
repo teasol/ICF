@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-19` — §179 random512/full-abundance + hierarchical PCA32/K256의 4-seed 평가 완료. 전체 **0.66034±0.00025**, v110 대비 −0.00679(3/17)로 미승격이다. 활성 구성은 계속 **historical v110 = 학습 파라미터 0**(§161, SEAL **0.70692**, 홀드아웃 **0.61029**, 전체 **0.66713**)이고 실행 중인 job은 없다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
+**Last updated**: `2026-08-19` — §180 raw1536 spherical/cosine k-means + random512/full-abundance 4-seed 평가 완료. 전체 **0.65618±0.00018**, v110 대비 −0.01095(7/17)로 미승격이다. 활성 구성은 계속 **historical v110 = 학습 파라미터 0**(§161, SEAL **0.70692**, 홀드아웃 **0.61029**, 전체 **0.66713**)이고 실행 중인 job은 없다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -7014,3 +7014,37 @@ hierarchical tokenizer가 기존 Lloyd tokenizer를 회복시키지 못했다.
 실행 arm은 `h2r512all_s{42..45}`이고 로그/예측은
 `logs/20260819_ct_h2_random512_full_abundance/{seal,heldout}/`에 있다. 68개 로그 모두 final 1개,
 traceback 0으로 확인했다. 재현용 arm은 `scripts/run_ct_readout_sweep.sh`에 추가했다.
+
+---
+
+## 180. 2026-08-19 — raw1536 spherical k-means + random512/full abundance, 4 seed: **미승격**
+
+사용자 요청으로 CT PCA를 사용하지 않는 raw 1536-d에서 spherical/cosine k-means를 구현·평가했다.
+context의 random 512-cell subset으로 좌표별 centre/scale을 구한 뒤 각 cell을 L2 정규화하고,
+`1−cosine` 거리로 seeded k-means++ 초기화와 최대 8회 Lloyd 갱신을 수행했다. 각 centroid는 갱신
+직후 단위구면으로 재투영하며, abundance는 같은 context 통계와 L2 정규화를 적용한 모든 cell의
+cosine soft assignment 평균이다. K=32, CT ridge λ=1, CT weight 0.7이고 sampling seed만 42–45로
+바꿨다.
+
+| seed | SEAL 10 | 홀드아웃 7 | 전체 17 |
+|---:|---:|---:|---:|
+| 42 | 0.699390 | 0.594443 | 0.656176 |
+| 43 | 0.699210 | 0.594400 | 0.656053 |
+| 44 | 0.700020 | 0.594271 | 0.656476 |
+| 45 | 0.699210 | 0.594314 | 0.656018 |
+| **평균±population std** | **0.699457±0.000333** | **0.594357±0.000068** | **0.656181±0.000180** |
+| **Δ vs v110** | **−0.007463** | **−0.015933** | **−0.010949** |
+
+task별 4-seed 평균은 v110 대비 SEAL 4/10, 홀드아웃 3/7, 전체 **7/17만 상승**했다. 상승은 KRAS
++0.01213, PIK3CA +0.00720, Histologic Grade +0.00418 등이지만 ARID1A −0.05798, ER −0.03505,
+SMAD4 −0.03193, PBRM1 −0.02990, VHL −0.02880의 하락이 크다. 양쪽 독립 집단 macro가 모두
+하락하므로 요청 조합은 미승격, v110을 유지한다.
+
+⚠️ 이 arm은 **PCA32→raw1536과 Euclidean→cosine을 동시에 바꾼 조합**이다. 따라서 spherical
+k-means 자체의 순효과를 분리하지 못하며, 이 결과만으로 cosine 축 전체를 닫지 않는다. 분리가
+필요하면 동일 raw1536/random512/full-abundance의 Euclidean control 또는 PCA32 spherical arm을
+짝지어야 한다.
+
+실행 arm은 `sphraw512all_s{42..45}`, 로그/예측은
+`logs/20260819_ct_spherical_raw512_full_abundance/{seal,heldout}/`에 있다. 68개 로그 모두 final 1개,
+traceback 0이다. 구현 전 BagPFN Python full test는 **310 tests, OK (68.011s)**였다.

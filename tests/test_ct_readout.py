@@ -360,6 +360,38 @@ class KMeansTest(unittest.TestCase):
         self.assertFalse(torch.equal(recovered[1], initial[1]))
         self.assertTrue(bool((pooled == recovered[1]).all(dim=1).any()))
 
+    def test_spherical_kmeans_is_reproducible_and_unit_norm(self):
+        context_bags, _, query_bags = episode(53)
+        config = CTReadoutConfig(
+            num_tokens=8,
+            cells_per_bag=24,
+            sampling="random",
+            tokenizer="spherical_kmeans",
+            kmeans_seed=7,
+            kmeans_max_iterations=5,
+        )
+        first = ct_abundance(context_bags, query_bags, config)
+        repeated = ct_abundance(context_bags, query_bags, config)
+        self.assertTrue(torch.equal(first.tokens, repeated.tokens))
+        self.assertTrue(torch.equal(first.context, repeated.context))
+        self.assertTrue(torch.allclose(
+            first.tokens.norm(dim=1), torch.ones(config.num_tokens), atol=1e-6
+        ))
+
+    def test_spherical_lloyd_normalises_centroids(self):
+        pooled = torch.randn(80, 5, generator=torch.Generator().manual_seed(54))
+        pooled = pooled / pooled.norm(dim=1, keepdim=True)
+        tokens, _ = lloyd_refine(
+            pooled,
+            pooled[:6].clone(),
+            3,
+            "cosine",
+            normalise_centroids=True,
+        )
+        self.assertTrue(torch.allclose(
+            tokens.norm(dim=1), torch.ones(tokens.shape[0]), atol=1e-6
+        ))
+
     def test_refinement_moves_the_tokens(self):
         context_bags, _, query_bags = episode(31)
         before = ct_abundance(context_bags, query_bags, self._config(0)).tokens

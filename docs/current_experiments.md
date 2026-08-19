@@ -5,7 +5,7 @@ CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 
 ---
 
-## 0. CT sampling/tokenizer 및 full-cell PCA/K 최근 결론 (§165–§179)
+## 0. CT sampling/tokenizer 및 full-cell PCA/K 최근 결론 (§165–§180)
 
 활성 v110은 결정론적이지만 CT dictionary cell을 무작위로 뽑는 arm은 다시 seed 분산이 생긴다.
 따라서 단일 seed나 task 반복을 근거로 삼지 않고 **sampling seed 42–45를 같은 17 task에서 반복**한다.
@@ -68,6 +68,13 @@ capacity 부족이 확인됐다. PCA64에서는 K32 0.65357 > K16 0.64945였지�
 full-cell hierarchical PCA32/K256과는 전체 −0.00036로 동률권이지만 random512/Lloyd
 k-means보다 −0.00437 낮아 미승격이다. arm은 `h2r512all_s{42..45}`, 로그는
 `logs/20260819_ct_h2_random512_full_abundance/{seal,heldout}/`이다.
+
+§180은 raw1536 spherical/cosine k-means K32 + random512/full-abundance를 4 seed로 평가했다.
+SEAL 0.699457±0.000333 / 홀드아웃 0.594357±0.000068 / 전체 0.656181±0.000180으로 v110 대비
+각각 −0.00746 / −0.01593 / −0.01095였고 7/17 task만 상승해 미승격이다. 단 raw dimension과
+cosine metric을 함께 바꾼 조합이므로 cosine 단독 효과는 미분리 상태다. arm은
+`sphraw512all_s{42..45}`, 로그는
+`logs/20260819_ct_spherical_raw512_full_abundance/{seal,heldout}/`이다.
 
 현재 실행 중인 job은 없다. PCA/K 보간을 계속한다면 다음 미실행 후보는 **PCA24/K256**이지만,
 사용자 확인 없이 자동 실행하지 않는다.

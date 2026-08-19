@@ -1,8 +1,8 @@
 # Agent handoff guide
 
-**Last updated**: 2026-08-19 — §179 random512/full-abundance + hierarchical PCA32/K256
-4-seed 평가 완료(전체 0.66034±0.00025, v110 대비 −0.00679, 3/17). 활성 baseline은 계속
-v110이며 실행 중인 job은 없다.
+**Last updated**: 2026-08-19 — §180 raw1536 spherical/cosine k-means +
+random512/full-abundance 4-seed 평가 완료(전체 0.65618±0.00018, v110 대비 −0.01095, 7/17).
+활성 baseline은 계속 v110이며 실행 중인 job은 없다.
 
 ---
 
@@ -18,25 +18,26 @@ v110이며 실행 중인 job은 없다.
 
 3. 읽는 순서는 이 문서 §0 → [`current_architecture.md` §0](current_architecture.md) →
    [`current_experiments.md` §0](current_experiments.md) → 세부 수치가 필요할 때만
-   [`current_status.md` §173–§179](current_status.md)다.
-4. §173–§179의 코드·평가·문서는 정리 커밋에 반영됐다. 새 세션은 `git status --short`가 비어
+   [`current_status.md` §173–§180](current_status.md)다.
+4. §173–§179의 코드·평가·문서는 `c34dfe2`에 반영됐다. §180도 완료 후 별도 커밋했다. 새 세션은
+   `git status --short`가 비어
    있는지와 `git log -n 3 --oneline`의 최신 커밋부터 확인한다.
 5. 활성 모델은 **historical v110**이다. 코드 기본값은 §174의 random64+k-means++ candidate지만
    공식 전체가 0.66375로 v110 0.66713보다 낮아 승격되지 않았다. §175–§178 full-cell hierarchical
-   arm과 §179 random512/hierarchical 4-seed arm도 모두 v110을 넘지 못했다. 실행 중 평가
+   arm, §179 random512/hierarchical, §180 spherical raw1536 4-seed arm도 모두 v110을 넘지 못했다. 실행 중 평가
    프로세스는 없고 같은 tag를 다시 돌리지 않는다.
 6. 2026-08-19 인계 시점에는 GPU 0–7이 모두 NVIDIA B200 183,359 MiB이고 사용량 0 MiB였다.
    자원 상태는 변하므로 새 세션 시작 때 `nvidia-smi`로 다시 확인한다. 8-GPU 사용 가능 여부는
    그 시점의 다른 사용자 프로세스를 보고 결정한다.
-7. 마지막 코드 검증은 BagPFN Python으로 **308 tests, OK (68.073s)**였다. §179의 68개 평가
+7. 마지막 코드 검증은 BagPFN Python으로 **310 tests, OK (68.011s)**였다. §180의 68개 평가
    로그도 모두 final 1개, traceback 0으로 확인했다.
 
 새 세션에 전달할 최소 문장:
 
 > `/NHNHOME/WORKSPACE/26msit005_C/kimds/ICF`에서 `docs/agent_handoff.md`의 “새 세션 60초 재개 절차”와
 > §0을 읽고 이어서 작업해줘. Python은 BagPFN 환경 실행 파일을 직접 사용해줘. 활성 baseline은
-> historical v110이고 §173–§179 arm은 모두 종료됐다. 마지막 결과는 random512/full-abundance +
-> hierarchical PCA32/K256 4-seed 전체 0.66034±0.00025이며, 다음 미실행 보간 후보는 PCA24/K256이다.
+> historical v110이고 §173–§180 arm은 모두 종료됐다. 마지막 결과는 raw1536 spherical k-means +
+> random512/full-abundance 4-seed 전체 0.65618±0.00018이며, cosine 단독 효과는 아직 미분리다.
 
 ---
 

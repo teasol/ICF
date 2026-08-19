@@ -92,6 +92,7 @@ head    margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
 | DD 전반 | K·rank·게이트·selector 네 갈래 모두 (§145~§147) |
 | CT cell 샘플링 | random64/all ≈ random512/all(−0.00011), abundance512 ≈ all(−0.00014). §174의 matched 2×2에서 even→random이 전체 −0.00339로 하락 원인임을 분리했다. v110은 even 유지 (§159, §160, §165–§167, §174) |
 | CT hierarchical | full-cell 최고는 PCA32/K256 0.66070. random512/full-abundance 교차도 4-seed 0.66034±0.00025(3/17)로 미승격. PCA8/16/64/128 및 K8..2048 어디서도 v110을 넘지 못함 (§168, §175–§179) |
+| CT spherical raw1536 조합 | random512/full-abundance, K32의 4-seed 전체 0.65618±0.00018(7/17), v110 대비 −0.01095로 미승격. raw 차원과 cosine을 함께 바꿔 metric 단독 효과는 미분리 (§180) |
 | CT HDBSCAN full-cell | GPU NN-descent, 32D는 noise 96.2%(§169), 3D도 noise 75~97%에 SEAL 0.6849(−0.0221)(§173). 밀도 기반 K는 연속 공간에서 노이즈 폭증으로 기각 |
 | CT DBSCAN random64/all | adaptive k-distance knee eps, fold 84.5%가 K=1. 전체 0.64976±0.00041, v110 대비 −0.01737 (§170) |
 | CT HDBSCAN random64/all | noise 93.6%, K 중앙값 2, 30.2% all-noise fallback. 전체 0.64819±0.00052, v110 대비 −0.01894 (§171) |

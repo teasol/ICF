@@ -94,11 +94,12 @@ class CTReadoutConfig:
     # computes the same token-dependent squared distance with
     # ||c||^2 - 2 x.c; ||x||^2 is omitted because it is constant across tokens
     # for both argmin and softmax. This avoids materialising [cells,tokens,dims].
-    distance_kernel: Literal["broadcast", "gemm"] = "broadcast"
+    distance_kernel: Literal["broadcast", "gemm", "cosine"] = "broadcast"
     # SS168. Hierarchical PCA-initialised 2-means reads every context cell in
     # O(N D log K), avoiding the 30 x O(N K D) Lloyd sweep at large K.
     tokenizer: Literal[
-        "fps_lloyd", "kmeans_plusplus", "hierarchical_2means", "hdbscan", "dbscan"
+        "fps_lloyd", "kmeans_plusplus", "spherical_kmeans",
+        "hierarchical_2means", "hdbscan", "dbscan"
     ] = "fps_lloyd"
     bisect_iterations: int = 2
     bisect_power_iterations: int = 3
@@ -313,7 +314,9 @@ def farthest_point_tokens(pooled: torch.Tensor, config: CTReadoutConfig) -> torc
 
 
 def kmeans_plusplus_tokens(
-    pooled: torch.Tensor, config: CTReadoutConfig
+    pooled: torch.Tensor,
+    config: CTReadoutConfig,
+    distance_kernel: str | None = None,
 ) -> torch.Tensor:
     """Seed K centroids with reproducible D-squared sampling.
 
@@ -333,8 +336,9 @@ def kmeans_plusplus_tokens(
     selected = [first]
     chosen = torch.zeros(pooled.shape[0], device=pooled.device, dtype=torch.bool)
     chosen[first] = True
+    kernel = config.distance_kernel if distance_kernel is None else distance_kernel
     nearest = _token_distance(
-        pooled, pooled[first].unsqueeze(0), config.distance_kernel
+        pooled, pooled[first].unsqueeze(0), kernel
     ).squeeze(1).clamp_min_(0)
 
     for _ in range(1, count):
@@ -350,7 +354,7 @@ def kmeans_plusplus_tokens(
         selected.append(index)
         chosen[index] = True
         distance = _token_distance(
-            pooled, pooled[index].unsqueeze(0), config.distance_kernel
+            pooled, pooled[index].unsqueeze(0), kernel
         ).squeeze(1).clamp_min_(0)
         nearest = torch.minimum(nearest, distance)
     return pooled[torch.stack(selected)]
@@ -667,9 +671,9 @@ def _distance_rows(tokens: torch.Tensor, distance_kernel: str) -> int:
     elements_per_row = tokens.shape[0]
     if distance_kernel == "broadcast":
         elements_per_row *= tokens.shape[1]
-    elif distance_kernel != "gemm":
+    elif distance_kernel not in ("gemm", "cosine"):
         raise ValueError(
-            "distance_kernel must be 'broadcast' or 'gemm', "
+            "distance_kernel must be 'broadcast', 'gemm', or 'cosine', "
             f"got {distance_kernel!r}"
         )
     return max(1, _DISTANCE_ELEMENT_BUDGET // max(1, elements_per_row))
@@ -685,8 +689,12 @@ def _token_distance(pooled: torch.Tensor, tokens: torch.Tensor,
         distance.mul_(-2.0 / pooled.shape[1])
         distance.add_(tokens.square().mean(dim=1).unsqueeze(0))
         return distance
+    if distance_kernel == "cosine":
+        # Spherical k-means normalises both operands before reaching this path.
+        # Clamp only round-off excursions so distance remains non-negative.
+        return (1.0 - _fp32_matmul(pooled, tokens.T)).clamp_min_(0)
     raise ValueError(
-        "distance_kernel must be 'broadcast' or 'gemm', "
+        "distance_kernel must be 'broadcast', 'gemm', or 'cosine', "
         f"got {distance_kernel!r}"
     )
 
@@ -728,6 +736,7 @@ def lloyd_refine(
     *,
     tolerance: float = 0.0,
     recover_empty: bool = False,
+    normalise_centroids: bool = False,
 ):
     """Move tokens to their cluster means, `iterations` times (docs SS157).
 
@@ -765,6 +774,9 @@ def lloyd_refine(
             if candidates.numel() < empty.numel():
                 candidates = torch.argsort(errors, descending=True, stable=True)
             updated[empty] = pooled[candidates[: empty.numel()]]
+        if normalise_centroids:
+            norms = updated.square().sum(dim=1, keepdim=True).sqrt()
+            updated = updated / norms.clamp_min(1e-12)
         movement = (updated - tokens).square().mean(dim=1).sqrt().max()
         tokens = updated
         if tolerance > 0 and float(movement) <= tolerance:
@@ -794,6 +806,15 @@ def ct_abundance(
     token_context, token_query, normalisation = prepare_cells(
         context_bags, query_bags, config, pca_basis, return_normalisation=True
     )
+    spherical = config.tokenizer == "spherical_kmeans"
+    distance_kernel = "cosine" if spherical else config.distance_kernel
+    if spherical:
+        def unit_normalise(bag):
+            norms = bag.square().sum(dim=1, keepdim=True).sqrt()
+            return bag / norms.clamp_min(config.eps)
+
+        token_context = [unit_normalise(bag) for bag in token_context]
+        token_query = [unit_normalise(bag) for bag in token_query]
     pooled = torch.cat(token_context, dim=0)
     if config.tokenizer == "fps_lloyd":
         tokens = farthest_point_tokens(pooled, config)
@@ -811,6 +832,17 @@ def ct_abundance(
             tolerance=config.kmeans_tolerance,
             recover_empty=True,
         )
+    elif config.tokenizer == "spherical_kmeans":
+        tokens = kmeans_plusplus_tokens(pooled, config, distance_kernel)
+        tokens, _ = lloyd_refine(
+            pooled,
+            tokens,
+            config.kmeans_max_iterations,
+            distance_kernel,
+            tolerance=config.kmeans_tolerance,
+            recover_empty=True,
+            normalise_centroids=True,
+        )
     elif config.tokenizer == "hierarchical_2means":
         tokens = hierarchical_2means_tokens(pooled, config)
     elif config.tokenizer == "hdbscan":
@@ -819,7 +851,7 @@ def ct_abundance(
         tokens = dbscan_tokens(pooled, config)
     else:
         raise ValueError(
-            "tokenizer must be 'fps_lloyd', 'kmeans_plusplus', "
+            "tokenizer must be 'fps_lloyd', 'kmeans_plusplus', 'spherical_kmeans', "
             "'hierarchical_2means', 'hdbscan', or 'dbscan', "
             f"got {config.tokenizer!r}"
         )
@@ -842,16 +874,19 @@ def ct_abundance(
             cells_per_bag=abundance_limit,
             normalisation=normalisation,
         )
+        if spherical:
+            context = [unit_normalise(bag) for bag in context]
+            query = [unit_normalise(bag) for bag in query]
 
     def abundance(bags):
         # Chunked for the same reason as `_assign`, and identically exact: the mean
         # over cells is accumulated as a weighted sum of per-chunk means.
-        rows = _distance_rows(tokens, config.distance_kernel)
+        rows = _distance_rows(tokens, distance_kernel)
         outputs = []
         for bag in bags:
             if rows >= bag.shape[0]:
                 outputs.append(
-                    (-_token_distance(bag, tokens, config.distance_kernel)
+                    (-_token_distance(bag, tokens, distance_kernel)
                      / config.temperature).softmax(dim=-1).mean(dim=0)
                 )
                 continue
@@ -859,7 +894,7 @@ def ct_abundance(
             for start in range(0, bag.shape[0], rows):
                 block = bag[start:start + rows]
                 total = total + (
-                    -_token_distance(block, tokens, config.distance_kernel)
+                    -_token_distance(block, tokens, distance_kernel)
                     / config.temperature
                 ).softmax(dim=-1).sum(dim=0)
             outputs.append(total / bag.shape[0])
