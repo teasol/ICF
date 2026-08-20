@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-20` — 활성 baseline은 여전히 **v113**(§185, CT cell 예산 = bag 크기의 1/8 fraction, feasibility 승격, SEAL 10 macro 0.70394). §186에서 fixed-head 세 branch weight(CV/DD/CT)를 전부 1.0으로 통일해 재평가한 결과 SEAL 10 macro가 **0.70509**(+0.00115)로 소폭 개선됐으나 **아직 미승격** — 사용자 승인 대기 중, `scripts/eval_v113_unit_weights.sh`(uncommitted)로 재현 가능. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
+**Last updated**: `2026-08-20` — §187 사용자 결정으로 **v114 = v113 + fixed-head 세 branch weight(CV/DD/CT)를 전부 1.0으로 통일**을 활성 baseline으로 승격했다(§186 실측). SEAL 10 macro **0.70509**, v113(0.70394) 대비 **+0.00115** — 개선분 대부분이 저신호 task(ccrcc BAP1/VHL)에서 나왔다(§118 기준). 활성 runner `scripts/eval_v114.sh`. `scripts/eval_v113.sh`(weight 비대칭)는 historical 재현 전용으로 유지한다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -7401,12 +7401,52 @@ brca PIK3CA(−0.0136) 하나가 가장 크다 — 저신호 구간 개선이 �
 
 ⚠️ **결정론적 arm이라 t/p 게이트를 적용할 근거가 없다**(§151-1) — 이 결과는 "부호 일치 방향과
 크기"만으로 판단해야 한다. 4/17 task만(SEAL 10) 측정했고 홀드아웃 7·전체 17은 미측정이다.
-**아직 baseline으로 승격되지 않았다** — 사용자 승인 대기 중.
+**사용자 결정으로 §187에서 v114로 승격됐다.**
 
 구현: `scripts/eval_v113_unit_weights.sh`(신규, uncommitted) — v113과 동일한 CT
 fraction(`ICF_CT_CELLS=0.125/own/min=64`) 위에 `ICF_FIXED_HEAD_CV_WEIGHT`·
 `ICF_FIXED_HEAD_DD_WEIGHT`·`ICF_FIXED_HEAD_CT_WEIGHT`를 전부 `1.0`으로 명시 export.
 
 _by Claude Sonnet 5 on gnode3 at 2026-08-20 09:17:53_
+
+---
+
+## 187. 2026-08-20 — **v114 승격 확정: v113 + fixed-head 세 branch weight를 전부 1.0으로 통일**
+
+사용자 결정으로 §186의 arm을 새 활성 baseline으로 승격했다.
+
+```
+CV/DD/CT 파이프라인      : v113과 동일 (offdiag CV, ordered-coordinate × typicality DD κ=1,
+                           CT cell 예산 = bag 자기 크기의 1/8 fraction floor 64)
+fixed-head branch weight : CV 1.442 → 1.0, DD 1.0(변경 없음), CT 0.7 → 1.0
+head margin              = 1.0·(CV1−CV0) − 1.0·M_DD + 1.0·(CT1−CT0)
+```
+
+| | SEAL 10 |
+|---|---:|
+| **v114 (활성)** | **0.70509** |
+| v113 (previous baseline) | 0.70394 |
+| v112 (CT 전체-cell, 참고) | 0.70432 |
+| Δ v114−v113 | +0.00115 |
+
+§186에서 이미 확인했듯 개선분은 task 전반에 고르지 않다 — ccrcc BAP1(+0.0116)·VHL(+0.0140)
+같은 저신호(0.5 근처) task에서 크게 오르고, brca PIK3CA(−0.0136)에서 가장 크게 내렸다. §118
+규칙(같은 크기의 Δ라도 천장 근처보다 랜덤 근처 변화가 더 의미 있다)에 따라 사용자가 이 arm을
+승격하기로 결정했다. **v112 대비로도 사실상 동률**(+0.00077)이라, CT를 전체-cell에서 fraction
+샘플링으로 바꾼 §185의 feasibility 승격이 예측 성능을 갉아먹지 않았다는 점도 이 승격으로 재확인된다.
+
+⚠️ **미측정 항목**: 홀드아웃 7·전체 17은 이 arm으로 아직 측정되지 않았다. §0-2/§0-3 표의
+해당 칸을 채우기 전까지는 v113/v112 값을 v114의 것으로 인용하지 말 것.
+
+구현:
+
+- `scripts/eval_v114.sh`(신규, 활성 runner, `scripts/eval_v113_unit_weights.sh`에서 승격하며
+  개명) — v113과 CT/DD/CV 파이프라인 동일, `ICF_FIXED_HEAD_CV_WEIGHT=1.0`·
+  `ICF_FIXED_HEAD_DD_WEIGHT=1.0`·`ICF_FIXED_HEAD_CT_WEIGHT=1.0`만 다르다.
+- `scripts/eval_v113.sh`는 비대칭 weight(1.442/1/0.7) 재현 전용으로 유지(변경 없음).
+- 코드 변경 없음 — weight는 이미 존재하던 `ICF_FIXED_HEAD_CV_WEIGHT`/`_DD_WEIGHT`/`_CT_WEIGHT`
+  환경변수 오버라이드로만 조정된다(`scripts/test_pathobench.py`, §163).
+
+_by Claude Sonnet 5 on gnode3 at 2026-08-20 09:20:50_
 
 ---

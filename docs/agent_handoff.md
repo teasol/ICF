@@ -1,12 +1,13 @@
 # Agent handoff guide
 
-**Last updated**: 2026-08-20 — §185 사용자 결정으로 v112의 CT cell 예산(전체 cell)을 bag 자기
-크기의 1/8 fraction(floor 64, `ICF_CT_CELLS=0.125`)으로 바꾼 **v113을 활성 baseline**으로
-승격했다. 승격 사유는 예측 macro 개선이 **아니라 feasibility** — 22GB급 GPU 노드(gnode3)에서
-v112의 전체-cell CT가 LUAD처럼 bag당 최대 ~35k cell인 slide에서 즉시 `CUDA out of memory`로
-죽어(§184) SEAL 10-task를 완주할 수 없었다. SEAL 10 macro는 0.70394로 v112(0.70432) 대비
-−0.00038, §183의 "flat" 판정 폭(−0.00021)과 같은 급의 잡음이라 예측 성능 손실은 사실상 없다.
-전체 17-task macro는 아직 이 arm으로 재측정되지 않았다(§185 참고). 실행 중인 job은 없다.
+**Last updated**: 2026-08-20 — §187 사용자 결정으로 v113의 fixed-head 세 branch weight
+(CV=1.442/DD=1.0/CT=0.7)를 **전부 1.0으로 통일한 v114를 활성 baseline**으로 승격했다.
+SEAL 10 macro **0.70509**로 v113(0.70394) 대비 **+0.00115**(§186 실측) — 개선분 대부분이
+저신호(0.5 근처) task인 ccrcc BAP1(+0.0116)·VHL(+0.0140)에서 나왔고, brca PIK3CA(−0.0136)가
+가장 크게 내렸다. §118 규칙(랜덤 근처 변화가 천장 근처 변화보다 실질적으로 더 의미 있다)에 따라
+사용자가 승격을 결정했다. CV/DD/CT 파이프라인 자체는 v113과 동일(CT cell 예산 = bag 크기의
+1/8 fraction, floor 64 — feasibility 승격, §184/§185). 전체 17-task·홀드아웃 7은 아직 이
+arm으로 재측정되지 않았다. 실행 중인 job은 없다.
 
 ---
 
@@ -26,10 +27,12 @@ v112의 전체-cell CT가 LUAD처럼 bag당 최대 ~35k cell인 slide에서 즉�
 4. §173–§179의 코드·평가·문서는 `c34dfe2`에 반영됐다. §180, §182, §183도 완료 후 각각 별도
    커밋했다. 새 세션은 `git status --short`가 비어 있는지와 `git log -n 3 --oneline`의 최신
    커밋부터 확인한다.
-5. 활성 모델은 **v113 = v112 + CT cell 예산을 bag 자기 크기의 1/8 fraction(floor 64)으로 교체**
-   (§185, feasibility 승격 — 22GB GPU에서 v112의 전체-cell CT가 LUAD 대형 bag에 OOM, §184). CV/DD는
-   v112와 동일. v112의 전체-cell/전체-abundance CT는 `scripts/eval_v112.sh`로 재현 가능하지만 더
-   이상 활성이 아니다. v111의 distance DD readout은 `scripts/eval_v111.sh`로 재현 가능.
+5. 활성 모델은 **v114 = v113 + fixed-head 세 branch weight(CV/DD/CT)를 전부 1.0으로 통일**
+   (§187, SEAL 10 macro +0.00115, §186). CT cell 예산(bag 자기 크기의 1/8 fraction, floor 64)은
+   v113과 동일(§185, feasibility 승격 — 22GB GPU에서 v112의 전체-cell CT가 LUAD 대형 bag에 OOM,
+   §184). v113의 비대칭 weight(CV=1.442/DD=1/CT=0.7)는 `scripts/eval_v113.sh`로, v112의
+   전체-cell/전체-abundance CT는 `scripts/eval_v112.sh`로, v111의 distance DD readout은
+   `scripts/eval_v111.sh`로 재현 가능하지만 셋 다 더 이상 활성이 아니다.
 6. 2026-08-19 인계 시점에는 GPU 0–7이 모두 NVIDIA B200 183,359 MiB이고 사용량 0 MiB였다.
    자원 상태는 변하므로 새 세션 시작 때 `nvidia-smi`로 다시 확인한다. 8-GPU 사용 가능 여부는
    그 시점의 다른 사용자 프로세스를 보고 결정한다.
@@ -43,9 +46,10 @@ v112의 전체-cell CT가 LUAD처럼 bag당 최대 ~35k cell인 slide에서 즉�
 
 > `/NHNHOME/WORKSPACE/26msit005_C/kimds/ICF`에서 `docs/agent_handoff.md`의 “새 세션 60초 재개 절차”와
 > §0을 읽고 이어서 작업해줘. Python은 BagPFN 환경 실행 파일을 직접 사용해줘. 활성 baseline은
-> v113 = v112 + CT cell 예산을 bag 크기의 1/8 fraction(floor 64)으로 교체(feasibility 승격, §185)다.
-> 활성 runner는 `scripts/eval_v113.sh`, historical v112(전체-cell CT) runner는
-> `scripts/eval_v112.sh`, v111(distance DD) runner는 `scripts/eval_v111.sh`다.
+> v114 = v113 + fixed-head 세 branch weight(CV/DD/CT)를 전부 1.0으로 통일(§187)이다. 활성
+> runner는 `scripts/eval_v114.sh`, historical v113(비대칭 weight) runner는
+> `scripts/eval_v113.sh`, v112(전체-cell CT) runner는 `scripts/eval_v112.sh`, v111(distance DD)
+> runner는 `scripts/eval_v111.sh`다.
 
 ---
 
@@ -88,7 +92,7 @@ bash scripts/eval_v111.sh 0 smoke cptac_ccrcc/VHL_mutation     # v111: 0.5116
 
 ## 0-3. 지금 상태 한 눈에
 
-**활성 = v113, 학습 파라미터 0, seed std 0.00000.** 전체 명세는
+**활성 = v114, 학습 파라미터 0, seed std 0.00000.** 전체 명세는
 [`current_architecture.md` **§0**](current_architecture.md) — 거기가 SSOT다.
 
 ```
@@ -100,13 +104,16 @@ DD   같은 triangle 전체에서 rank-1 분산 방향 → ordered-coordinate ×
 CT   bag 자기 크기의 1/8 fraction(floor 64, ICF_CT_CELLS=0.125) → 32 PCA 방향 →
      hierarchical 2-means K256 → 같은 샘플로 abundance(match) → ridge (λ=1)
      ⚠️ v112는 여기서 전체 cell을 썼다 — 22GB GPU에서 LUAD 대형 bag(~35k cell)이 OOM(§184)
-head margin = 1.442·(CV1−CV0) − 1.0·M_DD + 0.7·(CT1−CT0)
+head margin = 1.0·(CV1−CV0) − 1.0·M_DD + 1.0·(CT1−CT0)
+     ⚠️ v113은 CV=1.442·CT=0.7로 비대칭이었다(CV는 옛 8-head 분해 fit, §137-3). 통일 후
+     SEAL 10 macro +0.00115(§186/§187)
 ```
 
 | | SEAL 10 | 홀드아웃 7 | ABMIL 0.727 대비 |
 |---|---:|---:|---:|
-| **v113 (활성, feasibility 승격 §185)** | **0.70394** | — | **−0.02306** |
-| v112 (previous baseline, CT 전체-cell) | 0.70432 | 0.60181 | −0.02268 |
+| **v114 (활성, weight 통일 §187)** | **0.70509** | — | **−0.02191** |
+| v113 (previous baseline, CT fraction 샘플링) | 0.70394 | — | −0.02306 |
+| v112 (CT 전체-cell) | 0.70432 | 0.60181 | −0.02268 |
 | v111 | 0.70453 | 0.59809 | −0.02247 |
 | v110 (historical) | 0.70692 | 0.61029 | −0.02008 |
 | v109 | 0.7027 | 0.6042 | −0.0243 |
@@ -114,11 +121,12 @@ head margin = 1.442·(CV1−CV0) − 1.0·M_DD + 0.7·(CT1−CT0)
 | v107 | 0.6945 | 0.5836 | −0.0321 |
 | v106 | 0.6864 | 0.5767 | −0.0406 |
 
-v113은 v112 대비 SEAL 10에서 −0.00038(잡음 수준, §184)이고 **CT cell 예산만** 다르다. 홀드아웃
-7·전체 17은 아직 이 arm으로 재측정되지 않았다 — v112 값을 v113의 것으로 오인해 인용하지 말 것.
+v114은 v113 대비 SEAL 10에서 +0.00115이고(§186), 코드 변경 없이 **fixed-head weight만** 다르다
+(`ICF_FIXED_HEAD_CV_WEIGHT`/`_DD_WEIGHT`/`_CT_WEIGHT`를 전부 `1.0`). 홀드아웃 7·전체 17은 아직
+이 arm으로 재측정되지 않았다 — v112/v113 값을 v114의 것으로 오인해 인용하지 말 것.
 
-실행: `bash scripts/eval_v113.sh <gpu> <tag> [tasks...]` (v112 전체-cell CT 재현은
-`scripts/eval_v112.sh`)
+실행: `bash scripts/eval_v114.sh <gpu> <tag> [tasks...]` (v113 비대칭 weight 재현은
+`scripts/eval_v113.sh`, v112 전체-cell CT 재현은 `scripts/eval_v112.sh`)
 
 ## 0-4. ⚠️ 판정 규칙이 바뀌었다 — 결정론적 arm에 t를 쓰지 말 것
 

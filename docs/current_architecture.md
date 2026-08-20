@@ -1,20 +1,18 @@
 # Current architecture (2026-08-20)
 
-**활성 구성 v113 — 학습 파라미터 0, 완전 결정론적.** CV/DD는 v112와 동일(§183). v113은 CT의
-cell 예산만 바꿔 **feasibility 사유로** 승격했다(§185) — v112의 CT가 bag의 **전체 cell**을
-context 통계·GPU 텐서에 올리는데, LUAD처럼 bag당 최대 ~35k cell인 slide가 있는 22GB급 GPU
-노드에서는 이게 즉시 `CUDA out of memory`로 죽는다(§184). v113은 그 전체-cell 예산을 **bag
-자기 크기의 1/8 fraction**(floor 64)으로 바꿔 이 문제를 없앴다. 승격 근거는 예측 macro
-개선이 아니라 **이 arm 없이는 메모리 제약 노드에서 SEAL 10-task를 아예 완주할 수 없었다는
-feasibility**이며, macro 자체는 v112 대비 −0.00038(SEAL 10)로 사실상 flat임이 §184에서
-확인됐다(v112→v111 승격 때 "flat" 판정 폭 −0.00021과 같은 급의 잡음). v110은 더 높은 예측
-baseline이지만 historical control이다. 아래 §0이 현행 명세이고, 그 뒤의
-`Historical-*` / `A` / `B` 절은 **학습을 포함하던 직전 계보(v83~v98)** 의 명세로 참조용이다.
-그 절들의 gradient·학습 모듈·checkpoint 계약은 **v113에 적용되지 않는다.**
+**활성 구성 v114 — 학습 파라미터 0, 완전 결정론적.** CV/DD/CT 파이프라인은 v113과 동일(§185,
+CT cell 예산 = bag 자기 크기의 1/8 fraction, feasibility 승격). v114는 fixed head의 세 branch
+weight(CV/DD/CT)를 **전부 1.0으로 통일**해 승격했다(§187) — v113은 CV 1.442(옛 8-head 분해
+fit, §137-3)·DD 1.0·CT 0.7(임의 조정)로 비대칭이었다. 통일 후 SEAL 10 macro가 0.70509로
+v113(0.70394) 대비 +0.00115 상승했고(§186), 개선분 대부분이 저신호(0.5 근처) task인 ccrcc
+BAP1·VHL에서 나왔다(§118 기준). v110은 더 높은 예측 baseline이지만 historical control이다.
+아래 §0이 현행 명세이고, 그 뒤의 `Historical-*` / `A` / `B` 절은 **학습을 포함하던 직전
+계보(v83~v98)** 의 명세로 참조용이다. 그 절들의 gradient·학습 모듈·checkpoint 계약은
+**v114에 적용되지 않는다.**
 
 ---
 
-# §0. v113 명세 (활성)
+# §0. v114 명세 (활성)
 
 ## 0-1. 한 눈에
 
@@ -44,12 +42,14 @@ CT      bag 자기 크기의 **1/8 fraction**(floor 64, `ICF_CT_CELLS=0.125`/`ow
         ⚠️ v112는 이 자리에서 **전체 cell**을 썼다 — LUAD 같은 대형 bag(~35k cell)에서 22GB급
         GPU가 OOM 나던 지점(§184). fraction 샘플링 전환은 macro에 사실상 영향이 없다(§184/§185).
 
-head    margin = 1.442·(CV1−CV0) − 1.0·M_DD + 0.7·(CT1−CT0)
+head    margin = 1.0·(CV1−CV0) − 1.0·M_DD + 1.0·(CT1−CT0)
         logits = (−margin/2, +margin/2)
+        ⚠️ v113은 CV=1.442·CT=0.7로 비대칭이었다(CV=1.442는 옛 8-head 분해 fit, §137-3). 세
+        weight를 1.0으로 통일하니 SEAL 10 macro가 +0.00115 올랐다(§186/§187).
 ```
 
-**실행**: `bash scripts/eval_v113.sh <gpu> <tag> [tasks...]` (v112 CV/CT 전체-cell 재현은
-`scripts/eval_v112.sh`, historical)
+**실행**: `bash scripts/eval_v114.sh <gpu> <tag> [tasks...]` (v113 비대칭 weight 재현은
+`scripts/eval_v113.sh`, v112 CV/CT 전체-cell 재현은 `scripts/eval_v112.sh`, 둘 다 historical)
 **구현**: `src/models/training_free.py` (파라미터 0). 정식 채점은 환경변수로 기존 경로를 써도 된다 —
 `tests/test_training_free.py`가 두 경로의 등가성을 고정한다.
 
@@ -91,8 +91,9 @@ M_{DD}(q)=a(q)o(q)
 
 | | SEAL 10 | 홀드아웃 7 | 전체 17 | seed std |
 |---|---:|---:|---:|---:|
-| **v113 (활성, CT fraction 샘플링)** | **0.70394** | — | — | **0.00000** |
-| v112 (previous baseline, CT 전체-cell) | 0.70432 | 0.60181 | 0.66211 | 0.00000 |
+| **v114 (활성, weight 통일)** | **0.70509** | — | — | **0.00000** |
+| v113 (previous baseline, CT fraction 샘플링) | 0.70394 | — | — | 0.00000 |
+| v112 (CT 전체-cell) | 0.70432 | 0.60181 | 0.66211 | 0.00000 |
 | v111 (distance DD readout) | 0.70453 | 0.59809 | 0.66070 | 0.00000 |
 | v110 (historical predictive best) | 0.70692 | 0.61029 | 0.66713 | 0.00000 |
 | v109 | 0.7027 | 0.6042 | — | 0.00000 |
