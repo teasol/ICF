@@ -19,6 +19,8 @@ one shared `ct_abundance()` and varies only step 6-7 when comparing readouts:
   prototype  class prototypes over all 16 standardised dims; margin is the
              squared-distance difference, positive toward class 1.
   ridge      class-balanced ridge on all 16 dims; margin is logit1 - logit0.
+  kernel_ridge  class-balanced KERNEL ridge (linear/rbf/poly) on all dims,
+             solved in the dual; `kernel="linear"` reproduces `ridge`.
 
 WHY BOTH prototype AND ridge. They fail differently, which is the diagnostic.
 `prototype` is a fixed isotropic geometry: it can only find a class difference
@@ -50,7 +52,7 @@ from typing import Literal, NamedTuple, Sequence
 
 import torch
 
-MODES = ("extreme", "prototype", "ridge")
+MODES = ("extreme", "prototype", "ridge", "kernel_ridge")
 
 
 def _fp32_matmul(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
@@ -95,6 +97,20 @@ class CTReadoutConfig:
     # is the same size-aware policy as `cells_fraction`, applied only to the
     # abundance average.
     abundance_cells_per_bag: int | float | None | Literal["match"] = "match"
+    # SS189. Pooling of the per-cell token assignment into the per-bag abundance
+    # vector. "mean" is the historical default (bit-identical); "max" keeps, per
+    # token, the single most similar cell; "topk" averages the most similar
+    # `abundance_topk_fraction` of cells (floor `abundance_topk_min`), so it
+    # interpolates between "max" (k=1) and "mean" (k=all). Max/topk are
+    # non-linear in the cells, so they carry information the mean abundance
+    # discards -- at the cost of outlier sensitivity.
+    # "mean+topk" CONCATENATES the mean and top-k vectors into a 2K-dimensional
+    # descriptor instead of replacing one with the other, so a ridge / kernel
+    # ridge readout can use both jointly. This keeps the diagnostic 0-param: the
+    # readout coefficients are still fit per episode from the context only.
+    abundance_pooling: str = "mean"
+    abundance_topk_fraction: float = 0.1
+    abundance_topk_min: int = 1
     # Random is the active default: evenly spaced indices are biased whenever
     # storage order carries slide/location/batch structure. The fixed seed is
     # mixed with the bag index, so evaluation remains reproducible while bags do
@@ -135,6 +151,16 @@ class CTReadoutConfig:
     temperature: float = 0.5
     eps: float = 1e-6
     ridge_lambda: float = 1.0
+    # SS188 (G0). Kernel for `mode="kernel_ridge"`: tests whether the
+    # abundance -> label relation has non-linear structure the linear ridge
+    # misses. "linear" reproduces the primal ridge exactly (control); "rbf" and
+    # "poly" (inhomogeneous) are the non-linear candidates. Kernels are evaluated
+    # on the CONTEXT-standardised abundance, class-balanced like the primal
+    # ridge, and solved in the dual (n x n, n = context bags).
+    kernel: str = "rbf"
+    kernel_gamma: float | None = None   # None -> 1 / dims (scikit-learn heuristic)
+    kernel_degree: int = 2
+    kernel_coef0: float = 1.0
     # SS149. Measure cell-token distances in a PCA subspace instead of raw 1536-d.
     # None = today's behaviour (v107), unchanged.
     #
@@ -1032,24 +1058,72 @@ def ct_abundance(
 
     def abundance(bags):
         # Chunked for the same reason as `_assign`, and identically exact: the mean
-        # over cells is accumulated as a weighted sum of per-chunk means.
+        # over cells is accumulated as a weighted sum of per-chunk means. `max` /
+        # `topk` materialise the per-cell assignment (gemm distance is
+        # [cells, tokens], so even a 35k-cell LUAD bag is ~35 MB, transient).
         rows = _distance_rows(tokens, distance_kernel)
+        pooling = config.abundance_pooling
         outputs = []
-        for bag in bags:
+
+        def assignment(bag):
+            # [n_cells, K] softmax token-assignment, chunked.
             if rows >= bag.shape[0]:
-                outputs.append(
-                    (-_token_distance(bag, tokens, distance_kernel)
-                     / config.temperature).softmax(dim=-1).mean(dim=0)
-                )
-                continue
-            total = torch.zeros(tokens.shape[0], device=bag.device, dtype=bag.dtype)
-            for start in range(0, bag.shape[0], rows):
-                block = bag[start:start + rows]
-                total = total + (
-                    -_token_distance(block, tokens, distance_kernel)
+                return (
+                    -_token_distance(bag, tokens, distance_kernel)
                     / config.temperature
-                ).softmax(dim=-1).sum(dim=0)
-            outputs.append(total / bag.shape[0])
+                ).softmax(dim=-1)
+            return torch.cat(
+                [
+                    (
+                        -_token_distance(bag[start:start + rows], tokens, distance_kernel)
+                        / config.temperature
+                    ).softmax(dim=-1)
+                    for start in range(0, bag.shape[0], rows)
+                ],
+                dim=0,
+            )
+
+        for bag in bags:
+            if pooling == "mean":
+                if rows >= bag.shape[0]:
+                    outputs.append(
+                        (-_token_distance(bag, tokens, distance_kernel)
+                         / config.temperature).softmax(dim=-1).mean(dim=0)
+                    )
+                    continue
+                total = torch.zeros(tokens.shape[0], device=bag.device, dtype=bag.dtype)
+                for start in range(0, bag.shape[0], rows):
+                    block = bag[start:start + rows]
+                    total = total + (
+                        -_token_distance(block, tokens, distance_kernel)
+                        / config.temperature
+                    ).softmax(dim=-1).sum(dim=0)
+                outputs.append(total / bag.shape[0])
+            elif pooling == "max":
+                outputs.append(assignment(bag).amax(dim=0))
+            elif pooling == "topk":
+                count = int(round(config.abundance_topk_fraction * bag.shape[0]))
+                count = min(max(count, config.abundance_topk_min), bag.shape[0])
+                # Per-token top-k: each token averages its k most similar cells.
+                # The mean of the k largest values is tie-invariant, so this stays
+                # deterministic regardless of torch.topk's tie-breaking.
+                top = torch.topk(assignment(bag).T, count, dim=1).values  # [K, k]
+                outputs.append(top.mean(dim=1))
+            elif pooling == "mean+topk":
+                # Keep the historical mean AND append the top-k per-token average
+                # as K extra coordinates ([mean; top] -> 2K). Both share the same
+                # soft assignment, so no extra distance computation; only the
+                # materialised [n_cells, K] assignment (already the cost of topk).
+                assign = assignment(bag)  # [n_cells, K]
+                count = int(round(config.abundance_topk_fraction * bag.shape[0]))
+                count = min(max(count, config.abundance_topk_min), bag.shape[0])
+                top = torch.topk(assign.T, count, dim=1).values  # [K, k]
+                outputs.append(torch.cat([assign.mean(dim=0), top.mean(dim=1)], dim=0))
+            else:
+                raise ValueError(
+                    f"abundance_pooling must be 'mean', 'max', 'topk', or "
+                    f"'mean+topk', got {pooling!r}"
+                )
         return torch.stack(outputs)
 
     return CTAbundance(tokens, abundance(context), abundance(query))
@@ -1156,10 +1230,89 @@ def readout_ridge(abundance, labels, config) -> CTMargins:
     return CTMargins(margin(context), margin(query), separation)
 
 
+def _kernel_matrix(left, right, config):
+    """Kernel Gram matrix between rows of `left` and `right`.
+
+    Operates on the CONTEXT-standardised abundance (`_standardise` output), so
+    `kernel="linear"` is exactly the inner product the primal ridge solves.
+    `kernel_gamma=None` defaults to 1 / dims (scikit-learn's heuristic), which
+    keeps the RBF exponent O(1) on unit-RMS coordinates.
+    """
+    if config.kernel == "linear":
+        return left @ right.T
+    squared = _fp32_matmul(left, right.T)
+    if config.kernel == "rbf":
+        sqnorm_left = (left * left).sum(dim=1, keepdim=True)
+        sqnorm_right = (right * right).sum(dim=1, keepdim=True)
+        distances = sqnorm_left - 2.0 * squared + sqnorm_right.T
+        dims = left.shape[-1]
+        gamma = config.kernel_gamma if config.kernel_gamma is not None else 1.0 / dims
+        return torch.exp(-gamma * distances)
+    if config.kernel == "poly":
+        dims = left.shape[-1]
+        gamma = config.kernel_gamma if config.kernel_gamma is not None else 1.0 / dims
+        return (gamma * squared + config.kernel_coef0).pow(config.kernel_degree)
+    raise ValueError(
+        f"kernel must be 'linear', 'rbf', or 'poly', got {config.kernel!r}"
+    )
+
+
+def readout_kernel_ridge(abundance, labels, config) -> CTMargins:
+    """Class-balanced kernel ridge in the DUAL: an n x n solve (n = context bags).
+
+    Same class balance and CONTEXT-only standardisation as `readout_ridge`, so
+    `kernel="linear"` reproduces the primal ridge to numerical precision. The
+    non-linear kernels (rbf/poly) are the G0 diagnostic -- they answer whether
+    the abundance->label relation has curvature the linear ridge cannot express.
+
+    Weighted centring happens in kernel (feature) space, so the linear kernel
+    recovers the primal's weighted centring plus intercept exactly, and label
+    antisymmetry (one-hot targets exchange under a class swap) holds for every
+    kernel: `alpha` columns swap, so the margin negates.
+    """
+    labels = labels.long()
+    context, query = _standardise(abundance, config)
+    targets = torch.nn.functional.one_hot(labels, 2).float()
+    counts = torch.bincount(labels, minlength=2)
+    if bool((counts == 0).any()):
+        raise ValueError("Every class must occur in the context set.")
+    weight = counts.float().reciprocal()[labels]
+    total = weight.sum().clamp_min(config.eps)
+    root = weight.sqrt()
+
+    k_context = _kernel_matrix(context, context, config)
+    # Weighted feature-space mean: m(x_j) = sum_i w_i k(x_i, x_j) / W.
+    m_context = (weight[None, :] @ k_context).squeeze(0) / total          # [n]
+    mu2 = (weight[None, :] @ k_context @ weight[:, None]).squeeze() / (total * total)
+    target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total  # [1, 2]
+    centred_targets = (targets - target_mean) * root[:, None]              # [n, 2]
+    gram = root[:, None] * (
+        k_context - m_context[:, None] - m_context[None, :] + mu2
+    ) * root[None, :] + config.ridge_lambda * torch.eye(
+        k_context.shape[0], device=k_context.device, dtype=k_context.dtype
+    )
+    alpha = torch.linalg.solve(gram, centred_targets)                      # [n, 2]
+
+    def values(kernel_to_context):
+        # kernel_to_context: [n, t], k(context_j, target_i).
+        m_target = (weight[None, :] @ kernel_to_context).squeeze(0) / total  # [t]
+        cross = kernel_to_context - m_context[:, None] - m_target[None, :] + mu2  # [n, t]
+        out = (alpha * root[:, None]).T @ cross + target_mean.T            # [2, t]
+        out = out.T                                                        # [t, 2]
+        return out[:, 1] - out[:, 0]
+
+    context_margin = values(k_context)
+    query_margin = values(_kernel_matrix(context, query, config))
+    # Class-swap invariant magnitude (the head's SEP slot carries weight 0).
+    separation = (alpha[:, 1] - alpha[:, 0]).abs().sum()
+    return CTMargins(context_margin, query_margin, separation)
+
+
 READOUTS = {
     "extreme": readout_extreme,
     "prototype": readout_prototype,
     "ridge": readout_ridge,
+    "kernel_ridge": readout_kernel_ridge,
 }
 
 

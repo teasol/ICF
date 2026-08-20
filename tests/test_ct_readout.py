@@ -33,6 +33,7 @@ from src.models.ct_readout import (
     prepare_cells,
     readout_prototype,
     readout_ridge,
+    readout_kernel_ridge,
     resolve_cells_per_bag,
     ridge_coefficients,
     sample_cells,
@@ -245,6 +246,122 @@ class RidgeTest(unittest.TestCase):
         context_bags, labels, query_bags = episode(14)
         with self.assertRaisesRegex(ValueError, "mode must be one of"):
             ct_margins(context_bags, labels, query_bags, CONFIG, "nope")
+
+
+class KernelRidgeTest(unittest.TestCase):
+    """SS188 (G0): kernel ridge must reproduce the primal ridge under the linear
+    kernel, stay deterministic, and keep label antisymmetry -- the invariants the
+    fixed head's constants depend on."""
+
+    def kernel_config(self, kernel):
+        return CTReadoutConfig(
+            num_tokens=8, cells_per_bag=24, temperature=0.5, eps=1e-6,
+            sampling="even", kernel=kernel,
+        )
+
+    def test_linear_kernel_reproduces_the_primal_ridge(self):
+        context_bags, labels, query_bags = episode(20, context=20)
+        abundance = ct_abundance(context_bags, query_bags, CONFIG)
+        ridge = readout_ridge(abundance, labels, CONFIG)
+        kernel = readout_kernel_ridge(abundance, labels, self.kernel_config("linear"))
+        self.assertTrue(torch.allclose(ridge.context, kernel.context, atol=1e-4))
+        self.assertTrue(torch.allclose(ridge.query, kernel.query, atol=1e-4))
+
+    def test_nonlinear_kernels_are_antisymmetric(self):
+        context_bags, labels, query_bags = episode(21, context=20)
+        for name in ("rbf", "poly"):
+            config = self.kernel_config(name)
+            abundance = ct_abundance(context_bags, query_bags, config)
+            original = readout_kernel_ridge(abundance, labels, config)
+            flipped = readout_kernel_ridge(abundance, 1 - labels, config)
+            self.assertTrue(
+                torch.allclose(original.query, -flipped.query, atol=1e-4), name
+            )
+
+    def test_nonlinear_kernels_are_deterministic(self):
+        context_bags, labels, query_bags = episode(22, context=20)
+        for name in ("rbf", "poly"):
+            config = self.kernel_config(name)
+            abundance = ct_abundance(context_bags, query_bags, config)
+            first = readout_kernel_ridge(abundance, labels, config)
+            second = readout_kernel_ridge(abundance, labels, config)
+            self.assertTrue(torch.equal(first.query, second.query), name)
+
+    def test_query_bags_never_change_the_context_side(self):
+        context_bags, labels, query_bags = episode(23, context=16)
+        other = [bag * 5.0 + 11.0 for bag in query_bags]
+        for name in ("rbf", "poly"):
+            config = self.kernel_config(name)
+            a, first = ct_margins(context_bags, labels, query_bags, config, "kernel_ridge")
+            b, second = ct_margins(context_bags, labels, other, config, "kernel_ridge")
+            self.assertTrue(torch.equal(first.context, second.context), name)
+            self.assertTrue(torch.equal(a.context, b.context), name)
+
+
+class AbundancePoolingTest(unittest.TestCase):
+    """SS189: max/topk pooling of the per-cell assignment adds cell-dimension
+    non-linearity. fraction=1.0 must recover the mean; k=1 must recover max."""
+
+    def pooling_config(self, pooling, fraction=0.1, minimum=1):
+        return CTReadoutConfig(
+            num_tokens=8, cells_per_bag=24, temperature=0.5, eps=1e-6,
+            sampling="even", abundance_pooling=pooling,
+            abundance_topk_fraction=fraction, abundance_topk_min=minimum,
+        )
+
+    def test_topk_fraction_one_recovers_the_mean(self):
+        context_bags, _, query_bags = episode(30, context=12, query=4)
+        mean = ct_abundance(context_bags, query_bags, CONFIG)
+        topk = ct_abundance(
+            context_bags, query_bags, self.pooling_config("topk", fraction=1.0)
+        )
+        self.assertTrue(torch.allclose(mean.context, topk.context, atol=1e-5))
+        self.assertTrue(torch.allclose(mean.query, topk.query, atol=1e-5))
+
+    def test_max_matches_topk_with_one_cell(self):
+        context_bags, _, query_bags = episode(31, context=12, query=4)
+        topk_one = ct_abundance(
+            context_bags, query_bags,
+            self.pooling_config("topk", fraction=0.0, minimum=1),
+        )
+        maxed = ct_abundance(context_bags, query_bags, self.pooling_config("max"))
+        self.assertTrue(torch.allclose(maxed.context, topk_one.context, atol=1e-5))
+        self.assertTrue(torch.allclose(maxed.query, topk_one.query, atol=1e-5))
+
+    def test_topk_is_deterministic(self):
+        context_bags, _, query_bags = episode(32, context=12, query=4)
+        config = self.pooling_config("topk", fraction=0.3)
+        first = ct_abundance(context_bags, query_bags, config)
+        second = ct_abundance(context_bags, query_bags, config)
+        self.assertTrue(torch.equal(first.context, second.context))
+        self.assertTrue(torch.equal(first.query, second.query))
+
+    def test_mean_plus_topk_concatenates_both(self):
+        """SS189-2. "mean+topk" appends the top-k vector, it does not replace the
+        mean: the first K coordinates equal the mean abundance and the last K
+        equal the top-k abundance, so the ridge can use both jointly."""
+        context_bags, _, query_bags = episode(34, context=12, query=4)
+        mean = ct_abundance(context_bags, query_bags, CONFIG)
+        topk = ct_abundance(
+            context_bags, query_bags, self.pooling_config("topk", fraction=0.3)
+        )
+        both = ct_abundance(
+            context_bags, query_bags, self.pooling_config("mean+topk", fraction=0.3)
+        )
+        k = CONFIG.num_tokens
+        self.assertEqual(both.context.shape[-1], 2 * k)
+        self.assertEqual(both.query.shape[-1], 2 * k)
+        for left, right in ((both.context, mean.context), (both.query, mean.query)):
+            self.assertTrue(torch.allclose(left[:, :k], right, atol=1e-5))
+        for left, right in ((both.context, topk.context), (both.query, topk.query)):
+            self.assertTrue(torch.allclose(left[:, k:], right, atol=1e-5))
+
+    def test_unknown_pooling_is_rejected(self):
+        context_bags, _, query_bags = episode(33, context=12, query=4)
+        with self.assertRaisesRegex(ValueError, "abundance_pooling must be"):
+            ct_abundance(
+                context_bags, query_bags, self.pooling_config("nope")
+            )
 
 
 class PrepareCellsTest(unittest.TestCase):

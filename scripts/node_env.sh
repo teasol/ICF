@@ -49,7 +49,8 @@ if [ -z "${ICF_DATA_ROOT:-}" ]; then
   for candidate in \
     /NHNHOME/BASE/kimds/Data/PathoBench \
     /lustre/BASE/kimds/Data/PathoBench \
-    "$HOME/Data/PathoBench"
+    "$HOME/Data/PathoBench" \
+    "$HOME/ICF/data/repro_labels_folds"
   do
     [ -d "$candidate/official" ] && { ICF_DATA_ROOT="$candidate"; break; }
   done

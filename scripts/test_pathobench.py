@@ -639,12 +639,15 @@ def evaluate_trial(
         ct_distance_kernel = os.environ.get("ICF_CT_DISTANCE_KERNEL")
         ct_tokenizer = os.environ.get("ICF_CT_TOKENIZER")
         ct_tokens = os.environ.get("ICF_CT_TOKENS")
+        ct_kernel = os.environ.get("ICF_CT_KERNEL")
+        ct_abundance_pooling = os.environ.get("ICF_CT_ABUNDANCE_POOLING")
         saved_ct_features = None
         if (ct_readout != "extreme" or ct_pca_dim is not None
                 or ct_kmeans is not None or ct_cells is not None
                 or ct_abundance_cells is not None or ct_sampling is not None
                 or ct_sampling_seed is not None or ct_distance_kernel is not None
-                or ct_tokenizer is not None or ct_tokens is not None):
+                or ct_tokenizer is not None or ct_tokens is not None
+                or ct_kernel is not None or ct_abundance_pooling is not None):
             from src.models.ct_readout import (  # noqa: PLC0415
                 CTReadoutConfig,
                 ct_margins,
@@ -690,6 +693,13 @@ def evaluate_trial(
                 # separate cap for the per-bag abundance average. "all" supports
                 # the random-512 dictionary / full-abundance diagnostic.
                 abundance_cells_per_bag=abundance_cells_per_bag,
+                abundance_pooling=os.environ.get("ICF_CT_ABUNDANCE_POOLING", "mean"),
+                abundance_topk_fraction=float(
+                    os.environ.get("ICF_CT_ABUNDANCE_TOPK_FRACTION", "0.1")
+                ),
+                abundance_topk_min=int(
+                    os.environ.get("ICF_CT_ABUNDANCE_TOPK_MIN", "1")
+                ),
                 # Random is the active default; even spacing is retained behind
                 # ICF_CT_SAMPLING=even for historical v110 reproduction.
                 sampling=os.environ.get("ICF_CT_SAMPLING", "random"),
@@ -729,6 +739,13 @@ def evaluate_trial(
                 temperature=float(inner.ct_temperature),
                 eps=float(inner.ct_eps),
                 ridge_lambda=float(os.environ.get("ICF_CT_RIDGE_LAMBDA", "1.0")),
+                kernel=os.environ.get("ICF_CT_KERNEL", "rbf"),
+                kernel_gamma=(
+                    None if os.environ.get("ICF_CT_KERNEL_GAMMA") is None
+                    else float(os.environ["ICF_CT_KERNEL_GAMMA"])
+                ),
+                kernel_degree=int(os.environ.get("ICF_CT_KERNEL_DEGREE", "2")),
+                kernel_coef0=float(os.environ.get("ICF_CT_KERNEL_COEF0", "1.0")),
                 pca_dim=None if ct_pca_dim is None else int(ct_pca_dim),
                 pca_scaling=os.environ.get("ICF_CT_PCA_SCALING", "standardise"),
                 # SS157: Lloyd iterations refining the farthest-point tokens.
@@ -789,6 +806,13 @@ def evaluate_trial(
                   f"hdbscan_min_samples={readout_config.hdbscan_min_samples} "
                   f"dbscan_eps={readout_config.dbscan_eps} "
                   f"dbscan_min_samples={readout_config.dbscan_min_samples} "
+                  f"kernel={readout_config.kernel} "
+                  f"kernel_gamma={readout_config.kernel_gamma} "
+                  f"kernel_degree={readout_config.kernel_degree} "
+                  f"kernel_coef0={readout_config.kernel_coef0} "
+                  f"abundance_pooling={readout_config.abundance_pooling} "
+                  f"abundance_topk_fraction={readout_config.abundance_topk_fraction} "
+                  f"abundance_topk_min={readout_config.abundance_topk_min} "
                   f"tokens={readout_config.num_tokens}", flush=True)
         # docs SS155. `ICF_DD_RELATIVE=1` ranks by (D0-D1)/(D0+D1+eps) instead of
         # (D0-D1), i.e. by the RATIO rather than the difference, which suppresses a

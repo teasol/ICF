@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-20` — §187 사용자 결정으로 **v114 = v113 + fixed-head 세 branch weight(CV/DD/CT)를 전부 1.0으로 통일**을 활성 baseline으로 승격했다(§186 실측). SEAL 10 macro **0.70509**, v113(0.70394) 대비 **+0.00115** — 개선분 대부분이 저신호 task(ccrcc BAP1/VHL)에서 나왔다(§118 기준). 활성 runner `scripts/eval_v114.sh`. `scripts/eval_v113.sh`(weight 비대칭)는 historical 재현 전용으로 유지한다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
+**Last updated**: `2026-08-20` — §188/§189 진단(**CT kernel-ridge rbf/poly**, **CT top-k/mean+topk 풀링**) **전부 기각**. v114 활성 baseline 유지(SEAL 10 macro **0.70509**). kernel-ridge: rbf macro 0.69500(−0.0101)/poly 0.69475(−0.0103); top-k 교체 VHL 0.5076(−0.0154); mean+topk concatenate macro 0.70067(−0.0044). 세 방향 모두 kernel/top-k 비선형이 유효 신호를 못 냄 — 재현 코드만 보존. 활성 runner `scripts/eval_v114.sh`. `scripts/eval_v113.sh`(weight 비대칭)는 historical 재현 전용으로 유지한다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -7448,5 +7448,81 @@ head margin              = 1.0·(CV1−CV0) − 1.0·M_DD + 1.0·(CT1−CT0)
   환경변수 오버라이드로만 조정된다(`scripts/test_pathobench.py`, §163).
 
 _by Claude Sonnet 5 on gnode3 at 2026-08-20 09:20:50_
+
+---
+
+## 188. 2026-08-20 — v114 + CT kernel-ridge readout(linear/rbf/poly): **rbf·poly 전부 macro 하락, 기각**
+
+v114의 CT readout을 `ridge`(primal, 16×16/256×256 solve)에서 **kernel ridge(dual, n×n solve)**로
+교체하는 0-param 진단(`scripts/eval_v114_kernel.sh <gpu> <tag> <kernel>`, 신규). abundance→label
+관계에 선형 ridge가 표현 못 하는 곡률이 있는지 묻는 실험이다. `kernel=linear`는 primal ridge를
+수치적으로 정확히 재현하는 control이고, `rbf`/`poly`가 실제 진단이다. 10개 task 전부 `rc=0`.
+
+| task | v114 (ridge) | kernel=rbf | kernel=poly |
+|---|---:|---:|---:|
+| bc_therapy/er_status | 0.6797 | 0.6583 | 0.6570 |
+| bc_therapy/grade | 0.7369 | 0.7218 | 0.7314 |
+| bc_therapy/her2_status | 0.6804 | 0.6680 | 0.6662 |
+| cptac_brca/PIK3CA_mutation | 0.5254 | 0.5560 | 0.5455 |
+| cptac_brca/TP53_mutation | 0.8247 | 0.8132 | 0.8116 |
+| cptac_luad/EGFR_mutation | 0.7869 | 0.7684 | 0.7767 |
+| cptac_luad/STK11_mutation | 0.8925 | 0.8670 | 0.8805 |
+| cptac_luad/TP53_mutation | 0.7021 | 0.6653 | 0.6841 |
+| cptac_ccrcc/BAP1_mutation | 0.6993 | 0.6579 | 0.6484 |
+| cptac_ccrcc/VHL_mutation | 0.5230 | 0.5741 | 0.5461 |
+| **SEAL 10 macro (fold-mean)** | **0.70509** | **0.69500** (−0.0101) | **0.69475** (−0.0103) |
+
+**해석**: 관심 task인 저신호 VHL은 rbf가 **+0.0510**(0.5741)으로 크게 오르지만, 그 대가로
+**10개 중 8개 task가 하락**한다(BAP1 −0.0414, TP53-luad −0.0368, STK11 −0.0255, er −0.0214,
+EGFR −0.0185, grade −0.0151). §118 규칙(천장 근처 하락 vs 랜덤 근처 개선)으로도 순 macro
+−0.0101은 기각이다. rbf의 VHL 개선은 다른 task 하락과의 맞바꿈에 그치고, poly도 동일하게
+열화한다 — **abundance→label 관계에 linear ridge가 못 잡는 곡률은 실측되지 않았다**.
+
+구현: `src/models/ct_readout.py`에 `kernel_ridge` readout + `_kernel_matrix`(linear/rbf/poly) 추가,
+`scripts/test_pathobench.py`에 `ICF_CT_KERNEL*` env plumbing, `tests/test_ct_readout.py`에
+kernel 테스트 3개. 재현 전용으로 보존한다(기각).
+
+_by GitHub Copilot (DeepSeek V4 Pro) on gnode3 at 2026-08-20 22:21:22_
+
+---
+
+## 189. 2026-08-20 — v114 + CT top-k / mean+topk abundance 풀링: **교체·더하기 모두 기각, 방향 폐기**
+
+CT abundance 5단계의 **mean 풀링을 cell 차원 비선형으로 흔들어**보는 0-param 진단. k-means++
+토큰 256개가 이미 cell 분포의 클러스터 중심이므로, "가장 유사한 cell을 뽑아 평균"하는 top-k는
+mean이 이미 담는 majority 패턴을 재강조할 뿐이고, 추가로 주는 정보는 assignment peakedness
+(노이즈)뿐이라는 가설을 검증했다.
+
+- **교체** `scripts/eval_v114_topk.sh`(신규): `ICF_CT_ABUNDANCE_POOLING=topk`, 각 토큰이 가장
+  유사한 cell 상위 `fraction=0.1`(floor 1)의 평균을 사용. VHL 단일 프로브 **0.5076**
+  (v114 0.5230 대비 **−0.0154**)로 열세 → 전체 10-task는 미실행.
+- **더하기** `scripts/eval_v114_cattopk.sh`(신규): `ICF_CT_ABUNDANCE_POOLING=mean+topk`,
+  mean 벡터 뒤에 top-k 벡터를 이어붙여 2K=512차원으로 만들고 ridge가 결합 사용. 10-task 전체 실행.
+
+| task | v114 (mean) | mean+topk | Δ |
+|---|---:|---:|---:|
+| bc_therapy/er_status | 0.6797 | 0.6820 | +0.0023 |
+| bc_therapy/grade | 0.7369 | 0.7228 | −0.0141 |
+| bc_therapy/her2_status | 0.6804 | 0.6760 | −0.0044 |
+| cptac_brca/PIK3CA_mutation | 0.5254 | 0.5383 | +0.0129 |
+| cptac_brca/TP53_mutation | 0.8247 | 0.8223 | −0.0024 |
+| cptac_luad/EGFR_mutation | 0.7869 | 0.7847 | −0.0022 |
+| cptac_luad/STK11_mutation | 0.8925 | 0.8874 | −0.0051 |
+| cptac_luad/TP53_mutation | 0.7021 | 0.6968 | −0.0053 |
+| cptac_ccrcc/BAP1_mutation | 0.6993 | 0.6827 | −0.0166 |
+| cptac_ccrcc/VHL_mutation | 0.5230 | 0.5137 | −0.0093 |
+| **SEAL 10 macro (fold-mean)** | **0.70509** | **0.70067** | **−0.00442** |
+
+**해석**: concatenate가 rbf/poly(−0.010)보다는 덜 나빴지만 여전히 v114보다 낮다. 개선은
+PIK3CA(+0.0129)·er(+0.0023)뿐이고 grade(−0.0141)·BAP1(−0.0166)을 비롯해 8/10 task가 하락,
+관심 task인 VHL조차 −0.0093으로 내려갔다. **top-k가 상보적 신호를 주지 못하고 ridge에 노이즈만
+추가**했다는 결론이 교체(topk)·더하기(mean+topk) 두 방향에서 일관되게 확인됐다. 사용자 결정으로
+**cell 차원 top-k 방향은 폐기**한다(재현 코드 보존).
+
+구현: `src/models/ct_readout.py`에 `abundance_pooling: "max" | "topk" | "mean+topk"` 추가,
+`scripts/test_pathobench.py`에 `ICF_CT_ABUNDANCE_POOLING/TOPK_*` env plumbing,
+`tests/test_ct_readout.py`에 pooling 테스트 4개(전체 332 passed, 3 skipped).
+
+_by GitHub Copilot (DeepSeek V4 Pro) on gnode3 at 2026-08-20 22:21:22_
 
 ---
