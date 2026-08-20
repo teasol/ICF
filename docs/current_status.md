@@ -1,6 +1,6 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-20` — §185 사용자 결정으로 **v113 = v112 + CT cell 예산을 bag 자기 크기의 1/8 fraction(floor 64, `ICF_CT_CELLS=0.125`)으로 교체**를 활성 baseline으로 승격했다. 승격 사유는 예측 macro가 아니라 **feasibility**다 — v112의 CT는 bag의 전체 cell을 쓰는데, 22GB급 GPU 노드(gnode3)에서 LUAD처럼 bag당 최대 ~35k cell인 slide가 즉시 `CUDA out of memory`로 죽어(§184) SEAL 10-task를 완주할 수 없었다. v113은 이 OOM을 없애면서 SEAL 10 macro **0.70394**로 v112(0.70432) 대비 **−0.00038**(§183의 "flat" 판정 폭 −0.00021과 같은 급의 잡음 — 예측 성능 손실 없음)을 확인했다. 전체 17-task/홀드아웃 7은 아직 이 arm으로 재측정되지 않았다. 활성 runner `scripts/eval_v113.sh`. `scripts/eval_v112.sh`(전체-cell CT)와 `scripts/eval_v111.sh`(distance DD)는 historical 재현 전용으로 유지한다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
+**Last updated**: `2026-08-20` — 활성 baseline은 여전히 **v113**(§185, CT cell 예산 = bag 크기의 1/8 fraction, feasibility 승격, SEAL 10 macro 0.70394). §186에서 fixed-head 세 branch weight(CV/DD/CT)를 전부 1.0으로 통일해 재평가한 결과 SEAL 10 macro가 **0.70509**(+0.00115)로 소폭 개선됐으나 **아직 미승격** — 사용자 승인 대기 중, `scripts/eval_v113_unit_weights.sh`(uncommitted)로 재현 가능. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -7366,5 +7366,47 @@ SEAL 10 macro Δ(−0.00038)는 §183에서 v111→v112 승격을 "사실상 fla
 - ⚠️ 이 절 작성 시점 기준 위 코드 변경은 **여전히 working tree에 uncommitted**다.
 
 _by Claude Sonnet 5 on gnode3 at 2026-08-20 01:11:51_
+
+---
+
+## 186. 2026-08-20 — fixed-head 세 branch weight를 1.0으로 통일: SEAL 10 macro +0.00115, **아직 미승격**
+
+v113(§185)의 fixed head는 `margin = 1.442·(CV1−CV0) − 1.0·M_DD + 0.7·(CT1−CT0)`로 branch마다
+다른 weight를 쓴다(1.442는 옛 8-head 분해 fit, §137-3; 0.7은 임의 조정). 사용자 요청으로 세
+weight를 전부 **1.0으로 통일**해 SEAL 10-task를 재평가했다(`scripts/eval_v113_unit_weights.sh`,
+신규·uncommitted, `ICF_FIXED_HEAD_CV_WEIGHT=1.0 ICF_FIXED_HEAD_DD_WEIGHT=1.0
+ICF_FIXED_HEAD_CT_WEIGHT=1.0`, CV/DD/CT 파이프라인 자체는 v113과 동일). 10개 task 전부 `rc=0`,
+OOM 0건(LUAD 3개 포함).
+
+| task | v113 (cv=1.442/dd=1/ct=0.7) | unit-weight (cv=dd=ct=1.0) | Δ |
+|---|---:|---:|---:|
+| bc_therapy/er_status | 0.6885 | 0.6797 | −0.0088 |
+| bc_therapy/grade | 0.7338 | 0.7369 | +0.0031 |
+| bc_therapy/her2_status | 0.6737 | 0.6804 | +0.0067 |
+| cptac_brca/PIK3CA_mutation | 0.5390 | 0.5254 | −0.0136 |
+| cptac_brca/TP53_mutation | 0.8255 | 0.8247 | −0.0008 |
+| cptac_luad/EGFR_mutation | 0.7862 | 0.7869 | +0.0007 |
+| cptac_luad/STK11_mutation | 0.8949 | 0.8925 | −0.0024 |
+| cptac_luad/TP53_mutation | 0.7011 | 0.7021 | +0.0010 |
+| cptac_ccrcc/BAP1_mutation | 0.6877 | 0.6993 | **+0.0116** |
+| cptac_ccrcc/VHL_mutation | 0.5090 | 0.5230 | **+0.0140** |
+| **SEAL 10 macro (fold-mean)** | **0.70394** | **0.70509** | **+0.00115** |
+| SEAL 10 macro (pooled) | 0.70019 | 0.70085 | +0.00066 |
+
+**해석**: unit-weight가 7/10 task에서 우세하고 macro도 소폭 상승했다(+0.00115, v112 baseline
+0.70432과 거의 동률 — +0.00077). §118 규칙대로 baseline 성능대를 같이 보면, 개선폭 대부분이
+**0.5 근처 저신호 task 두 개(ccrcc BAP1 +0.0116, VHL +0.0140)**에서 나왔고, 하락은
+brca PIK3CA(−0.0136) 하나가 가장 크다 — 저신호 구간 개선이 고신호 구간의 소폭 하락보다
+실질적으로 더 유의미하다는 §118의 판단 기준에 부합한다.
+
+⚠️ **결정론적 arm이라 t/p 게이트를 적용할 근거가 없다**(§151-1) — 이 결과는 "부호 일치 방향과
+크기"만으로 판단해야 한다. 4/17 task만(SEAL 10) 측정했고 홀드아웃 7·전체 17은 미측정이다.
+**아직 baseline으로 승격되지 않았다** — 사용자 승인 대기 중.
+
+구현: `scripts/eval_v113_unit_weights.sh`(신규, uncommitted) — v113과 동일한 CT
+fraction(`ICF_CT_CELLS=0.125/own/min=64`) 위에 `ICF_FIXED_HEAD_CV_WEIGHT`·
+`ICF_FIXED_HEAD_DD_WEIGHT`·`ICF_FIXED_HEAD_CT_WEIGHT`를 전부 `1.0`으로 명시 export.
+
+_by Claude Sonnet 5 on gnode3 at 2026-08-20 09:17:53_
 
 ---
