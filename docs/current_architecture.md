@@ -129,16 +129,4 @@ $PYTHON -m unittest discover -s tests -p "test_*.py"
 bash scripts/eval_v114.sh <gpu_id> <tag> [tasks...]
 ```
 
----
-
-## 5. 닫힌 축 (Closed Axes — 재시도 금지)
-
-| 축 | 기각 근거 |
-| :--- | :--- |
-| **합성 데이터 분포 축** | 실제 에피소드와의 분포 격차를 닫으려고 할수록 성능이 단조 하락함 (`docs/current_status.md` §129). |
-| **DD 전반 축** | $K > 128, r > 1, |t|$ 게이트/셀렉터 모두 실패. 현 1-D typicality로 고정 (§147). |
-| **CT Cell 수 단순 증대** | Bag당 64개 이상의 full-cell을 써도 성능 향상 없음 (§159). |
-| **CT Kernel-Ridge** | RBF/Poly 비선형 커널 모두 8/10 task 하락 $\to$ 비선형 곡률 부재 확인 (§188). |
-| **CT Top-k 풀링** | Mean 풀링 대비 노이즈만 가중되어 기각 (§189). |
-
-_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 15:48:00_
+_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 15:49:00_
