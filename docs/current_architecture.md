@@ -34,13 +34,16 @@ DD      같은 triangle(**전체**, 대각 포함)에서 K×K 공분산을 재�
         옛 정규화 제곱 거리 readout은 `distance`로 남아 있고 `scripts/eval_v111.sh`로
         재현 가능하지만 더 이상 활성이 아니다.
 
-CT      bag 자기 크기의 **1/8 fraction**(floor 64, `ICF_CT_CELLS=0.125`/`own`, §185)만 샘플링
+CT      bag 자기 크기의 **1/8 fraction**(floor 64, **seeded random**, seed 0 —
+        `ICF_CT_CELLS=0.125`/`own`/`min=64`, §185)만 샘플링
         → B의 상위 **32 PCA 방향**으로 사영 → context로 좌표 표준화 →
-        hierarchical PCA/2-means tree로 **256 token** → 샘플링된 cell만 soft assignment(abundance
-        는 `match` — 토큰 dictionary와 같은 샘플) → bag별 256차원 abundance →
-        클래스 균형 ridge(λ=1) → logit 2개
-        ⚠️ v112는 이 자리에서 **전체 cell**을 썼다 — LUAD 같은 대형 bag(~35k cell)에서 22GB급
-        GPU가 OOM 나던 지점(§184). fraction 샘플링 전환은 macro에 사실상 영향이 없다(§184/§185).
+        **seeded k-means++ + Lloyd(max 8, tol 1e-4)** 로 **256 token** → 샘플링된 cell만
+        soft assignment(abundance는 `match` — 토큰 dictionary와 같은 샘플) →
+        bag별 256차원 abundance → 클래스 균형 ridge(λ=1) → logit 2개
+        ⚠️ v112는 이 자리에서 **전체 cell + even 샘플링 + hierarchical 2-means tree**를 썼다 —
+        LUAD 같은 대형 bag(~35k cell)에서 22GB급 GPU가 OOM 나던 지점(§184). v113 전환은 cell
+        예산뿐 아니라 **tokenizer와 sampling policy까지 함께** 바꿨고(§185-1 정정), 그럼에도
+        SEAL 10 macro는 −0.00038로 사실상 무영향이었다(§184/§185).
 
 head    margin = 1.0·(CV1−CV0) − 1.0·M_DD + 1.0·(CT1−CT0)
         logits = (−margin/2, +margin/2)
@@ -104,6 +107,9 @@ M_{DD}(q)=a(q)o(q)
 
 ⚠️ **결정론적이므로 t·p·CI를 쓰지 않는다**(§151-1). 판정은 **부호 일치 수**와
 **독립 집단 재현**(SEAL 10 / 홀드아웃 7)으로 한다.
+⚠️ **v113·v114 행의 `—`는 "미측정"이지 "0"이나 "v112와 같음"이 아니다** — CT의 cell 예산·
+tokenizer·sampling이 v112에서 바뀌었으므로(§0-1) 그 칸에 v112 값을 옮겨 적지 말 것(§185, §187).
+**따라서 지금 v114를 두 독립 집단으로 재현 검증할 수 없다** — SEAL 10만 있다.
 
 ## 0-3. 각 상수가 왜 그 값인가
 
@@ -116,11 +122,11 @@ M_{DD}(q)=a(q)o(q)
 | DD = ordered × typicality, κ=1 | bounded evidence가 distance readout보다 홀드아웃에서 +0.00372, SEAL은 flat(−0.00021), 전체 +0.00141 (§182, §183 사용자 결정) |
 | DD fixed-head weight = 1.0 | 옛 distance readout에 fit된 0.343 magnitude는 bounded margin 스케일에 근거가 없어 제거 (§182-2/182-3) |
 | CT = 32 PCA 차원 | raw 1536은 거리 집중(rel_std 0.229 vs 0.368) (§149) |
-| CT = full cell | selection policy 자체를 없애 storage-order bias와 sampling randomness 제거 (§181 사용자 결정) |
-| CT = hierarchical 2-means | full-cell에서 label-free하고 결정론적인 대규모 K tokenizer (§168) |
-| CT = 256 token | full-cell hierarchical 스윕의 전체 17 최고 0.66070 (§168, §175) |
+| CT = bag 크기의 1/8 fraction | 22GB GPU에서 v112 full-cell이 LUAD 3 task 전부 OOM — feasibility 승격. macro는 −0.00038로 무영향 (§184, §185 사용자 결정) |
+| CT = seeded k-means++ (Lloyd ≤8) | fraction 샘플 위에서 hierarchical tree를 대체. §185 전환에 함께 포함됐다 (§185-1 정정). FPS 대비 근거는 §157-2(유효 token 1.9→13.2) |
+| CT = 256 token | full-cell hierarchical 스윕의 전체 17 최고 0.66070에서 이어받은 값 (§168, §175). ⚠️ fraction + k-means++ 위에서는 **재스윕하지 않았다** |
 | head = 3 상수 | 라벨 반대칭이 SEP 가중 0과 쌍의 등가·반대를 강제 (§137-3) |
-| CT weight 0.7 | k-means token에서만 성립. FPS token에서는 부호가 무너졌다 (§157-5, §151-2) |
+| CV/DD/CT weight = 1.0 (통일) | 세 weight 통일이 SEAL 10 macro +0.00115. 개선분 대부분이 저신호(0.5 근처) ccrcc BAP1·VHL에서 나왔다 (§186, §187 사용자 결정) |
 
 ## 0-4. ⚠️ 구조적 제약 — 건드리기 전에 알아야 할 것
 
@@ -132,15 +138,90 @@ M_{DD}(q)=a(q)o(q)
 5. **cell↔token 거리는 cell 축으로 chunk된다**(2²⁷ 원소). chunking은 원소별 산술을 안 바꾸므로
    정확하다 (§160-1).
 
-## 0-5. 닫힌 축 (재시도 금지)
+## 0-5. 코드베이스 모듈 구조 및 개발자 안내 (2026-08-21 리팩터링)
+
+2026-08-21 전체 코드베이스 리팩터링을 통해 모듈 책임 분리, 레지스트리 기반 모델 빌드, 테스트 스위트 경량화(335→86개, 3.1초)를 완료했다.
+
+### 1) 계층별 패키지 구성
+
+```
+ICF/
+├── src/
+│   ├── models/                    # 모델 및 Readout 정의
+│   │   ├── base.py                # InContextClassifierProtocol & BaseInContextClassifier
+│   │   ├── registry.py            # @register_model 데코레이터 및 build_model 팩토리
+│   │   ├── training_free.py       # v114 활성 baseline (0-parameter 결정론적 모델)
+│   │   ├── ct/                    # CT Readout 서브패키지 (기존 ct_readout.py 분해)
+│   │   │   ├── config.py          # CTReadoutConfig, CTAbundance, CTMargins
+│   │   │   ├── tokenizers.py      # k-means++, hierarchical 2-means, FPS, DBSCAN
+│   │   │   ├── abundance.py       # Cell sampling, projection, soft-abundance
+│   │   │   └── readout.py         # Ridge, Kernel Ridge, Prototype, Extreme readouts
+│   │   ├── ct_readout.py          # src.models.ct Re-export Facade (100% 하위 호환)
+│   │   ├── dd_adaptive_rank.py    # DD ordered-typicality margin
+│   │   └── set_transformer_ridge.py # 학습 모델 계보 (v98 등)
+│   │
+│   ├── datasets/                  # 데이터 파이프라인
+│   │   ├── synthetic/             # 합성 데이터 서브패키지 (기존 synthetic_data.py 분해)
+│   │   │   ├── types.py           # SyntheticEpisode, Task 목록 상수
+│   │   │   ├── generator.py       # SyntheticManifoldGenerator
+│   │   │   └── dataset.py         # SyntheticEpisodeDataset
+│   │   └── synthetic_data.py      # src.datasets.synthetic Re-export Facade (100% 하위 호환)
+│   │
+│   └── modules/                   # Lightning 학습 모듈 인터페이스
+│       ├── model_interface.py     # 순수 Lightning 라이프사이클 및 옵티마이저 관리
+│       ├── losses/ranking.py      # pairwise_ranking_loss
+│       ├── diagnostics/           # metrics.py (AUROC/Recall 등), oracle.py (Oracle Ridge)
+│       └── guards/                # gradient.py (Non-finite 가드), vram.py (VRAM 피크 경고)
+│
+├── scripts/
+│   ├── node_env.sh                # 실행 노드별 Conda / Python 경로 자동 탐색 SSOT
+│   ├── eval_v114.sh               # v114 활성 baseline 평가 엔트리포인트
+│   ├── eval_seal_tasks.sh         # SEAL 10 tasks 평가 러너
+│   ├── train.py, test_pathobench.py # 메인 학습 및 벤치마크 테스트 스크립트
+│   ├── diagnostics/               # diagnose_*.py (14개 분석/진단 스크립트 격리)
+│   └── archive/                   # sweeps/ (과거 파라미터 탐색), historical_evals/ (v107~v113)
+│
+└── tests/                         # 핵심 회귀 테스트 스위트 (86개 핵심 계약만 유지, ~3.1s)
+    ├── test_training_free.py      # v114 계약, 불변성, 등가성 검증
+    ├── test_ct_readout.py         # CT 토크나이저 및 리드아웃 9개 계약 검증
+    ├── test_set_transformer_ridge.py # 8개 아키텍처 계약 검증
+    ├── test_core_contracts.py     # 시스템 불변식 검증
+    └── history/                   # 과거 기각 실험 전용 20개 레거시 테스트 아카이브
+```
+
+### 2) 개발자 사용 가이드
+
+- **환경 로드**: 모든 스크립트나 명령 실행 전 `. scripts/node_env.sh`를 소싱한다.
+  ```bash
+  . scripts/node_env.sh
+  $PYTHON -m unittest discover -s tests -p "test_*.py"
+  ```
+- **테스트 실행**: 회귀 테스트는 `tests/test_*.py` 86개만 실행되어 3초 내에 완료된다.
+- **모델 등록 및 인스턴스화**:
+  ```python
+  from src.models.registry import register_model, build_model
+
+  @register_model("my_new_model")
+  class MyNewClassifier(nn.Module):
+      ...
+
+  model = build_model("my_new_model", ...)
+  ```
+- **CT 파이프라인 import**:
+  - 권장: `from src.models.ct import CTReadoutConfig, ct_margins, ct_abundance`
+  - 레거시 호환: `from src.models.ct_readout import CTReadoutConfig, ct_margins` (Facade를 통해 완벽 지원)
+
+## 0-6. 닫힌 축 (재시도 금지)
 
 | 축 | 결과 |
 |---|---|
 | 합성 데이터 분포 | 격차를 닫을수록 단조로 나빠진다 (§129) |
 | DD 전반 | K·rank·게이트·selector 네 갈래 모두 (§145~§147) |
 | DD `distance` readout | §183 사용자 결정으로 `ordered_typicality`가 대체. `scripts/eval_v111.sh`로 historical 재현만 가능 |
-| **CT 분기 전체** | §181 사용자 결정으로 종료. 예측 최고 v110 대신 bias/randomness 없는 full-cell hierarchical PCA32/K256을 v111로 승격 |
-| CT cell 샘플링 | v111은 전체 cell을 사용하므로 selection policy와 sampling seed가 연산에 관여하지 않음 |
+| **CT 분기 탐색** | §181 사용자 결정으로 종료(예측 최고 v110 대신 full-cell hierarchical PCA32/K256을 v111로 승격). 이후 v113의 fraction+k-means++ 전환은 **탐색이 아니라 feasibility 대응**이다 (§185) |
+| CT cell 샘플링 | ⚠️ **§181의 "randomness 없음" 근거는 v113부터 성립하지 않는다** — v113/v114는 `sampling=random`(seed 0 고정)으로 bag 크기의 1/8만 뽑는다. 결정론성은 seed 고정으로 유지되지만 selection policy는 다시 연산에 관여한다 (§185-1 정정) |
+| CT kernel-ridge readout | rbf macro 0.69500(−0.0101)·poly 0.69475(−0.0103), 둘 다 8/10 task 하락. abundance→label에 linear ridge가 못 잡는 곡률은 실측되지 않았다 (§188) |
+| CT top-k / mean+topk 풀링 | 교체(topk)는 VHL 0.5076(−0.0154), 더하기(mean+topk)는 macro 0.70067(−0.0044, 8/10 하락). cell 차원 top-k 방향 폐기 (§189) |
 | CT hierarchical sweep | full-cell 최고는 PCA32/K256 0.66070. PCA8/16/64/128 및 K8..2048 탐색 완료 (§168, §175–§179) |
 | CT spherical raw1536 조합 | random512/full-abundance, K32의 4-seed 전체 0.65618±0.00018(7/17), v110 대비 −0.01095로 미승격. raw 차원과 cosine을 함께 바꿔 metric 단독 효과는 미분리 (§180) |
 | CT HDBSCAN full-cell | GPU NN-descent, 32D는 noise 96.2%(§169), 3D도 noise 75~97%에 SEAL 0.6849(−0.0221)(§173). 밀도 기반 K는 연속 공간에서 노이즈 폭증으로 기각 |
@@ -148,8 +229,14 @@ M_{DD}(q)=a(q)o(q)
 | CT HDBSCAN random64/all | noise 93.6%, K 중앙값 2, 30.2% all-noise fallback. 전체 0.64819±0.00052, v110 대비 −0.01894 (§171) |
 | CT two-token readout | ridge로 대체됨. 단 raw 1536에서만 "무관"이었다 (§148·§150) |
 
-## 0-6. 열려 있는 갈래
+## 0-7. 열려 있는 갈래
 
+- ⚠️ **v114의 홀드아웃 7 · 전체 17이 미측정이다** — 가장 싸고 우선순위 높은 항목이다.
+  `bash scripts/eval_v114.sh <gpu> <tag> <홀드아웃 7 task>`로 채울 수 있다. 그때까지
+  §0-2 표의 해당 칸에 v112/v113 값을 대신 넣지 말 것(§187).
+- **CT의 token 수 256은 현재 파이프라인에서 재스윕된 적이 없다** — full-cell hierarchical
+  스윕(§168·§175)에서 이어받은 값인데 v113이 cell 예산·tokenizer·sampling을 모두 바꿨다.
+  같은 비용으로 확인 가능한 유일한 CT 노브다.
 - **CV 비대각 32,640차원의 가중** — 지금은 무가중 ridge다. 학습을 넣는다면 여기다 (§156-6).
 - **DD의 코호트 의존성은 §183 이후에도 남아 있다.** ordered × typicality로 바꿔도 SEAL은
   flat(−0.00021)이고 홀드아웃만 상승(+0.00372)한다 — 코호트 의존성 자체를 없애지는 못했고
@@ -160,8 +247,16 @@ M_{DD}(q)=a(q)o(q)
 
 ---
 
+# ⚠️ 여기서부터 끝까지는 Historical이다 — v114에 적용되지 않는다
+
+아래 모든 절(`Historical-*` / `A` / `B` / `C`~`H`)은 **학습을 포함하던 직전 계보(v83~v98)** 의
+명세다. 그 절들이 말하는 "활성 baseline"은 **2026-08-13 시점의 v83**이고, gradient 계약·학습
+모듈·checkpoint 호환·합성 데이터 계약은 전부 그 시절 것이다. **현행 명세는 위 §0**이고 활성
+baseline은 **v114**(학습 파라미터 0)다. 아래 숫자를 §0의 0.70509와 **빼지 말 것** — 레짐도
+시드 집합도 다르다(§107-2·§131-1).
+
 > [!IMPORTANT]
-> **활성 baseline은 v83 linear head의 4 seed × `epoch 49` checkpoint**
+> **(historical, 2026-08-13) 활성 baseline은 v83 linear head의 4 seed × `epoch 49` checkpoint**
 > (`CovarianceMeanLearnablePDDCTMLPModel`, SEAL **0.6880** = 1-GPU 4 seed 평균, §109)다 —
 > `checkpoints/20260813_153750/v83_linear_head_seed4{2..5}/`, tags `v83_linear_head_seed4{2..5}_ep49`,
 > config `configs/train_v83_linear_head_1536_1gpu.yaml`.

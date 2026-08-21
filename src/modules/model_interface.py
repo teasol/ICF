@@ -11,6 +11,19 @@ import torch
 import torch.nn.functional as F
 
 from src.datasets.synthetic_data import RESPONSE_TASK_NAMES
+from src.models.registry import build_model as registry_build_model
+from src.modules.diagnostics.metrics import binary_query_diagnostics
+from src.modules.diagnostics.oracle import (
+    fit_oracle_abundance_logits,
+    oracle_abundance_diagnostics,
+)
+from src.modules.guards.gradient import (
+    handle_nonfinite_gradients,
+    raise_if_nonfinite_gradients,
+    raise_if_nonfinite_parameters,
+)
+from src.modules.guards.vram import check_peak_vram
+from src.modules.losses.ranking import pairwise_ranking_loss
 
 
 class ModelInterface(L.LightningModule):
@@ -70,50 +83,15 @@ class ModelInterface(L.LightningModule):
             )
 
     def _raise_if_nonfinite_parameters(self, stage: str) -> None:
-        named = list(self.named_parameters())
-        tensors = [parameter for _, parameter in named]
-        if (
-            tensors
-            and torch.stack(
-                [torch.isfinite(parameter).all() for parameter in tensors]
-            ).all()
-        ):
-            return
-        bad = [name for name, parameter in named if not torch.isfinite(parameter).all()]
-        raise RuntimeError(f"Non-finite parameters at {stage}: {bad}")
+        raise_if_nonfinite_parameters(self, stage)
 
     def _raise_if_nonfinite_gradients(self, stage: str) -> None:
-        named = [
-            (name, parameter.grad)
-            for name, parameter in self.named_parameters()
-            if parameter.grad is not None
-        ]
-        gradients = [gradient for _, gradient in named]
-        if (
-            gradients
-            and torch.stack(
-                [torch.isfinite(gradient).all() for gradient in gradients]
-            ).all()
-        ):
-            return
-        bad = [name for name, gradient in named if not torch.isfinite(gradient).all()]
-        if self._nonfinite_gradient_policy == "raise":
-            raise RuntimeError(f"Non-finite gradients at {stage}: {bad}")
-        # policy == "zero": drop the poisoned entries and keep going. Zeroing
-        # (not nan_to_num) is deliberate -- mapping inf to a huge finite value
-        # would inject that magnitude into the step instead of removing it.
-        for _, gradient in named:
-            torch.nan_to_num_(gradient, nan=0.0, posinf=0.0, neginf=0.0)
-        self._nonfinite_gradient_steps += 1
-        if self._nonfinite_gradient_steps in (1, 10, 100, 1000) or (
-            self._nonfinite_gradient_steps % 5000 == 0
-        ):
-            print(
-                f"[nonfinite-gradient] zeroed at {stage} "
-                f"(count={self._nonfinite_gradient_steps}); first offenders: "
-                f"{bad[:5]}{' ...' if len(bad) > 5 else ''}",
-                flush=True,
-            )
+        self._nonfinite_gradient_steps = handle_nonfinite_gradients(
+            self,
+            stage,
+            policy=self._nonfinite_gradient_policy,
+            step_counter=self._nonfinite_gradient_steps,
+        )
         self.log(
             "nonfinite_gradient_steps",
             float(self._nonfinite_gradient_steps),
@@ -123,29 +101,11 @@ class ModelInterface(L.LightningModule):
         )
 
     def _check_peak_vram(self) -> None:
-        """Warn once if the first optimizer step's peak allocation is high.
-
-        This is a runtime complement to ``validate_vram_budget``: it measures
-        the real peak (model + first forward/backward), catching surprises
-        that a static estimate cannot (e.g. a future architecture change).
-        """
         if not torch.cuda.is_available() or self._vram_peak_checked:
             return
-        self._vram_peak_checked = True
-        device = torch.cuda.current_device()
-        total = torch.cuda.get_device_properties(device).total_memory
-        peak = torch.cuda.max_memory_allocated(device)
-        fraction = peak / total
-        self.print(
-            f"[vram] peak allocated after first step: "
-            f"{peak / 1e9:.2f} GiB ({fraction:.1%} of device)."
+        self._vram_peak_checked = check_peak_vram(
+            warn_fraction=self._vram_peak_fraction, print_fn=self.print
         )
-        if fraction >= self._vram_peak_fraction:
-            self.print(
-                f"[vram] WARNING: peak {fraction:.1%} >= "
-                f"{self._vram_peak_fraction:.0%}. This configuration risks "
-                "OOM on a smaller device; reduce num_bags/num_cells or batch."
-            )
 
     def on_train_start(self) -> None:
         self._raise_if_nonfinite_parameters("training start")
@@ -737,6 +697,13 @@ class ModelInterface(L.LightningModule):
         }
 
     @staticmethod
+    def _binary_query_diagnostics(
+        logits: torch.Tensor,
+        targets: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        return binary_query_diagnostics(logits, targets)
+
+    @staticmethod
     @torch.no_grad()
     def _fit_oracle_abundance_logits(
         abundance: torch.Tensor,
@@ -744,35 +711,7 @@ class ModelInterface(L.LightningModule):
         mask_index: torch.Tensor,
         ridge_lambda: float = 1e-3,
     ) -> torch.Tensor:
-        """Fit a detached 1-D ridge classifier using labelled context only."""
-        abundance = abundance.detach().float().flatten()
-        labels = labels.detach().long().flatten()
-        mask_index = mask_index.detach().long().flatten()
-        context_mask = torch.ones_like(labels, dtype=torch.bool)
-        context_mask[mask_index] = False
-        context_abundance = abundance[context_mask]
-        context_labels = labels[context_mask]
-        if context_abundance.numel() < 2 or torch.unique(context_labels).numel() < 2:
-            raise ValueError("Oracle ridge fitting requires both classes in context.")
-
-        center = context_abundance.mean()
-        scale = context_abundance.std(unbiased=False).clamp_min(1e-6)
-        context_feature = (context_abundance - center) / scale
-        query_feature = (abundance[mask_index] - center) / scale
-        design = torch.stack((context_feature, torch.ones_like(context_feature)), dim=1)
-        target = context_labels.float().mul(2).sub(1)
-        penalty = torch.diag(
-            torch.tensor([ridge_lambda, 0.0], device=design.device, dtype=design.dtype)
-        )
-        # Keep the tiny ridge solve in FP32 even when validation runs under
-        # BF16 autocast; oracle diagnostics never participate in optimization.
-        with torch.autocast(device_type=abundance.device.type, enabled=False):
-            coefficients = torch.linalg.solve(
-                design.float().T @ design.float() + penalty.float(),
-                design.float().T @ target.float(),
-            )
-        score = query_feature * coefficients[0] + coefficients[1]
-        return torch.stack((-0.5 * score, 0.5 * score), dim=-1).detach()
+        return fit_oracle_abundance_logits(abundance, labels, mask_index, ridge_lambda)
 
     @classmethod
     @torch.no_grad()
@@ -783,47 +722,14 @@ class ModelInterface(L.LightningModule):
         mask_index: torch.Tensor,
         model_auroc: torch.Tensor,
     ) -> dict[str, torch.Tensor]:
-        oracle_logits = cls._fit_oracle_abundance_logits(abundance, labels, mask_index)
-        query_labels = labels.detach().long()[mask_index]
-        diagnostics = cls._binary_query_diagnostics(oracle_logits, query_labels)
-        class0 = abundance.detach().float()[mask_index][query_labels == 0]
-        class1 = abundance.detach().float()[mask_index][query_labels == 1]
-        if class0.numel() and class1.numel():
-            pooled_variance = (
-                class0.var(unbiased=False) + class1.var(unbiased=False)
-            ) / 2
-            snr = (class1.mean() - class0.mean()).abs() / torch.sqrt(
-                pooled_variance + 1e-8
-            )
-        else:
-            snr = abundance.detach().float().sum() * 0
-        oracle_auroc = diagnostics["auroc"]
-        return {
-            "oracle_abundance_accuracy": (oracle_logits.argmax(dim=-1) == query_labels)
-            .float()
-            .mean(),
-            "oracle_abundance_balanced_accuracy": diagnostics["balanced_accuracy"],
-            "oracle_abundance_auroc": oracle_auroc,
-            "oracle_abundance_ce": F.cross_entropy(oracle_logits, query_labels),
-            "oracle_abundance_snr": snr,
-            "oracle_model_auroc_gap": oracle_auroc - model_auroc.detach().float(),
-        }
+        return oracle_abundance_diagnostics(abundance, labels, mask_index, model_auroc)
 
     @staticmethod
     def _pairwise_ranking_loss(
         logits: torch.Tensor,
         targets: torch.Tensor,
     ) -> torch.Tensor:
-        """Rank positive queries above negative queries within an episode."""
-        if logits.ndim != 2 or logits.shape[-1] != 2:
-            raise ValueError("Pairwise ranking currently requires binary logits.")
-        scores = logits[:, 1] - logits[:, 0]
-        positive = scores[targets == 1]
-        negative = scores[targets == 0]
-        if positive.numel() == 0 or negative.numel() == 0:
-            return logits.sum() * 0.0
-        margins = positive[:, None] - negative[None, :]
-        return F.softplus(-margins).mean()
+        return pairwise_ranking_loss(logits, targets)
 
     def _build_model(self, *args: Any, **kwargs: Any) -> torch.nn.Module:
         model_src = kwargs.pop("model_src", None)
@@ -849,9 +755,7 @@ class ModelInterface(L.LightningModule):
             "vram_peak_warn_fraction",
         ):
             kwargs.pop(key, None)
-        module_name, class_name = model_src.rsplit(".", 1)
-        model_cls = getattr(import_module(module_name), class_name)
-        return model_cls(*args, **kwargs)
+        return registry_build_model(model_src, *args, **kwargs)
 
     def configure_optimizers(self) -> dict[str, Any]:
         optimizer_cls = self._optimizer_class()

@@ -1,19 +1,43 @@
-# Current experiments (2026-08-19)
+# Current experiments (2026-08-21)
 
 CV-only 이전(v22~v39, 합성 중심 판정)은 [`history.md`](history.md).
 **그 문서의 판정 절차는 폐기됐다** — 합성 지표로 arm을 고르는 방식이 반복적으로 실패했다.
+
+> [!IMPORTANT]
+> **활성 baseline = v114** (§187, 사용자 결정). 학습 파라미터 0, 완전 결정론적.
+> **SEAL 10 macro 0.70509**, ⚠️ **홀드아웃 7·전체 17은 미측정**.
+> 실행: `bash scripts/eval_v114.sh <gpu> <tag> [tasks...]`
+>
+> ⚠️ **결정론적 arm에는 t·p·CI를 쓰지 않는다**(§151-1) — 부호 일치 수와 두 독립 집단
+> (SEAL 10 / 홀드아웃 7) 재현으로 판정하고, 최종 승격·기각은 사용자 판단이다(§118).
+> 아래 §1의 baseline·게이트 규정은 **학습을 포함하던 계보(v83~v105) 전용**이다.
 
 ---
 
 ## 0. CT sampling/tokenizer 및 full-cell PCA/K 최근 결론 (§165–§181)
 
-**§181 사용자 결정으로 CT 분기는 종료됐다.** CV/CT는 v111 full-cell/full-abundance hierarchical
-PCA32/K256에서 고정이다. 이후 절의 v110 대비 기각 표기는 당시의 예측성능 판정 기록이며,
-v111 승격은 selection bias와 sampling randomness 제거를 우선한 별도 운영 기준이다.
-**§183에서 DD readout만 ordered × typicality(κ=1, weight=1)로 바뀐 v112가 현재 활성
-baseline이다** — CT/CV 결론 자체는 바뀌지 않는다 (§8 참고).
+**§181 사용자 결정으로 CT 분기 탐색은 종료됐다.** 이 절의 v110 대비 기각 표기는 당시의
+예측성능 판정 기록이고, v111 승격은 selection bias와 sampling randomness 제거를 우선한 별도
+운영 기준이었다.
 
-활성 v110은 결정론적이지만 CT dictionary cell을 무작위로 뽑는 arm은 다시 seed 분산이 생긴다.
+⚠️ **그 뒤 CT는 두 번 더 바뀌었고, 이 절의 서술은 v111 시점에서 멈춰 있다:**
+
+| | v111 (이 절) | v112 (§183) | **v113/v114 (§185, 활성)** |
+|---|---|---|---|
+| CT cell | 전체 cell | 전체 cell | **bag 자기 크기의 1/8** (floor 64) |
+| sampling | even | even | **random** (seed 0 고정) |
+| tokenizer | hierarchical 2-means | hierarchical 2-means | **seeded k-means++ + Lloyd ≤8** |
+| abundance | all | all | **match** |
+| DD readout | distance | **ordered × typicality** | ordered × typicality |
+| head weight | 1.442 / 0.343 / 0.7 | 1.442 / 1.0 / 0.7 | **1.0 / 1.0 / 1.0** (§187) |
+
+v113 전환의 사유는 **예측 성능이 아니라 22GB GPU feasibility**다(v112는 그 노드에서 LUAD 3개
+task가 전부 OOM). 상세와 그 전환이 cell 예산 하나가 아니었다는 정정은 `current_status.md`
+**§185-1**. **§181이 든 "cell selection bias·sampling randomness 없음" 근거는 v113부터
+성립하지 않는다.**
+
+(이하 §165–§181 서술의 "활성"은 전부 **당시 활성이던 v110** 기준이다.)
+v110은 결정론적이지만 CT dictionary cell을 무작위로 뽑는 arm은 다시 seed 분산이 생긴다.
 따라서 단일 seed나 task 반복을 근거로 삼지 않고 **sampling seed 42–45를 같은 17 task에서 반복**한다.
 각 seed는 bag index와 섞어 bag마다 다른 subset을 만들고, 같은 seed는 완전 재현된다.
 
@@ -87,6 +111,10 @@ cosine metric을 함께 바꾼 조합이므로 cosine 단독 효과는 미분리
 sampling이 전혀 없다는 운영 불변성을 사용자가 우선했다. 실행은 `scripts/eval_v111.sh`다.
 
 현재 실행 중인 job은 없다. §181 사용자 결정에 따라 CT의 추가 PCA/K 보간은 실행하지 않는다.
+이후 CT에서 시도된 것도 전부 기각됐다 — **§188 kernel-ridge**(rbf −0.0101 / poly −0.0103,
+둘 다 8/10 하락), **§189 top-k 풀링**(교체 VHL −0.0154, mean+topk macro −0.0044, 8/10 하락).
+⚠️ 다만 **token 수 256은 v113의 fraction + k-means++ 위에서 재스윕된 적이 없다**(§168·§175의
+full-cell hierarchical 스윕에서 이어받은 값) — CT에 남은 유일한 미확인 노브다.
 
 ---
 
@@ -101,6 +129,11 @@ sampling이 전혀 없다는 운영 불변성을 사용자가 우선했다. 실�
 > **같은 코호트·같은 공식 50-fold**로 비교 가능한 행. 나머지 7개는 대응 수치가 없다.
 
 > [!IMPORTANT]
+> ⚠️ **아래 블록은 학습을 포함하던 계보(v83~v105) 전용이다 — 활성 v114에는 적용되지 않는다.**
+> v106 이후 arm은 학습 파라미터가 0이라 시드 분산이 정확히 0이고, 게이트의 분모가 사라진다.
+> 결정론적 arm의 판정 규칙은 **§151-1**(부호 일치 수 + 두 독립 집단 재현)이다. 아래 규정은
+> ⓐ 학습을 포함하는 새 arm을 만들 때, 또는 ⓑ 과거 기록을 읽을 때만 유효하다(§139-6).
+>
 > **baseline·채점 규칙·게이트 (§109, 2026-08-13) — 판정 단위가 4 seed다**
 >
 > - **baseline = v98 (`donor_shift_scale` 0.15), 1-GPU 8 seed(42–49) 평균 `0.6852`** (§131, 사용자 결정).
@@ -199,6 +232,27 @@ sampling이 전혀 없다는 운영 불변성을 사용자가 우선했다. 실�
 
 ## 2. 표준 실행
 
+### 2-0. 활성 계보 (v114) — 학습 없음
+
+```bash
+. scripts/node_env.sh                                          # 노드 종속 변수 해석 (§164)
+bash scripts/eval_v114.sh <gpu> <tag>                          # SEAL 10 (기본값)
+bash scripts/eval_v114.sh <gpu> <tag> \
+  cptac_ccrcc/PBRM1_mutation cptac_lscc/{ARID1A_mutation,Histologic_Grade,KEAP1_mutation} \
+  cptac_luad/KRAS_mutation cptac_pda/SMAD4_mutation ucla_lung/progression_regression
+                                                               # 홀드아웃 7 (⚠️ v114로 미측정)
+bash scripts/eval_v114.sh 0 smoke cptac_ccrcc/VHL_mutation     # 30초 점검 → 0.5230
+```
+`<gpu>`만 바꿔 병렬로 돌린다. checkpoint·config는 껍데기라 어느 v98 시드를 넘겨도 같은 수치가
+나오고(§152), `node_env.sh`의 `ICF_CKPT`가 자동 탐색한다. historical 재현은
+`scripts/eval_v10{6,7,8,9}.sh`·`eval_v11{0,1,2,3}.sh`.
+
+### 2-1. Historical — 학습 계보(v83~v105)의 4 seed 배치
+
+⚠️ **활성 계보에는 해당 없다.** 학습을 포함하는 새 arm을 만들 때만 쓴다.
+⚠️ 아래 절대 경로(`/home/aibio_3/...`, `/NHNHOME/BASE/...`)는 **옛 노드 것**이다 —
+`scripts/node_env.sh`로 해석할 것(§164-1).
+
 **학습 — 4 seed 배치가 판정 단위다 (§107).** GPU 0–3에 시드 하나씩 올려 한 배치 약 28분.
 ```bash
 for i in 0 1 2 3; do
@@ -242,13 +296,44 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 
 ## 3. 결과표
 
-### 3-1. 현행 판정 레짐 — 1-GPU × 4 seed (§106·§107·§109)
+### 3-0. 활성 계보 — training-free (학습 파라미터 0, seed std 0.00000)
 
-**새 arm은 이 표하고만 비교한다 — 현재 기준 arm은 v83이다.**
+**새 arm은 이 표하고만 비교한다 — 현재 기준 arm은 v114다.** 판정은 t가 아니라 **부호 일치 수 +
+두 독립 집단(SEAL 10 / 홀드아웃 7) 재현**이다(§151-1).
+
+| arm | 직전에서 바뀐 것 | SEAL 10 | 홀드아웃 7 | 전체 17 | 근거 |
+|---|---|---:|---:|---:|---|
+| v106 | 학습 P → **within-slide PCA(K=128)** + 고정 head. **학습 196,621 → 0** | 0.6864 | 0.5767 | 0.6412※ | §139 |
+| v107 | K 128 → **256** | 0.6945 | 0.5836 | 0.6488 | §143 |
+| v108 | CT = **PCA32 부분공간 + ridge readout** (둘은 반드시 함께) | 0.6967 | 0.5893 | 0.6525 | §152 |
+| v109 | CV = **off-diagonal만**, CT = **k-means token** @ w=0.7 | 0.7027 | 0.6042 | 0.6621 | §158 |
+| **v110** | CT cluster 16 → **32** | 0.70692 | **0.61029** | **0.66713** | §161 |
+| v111 | CT = **full-cell hierarchical PCA32/K256** (bias 제거 우선) | 0.70453 | 0.59809 | 0.66070 | §181 |
+| v112 | DD = **ordered × typicality** (κ=1, weight=1) | 0.70432 | 0.60181 | 0.66211 | §183 |
+| v113 | CT cell 예산 = **bag 1/8 fraction** + k-means++ + random sampling | 0.70394 | 미측정 | 미측정 | §185 |
+| **v114 (활성)** | fixed-head weight **세 개 전부 1.0** | **0.70509** | **미측정** | **미측정** | §187 |
+| 참고: ABMIL(지도학습) | — | 0.7266 | — | — | — |
+
+※ v106의 전체 17은 두 집단 macro에서 유도한 값이다(원문에 단일 수치로 기록되지 않았다).
+
+⚠️ **전체 17 최고는 여전히 v110(0.66713)이다.** v111~v114 승격은 예측 성능이 아니라 각각
+selection bias 제거(§181)·DD 형태(§183)·**22GB GPU feasibility**(§185)·weight 통일(§187)이
+사유다. "최신 = 최고"로 읽지 말 것.
+⚠️ **v113/v114의 빈 칸을 v112 값으로 채우지 말 것** — 그 사이에 CT의 cell 예산·tokenizer·
+sampling이 전부 바뀌었다(`current_status.md` §185-1).
+
+**기각된 CT 변형** (재현 코드만 보존): §188 kernel-ridge(rbf 0.69500 / poly 0.69475, v114 대비
+−0.0101 / −0.0103, 둘 다 8/10 하락) · §189 top-k 풀링(교체 VHL 0.5076, mean+topk macro
+0.70067 = −0.0044, 8/10 하락).
+
+### 3-1. Historical 판정 레짐 — 1-GPU × 4 seed (§106·§107·§109)
+
+⚠️ **이 표는 학습을 포함하던 계보(v83~v105)의 기록이다 — 활성 v114와 직접 비교할 수 없다.**
+레짐도 시드 집합도 다르다(§107-2·§131-1). 새 arm은 §3-0과 비교한다.
 
 | arm | baseline에서 바뀐 것 | 4 seed 평균 | seed std | 판정 |
 |---|---|---:|---:|---|
-| **v83 linear head** | (**활성 baseline**, §109) | **0.6880** | 0.0074 | head `12→32→1`(GELU) → `Linear(12,1)`, tags `v83_linear_head_seed4{2..5}_ep49` |
+| **v83 linear head** | (당시 baseline, §109 — 지금은 historical) | **0.6880** | 0.0074 | head `12→32→1`(GELU) → `Linear(12,1)`, tags `v83_linear_head_seed4{2..5}_ep49` |
 | v82 Medium | head `Linear(12,1)` → `12→32→1`(GELU) | 0.6835 | 0.0029 | v83 기준 −0.0045 (t≈−1.15, 3/4) **미판정** — 직전 baseline(§107) |
 | v84 deep head | head `12→32→1`(GELU) → `12→32→32→1`(GELU×2) | 0.6777 | 0.0018 | v82 기준 −0.0057 (t=−3.63, 4/4) / v83 기준 −0.0102 (t=−3.61, 4/4) **기각, 양쪽** (§110) |
 | v86 noise | `observation_noise` 0.005 → 0.01 (데이터만) | 0.6884 | 0.0072 | v83 기준 +0.0004 (t=0.71, 3/4) **완전 무효과(null)** — §105-6 옛 레버 재현 안 됨 (§112) |
@@ -268,13 +353,7 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 | v103 GELU head | v98에서 head `Linear(12,1)`→`12→32→1`(GELU), 197,057 | 0.6828 | 0.0059 | v98(42–45) 기준 −0.0073 (t=−2.01, 1/4) **측정 불가**(<0.0121). 단 v83 vs v82(+0.0045)와 **부호 반복** — linear 유지 (§132) |
 | v104 fixed P | `model_src` learnable P 제거, **trainable 196,621→13** | 0.6775 | **0.00013** | v98(42–45) 기준 **−0.0126 (t=−3.59, 0/4) 기각**. §105 이후 **처음으로 게이트+검출한계 동시 통과**. ⚠️ seed std가 55배 작다 — **분산의 출처가 P** (§133) |
 | v105 MLP 사영 h128 | P → `GELU(x@W1)@QR(W2).Q`, 213,005 | 0.6870 | 0.00424 | v98 기준 epoch39에서 −0.0030 (t=−0.83, 2/4) **측정 불가**. 부호가 epoch마다 뒤집힘, 합성 val_ce도 동일 — **비선형성이 아무 일도 안 함** (§135) |
-| v111 full-cell hierarchical PCA32/K256 | selection 없음, full abundance, deterministic tree | 0.70453 | 0.00000 | previous baseline (§181, 사용자 결정), distance DD readout. `scripts/eval_v111.sh`로 historical 재현. 홀드아웃 0.59809, 전체 0.66070 |
-| **v112 = v111 + DD ordered×typicality(κ=1,w=1)** | CT/CV 동일, DD readout만 교체 | **0.70432** | **0.00000** | **활성 구성 (§183, 사용자 결정)**. `scripts/eval_v112.sh`. 홀드아웃 0.60181, 전체 0.66211. SEAL flat, 홀드아웃 상승이 전체 macro를 견인 |
-| v110 = v109에 CT cluster 32 | CT의 cluster 16→32, even64/FPS+Lloyd30 | 0.70692 | 0.00000 | historical predictive best. `scripts/eval_v110.sh`. 홀드아웃 0.61029, 전체 0.66713 |
-| v109 = CV offdiag + CT k-means @0.7 | CV는 off-diagonal 32,640만, CT는 k-means token(Lloyd 30) + weight 0.7 | 0.7027 | 0.00000 | historical — §161에서 v110으로 대체. `scripts/eval_v109.sh`. 홀드아웃 0.6042, 전체 17 **+0.0096 (13/17)** — 세션 최고 부호 일치. 단독 +0.0070·+0.0030이 **가법적**(예측 0.6624 vs 실측 0.6621). ABMIL 대비 −0.0243 |
-| v108 = v107의 CT 교체 | CT 거리를 32-d PCA 부분공간에서 재고 16-d abundance 전체를 ridge로 읽음 | 0.6967 | 0.00000 | historical — §158에서 v109로 대체. `scripts/eval_v108.sh`. SEAL 10 +0.0022, 홀드아웃 7 +0.0057, 전체 17 **+0.0037 (11/17)**. ⚠️ t 미보고(결정론적, §151-1). PCA·ridge **단독은 각각 +0.0019/+0.0008** — 반드시 함께 (§150) |
-| v107 = v106에 K=256 | v106과 동일, K 128→256만 | 0.6945 | 0.00000 | historical — §152에서 v108로 대체. `scripts/eval_v107.sh`. SEAL 10 +0.0081 (t=2.98, 8/10), 홀드아웃 7 +0.0069, 전체 17 **+0.0076 (t=3.01, 12/17)**. 런타임 동일(24→25초). K는 v106에서 처음으로 **평가 시점 노브**가 됐다 |
-| v106 = within PCA + 고정 head (K=128) | 사영=fold context의 within-slide PCA, head=상수 3개, **학습 param 0** | 0.6864 | 0.00000 | historical — §142에서 v107로 대체. 정식 경로. v98(42–45) 대비 −0.0037 (t=−1.08, 측정 불가) — macro를 내주고 학습·시드 반복 제거 |
+| **v106~v114 (training-free 계보)** | 학습 파라미터 0, seed std 0.00000 | 0.6864 → **0.70509** | **0.00000** | ⚠️ **이 표에 넣지 않는다 — 레짐이 다르다.** 전체 계보와 홀드아웃/전체 17 수치는 위 **§3-0**. 활성은 **v114**(`scripts/eval_v114.sh`), 전체 17 최고는 v110(0.66713). v107~v112 재현 runner는 `scripts/eval_v10{7,8,9}.sh`·`eval_v11{0,1,2,3}.sh`로 전부 보존돼 있다 |
 | pooled PCA + 고정 head | 위와 같되 전역 평균 풀링 | 0.6844 | 0.00000 | within 대비 −0.0020 — between-slide 항이 사영을 낭비 (§139-4) |
 | P + 고정 head | 학습 P 유지, head만 상수 | 0.6898 | 0.00707 | v98 대비 **−0.0003** — **head 학습 불필요 확정** (§138-4) |
 | v77 Hard | ClassSep `[0.5,1.4]` → `[0.2,0.8]` (v82 기준) | 0.6781 | 0.0053 | v82 기준 −0.0053 (t=−3.0, 4/4) |
@@ -298,7 +377,10 @@ grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_<TAG>.log \
 최강 기각)이고, 동기였던 VHL/BAP1도 개선되지 않았다. 코드·테스트는 음성 결과의 근거로 남겨둔다.
 새 실험 방향은 재기획 중이다.
 
-### 3-1b. 앙상블 (학습 비용 0, §130)
+### 3-1b. 앙상블 (학습 비용 0, §130) — **historical**
+
+⚠️ **활성 계보에는 적용할 수 없다.** v106 이후는 결정론적이라 시드 앙상블이라는 축이 존재하지
+않는다(§143-4). 아래는 학습 계보에서 시드 분산을 사후 평균한 기록이다.
 
 기존 `predictions/*.pt`의 fold별 slide 확률을 평균해 AUROC를 재계산한 것이다. **새 학습 없음.**
 
@@ -405,6 +487,11 @@ arm과 같은 선상에서 승격 비교하는 것이 공정한지는 사용자 
 ---
 
 ## 5. 미해결 / 다음
+
+⚠️ **아래 목록은 학습 계보 시절(v83~v105)의 것이다.** 활성 v114의 다음 Action 3개는
+`current_status.md` **§0**에 있다 — ① v114 홀드아웃 7 측정, ② CT token 수 재스윕,
+③ CV off-diagonal 가중. 아래 항목 중 살아 있는 것은 **5번(병목이 표현이 아닐 가능성)** 과
+**4h(task별 결손 분포 — VHL은 겨냥 금지, 헤드룸은 luad TP53)** 뿐이다.
 
 1. **계보 B는 현재 형태로 기각** — 재설계(세포 간 attention + 16,384차원)가 합성 지표를
    0.78 → 0.849로 크게 끌어올렸는데 **SEAL은 오히려 내려갔다**(0.6619 → 0.6526).
@@ -548,7 +635,7 @@ covariance+raw-bag-mean을 비교했다. 학습 없이 fold마다 closed-form ri
 다만 ICI의 95% CI는 각각 [0.414,0.657], [0.427,0.669]로 모두 랜덤을 포함한다.
 CovarianceOnlyRidgeModel은 이 결정을 재검증할 historical control로만 남긴다.
 
-## 8. DD와 v70 learned relation head (2026-08-11)
+## 8. DD와 relation head — §8-1은 현행(§182·§183), 나머지는 historical (2026-08-11)
 
 ### 8-1. training-free DD ablation
 
@@ -569,8 +656,9 @@ bash scripts/eval_dd_ordered_typicality.sh <gpu> <tag> [tasks...]
 오버라이드하지 않아 legacy distance readout용 0.343 magnitude를 그대로 썼다(전체
 0.66313, +0.00243, 단 SEAL/홀드아웃 부호 불일치). 사용자 지시로 이 스케일을 제거하고
 (`ICF_FIXED_HEAD_DD_WEIGHT=1`) 재평가한 결과가 SEAL 0.70432(−0.00021), 홀드아웃
-0.60181(+0.00372), 전체 0.66211(+0.00141)이며 이것이 v112로 승격됐다. 활성 runner는
-`scripts/eval_v112.sh`, `TrainingFreeConfig` 기본값도 `dd_readout="ordered_typicality"`,
+0.60181(+0.00372), 전체 0.66211(+0.00141)이며 이것이 v112로 승격됐다. 당시 runner는
+`scripts/eval_v112.sh`(지금은 full-cell CT 재현 전용 — 활성은 `eval_v114.sh`),
+`TrainingFreeConfig` 기본값도 `dd_readout="ordered_typicality"`,
 `weight_dd=-1.0`으로 바뀌었다(상세는 `current_status.md` §183, `current_architecture.md` §0-1b).
 
 canonical CV와 같은 fixed P(K128) covariance에서 rank-1 DD를 만들었다. 학습 없이
@@ -627,7 +715,7 @@ calibration 학습에 더 잘 전달된다**는 증거다.
 위치와 inductive bias에 강하게 의존한다**이다. v71 CV+MLP가 DD가 실제로 추가 일반화 신호를
 제공했는지 분리한다.
 
-## 9. v71–v74 relation-head ablation과 활성 baseline
+## 9. v71–v74 relation-head ablation과 당시 baseline — **historical (2026-08-11)**
 
 | arm | relation feature | synthetic manifold | SEAL macro | 판정 |
 |---|---|---|---:|---|

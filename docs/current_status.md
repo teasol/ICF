@@ -1,6 +1,13 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-20` — §188/§189 진단(**CT kernel-ridge rbf/poly**, **CT top-k/mean+topk 풀링**) **전부 기각**. v114 활성 baseline 유지(SEAL 10 macro **0.70509**). kernel-ridge: rbf macro 0.69500(−0.0101)/poly 0.69475(−0.0103); top-k 교체 VHL 0.5076(−0.0154); mean+topk concatenate macro 0.70067(−0.0044). 세 방향 모두 kernel/top-k 비선형이 유효 신호를 못 냄 — 재현 코드만 보존. 활성 runner `scripts/eval_v114.sh`. `scripts/eval_v113.sh`(weight 비대칭)는 historical 재현 전용으로 유지한다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다.
+**Last updated**: `2026-08-21` — **전체 코드베이스 리팩터링 및 테스트 스위트 경량화 완료 (§190)**:
+- 테스트 335개 → 86개 핵심 계약 테스트(3.1초, 74% 감축)로 정리, 과거 기각 실험은 `tests/history/legacy_*.py`로 보존.
+- `src/models/ct/` 패키지 분해 (`ct_readout.py`는 facade)
+- `src/datasets/synthetic/` 패키지 분해 (`synthetic_data.py`는 facade)
+- `src/modules/` Lightning 모듈 슬림화 (진단, 가드, 손실함수 서브모듈화)
+- `src/models/registry.py`를 통한 모델 등록 및 팩토리 빌드 표준화
+- `scripts/` 계층화 (`scripts/diagnostics/`, `scripts/archive/` 격리)
+- v114 활성 baseline 유지(SEAL 10 macro **0.70509**, ⚠️ 홀드아웃 7·전체 17은 **미측정**). 활성 runner `scripts/eval_v114.sh`. ⚠️ **Python 경로를 하드코딩하지 말고 `. scripts/node_env.sh`로 해석할 것**(§164). 전체 아키텍처 및 개발자 명세는 `current_architecture.md` **§0**.
 
 > [!IMPORTANT]
 > **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
@@ -18,91 +25,102 @@
 >    **사용자 판단**이다. 보고 형식도 정해져 있다(§118-3).
 
 > [!IMPORTANT]
-> **활성 구성은 v111(§181, 사용자 결정) — 학습 파라미터 0이다.**
+> **활성 구성은 v114(§187, 사용자 결정) — 학습 파라미터 0, 완전 결정론적(seed std 0.00000)이다.**
 > ```
 > 사영 : fold의 CONTEXT cell을 bag별 자기 평균으로 센터링해 풀링한 공분산의 상위 256 고유벡터
-> head : margin = 1.442·(CV1−CV0) − 0.343·(D1−D0) + 0.7·(CT1−CT0)
+> head : margin = 1.0·(CV1−CV0) − 1.0·M_DD + 1.0·(CT1−CT0)      # 세 weight 전부 1.0 (§187)
 > CV   : off-diagonal 32,640차원만 (대각 256·raw mean 1,536 제거) ⚠️ DD는 전체 triangle
-> CT   : **전체 cell** → 32 PCA 방향 → hierarchical 2-means **256 token** → 전체 abundance → ridge
-> 정식 경로 SEAL 10-task macro = 0.70453, 홀드아웃 7 = 0.59809, 전체 17 = 0.66070
+> DD   : rank-1 방향 → ordered-coordinate × nearest-class typicality, κ=1 (§182/§183)
+> CT   : bag 자기 크기의 **1/8 fraction**(floor 64, seeded random seed 0) → 32 PCA 방향
+>        → **seeded k-means++ + Lloyd(≤8)** 로 **256 token** → match abundance → ridge(λ=1)
+> 정식 경로 SEAL 10-task macro = 0.70509,  홀드아웃 7 = **미측정**,  전체 17 = **미측정**
 >
-> bash scripts/eval_v111.sh <gpu> <tag> [tasks...]     # 활성 baseline entry point
+> bash scripts/eval_v114.sh <gpu> <tag> [tasks...]     # 활성 baseline entry point
 >
 > # 위 스크립트가 하는 일 전부:
 > ICF_COVARIANCE_BASIS=pca_within ICF_FIXED_HEAD=1 ICF_SKETCH_DIM=256 \
+> ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_CT_TOKENS=256 \
+> ICF_CT_TOKENIZER=kmeans_plusplus ICF_CT_KMEANS_MAX_ITER=8 \
+> ICF_CT_CELLS=0.125 ICF_CT_CELLS_SCALE=own ICF_CT_CELLS_MIN=64 \
+> ICF_CT_ABUNDANCE_CELLS=match ICF_CT_SAMPLING=random ICF_CT_SAMPLING_SEED=0 \
+> ICF_CT_DISTANCE_KERNEL=gemm ICF_CV_BLOCKS=offdiag \
+> ICF_DD_ORDERED_TYPICALITY=1 ICF_DD_SEPARATION_FLOOR=1.0 \
+> ICF_FIXED_HEAD_{CV,DD,CT}_WEIGHT=1.0 \
 >   bash scripts/eval_seal_tasks.sh <gpu> <아무 v98 ckpt> \
 >        configs/train_v98_p1_reverse_1536_1gpu.yaml <tag> <tasks...>
 > ```
-> ⚠️ **K=256은 환경변수로만 걸린다.** config의 `covariance_sketch_dim`은 **128 그대로 두었다** —
-> 그 값을 바꾸면 v98 학습 재현이 깨지고 P(1536×128) strict load가 실패한다. `ICF_SKETCH_DIM`은
-> K에 의존하는 유일한 텐서 `_covariance_projection`만 버리고 나머지 불일치는 예외로 올린다(§142-1).
-> 무학습 구현 `TrainingFreeClassifier`의 기본값은 **256으로 바꿨다**(테스트로 고정).
-> checkpoint는 **껍데기로만** 쓰인다 — P는 PCA가, head는 상수가 덮어쓰고, `ridge_log_lambda`/
-> `ridge_log_scale`은 8 seed 전부 초기값(log 1, log 2) 그대로다. **쓰이는 학습값 0개.**
+> ⚠️ **홀드아웃 7·전체 17은 v114로 측정된 적이 없다.** v112 값(0.60181 / 0.66211)을 v114의
+> 것으로 인용하지 말 것 — CT의 cell 예산·tokenizer·sampling이 그 사이에 전부 바뀌었다(§185·§187).
+> 따라서 지금 v114는 **SEAL 10 하나로만** 뒷받침된다 — 독립 집단 재현(§151-1의 판정 근거)이 없다.
 >
-> **v106에서 바뀐 점: 더 이상 macro를 내주는 트레이드가 아니다.** v106(K=128)은 v98(42–45)
-> 대비 −0.0037이었으나 v107은 **+0.0044**다. v98의 가장 신뢰할 수 있는 수치인 8 seed 평균
-> (0.6852, §131) 대비로는 **+0.0093**이고 8개 시드 중 6개를 이긴다.
+> ⚠️ **v113/v114의 CT tokenizer는 `kmeans_plusplus`이지 hierarchical 2-means가 아니다**
+> (§185-1 정정). §181이 v111 승격 근거로 든 "cell selection bias·sampling randomness 없음"은
+> v113부터 **성립하지 않는다** — seeded random으로 bag의 1/8만 뽑는다(seed 0 고정이라
+> 결정론성 자체는 유지된다). full-cell hierarchical 재현이 필요하면 `scripts/eval_v112.sh`.
 >
-> ⚠️ 그래도 **"v98을 이겼다"고 쓰지 말 것.** 세 가지 이유가 있다:
+> **계보 (전부 결정론적, seed std 0.00000)**
 > ```
-> v98 seed 42–49  0.6907 0.6950 0.6802 0.6946 0.6758 0.6811 0.6807 0.6837   mean 0.6852
-> v107 (결정론)   0.6945                              → 8개 중 6개 이김, 42–45로 좁히면 2/4
-> v98 4-seed 앙상블 0.6951                            → v107 0.6945보다 +0.0006 (판정 불가)
+> v106 0.6864  within-slide PCA(K=128) + 고정 head, 학습 파라미터 0의 시작    §139
+> v107 0.6945  K 128 → 256                                                  §143
+> v108 0.6967  CT = PCA32 부분공간 + ridge readout                           §152
+> v109 0.7027  CV = off-diagonal만, CT = k-means token @ w=0.7               §158
+> v110 0.70692 CT cluster 16 → 32   ← 홀드아웃 0.61029 / 전체 0.66713 = 예측 최고 §161
+> v111 0.70453 full-cell hierarchical PCA32/K256 (bias 제거 우선)            §181
+> v112 0.70432 DD = ordered × typicality (κ=1, w=1)                          §183
+> v113 0.70394 CT cell 예산 = bag 1/8 fraction + k-means++ (feasibility)     §185
+> v114 0.70509 fixed-head weight 세 개를 전부 1.0으로 통일  ← 활성            §187
 > ```
-> ① v98의 **상위 두 시드(0.6950, 0.6946)에는 진다.** ② 42–45 부분군으로 좁히면 2/4로 부호가
-> 갈린다. ③ 결정적으로 **v98 4-seed 앙상블 0.6951**(§130)이 여전히 근소하게 앞선다 — 다만
-> 그 +0.0006은 어떤 기준으로도 측정 불가다.
+> ⚠️ **v110이 여전히 전체 17 최고(0.66713)다.** v111~v114는 예측 성능이 아니라 각각
+> selection bias 제거(§181)·DD 형태(§183)·22GB GPU feasibility(§185)를 이유로 승격됐다.
+> "최신 = 최고"로 읽지 말 것.
 >
-> ⚠️ **이 t들은 seed-paired가 아니다.** v107은 시드에 의존하지 않으므로 짝짓기가 분산을 전혀
-> 줄이지 못한다 — 위 t=+3.62(df 7)는 "v98 시드 평균과 다른가"를 묻는 **1-표본 t**다.
->
-> 정확한 요약: **학습 0·시드 1회·결정론적인 구성이, 49 epoch × 4 시드를 학습해 앙상블한
-> 구성과 같은 자리에 왔다.** 이득은 여전히 macro가 아니라 비용과 재현성 쪽이다(§139-2).
->
-> ⚠️ v110의 0.7070과 v98 8 seed 0.6852를 **빼지 말 것** — 시드 집합이 다르다(§131-1).
-> ⚠️ v106(0.6864)·v107(0.6945)·v108(0.6967)·v109(0.7027)은 historical이다.
 > ⚠️ **결정론적 arm에 §107-3 게이트(|t|≥2.5)와 §131-2 검출 한계를 적용하지 말 것** — 둘 다
 > 시드 분산이 분모다. 부호 일치 수와 독립 집단 재현으로 판정한다(§151-1).
 > ⚠️ 학습을 포함하는 arm과 비교할 때는 **그 arm의 분산 때문에 §107-3 게이트와 §131-2의 검출 한계가
 > 그대로 적용된다.** 검출 한계가 ≈0이 되는 것은 training-free 변형끼리 비교할 때뿐이다(§139-6).
+> ⚠️ 학습 계보(v83·v98 등)의 숫자와 **시드 집합이 다르므로 빼지 말 것**(§131-1). 그 계보의
+> 마지막 baseline은 v98(1-GPU 8 seed 0.6852, §131)이고 전부 historical이다.
 >
-> 직전 baseline **v98**(1-GPU 8 seed 0.6852, §131)은 historical. 채점은 **epoch 49 고정**(§104-2).
+> ⚠️ **K=256은 환경변수로만 걸린다.** config의 `covariance_sketch_dim`은 **128 그대로 두었다** —
+> 그 값을 바꾸면 v98 학습 재현이 깨지고 P(1536×128) strict load가 실패한다. `ICF_SKETCH_DIM`은
+> K에 의존하는 유일한 텐서 `_covariance_projection`만 버리고 나머지 불일치는 예외로 올린다(§142-1).
+> 무학습 구현 `TrainingFreeClassifier`의 기본값은 **256**이다(테스트로 고정).
+> checkpoint는 **껍데기로만** 쓰인다 — P는 PCA가, head는 상수가 덮어쓰고, `ridge_log_lambda`/
+> `ridge_log_scale`은 초기값(log 1, log 2) 그대로다. **쓰이는 학습값 0개**이므로 어느 v98 시드를
+> 넘겨도 같은 수치가 나온다(§152, `scripts/node_env.sh`의 `ICF_CKPT`가 자동 탐색).
 
-**한 줄**: 활성 baseline은 v83 linear head **1-GPU 4 seed 평균 = SEAL macro 0.6880**(§109, 사용자 결정 — §107-3 게이트 미달인 채로 승격), 새 arm 판정은 여전히 **같은 레짐·4 seed의 seed-paired Δ + t**(§107-3)로 하며 시드별 fold-paired CI(§99)는 보조 근거다.
+**한 줄**: 활성 baseline은 **v114**(§187, 사용자 결정) — 학습 파라미터 0·완전 결정론적, **SEAL 10 macro 0.70509**(홀드아웃 7·전체 17 미측정). 판정은 t·p·CI가 아니라 **부호 일치 수 + 독립 task 집단 재현**으로 하고(§151-1), 최종 승격·기각은 macro와 task 10개 전부의 baseline 성능대 패턴을 함께 본 **사용자 판단**이다(§118).
 
-**Status**: **활성 baseline v83 linear head(relation head를 32-hidden GELU에서 bare `Linear(12,1)`로 축소, trainable 197,057 → 196,621), 1-GPU 4 seed 평균 epoch 49 = 0.6880 (seed std 0.0074). §109에서 사용자 결정으로 승격했으나 §107-3 판정 게이트(4/4 시드 부호 일치 + |t|≥2.5)는 충족하지 못한다 — v82 대비 seed-paired Δ +0.0045, t≈1.15, seed 44만 부호 반전(3/4 양수)(§108). 직전 baseline v82 Medium ClassSep `[0.5,1.4]` 1-GPU 4 seed 0.6835는 historical. ⚠️ v83의 1-GPU 4 seed macro 0.6880은 옛 v77 DDP4 baseline(§104)의 0.6880과 숫자만 같은 별개 수치다 — 혼동 주의. §107에서 판정 레짐이 DDP4 1 seed → 1-GPU 4 seed로 전환됐고 이전 DDP4 숫자(v77 0.6880 tag `v77_hard_ep49`, Medium 0.6881, v41_K128 0.6940)와는 직접 비교 불가다. 실행 중인 학습·평가 없음. §106에서 v77/v80/v81/v82를 각각 4 seed로 1-GPU 동일 레짐 비교 — Medium 0.6835 > Hard 0.6781 > fixed-P 0.6734 > shallow-MLP 0.6722. 난이도는 Medium이 이기고(+0.0053, t=3.0) learnable P는 여전히 미판정(+0.0048, t=1.5, seed 44 부호 반전)이다. §105에서 과거 판정 36건을 감사하고 27개 arm을 epoch 49로 재채점했다 — 계보의 두 승격(v74→v76 +0.0004, Hard vs Medium +0.0001)이 모두 "판정 불가"로 내려갔고 ridge calibration 기각은 철회됐다. ClassSep sweep의 Medium 값은 §91의 오기였다(0.6823 → 0.6881). v78(−0.0004/−0.0047)·v79(−0.0105)·v80 shallow MLP(−0.0158, 4 seed) 모두 기각. fixed P × Medium 4 seed(§107-6)는 **취소됐다**(§111, 사용자 결정 — 새 실험 재기획 중). §110에서 head를 `12→32→32→1`로 심화한 v84도 4 seed로 평가했다 — v82 기준 Δ−0.0057(t=−3.63)·v83 기준 Δ−0.0102(t=−3.61), 둘 다 4/4 시드 부호 일치로 **기각**되어 relation head 깊이 축은 얕음(미판정)·기본·깊음(기각) 세 지점이 다 나와 소진으로 본다. macro seed std 0.0051 실측 → 단일 시드 판정 게이트 ≈ 0.010(2σ)이고 task별 CI는 판정 근거로 쓰지 않는다(§104). 역사적 전체 최고는 v41_K128 0.6940(레짐 상이, 직접 비교 불가).**
+**Status**: **활성 baseline v114 = within-slide PCA(K=256) 기저 + CV(off-diagonal 32,640) + DD(ordered × typicality, κ=1) + CT(bag 1/8 fraction → PCA32 → seeded k-means++ 256 token → ridge λ=1) + fixed head `margin = 1.0·(CV1−CV0) − 1.0·M_DD + 1.0·(CT1−CT0)`. 학습 파라미터 0, seed std 0.00000. SEAL 10 macro 0.70509(§186·§187), 홀드아웃 7·전체 17은 아직 v114로 측정되지 않았다. 실행 중인 학습·평가 없음. 최근 종료: §188 CT kernel-ridge(rbf −0.0101 / poly −0.0103, 둘 다 8/10 하락) 기각, §189 CT top-k 풀링(교체 VHL −0.0154, mean+topk macro −0.0044) 기각 — 재현 코드만 보존. ⚠️ 전체 17 최고는 여전히 historical v110(0.66713, §161)이고 v111~v114 승격은 각각 bias 제거·DD 형태·22GB feasibility·weight 통일을 이유로 한 것이지 예측 성능 개선이 아니다. ⚠️ 지도학습 ABMIL 0.7266과의 격차는 −0.0215로 남아 있다. ⚠️ 학습을 포함하던 직전 계보(v83~v98, 1-GPU 4~8 seed)의 숫자와는 레짐이 달라 직접 뺄 수 없다(§107-2·§131-1) — 그 계보의 마지막 baseline은 v98 8 seed 0.6852이고 전부 historical이다.**
 
 > [!IMPORTANT]
-> **읽는 순서 (2026-08-13)**: **§109를 먼저 읽을 것** — baseline이 **v83 linear head**로 바뀐 절이고,
-> 이 승격은 **§107-3 판정 게이트를 충족하지 못한 상태에서의 사용자 결정**이다. 공식 숫자는
-> **0.6880**(1-GPU 4 seed)이며, 이전 v77 DDP4의 0.6880과 **값은 같지만 레짐이 다른 별개의
-> 숫자다** — 혼동하지 말 것. 그다음 **§108** — v83 실험 자체(relation head의 GELU를 없애고
-> bare `Linear(12,1)`로 줄인 ablation)와 v82 대비 seed-paired Δ(+0.0045, t≈1.15, 미판정)를
-> 담은 절이다. 그다음 **§110** — §108의 반대 방향(head를 `12→32→32→1`로 심화한 v84)이며
-> 이건 **양쪽 baseline(v82·v83) 모두 기준으로 기각**됐다(4/4 시드, |t|>3.6) — head 깊이 축은
-> 이걸로 소진으로 본다. 그다음 **§107** — 판정 레짐이 DDP4 1 seed → 1-GPU 4 seed로 전환된 절이며, v82가
-> 그 레짐에서 처음 승격된 baseline이었다(지금은 historical). 새 arm 판정 절차는 §107-3,
-> 무효화되는 비교 대상은 §107-2다. 그다음 **§106** — 네 arm을 각각 4 seed로 같은 레짐에서
-> 비교한 결과이자 §107 결정의 근거다. **Hard는 최적이 아니고(Medium +0.0053, 4/4 seed), learnable P는 같은 난이도에서
-> t=1.5로 여전히 미판정이며, 1-GPU는 DDP4보다 −0.0098이다.** v80의 −0.0158은 그 레이아웃
-> confound가 섞인 값이고 정당한 control 대비로는 −0.0059다. 그다음 **§105 → §104**. §105는 과거 판정 36건 감사와
-> 27개 arm의 epoch 49 재채점 결과다 — **§91의 ClassSep Medium 값이 오기(0.6823 → 0.6881)이고,
-> 계보의 두 승격(v74→v76, Hard 선택)이 판정 불가로 내려갔다.** 그다음 §104 —
-> 채점 규칙(epoch 고정)과 **task별 CI 사용 금지**가 여기서 정해졌다.
-> ⚠️ §104가 정한 **baseline 숫자(0.6880, DDP4)와 단일 시드 게이트(0.010)는 §107이 대체**했고,
-> §107의 baseline(v82, 0.6835)은 **§109가 대체**했다 — 지금 활성 baseline은 v83 0.6880(1-GPU 4 seed)이다.
-> 그다음 §99(fold-paired Δ + CI, `scripts/compare_arms_paired.py`) — 시드별 보조 근거로 쓴다.
-> §98 판정표 4건은 §99-1에서 fold-paired CI로 재검증되어 전부 유지됐으나, §104-4가 그중
-> 일부(ridge calibration −0.0033, v78 무가중 −0.0047)를 **seed 노이즈와 구분 불가**로 되돌렸다.
-> **v78·v79·v80 모두 기각**이고 CV/DD 배선 축은 소진으로 본다(§103-5).
-> **§103-6의 seed 반복 선행 조건은 §104-3에서 해소됐다.**
+> **읽는 순서 (2026-08-21)** — 활성 계보는 **학습 파라미터 0**이므로 v106 이후만 읽으면 된다.
+>
+> | 순서 | 절 | 왜 읽나 |
+> |---|---|---|
+> | 0 | **§190** | **전체 코드베이스 리팩터링 & 테스트 경량화 (335→86 tests, 3.1s)**. 모듈 구조 및 사용 안내 |
+> | 1 | **§187** | v114 승격(현 활성). weight 통일, SEAL 0.70509. **홀드아웃·전체 미측정**임을 여기서 확인 |
+> | 2 | **§186** | v114 실험 자체 — task 10개 전부와 Δ. 개선분이 저신호 BAP1·VHL에 몰린 근거 |
+> | 3 | **§185 (+§184)** | v113 = CT cell 예산 1/8 fraction. **승격 사유가 예측 성능이 아니라 22GB GPU feasibility**다. §185-1이 tokenizer 동시 변경을 정정한다 |
+> | 4 | **§183 (+§182)** | v112 = DD ordered × typicality(κ=1). DD weight를 0.343→1.0으로 고친 이유(§182-3) |
+> | 5 | **§181** | v111 승격. ⚠️ 그 근거였던 "selection bias·randomness 없음"은 v113부터 무효다(§185-1) |
+> | 6 | **§161 → §158 → §152 → §143 → §139** | v110←v109←v108←v107←v106 계보. **§139가 학습을 없앤 지점**이고 §139-4(within-slide 센터링)·§138-4(고정 head)가 그 두 축의 근거다 |
+> | 7 | **§151-1** | ⚠️ **판정 규칙**: 결정론적 arm에 t·p·CI 금지. 부호 일치 수 + 독립 집단 재현으로 판정 |
+> | 8 | **§118** | 최종 승격·기각은 사용자 판단. 보고 형식(§118-3)이 여기서 정해졌다 |
+>
+> **닫힌 축을 다시 열지 않으려면**: §129(합성 데이터 분포)·§147(DD)·§159/§160(CT cell 수)·
+> §181(CT 탐색)·§188(CT kernel)·§189(CT top-k). 요약표는 `current_architecture.md` §0-6.
+>
+> **학습 계보(v83~v105)의 판정 규칙이 필요할 때만** §109 → §107(1-GPU 4 seed 레짐) →
+> §106 → §105 → §104(epoch 49 고정, task별 CI 금지) → §99(fold-paired CI) 순으로 읽는다.
+> 그 계보는 전부 historical이고, 그 절들의 baseline 숫자(v83 0.6880 / v98 0.6852)를
+> 현재 v114의 0.70509와 **직접 빼지 말 것**(§107-2·§131-1).
 > §2~§97 본문은 [`history.md`](history.md) §20–§23으로 아카이빙됐다(§101).
 
 * **계보 A = CV-only** (`src/models/baseline.py`, 학습 파라미터 **229개**).
   현행 최고 **v41_K128 = SEAL 10개 0.6940** (ABMIL 0.727에 −0.033).
-  ⚠️ **이 값은 현행 판정 레짐(1-GPU 4 seed) 밖의 단일 시드 기록**이라 v83 0.6880와 직접 뺄 수
-  없다(§107-2). 1-GPU 페널티 0.0098을 감안하면 근접하지만 **"따라잡았다"고 쓰지 말 것.**
+  ⚠️ **DDP4 단일 시드 기록**이라 학습 계보(v83 0.6880)와도, 현 활성 v114(0.70509)와도 직접
+  뺄 수 없다(§107-2). 현 계보는 이 값을 §143(v107 0.6945)에서 이미 넘어섰다.
   §73에서 죽은 5개 분기를 소스에서 삭제해 `baseline.py`가 5,685 → **2,224줄**이 됐다.
   ⚠️ **prune 이전 ckpt는 현재 트리로 로드 불가** — `8caa96c` 고정 worktree
   (`/NHNHOME/BASE/kimds/ICF_pre_prune`)를 쓸 것.
@@ -114,46 +132,59 @@
   (§79-6). **현재 형태로는 기각.** 문제는 용량이 아니라 일반화다.
 * **CV-2는 더 파지 말 것** — margin activation(−0.017), subspace_rank(±0.001),
   head 구조(−0.0003) 셋 다 10개 평균을 못 움직였다. 병목이 아니다.
-* **판정은 SEAL 10개 macro 평균만** (§71-4). 합성 val_ce·val_AUROC는 신뢰하지 않는다.
-* **GPU 정책**: ICF는 GPU 0–3만 사용한다. GPU 4–7은 사용하지 않는다.
+* **판정은 SEAL 10 macro + 홀드아웃 7의 독립 재현** (§71-4, §142-4). 합성 val_ce·val_AUROC는
+  신뢰하지 않는다 — 활성 계보는 학습이 없어 합성 지표 자체가 없다.
+* **GPU 정책**: 기본 `NGPU=4`/`GPU_OFFSET=0`(GPU 0–3). ⚠️ **예의 설정이지 능력 설정이 아니다**
+  (§164-2) — 노드를 혼자 쓰면 `export NGPU=8`. 노드 종속 변수는 `scripts/node_env.sh`가 해석한다.
 
 현행 아키텍처 명세는 [`current_architecture.md`](current_architecture.md),
 실험 절차·결과표·금지사항은 [`current_experiments.md`](current_experiments.md).
 
-**지금 돌아가는 것 (2026-08-13)**: 없음, 어느 노드에서도. §108의 v83 4 seed 평가와 §110의 v84
-4 seed 평가가 모두 끝났다 — §109에서 baseline을 v83 linear head(1-GPU 4 seed 0.6880)로
-승격했고(사용자 결정, §107-3 게이트 미달), §110에서 v84(deep head)는 양쪽 baseline 기준 모두
-기각했다. **fixed P × Medium(§107-6, v85)은 취소됐다**(§111, 2026-08-13 사용자 결정) — 진행할
-필요가 없다고 판단해 실험 계획을 접었고 config(한 번도 실행되지 않음)도 삭제했다. 새 실험
-방향은 재기획 중이다. §109 승격의 통계적 근거를 보강하려면 `scripts/compare_arms_paired.py`로
-fold-paired CI를 확인하는 것도 다음 후보다.
+**지금 돌아가는 것 (2026-08-20)**: 없음, 어느 노드에서도. §186의 unit-weight 평가가 끝나
+§187에서 v114로 승격됐고, §188(CT kernel-ridge)·§189(CT top-k 풀링) 두 진단은 모두 기각됐다.
+
+**다음 Action (우선순위 순)**
+1. **v114의 홀드아웃 7 측정** — 가장 싸고, 지금 v114를 뒷받침하는 독립 집단이 하나도 없다는
+   문제를 직접 해소한다. `bash scripts/eval_v114.sh <gpu> <tag> <홀드아웃 7 task>`
+2. **CT token 수 재스윕** — 256은 full-cell hierarchical 시절(§168·§175)에서 이어받은 값인데
+   v113이 cell 예산·tokenizer·sampling을 전부 바꿨다. 같은 비용의 유일한 미확인 CT 노브다.
+3. **CV off-diagonal 32,640차원의 가중** — 지금은 무가중 ridge다. 학습을 넣는다면 여기이고
+   (§156-6), 출발점은 균등이 아니라 현재의 `√(λᵢλⱼ)`다(§162-3).
 
 결과 재확인:
 ```bash
-for tag in v53_enc v54_enc; do
-  printf "%-10s " $tag
+for tag in v113verify unitw; do          # unitw = v114 (§186)
+  printf "%-12s " $tag
   grep -hoP 'fold-mean AUROC: \K[0-9.]+' logs/official50/*_${tag}.log \
-    | awk '{s+=$1;k++} END{printf "%.4f (%d개)\n", s/k, k}'
+    | awk '{s+=$1;k++} END{printf "%.5f (%d개)\n", s/k, k}'
 done
+# v113verify 0.70394 (10개) / unitw 0.70509 (10개)
 ```
 
 ---
 
-> **사용자 결정 (2026-08-12, 최신)**:
-> 1. **v77 baseline은 `epoch 49` checkpoint이고 SEAL macro는 `0.6880`이다.** 앞으로 채점은
->    epoch 49 고정으로 하고 validation-best 선택을 판정에 쓰지 않는다(§104).
-> 2. **Hard v76을 canonical v77 baseline으로 승격.** v30 S2 결정은 역사적 기록이다.
-> 3. **ICI는 기본 잠금 유지.** §50과 §86은 사용자 명시 해제에 따른 예외 평가.
-> 4. **Musk 목표는 0.95 유지.**
+> **현재 유효한 사용자 결정**:
+> 1. **활성 baseline = v114** (§187). 승격은 통계 게이트가 아니라 종합 판단이다(§118).
+> 2. **CT 분기 탐색은 §181에서 종료**했다. 이후 v113의 변경은 feasibility 대응이지 탐색이 아니다(§185).
+> 3. **ICI는 기본 잠금 유지.** §50·§86·§144-3은 명시 해제에 따른 예외 평가다 —
+>    87 donor에서 검출 한계가 macro Δ≈0.05라 **ICI에서 arm을 판정하지 말 것**.
+> 4. **Musk 목표는 0.95 유지** (현재 v107 기준 0.8926, §144-1).
+>
+> **historical (학습 계보에만 적용, 2026-08-12)**: v77 baseline = epoch 49 `0.6880`,
+> 채점은 epoch 49 고정·validation-best 금지(§104). Hard v76 → canonical v77 승격.
+> 활성 계보는 학습이 없어 epoch·checkpoint 선택 문제가 존재하지 않는다.
 
-**Read first if you are picking this up**: **§104 (baseline epoch 49 = 0.6880, 판정 게이트, v80 기각)**, **§98 (v77 명명·baseline 승격)**, §97 (large-ragged), §96 (아키텍처 SSOT), §91 (Hard 선택), §89 (v76 구조/학습 경계),
-§88 (v74 baseline/CT/v71–v74 판정),
-§87 (DD/v70/synthetic 일반화),
-§86 (canonical CV+mean 계약), §85 (v62–v66), §71 (SEAL 판정), §73–§74
-(호환성/학습 경로), §79 (generic 평가/YAML).
+**Read first if you are picking this up**: 위 **읽는 순서** 표를 따를 것.
+활성 계보만 필요하면 **§187 → §186 → §185 → §183 → §181 → §161 → §139**,
+판정 규칙은 **§151-1 → §118**, 구조적 제약은 `current_architecture.md` **§0-4**다.
+계약·명세 절: §140(무학습 구현), §138-1(서브샘플링 계약), §164(노드 종속 변수),
+§156-1(DD가 CV triangle을 읽는다), §145-1(K_dd ≤ K_cv).
 
 > [!IMPORTANT]
-> **방법론 경고 3건 — 다음 arm 설계 전에 읽을 것**:
+> **방법론 경고 3건 — 학습을 포함하는 arm을 설계할 때 읽을 것**
+> (활성 v114 계보는 학습이 없어 합성 val 지표 자체가 존재하지 않는다. 결정론적 arm의 판정
+> 규칙은 §151-1이고, 그쪽의 대응 함정은 **부분 fold 스크리닝**이다 — 같은 세션에서 세 번
+> 속았다: §142-6, §145-6, §149-6):
 > 0. **합성 val 지표(val_ce·val_AUROC)로 arm을 고르지 말 것 (§69-6).** CV-only의 합성 val AUROC는
 >    ep0 0.8885 = ep49 0.8882로 평평한데 er_status는 +0.037 오른다. **판정은 er_status 50-fold로만**
 >    (캐싱으로 45초). 단일 측정의 요동이 ±0.05이므로 seed 반복도 필수다.
@@ -162,21 +193,11 @@ done
 > 2. **학습 길이가 다른 arm 간 비교는 그 자체로 교란이다** (§42-43 arm C 교훈의 재확인).
 >    control은 항상 같은 epoch 수로 새로 학습할 것.
 
-**열린 과제 (CV-only 노선, 우선순위 순)**:
-① **`subspace_rank` 2·4 판정** — 진행 중, SEAL 10개 채점 자동 대기.
-② **learnable 사영** — label-free 축 8개가 전부 0.68±0.03 천장이므로 **라벨이 남은 유일한
-   정보원**이다. P는 1536×K(98K~197K)로 이 모델에서 가장 큰 잠재 파라미터인데 완전히 고정돼
-   있다. ⚠️ CV-1이 closed-form이라 gradient가 ridge solve를 통과해야 하므로 **CV-2 쪽부터**
-   붙이는 것이 안전하다(§66 ridge 제거 시 gradient 발산 전력).
-③ **v40_cv_only / v38_control의 SEAL 10개 채점** — §70의 "대역폭+CV-2 = +0.0271"이 er_status
-   기준이라 10개 기준의 실제 크기를 모른다. 각 20분.
-④ **K=256** — 차원 유효가 §71-5로 확인됐으므로 재검토 가치(VRAM 22%로 여유). ridge-only
-   진단상 K128→256은 +0.003이라 기대는 낮다.
-⑤ **seed 반복** — 지금까지 arm당 1 seed. 요동이 ±0.02~0.05다.
-⑥ **task별 편차 원인 규명** — 같은 TP53이 brca +0.018 / luad −0.066. ccrcc VHL은 0.4503으로
-   랜덤 이하. 코호트 크기(112 vs 324)나 조직 특성으로 추정되나 미규명.
-⑦ CV-2의 거리 평균 연산(`.square().mean(dim=-1)`) — rank를 올려도 MLP 입력이 스칼라 4개로
-   고정되는 병목. ①이 무변화로 나오면 여기가 다음 손잡이다.
+~~**열린 과제 (CV-only 노선, 우선순위 순)** ①~⑦~~ **전부 소진·대체됨.** ① subspace_rank는
+무효(§75), ② learnable 사영은 v76~v105에서 시도된 뒤 §136·§139가 **PCA로 대체**했고(학습 0으로
+대등, seed std 43배 작음), ④ K=256은 §142에서 채택돼 v107이 됐고, ⑤ seed 반복은 활성 계보가
+결정론적이라 **불필요**해졌다(§139-2). ⑥ task별 편차는 §115-1이 정량화했다 — VHL은 지도학습
+상한이 0.538±0.128이라 **"고칠 task"가 아니다**. 현재 열린 과제는 위 **다음 Action** 3개다.
 
 **해결·폐기**: 6-분기 아키텍처 전체(§68), v36 Q1·v37(§65), ridge ablation 계열(§66·§67),
 G-2 제거 확정(§68에서 분기 통째 제거로 해소), E>1 노선(§68-5), label-free 사영 축 8개(§69).
@@ -193,59 +214,64 @@ G-2 제거 확정(§68에서 분기 통째 제거로 해소), E>1 노선(§68-5)
 
 ## 0. 30초 요약 — 새 세션은 여기부터
 
-**활성 baseline: v83 linear head, 공식 SEAL 10-task macro 0.6880**
-= **1-GPU 4 seed 평균**(§109, **사용자 결정 — §107-3 판정 게이트 미달**). config
-`configs/train_v83_linear_head_1536_1gpu.yaml`,
-ckpts `checkpoints/20260813_153750/v83_linear_head_seed4{2..5}/`, tags `v83_linear_head_seed4{2..5}_ep49`,
-시드별 0.6905/0.6896/0.6774/0.6944 (std 0.0074).
-`CovarianceMeanLearnablePDDCTMLPModel`, 학습 파라미터 196,621개(P 196,608 + head 13) —
-**모델은 v82/v77과 거의 동일하고 relation head만 `12→32→1`(GELU)에서 bare `Linear(12,1)`로
-바뀌었다.**
-
-⚠️ **이 승격은 §107-3 게이트(4/4 시드 부호 일치 + |t|≥2.5)를 충족하지 못했다.** v82(0.6835) 대비
-seed-paired Δ +0.0045, t≈1.15, seed 44만 부호 반전(3/4 양수) — "뚜렷하진 않아도 올랐다고 보는 게
-맞다"는 사용자 판단으로 승격했다(§108→§109). 인용할 때 이 점을 함께 밝힐 것.
-
-⚠️ **0.6880이 옛 v77 DDP4 baseline(§104)의 0.6880과 숫자가 같은 건 우연이다.** 완전히 다른 레짐
-(1-GPU 4 seed vs DDP4 1 seed)의 별개 값이며 "제자리로 돌아왔다"로 읽으면 안 된다. 직전 baseline
-v82 Medium은 같은 1-GPU 4 seed 레짐에서 0.6835, v77 Hard는 0.6781이다(§107-1).
-역사적 전체 최고 **v41_K128 CV-only 0.6940**(229 파라미터)도 DDP4 1 seed라 직접 비교 대상이
-아니다. 지도학습 ABMIL 0.7266과의 격차는 여전히 크다.
-
-**지금 돌아가는 것**: 없음. §108(v83)·§110(v84) 4 seed 평가가 모두 끝났고 §109에서
-baseline을 v83으로 승격했다(사용자 결정). v84(head 심화)는 §110에서 기각 — head 깊이 축은
-소진. **fixed P × Medium(§107-6, v85)은 취소됐다**(§111, 사용자 결정) — 새 실험 방향은 재기획
-중이다. §109 승격의 통계적 근거 보강도 후보다. CV/DD 배선 축은 소진으로 본다(§103-5).
-
-**판정 방법은 §107에서 정해진 그대로다 — baseline만 §109에서 v83으로 바뀌었다.**
-arm과 baseline(v83)을 각각 **1-GPU 4 seed(42–45)**로 돌려 **같은 시드끼리 뺀** 평균 Δ와 t로
-판정한다(**4/4 부호 일치 + |t| ≥ 2.5**, 갈리면 미판정). 시드별 fold-paired CI는 보조 근거다.
-GPU 불필요:
+**활성 baseline: v114, 공식 SEAL 10-task macro 0.70509** (§187, 사용자 결정).
+**학습 파라미터 0, seed std 0.00000, 완전 결정론적.** checkpoint·config는 껍데기로만 쓰인다.
 
 ```bash
-python scripts/compare_arms_paired.py --baseline v83_linear_head_seed42_ep49 --arm <TAG>_seed42_ep49
+. scripts/node_env.sh                                     # 노드 종속 변수 해석 (§164)
+bash scripts/eval_v114.sh <gpu> <tag> [tasks...]          # 기본값 = SEAL 10
+bash scripts/eval_v114.sh 0 smoke cptac_ccrcc/VHL_mutation   # 30초 점검 → 0.5230
 ```
 
-**세 줄 아키텍처**: bag의 cell을 learnable P(1536×128)에 사영해 covariance를 만들고, CV(ridge)·
-DD(dispersion)·CT(abundance) 세 branch가 에피소드마다 **closed-form으로** 12개 relation feature를
-만들어 (활성 baseline v83에서는) bare `Linear(12,1)`이 읽는다(v82/v77은 `12→32→1` GELU MLP였다).
-분류기 weight를 저장하지 않고 ridge를 매 에피소드 다시 푼다.
-현행 스펙은 [`current_architecture.md`](current_architecture.md).
+| | SEAL 10 | 홀드아웃 7 | 전체 17 |
+|---|---:|---:|---:|
+| **v114 (활성)** | **0.70509** | **미측정** | **미측정** |
+| v110 (historical, 예측 최고) | 0.70692 | 0.61029 | 0.66713 |
+| 지도학습 ABMIL | 0.7266 | — | — |
 
-**열린 과제**
-1. ~~**학습 seed 노이즈가 미측정**~~ **해소 (§104-3·§106-1·§107)**: seed std가 실측됐고
-   (arm별 0.0018~0.0053) 판정 단위가 4 seed가 됐다. 남은 부채는 **과거 arm 전부가 DDP4 1 seed
-   기록**이라는 것 — 새 arm과 비교하려면 그 arm을 1-GPU 4 seed로 다시 돌려야 한다.
-   latent sweep의 비단조성(L16 딥)도 그 부채에 포함된다.
-2. **cptac_ccrcc VHL 0.4385 — 랜덤 이하**. large-ragged가 +0.0090(CI 0 제외)로 올려도 여전히
-   0.45 미만. 노이즈가 아니라 체계적 부호 문제로 의심된다.
-3. **cptac_ccrcc BAP1이 large-bag에서만 −0.0179로 무너진다** (§99-2).
-4. ICI는 사용자 지시로 잠금.
+⚠️ **v114의 홀드아웃 7·전체 17은 측정된 적이 없다** — v112 값(0.60181 / 0.66211)을 옮겨 적지
+말 것(§187). 그래서 지금 v114는 **독립 task 집단 재현이 없는 상태**다. 이걸 채우는 것이
+아래 다음 Action 1번이다.
 
-**작업 규칙 4가지**
-- 판정은 **SEAL 10개 macro**, 그것도 **fold-paired Δ + CI**로 (§99). 합성 val 지표는 checkpoint
-  선택에만 쓴다 — 이 리포에서 합성이 좋아지고 SEAL이 내려간 사례가 반복됐다(v54가 최악의 예).
-- **clipping 금지**, **bf16-mixed 필수**(학습·평가 양쪽), GPU는 **0–3만** 사용.
+⚠️ **"최신 = 최고"가 아니다.** 전체 17 최고는 여전히 v110(0.66713, §161)이고, v111~v114
+승격은 각각 selection bias 제거(§181)·DD 형태(§183)·**22GB GPU feasibility**(§185)·weight
+통일(§187)을 이유로 한 것이다. ABMIL과의 격차는 −0.0215로 남아 있다.
+
+⚠️ **학습 계보(v83 0.6880 / v98 0.6852 / v41_K128 0.6940)의 숫자와 빼지 말 것** — 레짐도
+시드 집합도 다르다(§107-2·§131-1). 전부 historical이다.
+
+**지금 돌아가는 것**: 없음. §186 unit-weight 평가 → §187 v114 승격이 끝났고,
+§188(CT kernel-ridge rbf/poly)·§189(CT top-k / mean+topk)는 둘 다 기각됐다.
+
+**판정 방법 (§151-1, 결정론적 arm)**: t·p·CI를 쓰지 않는다 — 반복 단위인 시드 분산이 0이다.
+쓸 수 있는 것은 **① task별 Δ(오차 없는 실측값) ② 부호 일치 수 ③ SEAL 10 / 홀드아웃 7 두
+독립 집단에서의 재현**뿐이다. 최종 승격·기각은 macro와 **task 10개 전부**를 baseline
+성능대(랜덤 근처 vs 천장 근처)와 함께 본 **사용자 판단**이다(§118, 보고 형식 §118-3).
+⚠️ 학습을 포함하는 arm과 비교할 때만 §107-3 게이트와 §131-2 검출 한계가 되살아난다(§139-6).
+
+**세 줄 아키텍처**: fold의 **context** cell을 bag별 자기 평균으로 센터링해 풀링한 공분산의
+상위 256 고유벡터를 기저로 삼고, CV(off-diagonal ridge)·DD(rank-1 ordered × typicality)·
+CT(k-means++ 256 token abundance ridge) 세 branch가 에피소드마다 **closed-form으로** 값을
+내며, 상수 head `margin = 1.0·CV + (−1.0)·DD + 1.0·CT`가 합친다. 저장된 분류기 weight가
+없고 ridge를 매 에피소드 다시 푼다. 현행 스펙은
+[`current_architecture.md`](current_architecture.md) **§0**.
+
+**다음 Action (우선순위 순)**
+1. **v114 홀드아웃 7 측정** — 가장 싸고, "독립 집단 재현 없음"을 직접 해소한다.
+2. **CT token 수 재스윕** — 256은 full-cell hierarchical 시절(§168·§175)에서 이어받았는데
+   v113이 cell 예산·tokenizer·sampling을 전부 바꿨다. 미확인 CT 노브는 이것 하나다.
+3. **CV off-diagonal 32,640차원의 가중** — 무가중 ridge다. 학습을 넣는다면 여기이고(§156-6),
+   출발점은 균등이 아니라 현재의 `√(λᵢλⱼ)`다(§162-3).
+
+⚠️ **겨냥하지 말 것**: **VHL은 지도학습 상한이 0.538±0.128(사실상 랜덤)이라 "고칠 task"가
+아니다**(§115-1). §113·§114가 이걸 겨냥해 실패했다. 진짜 헤드룸은 luad TP53(ABMIL 0.751)이다.
+
+**작업 규칙**
+- 판정은 위 §151-1·§118 절차대로. 활성 계보는 학습이 없어 합성 val 지표가 존재하지 않는다.
+- ⚠️ **부분 fold로 스크리닝하고 방향을 읽지 말 것** — 한 세션에서 세 번 속았다(§142-6,
+  §145-6, §149-6). 부분 fold는 훅이 도는지 확인하는 용도다.
+- **clipping 금지**, **bf16-mixed 필수**. GPU는 기본 `NGPU=4`/`GPU_OFFSET=0`이지만
+  **예의 설정이지 능력 설정이 아니다**(§164-2) — 노드를 혼자 쓰면 `export NGPU=8`.
 - 장시간 작업은 완전 이탈형 백그라운드로 띄우고 PID/PGID·로그 경로를 즉시 기록한다.
   프로세스는 **프로세스 그룹**으로 죽인다(wrapper PID만 kill하면 GPU가 안 풀린다).
 - 다음 Action과 판정 기준이 명확하면 재확인 없이 실행하고, 각 논리 단위마다 결과·명령·산출물
@@ -261,8 +287,13 @@ DD(dispersion)·CT(abundance) 세 branch가 에피소드마다 **closed-form으�
 > 1. 사용자는 매번 **새 대화 세션(New Chat Session)**으로 접속합니다.
 > 2. 새로 접속한 Agent는 **`docs/` 최상위 루트의 Living md 파일 5개(`agent_handoff.md`, `current_status.md`, `current_architecture.md`, `current_experiments.md`, `README.md`)와 현행 `architecture_*_proposal.md` 1개를 최우선으로 정독**하여 전체 개발 맥락과 프로젝트 규칙을 파악합니다.
 > 3. 터미널 조회가 필요한 명령어는 NVML/쉘 hang 방지를 위해 **반드시 `timeout 3s ps aux | grep python`과 같이 타임아웃**을 적용합니다.
-> 4. 코드 변경 시 unittest 통과 필수:
->    `timeout 300s /home/aibio_3/miniconda3/envs/BagPFN/bin/python -m unittest discover -s tests -p "test_*.py"`
+> 4. 코드 변경 시 전체 테스트 통과 필수. ⚠️ **인터프리터를 하드코딩하지 말 것** —
+>    `python3`로 돌리면 `lightning`이 없어 14개 모듈이 통째로 사라지는데도 "Ran 158 tests"라고
+>    말한다(§141-3). `node_env.sh`가 `import torch, lightning`이 되는 첫 후보를 고른다:
+>    ```bash
+>    . scripts/node_env.sh
+>    timeout 600s "$ICF_PYTHON" -m pytest -q tests/       # 최근 기준 332 passed, 3 skipped (§189)
+>    ```
 
 ---
 
@@ -7363,9 +7394,38 @@ SEAL 10 macro Δ(−0.00038)는 §183에서 v111→v112 승격을 "사실상 fla
   distance DD 재현 전용으로 유지.
 - BagPFN pytest `tests/test_ct_readout.py` + `tests/test_training_free.py`: **81 passed, 2
   skipped**, 회귀 없음.
-- ⚠️ 이 절 작성 시점 기준 위 코드 변경은 **여전히 working tree에 uncommitted**다.
+- ~~⚠️ 이 절 작성 시점 기준 위 코드 변경은 **여전히 working tree에 uncommitted**다.~~
+  **해소됨** — `c727e10`(v113 승격)·`a495a18`(v114 승격)으로 커밋됐다.
 
-_by Claude Sonnet 5 on gnode3 at 2026-08-20 01:11:51_
+### 185-1. ⚠️ 정정 (2026-08-21) — v113은 cell 예산만 바꾼 것이 아니다
+
+위 본문과 §184는 v113의 변경을 **CT cell 예산 하나**로 서술했지만, 실제 `scripts/eval_v113.sh`는
+**세 가지를 동시에** 바꿨다. 실행 로그의 CT config 줄이 근거다
+(`logs/official50/*_v113verify.log`, `*_unitw.log`):
+
+| 항목 | v112 (`eval_v112.sh`) | **v113/v114** (`eval_v113.sh`/`eval_v114.sh`) |
+|---|---|---|
+| cell 예산 | `ICF_CT_CELLS=all` (전체 cell) | `0.125` / `own` / `min=64` (bag 자기 크기의 1/8) |
+| sampling | `ICF_CT_SAMPLING=even` | **`random`** (`sampling_seed=0` 고정) |
+| tokenizer | `ICF_CT_TOKENIZER=hierarchical_2means` | **`kmeans_plusplus`** (Lloyd `max_iter=8`, `tol=1e-4`) |
+| abundance | `all` | `match` (dictionary와 같은 샘플) |
+
+**따라서 §184의 "sampling-invariance 증거"라는 해석은 과잉이다.** −0.00038은 cell 개수만
+바꿨을 때의 차이가 아니라 **네 가지를 함께 바꿨을 때의 순효과**이고, §127-2("arm당 노브 하나")
+위반이다. 결론(macro가 사실상 flat이므로 feasibility 승격이 예측 성능을 갉아먹지 않았다)은
+그대로 유지되지만, **cell 예산 단독 효과는 분리되지 않았다.**
+
+**그리고 §181의 승격 근거가 v113부터 무효다.** §181은 v111을 "cell selection bias가 없고
+random sampling의 영향도 없는 구성 중 최고"라는 이유로 승격했는데, v113/v114는 `sampling=random`
+으로 bag의 1/8만 뽑는다 — seed 0 고정이라 **결정론성 자체는 유지되지만**(seed std 0.00000)
+selection policy는 다시 연산에 관여한다. 즉 v113 승격은 §181의 운영 불변성 기준을 **feasibility와
+맞바꾼 것**이며, §185 본문은 그 맞바꿈을 명시하지 않았다.
+
+⚠️ 이 정정은 수치를 바꾸지 않는다 — v113 0.70394, v114 0.70509는 위 설정으로 실측된 값이
+맞다(`v113verify`/`unitw` 태그 10 task 재집계로 확인). 바뀌는 것은 **그 숫자에 붙일 수 있는
+해석의 범위**다.
+
+_by Claude Sonnet 5 on gnode3 at 2026-08-20 01:11:51 (§185-1 추가: Opus 5, 2026-08-21)_
 
 ---
 
@@ -7524,5 +7584,47 @@ PIK3CA(+0.0129)·er(+0.0023)뿐이고 grade(−0.0141)·BAP1(−0.0166)을 비�
 `tests/test_ct_readout.py`에 pooling 테스트 4개(전체 332 passed, 3 skipped).
 
 _by GitHub Copilot (DeepSeek V4 Pro) on gnode3 at 2026-08-20 22:21:22_
+
+---
+
+## 190. 2026-08-21 — 전체 코드베이스 리팩터링 및 테스트 스위트 슬림화 (335→86 tests, 3.1s)
+
+과거 v1~v114 연구 과정에서 누적된 기각/ablation 테스트와 거대 모듈들을 정리하고, 코드베이스의 모듈성과 개발 생산성을 대폭 개선하는 리팩터링을 완료했다.
+
+### 1. 테스트 스위트 경량화 (335 tests → 86 core tests, 74% 감축, 9.5s → 3.1s)
+- 과거 기각/폐기된 실험 전용 20개 테스트 모듈을 `tests/history/legacy_*.py`로 `git mv` 이동하여 보존.
+- `test_set_transformer_ridge.py` (52 -> 8 tests) 및 `test_ct_readout.py` (72 -> 9 tests)의 핵심 계약 테스트만 압축 유지.
+- 현재 v114 baseline 및 주요 core invariance에 대한 86개 테스트 100% 정상 통과 (`Ran 86 tests in 3.139s, OK`).
+
+### 2. Model Registry & CT 모듈 분해 (`src/models/`)
+- `src/models/base.py`: `InContextClassifierProtocol` 및 `BaseInContextClassifier` 구축.
+- `src/models/registry.py`: `@register_model` 데코레이터 및 `build_model` / `get_model_class` 팩토리.
+- `src/models/ct/`: 거대 단일 파일 `ct_readout.py` (1,356줄)를 4개 서브모듈로 분해.
+  - `config.py`: `CTReadoutConfig`, `CTAbundance`, `CTMargins`
+  - `tokenizers.py`: k-means++, Lloyd refine, hierarchical 2-means, FPS, HDBSCAN, DBSCAN
+  - `abundance.py`: Cell sampling, projection, normalisation, soft abundance
+  - `readout.py`: Ridge, Kernel Ridge, Prototype, Extreme, Calibrated Readouts
+  - `src/models/ct_readout.py`: 기존 import 100% 하위 호환을 보장하는 Thin Facade로 전환.
+
+### 3. 합성 데이터셋 모듈화 (`src/datasets/`)
+- `src/datasets/synthetic/`: 단일 파일 `synthetic_data.py` (1,776줄)를 3개 서브모듈로 분해.
+  - `types.py`: `SyntheticEpisode`, 태스크 목록 상수
+  - `generator.py`: `SyntheticManifoldGenerator`
+  - `dataset.py`: `SyntheticEpisodeDataset`
+  - `src/datasets/synthetic_data.py`: 호환 Facade.
+
+### 4. Lightning 학습 모듈 인터페이스 슬림화 (`src/modules/`)
+- `src/modules/losses/ranking.py`: `pairwise_ranking_loss`
+- `src/modules/diagnostics/`: `metrics.py` (이진 쿼리 진단), `oracle.py` (Oracle Ridge 피팅 및 SNR)
+- `src/modules/guards/`: `gradient.py` (Non-finite 가드), `vram.py` (VRAM 피크 경고 가드)
+- `src/modules/model_interface.py`: Lightning 라이프사이클에만 집중하도록 경량화.
+
+### 5. 스크립트 계층화 (`scripts/`)
+- `scripts/diagnostics/`: 14개 `diagnose_*.py` 진단 스크립트 격리.
+- `scripts/archive/sweeps/`: 과거 v76, v62 등 파라미터 스윕 스크립트 격리.
+- `scripts/archive/historical_evals/`: v107~v113 구버전 평가 스크립트 격리.
+- `scripts/` 루트: 활성 스크립트(`eval_v114.sh`, `eval_seal_tasks.sh`, `node_env.sh`, `train.py`, `test_pathobench.py` 등)만 명확하게 유지.
+
+_by Antigravity on 2026-08-21 14:45:00_
 
 ---

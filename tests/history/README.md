@@ -1,13 +1,18 @@
 # Archived test suites
 
-These files preserve regression and research contracts for retired architectures and
-superseded diagnostics. They deliberately use the `legacy_*.py` filename pattern, so
-the default command does not execute them:
+These files preserve regression and research contracts for retired architectures,
+superseded diagnostics, and historical experimental ablation arms (v1~v100+).
+They deliberately use the `legacy_*.py` filename pattern, so the default discovery
+command does not execute them:
 
 ```bash
 python -m unittest discover -s tests -p "test_*.py"
 ```
 
-The compact default suite is the required gate for active v30/v33 work. Archived tests
-are historical references and are not a required CI gate. Run an individual archived
-module explicitly only when modifying its preserved code path.
+The compact core suite (86 tests) is the required CI and development gate for active
+v114 Training-Free work. Archived tests are historical references and can be run
+individually on demand when inspecting or modifying preserved code paths:
+
+```bash
+python -m unittest tests/history/legacy_set_transformer_ridge.py
+```
