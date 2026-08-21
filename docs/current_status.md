@@ -7625,6 +7625,6 @@ _by GitHub Copilot (DeepSeek V4 Pro) on gnode3 at 2026-08-20 22:21:22_
 - `scripts/archive/historical_evals/`: v107~v113 구버전 평가 스크립트 격리.
 - `scripts/` 루트: 활성 스크립트(`eval_v114.sh`, `eval_seal_tasks.sh`, `node_env.sh`, `train.py`, `test_pathobench.py` 등)만 명확하게 유지.
 
-_by Antigravity on gnode3 at 2026-08-21 14:45:00_
+_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 14:45:00_
 
 ---

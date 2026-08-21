@@ -4,7 +4,7 @@
 §187 사용자 결정으로 v113의 fixed-head 세 branch weight (CV=1.442/DD=1.0/CT=0.7)를 **전부 1.0으로 통일한 v114가 활성 baseline**(SEAL 10 macro **0.70509**)이다.
 거대 모듈 분해(`src/models/ct/`, `src/datasets/synthetic/`, `src/modules/`), 모델 레지스트리 구축(`src/models/registry.py`), 스크립트 계층화(`scripts/diagnostics/`, `scripts/archive/`), 과거 기각 테스트의 `tests/history/` 아카이빙이 완료됐다.
 
-_by Antigravity on gnode3 at 2026-08-21 14:51:00_
+_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 14:51:00_
 
 ---
 
