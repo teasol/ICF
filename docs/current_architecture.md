@@ -141,12 +141,4 @@ bash scripts/eval_v114.sh <gpu_id> <tag> [tasks...]
 | **CT Kernel-Ridge** | RBF/Poly 비선형 커널 모두 8/10 task 하락 $\to$ 비선형 곡률 부재 확인 (§188). |
 | **CT Top-k 풀링** | Mean 풀링 대비 노이즈만 가중되어 기각 (§189). |
 
----
-
-## 6. 열려 있는 연구 방향
-
-1. **[Plan A] BM Branch 가중치 및 사영 차원 스윕**: 1차 모멘트 결합 효과 검증 (`current_experiments.md` 참조).
-2. **[Plan B] TH (Tumor Heterogeneity) 다양성 스칼라**: 슬라이드 내 세포 다양성/엔트로피 1D 증거 주입.
-3. **v114의 홀드아웃 7 및 전체 17 실측**: SEAL 10 외 독립 집단에서의 재현성 확보.
-
-_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 15:47:00_
+_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 15:48:00_
