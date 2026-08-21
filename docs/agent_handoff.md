@@ -18,24 +18,27 @@ _by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 14:51:00_
    /NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python
    ```
 
-3. 읽는 순서는 이 문서 §0 → [`current_architecture.md` §0](current_architecture.md) →
+3. 읽는 순서는 이 문서 §0 → [`current_status.md` **§0 (판정 프로토콜 종합 SSOT)**](current_status.md) →
+   [`current_architecture.md` §0](current_architecture.md) →
    [`current_experiments.md` §0](current_experiments.md) → 세부 수치가 필요할 때만
-   [`current_status.md` §183, §190](current_status.md)다.
-4. §173–§179의 코드·평가·문서는 `c34dfe2`에 반영됐다. §180, §182, §183, §190(리팩터링)도 완료 후
-   각각 별도 커밋했다. 새 세션은 `git status --short`가 비어 있는지와 `git log -n 3 --oneline`의 최신
-   커밋부터 확인한다.
-5. 활성 모델은 **v114 = v113 + fixed-head 세 branch weight(CV/DD/CT)를 전부 1.0으로 통일**
+   [`current_status.md` §183, §190, §191](current_status.md)다.
+4. **판정 규칙 SSOT**: 모든 모델 평가 및 승격/기각 판정 규칙은 [`current_status.md` §0](current_status.md)으로
+   일원화됐다 (결정론적 판정: t·p·CI 금지, 부호 일치 수 및 독립 재현 우선 / 최종 승격: 사용자 판단 / 닫힌 축 재시도 금지).
+5. §173–§179의 코드·평가·문서는 `c34dfe2`에 반영됐다. §180, §182, §183, §190(리팩터링), §191(BM 브랜치)도
+   완료 후 각각 별도 커밋했다. 새 세션은 `git status --short`가 비어 있는지와 `git log -n 3 --oneline`의
+   최신 커밋부터 확인한다.
+6. 활성 모델은 **v114 = v113 + fixed-head 세 branch weight(CV/DD/CT)를 전부 1.0으로 통일**
    (§187, SEAL 10 macro +0.00115, §186). CT cell 예산(bag 자기 크기의 1/8 fraction, floor 64)은
    v113과 동일(§185, feasibility 승격 — 22GB GPU에서 v112의 전체-cell CT가 LUAD 대형 bag에 OOM,
    §184). v113의 비대칭 weight(CV=1.442/DD=1/CT=0.7)는 `scripts/archive/historical_evals/eval_v113.sh`로,
    v112의 전체-cell/전체-abundance CT는 `scripts/archive/historical_evals/eval_v112.sh`로,
    v111의 distance DD readout은 `scripts/archive/historical_evals/eval_v111.sh`로 재현 가능하지만
    셋 다 더 이상 활성이 아니다.
-6. 2026-08-19 인계 시점에는 GPU 0–7이 모두 NVIDIA B200 183,359 MiB이고 사용량 0 MiB였다.
+7. 2026-08-19 인계 시점에는 GPU 0–7이 모두 NVIDIA B200 183,359 MiB이고 사용량 0 MiB였다.
    자원 상태는 변하므로 새 세션 시작 때 `nvidia-smi`로 다시 확인한다. 8-GPU 사용 가능 여부는
    그 시점의 다른 사용자 프로세스를 보고 결정한다.
-7. 마지막 코드 검증은 BagPFN Python으로 **92 tests, OK (13.2s)**였다.
-8. 문서에 **새 단락·긴 내용**을 쓸 때는 작성 직후
+8. 마지막 코드 검증은 BagPFN Python으로 **92 tests, OK (13.2s)**였다.
+9. 문서에 **새 단락·긴 내용**을 쓸 때는 작성 직후
    `_by <LLM Name> on <server name> at <YYYY-MM-DD HH:MM:SS>_` 스탬프를 남긴다.
    오타·숫자·링크 같은 사소한 수정에는 붙이지 않는다. 상세는 아래 §6-3.
 
