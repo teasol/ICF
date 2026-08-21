@@ -90,6 +90,31 @@ M_{DD}(q)=a(q)o(q)
 - fixed-head weight는 **1.0**이다(§183) — 옛 `distance` readout에 fit된 0.343 magnitude는
   bounded margin에 재사용할 근거가 없어 제거했다(§182-2/182-3).
 
+## 0-1c. BM (Projected Bag-Mean) Branch 수식 및 구현 (Plan A, 2026-08-21)
+
+슬라이드 내 1차 모멘트(세포 평균 $\bar{x}_i \in \mathbb{R}^{1536}$)를 Within-slide PCA 기저 $B$ 상위 $d$차원(기본 32차원)으로 사영하여 클래스 균형 Ridge로 판별하는 0-parameter 브랜치다.
+
+\[
+\mu_i = \bar{x}_i B_{:d} \in \mathbb{R}^d \quad (d = \text{bm\_dim}, \text{ 기본 } 32)
+\]
+
+\[
+\mu_i^{std} = \frac{\mu_i - \bar{\mu}_{ctx}}{\sigma_{ctx}}
+\]
+
+\[
+M_{BM} = \text{logit}_1 - \text{logit}_0 \quad (\text{Class-balanced Dual Ridge, } \lambda = \text{bm\_lambda} = 1.0)
+\]
+
+\[
+\text{Total Margin} = w_{CV} M_{CV} + w_{DD} M_{DD} + w_{CT} M_{CT} + w_{BM} M_{BM}
+\]
+
+- **기본 가중치 $w_{BM} = 0.0$**: v114 활성 baseline의 완전한 bit-level 하위 호환성을 보존한다.
+- **라벨 반대칭성(Label Antisymmetry)** 및 **쿼리 비누수(No-Leakage)** 계약을 엄밀하게 만족하며 6개 전용 단위 테스트(`tests/test_bm_branch.py`)로 고정되었다.
+
+_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 15:02:00_
+
 ## 0-2. 수치
 
 | | SEAL 10 | 홀드아웃 7 | 전체 17 | seed std |

@@ -7628,3 +7628,31 @@ _by GitHub Copilot (DeepSeek V4 Pro) on gnode3 at 2026-08-20 22:21:22_
 _by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 14:45:00_
 
 ---
+
+## 191. 2026-08-21 — Plan A: Projected Bag-Mean (BM) Branch 구현 및 단위 테스트 완료
+
+기존 v114의 3-branch(CV, DD, CT)가 완전히 배제하고 있던 **1차 모멘트(세포 평균 $\bar{x}_i \in \mathbb{R}^{1536}$)** 정보를 Within-slide PCA 기저의 주요 신호 축(상위 32차원)으로 사영하여 Class-balanced Ridge로 판별하는 **BM (Projected Bag-Mean) Branch**를 구현했다.
+
+### 1. 설계 및 구현 세부사항
+- **사영 및 정규화**:
+  - 각 bag의 평균 $\bar{x}_i$를 기저 상위 `bm_dim`($d=32$) 차원으로 사영: $\mu_i = \bar{x}_i B_{:d} \in \mathbb{R}^{32}$.
+  - Context 슬라이드들의 평균 $\bar{\mu}_{ctx}$과 RMS 표준편차 $\sigma_{ctx}$로 좌표 표준화.
+- **분류기 (0-parameter)**:
+  - Context-standardized $\mu_i^{std}$에 대해 Class-balanced Dual Ridge ($\lambda=1.0$)를 적용하여 로짓 산출 $\to M_{BM} = \text{logit}_1 - \text{logit}_0$.
+- **통합 및 호환성**:
+  - `TrainingFreeConfig`에 `weight_bm: float = 0.0`, `bm_dim: int = 32`, `bm_lambda: float = 1.0` 추가.
+  - 기본값 $w_{BM}=0.0$으로 설정되어 기존 v114의 동작 및 기존 86개 테스트 결과가 bit-level로 100% 동일하게 유지됨.
+
+### 2. 엄밀한 계약 검증 (`tests/test_bm_branch.py`, 6 tests PASS)
+- **Equivalence Test**: `weight_bm=0.0` 시 기본 v114 마진과 100% 동일.
+- **Standalone Test**: BM 단독 활성화 시 유효한 마진 출력.
+- **Label Antisymmetry Test**: 라벨 반전($y \to 1-y$) 시 $M_{BM} \to -M_{BM}$ 성립.
+- **No-Leakage Test**: Query 변경 시 Context 사영 및 표준화 통계 불변.
+- **Determinism Test**: 동일 입력에 대해 완전 결정론적 출력.
+- **Dimension Flexibility Test**: 8, 16, 64, 128차원 등 다양한 사영 차원 지원 확인.
+
+전체 테스트 스위트: **92 tests, OK (13.2s)**.
+
+_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 15:03:00_
+
+---

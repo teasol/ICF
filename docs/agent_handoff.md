@@ -34,7 +34,7 @@ _by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 14:51:00_
 6. 2026-08-19 인계 시점에는 GPU 0–7이 모두 NVIDIA B200 183,359 MiB이고 사용량 0 MiB였다.
    자원 상태는 변하므로 새 세션 시작 때 `nvidia-smi`로 다시 확인한다. 8-GPU 사용 가능 여부는
    그 시점의 다른 사용자 프로세스를 보고 결정한다.
-7. 마지막 코드 검증은 BagPFN Python으로 **86 tests, OK (3.139s)**였다.
+7. 마지막 코드 검증은 BagPFN Python으로 **92 tests, OK (13.2s)**였다.
 8. 문서에 **새 단락·긴 내용**을 쓸 때는 작성 직후
    `_by <LLM Name> on <server name> at <YYYY-MM-DD HH:MM:SS>_` 스탬프를 남긴다.
    오타·숫자·링크 같은 사소한 수정에는 붙이지 않는다. 상세는 아래 §6-3.

@@ -202,6 +202,11 @@ class TrainingFreeConfig:
     # 13/17). ⚠️ DD still receives the FULL triangle -- it rebuilds its K x K
     # matrices from it, so masking globally would break DD, not just narrow CV.
     cv_blocks: str = "offdiag"
+    # BM branch: projected bag-mean in leading subspace with class-balanced ridge.
+    # Default weight 0.0 preserves v114 bit-identically.
+    bm_dim: int = 32
+    bm_lambda: float = 1.0
+    weight_bm: float = 0.0
 
 
 
@@ -415,11 +420,49 @@ class TrainingFreeClassifier:
 
         dd = self._dd_features(to_matrices(context), context_labels, to_matrices(query))
         q0, q1 = self._ct_features(context_bags, context_labels, query_bags, basis)
-        return (
+        total_margin = (
             config.weight_cv * (cv[:, 1] - cv[:, 0])
             + config.weight_dd * (dd[:, 1] - dd[:, 0])
             + config.weight_ct * (q1 - q0)
         )
+        if config.weight_bm != 0.0:
+            bm = self._bm_features(context_bags, context_labels, query_bags, basis)
+            total_margin = total_margin + config.weight_bm * bm
+        return total_margin
+
+    def _bm_features(
+        self,
+        context_bags: Sequence[torch.Tensor],
+        context_labels: torch.Tensor,
+        query_bags: Sequence[torch.Tensor],
+        basis: torch.Tensor,
+    ) -> torch.Tensor:
+        """Projected bag-mean in leading subspace with class-balanced ridge."""
+        dim = min(self.config.bm_dim, basis.shape[1])
+        bm_basis = basis[:, :dim].to(dtype=torch.float32)
+        ctx_means = torch.stack([b.float().mean(dim=0) for b in context_bags]) @ bm_basis
+        qry_means = torch.stack([b.float().mean(dim=0) for b in query_bags]) @ bm_basis
+
+        labels = context_labels.long()
+        targets = torch.nn.functional.one_hot(labels, 2).float()
+        counts = torch.bincount(labels, minlength=2)
+        if bool((counts == 0).any()):
+            raise ValueError("Every class must occur in the context set.")
+
+        weight = counts.float().reciprocal()[labels]
+        total = weight.sum().clamp_min(1e-12)
+        feature_mean = (weight[:, None] * ctx_means).sum(0, keepdim=True) / total
+        target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
+        root = weight.sqrt()[:, None]
+
+        design = (ctx_means - feature_mean) * root
+        centred_targets = (targets - target_mean) * root
+
+        dual = _solve_ridge(design @ design.T, centred_targets, self.config.bm_lambda)
+        coefficients = design.T @ dual
+        intercept = target_mean - feature_mean @ coefficients
+        logits = qry_means @ coefficients + intercept
+        return logits[:, 1] - logits[:, 0]
 
     def predict_proba(self, context_bags, context_labels, query_bags) -> torch.Tensor:
         """P(class 1) per query bag."""
