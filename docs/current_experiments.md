@@ -1,13 +1,13 @@
 # Current Experiments & Active Queue (2026-08-21)
 
-**Last updated**: `2026-08-21`
+**Last updated**: `2026-08-21 17:59:00`
 
 > [!IMPORTANT]
-> **활성 baseline = v114** (`docs/current_status.md` §187, 사용자 결정). 학습 파라미터 0, 완전 결정론적(seed std 0.00000).
-> **SEAL 10 macro 0.70509**, ⚠️ **홀드아웃 7·전체 17은 미측정**.
+> **활성 baseline = v114** (`docs/current_status.md` §187, 사용자 결정). 학습 파라미터 0, 완전 결정론적(Deterministic).
+> ⚠️ **판정 프로토콜 개정**: **Primary Benchmark (7 tasks)** 가 주 판정 기준이며, **Hold-out Validation (SEAL 10 tasks)** 는 독립 교차 검증용이다.
 > 실행: `bash scripts/eval_v114.sh <gpu> <tag> [tasks...]`
 > 
-> ⚠️ **판정 규칙 종합 SSOT**: [`docs/current_status.md` §0](current_status.md)을 준수할 것. 결정론적 arm에는 t·p·CI를 일절 쓰지 않으며, **부호 일치 수(Sign Agreement)** 와 **독립 집단(SEAL 10 / 홀드아웃 7) 동시 재현**으로 판정하고 최종 승격/기각은 **사용자 판단**이다.
+> ⚠️ **판정 규칙 종합 SSOT**: [`docs/current_status.md` §0](current_status.md)을 준수할 것. 결정론적 arm에는 t·p·CI를 일절 쓰지 않으며, **Primary 7-task 부호 일치 수 ($\ge 5/7$)** 및 **Hold-out 10-task 동시 재현**으로 판정하고 최종 승격/기각은 **사용자 판단**이다.
 
 ---
 
@@ -24,19 +24,32 @@
 
 ## 2. 활성 실험 큐 (Active Experiment Queue)
 
-### [Plan A] BM (Projected Bag-Mean) Branch 벤치마크 평가 (즉시 실행 가능)
-- **가설**: CV(2차 공분산), DD(1D 분산), CT(의사세포형 조성비)가 모두 배제하고 있던 슬라이드 내 **1차 모멘트(세포 평균 $\bar{x}_i \in \mathbb{R}^{1536}$)**를 Within-slide PCA 기저 상위 32차원으로 사영하여 Class-balanced Ridge로 결합하면, 세포 집단 중심 이동(Global shift) 신호가 보강된다.
+### [Exp 1] v114 Baseline Primary 7-Task 공식 실측 (진행 중)
+- **목적**: 새로운 주 평가 기준인 **Primary 7개 과제**(`cptac_lscc/ARID1A`, `Histologic_Grade`, `KEAP1`, `cptac_luad/KRAS`, `cptac_pda/SMAD4`, `ucla_lung/progression`, `cptac_ccrcc/PBRM1`)에 대한 v114 공식 baseline AUROC를 확립.
+- **실행**:
+  ```bash
+  . scripts/node_env.sh
+  bash scripts/eval_v114.sh 0 v114_primary7 \
+    cptac_lscc/ARID1A_mutation cptac_lscc/Histologic_Grade cptac_lscc/KEAP1_mutation \
+    cptac_luad/KRAS_mutation cptac_pda/SMAD4_mutation \
+    ucla_lung/progression_regression cptac_ccrcc/PBRM1_mutation
+  ```
+
+---
+
+### [Exp 2] [Plan A] BM Branch Primary 7-Task 벤치마크 평가 (진행 중)
+- **가설**: CV(2차 공분산), DD(1D 분산), CT(의사세포형 조성비)가 모두 배제하고 있던 슬라이드 내 **1차 모멘트(세포 평균 $\bar{x}_i \in \mathbb{R}^{1536}$)**를 Within-slide PCA 기저 상위 32차원으로 사영하여 Class-balanced Ridge로 결합하면, Primary 7-task의 세포 집단 중심 이동(Global shift) 신호가 보강된다.
 - **수식**:
   $$\mu_i = \bar{x}_i B_{:32} \in \mathbb{R}^{32}, \quad M_{BM} = \text{logit}_1 - \text{logit}_0 \quad (\lambda=1.0)$$
   $$\text{Total Margin} = M_{CV} - M_{DD} + M_{CT} + w_{BM} M_{BM}$$
 - **실험 계획**:
-  1. **가중치 스윕 ($w_{BM} \in \{0.1, 0.2, 0.5, 0.7, 1.0\}$)** on SEAL 10 tasks
-  2. **독립 집단 재현**: 홀드아웃 7 tasks 동시 평가
-  3. **사영 차원 감도 분석 ($d \in \{16, 32, 64, 128\}$)**
+  1. **Primary 7-Task 평가 ($w_{BM} = 1.0$)**: 7개 과제에 대한 baseline 대비 $\Delta$ 및 부호 일치 수 산출.
+  2. **가중치 스윕 ($w_{BM} \in \{0.2, 0.5, 1.0\}$)**
+  3. **Hold-out 10-Task (SEAL 10) 교차 검증**
 
 ---
 
-### [Plan B] TH (Tumor Heterogeneity / Dispersion Entropy) 브랜치 (다음 제안)
+### [Exp 3] [Plan B] TH (Tumor Heterogeneity / Dispersion Entropy) 브랜치 (다음 제안)
 - **가설**: 암종 및 분자 아형에 따라 종양 세포의 **이질성(Heterogeneity / Dispersion)** 정도가 유의미하게 다르다. 슬라이드 내 세포 임베딩의 공분산 스펙트럼 엔트로피 $H_i$ 또는 유클리드 분산(Trace)을 1차원 스칼라로 측정하여 Class-balanced Ordered Evidence로 주입한다.
 - **수식**:
   $$v_i = \log \operatorname{Tr}(S_i) \quad \text{또는} \quad H_i = -\sum_{k=1}^K \tilde{\lambda}_k \log \tilde{\lambda}_k$$
@@ -45,22 +58,10 @@
 
 ---
 
-### [Plan C] QA (Quantile / Tail Abundance) 브랜치 (제안)
+### [Exp 4] [Plan C] QA (Quantile / Tail Abundance) 브랜치 (제안)
 - **가설**: 종양 특이적 신호는 평균 조성비(CT)뿐 아니라, 특정 기준 방향으로 가장 멀리 떨어진 **극단값 세포(Tail 5% or 95th percentile)**에 집중되어 있을 수 있다.
 - **수식**:
-  $$\tau_{ik} = \operatorname{Quantile}_{95\%} (\{z_{ij} \cdot t_k\}_{j=1}^{N_i})$$
-  $$M_{QA} = \text{Ridge}(\tau^{std}, y)$$
 - **기대 효과**: 희귀한 고등급 종양 세포 클론의 존재 유무를 1차/2차 통계와 독립적으로 탐지.
-
----
-
-### [Plan D] v114 홀드아웃 7 및 전체 17 공식 실측
-- **목적**: 현재 v114의 공식 수치가 SEAL 10(0.70509)만 측정되어 있으므로, 홀드아웃 7개 과제를 측정하여 17개 전체 벤치마크 점수를 확정.
-- **실행**:
-  ```bash
-  . scripts/node_env.sh
-  bash scripts/eval_v114.sh 0 heldout_v114 cptac_lscc/ARID1A_mutation cptac_lscc/KDM6A_mutation cptac_lscc/NF1_mutation cptac_luad/KRAS_mutation cptac_pda/KRAS_mutation cptac_pda/SMAD4_mutation cptac_ucec/TP53_mutation
-  ```
 
 ---
 
@@ -70,8 +71,8 @@
    - 반드시 `. scripts/node_env.sh` 소싱 확인.
    - 환경변수 및 오버라이드 플래그 명시.
 2. **결과 보고**:
-   - `docs/current_status.md` §0-2 양식 준수 (가설 설명 $\to$ 10/17개 전체 task별 $\Delta$ 표 $\to$ Macro $\Delta$ 및 부호 일치 수).
+   - `docs/current_status.md` §0-2 양식 준수 (가설 설명 $\to$ Primary 7-task 및 Hold-out 10-task 전체별 $\Delta$ 표 $\to$ Macro $\Delta$ 및 부호 일치 수).
    - 신규/수정 단락 작성 직후 스탬프 작성:
      `_by <LLM Name> on <server name> at <YYYY-MM-DD HH:MM:SS>_`
 
-_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 15:17:00_
+_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 17:59:00_

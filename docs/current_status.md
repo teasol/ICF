@@ -1,24 +1,28 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-21` — **전체 코드베이스 리팩터링 및 판정 규칙 단일 SSOT 통합 (§0, §190)**:
-- 테스트 335개 → 86개 핵심 계약 테스트(3.1초, 74% 감축)로 정리, 과거 기각 실험은 `tests/history/legacy_*.py`로 보존.
-- `src/models/ct/`, `src/datasets/synthetic/`, `src/modules/` 모듈화 및 Facade 구축 완료.
-- **판정 규칙 통합**: 모든 판정 규칙을 아래 **§0. 판정 프로토콜 종합 SSOT**로 일원화 (과거 학습 규칙은 §0-4 Historical로 이관).
-- v114 활성 baseline 유지(SEAL 10 macro **0.70509**, ⚠️ 홀드아웃 7·전체 17은 **미측정**). 활성 runner `scripts/eval_v114.sh`. ⚠️ **Python 경로를 하드코딩하지 말고 `. scripts/node_env.sh`로 해석할 것**(§164). 전체 아키텍처 및 개발자 명세는 `current_architecture.md` **§0**.
+**Last updated**: `2026-08-21 17:57:00` — **판정 프로토콜 개정 (Primary 7-task / Hold-out 10-task) 및 단일 SSOT 확립 (§0)**:
+- **판정 프로토콜 개정**: SEAL에 없던 7개 과제를 **새로운 Primary Benchmark**로 확립, 기존 SEAL 10-task를 **독립 Hold-out Validation**으로 전환.
+- v114 활성 baseline 유지(학습 파라미터 0, Deterministic). 활성 runner `scripts/eval_v114.sh`. ⚠️ **Python 경로를 하드코딩하지 말고 `. scripts/node_env.sh`로 해석할 것**(§164). 전체 아키텍처 및 개발자 명세는 `current_architecture.md` **§0**.
 
 ---
 
 # §0. 판정 프로토콜 종합 SSOT (Decision Protocol SSOT)
 
-프로젝트의 모든 모델 평가, 승격 및 기각 판단은 아래 원칙에 따라 수행된다.
+프로젝트의 모든 모델 평가, 승격 및 기각 판단은 아래 원칙에 따라 수행된다 (2026-08-21 개정).
 
 ## 0-1. 활성 결정론적 Arm 판정 규칙 (현 v106~v114 무학습 계보)
 - **$t$-통계량, $p$-value, 신뢰구간(CI) 사용 절대 금지 (§151-1)**:
   - 활성 모델은 학습 파라미터 0, 난수 시드 분산이 정확히 0($\text{seed std} = 0.00000$)이므로, task를 표본 단위로 둔 $t$-검정은 통계적 근거가 없다.
+- **벤치마크 2-Tier 구조 (2026-08-21 확정)**:
+  1. **Primary Benchmark (7 tasks)**: SEAL에 포함되지 않았던 7개 과제를 **새로운 주 평가 기준**으로 삼는다.
+     - `cptac_lscc/ARID1A_mutation`, `cptac_lscc/Histologic_Grade`, `cptac_lscc/KEAP1_mutation`
+     - `cptac_luad/KRAS_mutation`, `cptac_pda/SMAD4_mutation`
+     - `ucla_lung/progression_regression`, `cptac_ccrcc/PBRM1_mutation`
+  2. **Hold-out Validation (10 tasks)**: 기존 SEAL 10-task를 **독립 홀드아웃 검증 집단**으로 삼아 선택 편향(Selection bias) 및 일반화 성능을 교차 검증한다.
 - **유효한 3대 판정 지표**:
-  1. **부호 일치 수 (Sign Agreement)**: 17개 전체(또는 10개) task 중 몇 개 task에서 이겼는가? (예: $11/17$ 승리 vs $7/17$ 패배)
-  2. **독립 task 집단 간 재현성**: SEAL 10-task와 홀드아웃 7-task 양쪽 독립 집단에서 모두 개선($\Delta > 0$)이 일관되게 나타나는가?
-  3. **Macro $\Delta$ (산술 평균 변화량)**: 전체 macro 점수의 증감.
+  1. **Primary 7-task 부호 일치 수 (Sign Agreement)**: 7개 과제 중 몇 개에서 승리했는가? (예: $\ge 5/7$)
+  2. **Primary 7-task Macro $\Delta$**: 7개 과제 산술 평균의 유의미한 개선.
+  3. **Hold-out 10-task 재현성**: SEAL 10개 과제에서의 동시 개선 ($\Delta_{holdout} > 0$).
 
 ## 0-2. 최종 승격 / 기각 의사결정 프로토콜 (User Decision Protocol, §118)
 - **게이트 자동 결정 금지**: 어떤 수치나 통계 게이트도 모델 승격/기각을 자동으로 결정하지 않으며, **최종 판정은 항상 사용자의 종합적 판단**이다.
@@ -27,7 +31,7 @@
   - 고신호 구간에서 깎이고 저신호 구간에서만 오르는 것은 유효 신호가 아니라 노이즈/평균 회귀 교환일 가능성이 높다.
 - **필수 보고 양식 (§118-3)**:
   1. 이 실험/arm이 무엇을 검증하는지 가설 설명
-  2. **10개(또는 17개) 전체 task별 baseline 대비 $\Delta$ 표를 빠짐없이 제시** (요약/평균만 제시 금지)
+  2. **Primary 7개 과제 및 Hold-out 10개 과제 전체별 baseline 대비 $\Delta$ 표를 빠짐없이 제시** (요약/평균만 제시 금지)
   3. 전체 Macro $\Delta$ 및 부호 일치 수 제시 $\to$ 사용자가 승격/기각/재검증 최종 판정.
 
 ## 0-3. 닫힌 축 (Closed Axes) 재시도 금지
@@ -45,7 +49,7 @@
 - **독립 시드 그룹 재현 (§131-5)**: 단일 그룹의 높은 $|t|$보다 독립적인 시드 그룹(A/B 그룹)에서의 부호 일치 재현을 우선.
 - **평가 에포크 고정 (§104)**: 최적 에포크 체리피킹 금지, Epoch 49(또는 지정 에포크) 고정 평가.
 
-_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 15:08:00_
+_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 17:57:00_
 
 ---
 
