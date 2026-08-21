@@ -1,27 +1,18 @@
 # Agent handoff guide
 
-**Last updated**: 2026-08-20 — §187 사용자 결정으로 v113의 fixed-head 세 branch weight
-(CV=1.442/DD=1.0/CT=0.7)를 **전부 1.0으로 통일한 v114를 활성 baseline**으로 승격했다.
-SEAL 10 macro **0.70509**로 v113(0.70394) 대비 **+0.00115**(§186 실측) — 개선분 대부분이
-저신호(0.5 근처) task인 ccrcc BAP1(+0.0116)·VHL(+0.0140)에서 나왔고, brca PIK3CA(−0.0136)가
-가장 크게 내렸다. §118 규칙(랜덤 근처 변화가 천장 근처 변화보다 실질적으로 더 의미 있다)에 따라
-사용자가 승격을 결정했다. CV/DD/CT 파이프라인 자체는 v113과 동일(CT cell 예산 = bag 크기의
-1/8 fraction, floor 64 — feasibility 승격, §184/§185). 전체 17-task·홀드아웃 7은 아직 이
-arm으로 재측정되지 않았다.
+**Last updated**: 2026-08-21 — **전체 코드베이스 리팩터링 & 테스트 경량화(335→86 tests, 3.1s) 완료 (§190)**.
+§187 사용자 결정으로 v113의 fixed-head 세 branch weight (CV=1.442/DD=1.0/CT=0.7)를 **전부 1.0으로 통일한 v114가 활성 baseline**(SEAL 10 macro **0.70509**)이다.
+거대 모듈 분해(`src/models/ct/`, `src/datasets/synthetic/`, `src/modules/`), 모델 레지스트리 구축(`src/models/registry.py`), 스크립트 계층화(`scripts/diagnostics/`, `scripts/archive/`), 과거 기각 테스트의 `tests/history/` 아카이빙이 완료됐다.
 
-§188/§189에서 v114의 CT readout/풀링을 흔드는 0-param 진단을 돌렸고 **전부 기각**했다:
-kernel-ridge rbf/poly macro 0.69500/0.69475(−0.0101/−0.0103), top-k 풀링 교체 VHL 0.5076
-(−0.0154), mean+topk concatenate macro 0.70067(−0.0044). 세 방향 모두 kernel/top-k 비선형이
-유효 신호를 못 냈고, top-k(cell 차원) 방향은 사용자 결정으로 **폐기** — 재현 코드만 보존한다.
-**v114 활성 baseline은 변경 없음**(SEAL 10 macro 0.70509). 실행 중인 job은 없다.
+_by Antigravity on gnode3 at 2026-08-21 14:51:00_
 
 ---
 
 # 새 세션 60초 재개 절차
 
-1. 작업 디렉터리는 `/NHNHOME/WORKSPACE/26msit005_C/kimds/ICF`다.
-2. Python은 앞으로도 **반드시 아래 실행 파일을 직접 호출**한다. `python`, `python3`, `conda run`으로
-   우회하지 않는다.
+1. 작업 디렉터리는 `/NHNHOME/WORKSPACE/26msit005_C/kimds/ICF` (또는 현재 워크스페이스 `$HOME/ICF`)다.
+2. Python은 앞으로도 **반드시 아래 실행 파일을 직접 호출**하거나 `. scripts/node_env.sh`를 소싱하여 `$PYTHON`을 사용한다.
+   `python`, `python3`, `conda run`으로 우회하지 않는다.
 
    ```bash
    /NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python
@@ -29,21 +20,21 @@ kernel-ridge rbf/poly macro 0.69500/0.69475(−0.0101/−0.0103), top-k 풀링 �
 
 3. 읽는 순서는 이 문서 §0 → [`current_architecture.md` §0](current_architecture.md) →
    [`current_experiments.md` §0](current_experiments.md) → 세부 수치가 필요할 때만
-   [`current_status.md` §183](current_status.md)다.
-4. §173–§179의 코드·평가·문서는 `c34dfe2`에 반영됐다. §180, §182, §183도 완료 후 각각 별도
-   커밋했다. 새 세션은 `git status --short`가 비어 있는지와 `git log -n 3 --oneline`의 최신
+   [`current_status.md` §183, §190](current_status.md)다.
+4. §173–§179의 코드·평가·문서는 `c34dfe2`에 반영됐다. §180, §182, §183, §190(리팩터링)도 완료 후
+   각각 별도 커밋했다. 새 세션은 `git status --short`가 비어 있는지와 `git log -n 3 --oneline`의 최신
    커밋부터 확인한다.
 5. 활성 모델은 **v114 = v113 + fixed-head 세 branch weight(CV/DD/CT)를 전부 1.0으로 통일**
    (§187, SEAL 10 macro +0.00115, §186). CT cell 예산(bag 자기 크기의 1/8 fraction, floor 64)은
    v113과 동일(§185, feasibility 승격 — 22GB GPU에서 v112의 전체-cell CT가 LUAD 대형 bag에 OOM,
-   §184). v113의 비대칭 weight(CV=1.442/DD=1/CT=0.7)는 `scripts/eval_v113.sh`로, v112의
-   전체-cell/전체-abundance CT는 `scripts/eval_v112.sh`로, v111의 distance DD readout은
-   `scripts/eval_v111.sh`로 재현 가능하지만 셋 다 더 이상 활성이 아니다.
+   §184). v113의 비대칭 weight(CV=1.442/DD=1/CT=0.7)는 `scripts/archive/historical_evals/eval_v113.sh`로,
+   v112의 전체-cell/전체-abundance CT는 `scripts/archive/historical_evals/eval_v112.sh`로,
+   v111의 distance DD readout은 `scripts/archive/historical_evals/eval_v111.sh`로 재현 가능하지만
+   셋 다 더 이상 활성이 아니다.
 6. 2026-08-19 인계 시점에는 GPU 0–7이 모두 NVIDIA B200 183,359 MiB이고 사용량 0 MiB였다.
    자원 상태는 변하므로 새 세션 시작 때 `nvidia-smi`로 다시 확인한다. 8-GPU 사용 가능 여부는
    그 시점의 다른 사용자 프로세스를 보고 결정한다.
-7. 마지막 코드 검증은 BagPFN Python으로 **318 tests, OK (42.524s)**였다. v112 VHL smoke는
-   §182-3의 `dd=1.0` 로그 값(0.5095)과 일치해야 한다 — 승격 커밋 전 확인할 것.
+7. 마지막 코드 검증은 BagPFN Python으로 **86 tests, OK (3.139s)**였다.
 8. 문서에 **새 단락·긴 내용**을 쓸 때는 작성 직후
    `_by <LLM Name> on <server name> at <YYYY-MM-DD HH:MM:SS>_` 스탬프를 남긴다.
    오타·숫자·링크 같은 사소한 수정에는 붙이지 않는다. 상세는 아래 §6-3.

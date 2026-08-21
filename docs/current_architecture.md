@@ -211,6 +211,8 @@ ICF/
   - 권장: `from src.models.ct import CTReadoutConfig, ct_margins, ct_abundance`
   - 레거시 호환: `from src.models.ct_readout import CTReadoutConfig, ct_margins` (Facade를 통해 완벽 지원)
 
+_by Antigravity on gnode3 at 2026-08-21 14:50:00_
+
 ## 0-6. 닫힌 축 (재시도 금지)
 
 | 축 | 결과 |
