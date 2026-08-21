@@ -1,14 +1,14 @@
-# Current Architecture Specification (v114 + BM Branch)
+# Current Architecture Specification (v114 Active Baseline)
 
-**Last updated**: `2026-08-21`
+**Last updated**: `2026-08-21 15:47:00`
 
 ---
 
 ## 1. 아키텍처 개요 및 설계 철학
 
-ICF(In-Context Foundation) 모델의 활성 베이스라인(v114)은 **학습 파라미터가 0개(0-parameter)인 완전 결정론적(Deterministic, seed std = 0.00000) 인컨텍스트 분류기**다.
+ICF(In-Context Foundation) 모델의 활성 베이스라인(v114)은 **학습 파라미터가 0개(0-parameter)인 완전 결정론적(Deterministic) 인컨텍스트 분류기**다.
 
-- **원리**: 슬라이드(Bag) 단위의 다중 인스턴스(MIL) 병리 이미지 임베딩($X_i \in \mathbb{R}^{N_i \times 1536}$)에서, 레이블이 제공된 Context 슬라이드들만으로 Within-slide PCA 기저를 구축하고 4개 상보적 통계 브랜치(CV, DD, CT, BM)를 추출하여 닫힌 형태(Closed-form)의 Class-balanced Ridge 회귀로 마진을 산출한다.
+- **원리**: 슬라이드(Bag) 단위의 다중 인스턴스(MIL) 병리 이미지 임베딩($X_i \in \mathbb{R}^{N_i \times 1536}$)에서, 레이블이 제공된 Context 슬라이드들만으로 Within-slide PCA 기저를 구축하고 3개 상보적 통계 브랜치(CV, DD, CT)를 추출하여 닫힌 형태(Closed-form)의 Class-balanced Ridge 회귀로 마진을 산출한다.
 - **불변식**: Query 슬라이드는 기저 생성, 토큰 군집화, 통계 표준화에 일절 참여하지 않으며(No-Leakage), 라벨 반전($y \to 1-y$) 시 마진 부호가 정확히 반전된다(Label Antisymmetry).
 
 ```
@@ -17,20 +17,20 @@ ICF(In-Context Foundation) 모델의 활성 베이스라인(v114)은 **학습 �
                       ▼
    Within-Slide PCA (Context-Only Centered, K=256)
                       │
-     ┌────────────────┼────────────────┬────────────────┐
-     │                │                │                │
-     ▼                ▼                ▼                ▼
-[CV Branch]      [DD Branch]      [CT Branch]      [BM Branch]
-2차 공분산       1차원 분산       32D PCA 의사세포형  1차 모멘트 평균
-비대각 32,640D   Typicality       256 토큰 조성비    32D 기저 사영
-     │                │                │                │
-     ▼                ▼                ▼                ▼
-Dual Ridge (λ=1) Bounded Margin   Dual Ridge (λ=1) Dual Ridge (λ=1)
-   (M_CV)           (M_DD)           (M_CT)           (M_BM)
-     │                │                │                │
-     └────────────────┼────────────────┴────────────────┘
+     ┌────────────────┼────────────────┐
+     │                │                │
+     ▼                ▼                ▼
+[CV Branch]      [DD Branch]      [CT Branch]
+2차 공분산       1차원 분산       32D PCA 의사세포형
+비대각 32,640D   Typicality       256 토큰 조성비
+     │                │                │
+     ▼                ▼                ▼
+Dual Ridge (λ=1) Bounded Margin   Dual Ridge (λ=1)
+   (M_CV)           (M_DD)           (M_CT)
+     │                │                │
+     └────────────────┼────────────────┘
                       ▼
-  Total Margin = 1.0·M_CV - 1.0·M_DD + 1.0·M_CT + w_bm·M_BM
+  Total Margin = 1.0·M_CV - 1.0·M_DD + 1.0·M_CT
                       │
                       ▼
           Logits = (-M/2, +M/2)  -->  P(y=1) = sigmoid(M)
@@ -38,7 +38,7 @@ Dual Ridge (λ=1) Bounded Margin   Dual Ridge (λ=1) Dual Ridge (λ=1)
 
 ---
 
-## 2. 4대 브랜치 상세 작동 원리 및 수식
+## 2. 3대 브랜치 상세 작동 원리 및 수식
 
 ### 2.1. 기저 구축 (Within-Slide PCA Basis)
 - **입력**: Context 슬라이드 집합 $\{X_i\}_{i=1}^{n_{ctx}}$, 각 $X_i \in \mathbb{R}^{N_i \times 1536}$.
@@ -82,22 +82,11 @@ Dual Ridge (λ=1) Bounded Margin   Dual Ridge (λ=1) Dual Ridge (λ=1)
 
 ---
 
-### 2.5. BM (Projected Bag-Mean / 1차 모멘트 브랜치 - Plan A)
-- **설계 목적**: 2차 공분산/어번던스가 놓치는 슬라이드 전반의 세포 평균(1차 모멘트) 발현 신호 포착.
-- **작동 과정**:
-  1. 슬라이드 평균 $\bar{x}_i = \frac{1}{N_i} \sum_j x_{ij} \in \mathbb{R}^{1536}$ 계산.
-  2. 기저 사영: $\mu_i = \bar{x}_i B_{:32} \in \mathbb{R}^{32}$ (노이즈 억제를 위해 상위 32차원만 사용).
-  3. Context-only 표준화 및 Class-balanced Dual Ridge ($\lambda=1.0$) $\to M_{BM} = \text{logit}_1 - \text{logit}_0$.
-- **가중치**: 기본값 $w_{BM} = 0.0$ (v114 100% 호환). 활성화 시 $w_{BM} > 0$.
-
----
-
 ## 3. Head 마진 결합
 
-최종 마진 $M$은 4개 브랜치의 가중합으로 계산된다:
-$$M = w_{CV} M_{CV} - w_{DD} M_{DD} + w_{CT} M_{CT} + w_{BM} M_{BM}$$
+최종 마진 $M$은 3개 브랜치의 가중합으로 계산된다:
+$$M = 1.0 \cdot M_{CV} - 1.0 \cdot M_{DD} + 1.0 \cdot M_{CT}$$
 
-- **v114 기본 가중치**: $w_{CV} = 1.0, \quad w_{DD} = 1.0, \quad w_{CT} = 1.0, \quad w_{BM} = 0.0$
 - **출력 로짓 및 확률**:
   $$\text{logits} = \left(-\frac{M}{2}, +\frac{M}{2}\right), \quad P(y=1) = \sigma(M)$$
 
@@ -160,4 +149,4 @@ bash scripts/eval_v114.sh <gpu_id> <tag> [tasks...]
 2. **[Plan B] TH (Tumor Heterogeneity) 다양성 스칼라**: 슬라이드 내 세포 다양성/엔트로피 1D 증거 주입.
 3. **v114의 홀드아웃 7 및 전체 17 실측**: SEAL 10 외 독립 집단에서의 재현성 확보.
 
-_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 15:16:00_
+_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 15:47:00_
