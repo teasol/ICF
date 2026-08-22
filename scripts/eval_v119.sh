@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# v119 = 4-Branch (CT + BM + BD + QA) + Trimmed Mean Voting (CV dropped).
+# v119 = 5-Branch (CV + CT + BM + BD + QA) + Trimmed Mean Voting.
 #
 # Branches:
-#   - CV: OFF (w=0.0)
+#   - CV: off-diagonal covariance ridge (w=1.0)
 #   - DD: OFF (w=0.0)
 #   - CT: PCA-32 K256 soft abundance ridge (w=1.0)
 #   - BM: PCA-32 projected bag-mean ridge (w=1.0)
 #   - BD: Spectral Entropy ordered-typicality (w=1.0)
 #   - QA: PCA-32 Quantile & Extremum Evidence ridge (w=1.0, quantiles: 0.05, 0.10, 0.90, 0.95)
-#   - Aggregation: Trimmed Mean Voting (drops min & max probability per slide, averages remainder)
+#   - Aggregation: Trimmed Mean Voting (drops min & max probability per slide, averages remaining 3)
 #
 # Usage: bash scripts/eval_v119.sh <gpu> <tag> [task]...   (default: Primary 7 tasks)
 set -uo pipefail
@@ -47,7 +47,7 @@ export ICF_CT_TOKENIZER=kmeans_plusplus
 export ICF_CT_KMEANS_MAX_ITER="${ICF_CT_KMEANS_MAX_ITER:-8}"
 export ICF_CT_DISTANCE_KERNEL=gemm
 export ICF_CV_BLOCKS=offdiag
-export ICF_FIXED_HEAD_CV_WEIGHT=0.0
+export ICF_FIXED_HEAD_CV_WEIGHT=1.0
 export ICF_FIXED_HEAD_DD_WEIGHT=0.0
 export ICF_FIXED_HEAD_CT_WEIGHT=1.0
 export ICF_FIXED_HEAD_BM_WEIGHT=1.0
@@ -63,6 +63,7 @@ export ICF_QA_DIM=32
 export ICF_QA_LAMBDA=1.0
 export ICF_AGGREGATION=trimmed_mean
 
-echo "v119: CV=off w=0.0 DD=off w=0.0 CT=pca32/ridge w=1.0 BM=dim32 w=1.0 BD=entropy/dim256 w=1.0 QA=dim32/ridge w=1.0 AGG=trimmed_mean"
+echo "v119: CV=offdiag w=1.0 DD=off w=0.0 CT=pca32/ridge w=1.0 BM=dim32 w=1.0 BD=entropy/dim256 w=1.0 QA=dim32/ridge w=1.0 AGG=trimmed_mean"
 exec bash scripts/eval_seal_tasks.sh "$GPU" "$CKPT" "$CONFIG" "$TAG" "$@"
+
 

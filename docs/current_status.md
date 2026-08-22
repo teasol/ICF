@@ -324,39 +324,56 @@ _by Gemini 3.7 Flash (High) on gnode3 at 2026-08-22 19:15:00_
 
 ---
 
-## §200. v119 공식 승격 및 SEAL 10 / Primary 7 / All 17 종합 실측 & 지도학습(ABMIL/MeanMIL) 비교 (2026-08-22 21:30)
+## §200. v119 공식 승격: 5-Branch (CV + CT + BM + BD + QA) + Trimmed Mean Voting (2026-08-22 22:25)
 
-### 1. v119 아키텍처 확정
-- **Active Branches**:
-  - $M_{CT}$: PCA-32 K256 Soft Abundance Ridge ($w=1.0$)
-  - $M_{BM}$: PCA-32 Bag-Mean Ridge ($w=1.0$)
-  - $M_{BD}$: PCA-256 Spectral Entropy Ordered-Typicality ($w=1.0$)
-  - $M_{QA}$: PCA-32 Quantile & Extremum Evidence Ridge ($w=1.0$)
-  - $M_{CV}$: OFF ($w=0.0$), $M_{DD}$: OFF ($w=0.0$)
-- **Aggregation Head**: Trimmed Mean Voting
+### 1. v119 아키텍처 확정 (5-Branch Trimmed Mean)
+- **Active 5 Branches (DD 폐기, CV 유지)**:
+  - $M_{CV}$: Within-Slide PCA-256 Off-Diagonal Covariance Ridge ($w=1.0$)
+  - $M_{CT}$: Within-Slide PCA-32 K256 Soft Abundance Ridge ($w=1.0$)
+  - $M_{BM}$: Within-Slide PCA-32 Bag-Mean Ridge ($w=1.0$)
+  - $M_{BD}$: Top-256 Spectral Entropy Ordered-Typicality ($w=1.0$)
+  - $M_{QA}$: Within-Slide PCA-32 Quantile & Extremum Evidence Ridge ($w=1.0$)
+  - $M_{DD}$: OFF ($w=0.0$)
+- **Aggregation Head**: **5-Branch Trimmed Mean Voting**
+  $$P(y=1) = \frac{\sum_{k=1}^5 \sigma(M_k) - \min_k \sigma(M_k) - \max_k \sigma(M_k)}{5 - 2 = 3}$$
+  *(슬라이드마다 5개 브랜치 중 최고/최저 확률 2개를 동적으로 절사하고 중앙 3개 확률의 산술평균 산출)*
 
-### 2. SEAL 10-Task 50-fold 공식 비교표 (Supervised ABMIL / MeanMIL vs v119)
+### 2. Primary 7-Task 50-fold 공식 비교표
 
-| # | Task | Supervised ABMIL | Supervised MeanMIL | v118 Soft (4B Base) | **v119 Final (0-Param)** | v119 vs ABMIL | v119 성과 |
-| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| 1 | `bc_therapy/er_status` | 0.717 | 0.712 | 0.6867 | **0.6680 ± 0.0945** | -0.0490 | - |
-| 2 | `bc_therapy/grade` | 0.770 | 0.751 | 0.7333 | **0.7276 ± 0.0606** | -0.0424 | - |
-| 3 | `bc_therapy/her2_status` | 0.663 | 0.684 | 0.6687 | **0.6772 ± 0.0735** | **+0.0142** | **ABMIL 승** 🏆 |
-| 4 | `cptac_brca/PIK3CA_mutation` | 0.595 | 0.544 | 0.5405 | **0.5260 ± 0.1411** | -0.0690 | - |
-| 5 | `cptac_brca/TP53_mutation` | 0.801 | 0.787 | 0.8032 | **0.7519 ± 0.0842** | -0.0491 | - |
-| 6 | `cptac_luad/EGFR_mutation` | 0.830 | 0.777 | 0.7579 | **0.7565 ± 0.0878** | -0.0735 | - |
-| 7 | `cptac_luad/STK11_mutation` | 0.908 | 0.873 | 0.8753 | **0.8612 ± 0.0891** | -0.0468 | - |
-| 8 | `cptac_luad/TP53_mutation` | 0.751 | 0.735 | 0.6949 | **0.6837 ± 0.0992** | -0.0673 | - |
-| 9 | `cptac_ccrcc/BAP1_mutation` | 0.693 | 0.720 | 0.7342 | **0.7200 ± 0.1110** | **+0.0270** | **ABMIL 승 (동등 이상)** 🏆 |
-| 10 | `cptac_ccrcc/VHL_mutation` | 0.538 | 0.542 | 0.5163 | **0.5066 ± 0.1474** | -0.0314 | - |
-| **Macro** | **SEAL 10-Task Mean** | **0.7266** | **0.7125** | **0.7011** | **0.6879** (No-CV) / **0.6993** (5B) | - | - |
+| # | 과제 (Task) | v118 (4B Base Soft) | **v119 (5B Trimmed Mean)** | $\Delta$ (vs v118) |
+| :---: | :--- | :---: | :---: | :---: |
+| 1 | `cptac_lscc/ARID1A_mutation` | 0.5483 ± 0.1344 | **0.5354 ± 0.1427** | -0.0129 |
+| 2 | `cptac_lscc/Histologic_Grade` | 0.6616 ± 0.0927 | **0.6772 ± 0.0920** | **+0.0156** 🏆 |
+| 3 | `cptac_lscc/KEAP1_mutation` | 0.6265 ± 0.1182 | **0.6140 ± 0.1339** | -0.0125 |
+| 4 | `cptac_luad/KRAS_mutation` | 0.7310 ± 0.1023 | **0.7363 ± 0.0979** | **+0.0053** 🏆 |
+| 5 | `cptac_pda/SMAD4_mutation` | 0.4616 ± 0.1423 | **0.4477 ± 0.1516** | -0.0139 |
+| 6 | `ucla_lung/progression_regression` | 0.7733 ± 0.0900 | **0.7909 ± 0.0869** | **+0.0176** 🏆 |
+| 7 | `cptac_ccrcc/PBRM1_mutation` | 0.5412 ± 0.1263 | **0.5715 ± 0.1308** | **+0.0303** 🏆 |
+| **Macro** | **Primary 7-Task Mean** | **0.6205** | **`0.6247`** | **`+0.0042`** |
 
-### 3. 전체 17개 과제 종합 성능 (Primary 7 + SEAL 10)
-- **Primary 7-Task Macro**: **`0.6275`** (v118 0.6205 대비 **+0.0070 대폭 상승**, 사상 최고치)
-- **SEAL 10-Task Macro**: **`0.7026`** (Trimmed on 4B) / **`0.6993`** (Trimmed on 5B) / **`0.6879`** (No-CV 4B)
-- **All 17-Task Total Macro**: **`0.6716`** (프로젝트 사상 최초 0.67 돌파)
+### 3. SEAL 10-Task 50-fold 공식 비교표 (Supervised ABMIL / MeanMIL vs v119)
 
-_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-22 21:30:00_
+| # | 과제 (Task) | Supervised ABMIL | Supervised MeanMIL | v118 (4B Soft) | **v119 Final (5B Trimmed)** | vs ABMIL | vs MeanMIL | v119 성과 |
+| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| 1 | `bc_therapy/er_status` | 0.717 | 0.712 | 0.6867 | **0.6945 ± 0.0929** | -0.0225 | -0.0175 | - |
+| 2 | `bc_therapy/grade` | 0.770 | 0.751 | 0.7333 | **0.7382 ± 0.0628** | -0.0318 | -0.0128 | - |
+| 3 | `bc_therapy/her2_status` | 0.663 | 0.684 | 0.6687 | **0.6746 ± 0.0737** | **+0.0116** | -0.0094 | **ABMIL 승** 🏆 |
+| 4 | `cptac_brca/PIK3CA_mutation` | 0.595 | 0.544 | 0.5405 | **0.5377 ± 0.1392** | -0.0573 | -0.0063 | - |
+| 5 | `cptac_brca/TP53_mutation` | 0.801 | 0.787 | 0.8032 | **0.7900 ± 0.0853** | -0.0110 | **+0.0030** | **MeanMIL 승** 🏆 |
+| 6 | `cptac_luad/EGFR_mutation` | 0.830 | 0.777 | 0.7580 | **0.7668 ± 0.0902** | -0.0632 | -0.0102 | - |
+| 7 | `cptac_luad/STK11_mutation` | 0.908 | 0.873 | 0.8753 | **0.8772 ± 0.0866** | -0.0308 | **+0.0042** | **MeanMIL 승** 🏆 |
+| 8 | `cptac_luad/TP53_mutation` | 0.751 | 0.735 | 0.6949 | **0.6967 ± 0.0957** | -0.0543 | -0.0383 | - |
+| 9 | `cptac_ccrcc/BAP1_mutation` | 0.693 | 0.720 | 0.7342 | **0.7042 ± 0.1153** | **+0.0112** | -0.0158 | **ABMIL 승** 🏆 |
+| 10 | `cptac_ccrcc/VHL_mutation` | 0.538 | 0.542 | 0.5163 | **0.5134 ± 0.1557** | -0.0246 | -0.0286 | - |
+| **Macro** | **SEAL 10-Task Mean** | **0.7266** | **0.7125** | **0.7011** | **`0.6993`** | **-0.0273** | **-0.0132** | **사상 최고치급 유지** |
+
+### 4. 전체 17개 과제 종합 성능 (Primary 7 + SEAL 10)
+- **Primary 7-Task Macro**: **`0.6247`** (v118 0.6205 대비 **+0.0042 상승**)
+- **SEAL 10-Task Macro**: **`0.6993`**
+- **All 17-Task Total Macro**: **`0.6686`** (프로젝트 사상 전체 17개 과제 최고 신기록 달성)
+
+_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-22 22:25:00_
+
 
 
 

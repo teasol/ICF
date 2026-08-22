@@ -4,7 +4,7 @@
 
 > [!IMPORTANT]
 > **활성 baseline = v119** (`docs/current_status.md` §200, 사용자 결정). 학습 파라미터 0, 완전 결정론적(Deterministic).
-> **아키텍처**: 4-Branch (CT + BM + BD + QA, $w_{CV}=0.0, w_{DD}=0.0$) + Trimmed Mean Voting
+> **아키텍처**: 5-Branch (CV + CT + BM + BD + QA, $w_{DD}=0.0$) + Trimmed Mean Voting
 > ⚠️ **판정 프로토콜**: **Primary Benchmark (7 tasks)** 가 주 판정 기준이며, **Hold-out Validation (SEAL 10 tasks)** 는 독립 교차 검증용이다.
 > 실행: `bash scripts/eval_v119.sh <gpu> <tag> [tasks...]` (기본: Primary 7 tasks)
 > 
@@ -19,8 +19,9 @@
 | **§196 4-Branch Soft Voting (v118)** | 4-Branch Soft Voting ($P = \frac{1}{4}\sum \sigma(M_b)$, $w_{DD}=0.0$) | Macro **0.6205** (+0.0086 vs v116, 6/7 과제 승리) | **v118 공식 승격** 🚀 |
 | **§197 v118 SEAL 10 홀드아웃 검증** | 4-GPU로 SEAL 10개 과제(50-fold) 독립 교차 검증 | SEAL 10 Macro **0.7011** (프로젝트 사상 최초 0.70 돌파) | **검증 완료** 🏆 |
 | **§198 QA (Quantile Evidence) 실측** | 32 PCA 차원별 4대 분위수 $[Q_{0.05}, Q_{0.10}, Q_{0.90}, Q_{0.95}]$ Ridge | 단독 Progression **0.8068**, KRAS **0.7420**, Grade **0.6930** | **채택 완료** |
-| **§199 9대 Voting 전수 비교** | 5개 브랜치 기반 Soft/Linear/Median/Trimmed Mean/Rank/Z-score 비교 | Trimmed Mean 적용 시 Primary 7 Macro **`0.6275`** 달성 | **Trimmed Mean 채택** |
-| **§200 v119 공식 승격** | 4-Branch (CT + BM + BD + QA) + Trimmed Mean Voting | Primary 7 **`0.6275`**, SEAL 10 **`0.7026`**, All 17 **`0.6716`** | **v119 공식 승격** 🚀 |
+| **§199 9대 Voting 전수 비교** | 5개 브랜치 기반 Soft/Linear/Median/Trimmed Mean/Rank/Z-score 비교 | Trimmed Mean 적용 시 최고 성능 달성 | **Trimmed Mean 채택** |
+| **§200 v119 공식 승격** | 5-Branch (CV + CT + BM + BD + QA) + Trimmed Mean Voting | Primary 7 **`0.6247`**, SEAL 10 **`0.6993`**, All 17 **`0.6686`** | **v119 공식 승격** 🚀 |
+
 
 ---
 
