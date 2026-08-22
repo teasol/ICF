@@ -36,10 +36,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 import os
 import random
 import sys
 from pathlib import Path
+
 
 import lightning as L
 import pandas as pd
@@ -1101,6 +1103,114 @@ def evaluate_trial(
                     logits = logits.clone()
                     logits[:, 0] -= 0.5 * bm_weight * bm_margin
                     logits[:, 1] += 0.5 * bm_weight * bm_margin
+
+                bd_weight = float(os.environ.get("ICF_FIXED_HEAD_BD_WEIGHT", "0.0"))
+                if bd_weight != 0.0:
+                    bd_dim = int(os.environ.get("ICF_BD_DIM", "256"))
+                    bd_metric = os.environ.get("ICF_BD_METRIC", "entropy")
+                    bd_readout = os.environ.get("ICF_BD_READOUT", "ordered_typicality")
+                    bd_separation_floor = float(os.environ.get("ICF_BD_SEPARATION_FLOOR", "1.0"))
+                    bd_lambda = float(os.environ.get("ICF_BD_LAMBDA", "1.0"))
+                    bd_eps = 1e-6
+                    basis = inner._effective_covariance_projection()
+                    dim = min(bd_dim, basis.shape[1])
+                    bd_basis = basis[:, :dim].float()
+
+                    def get_bag_feature(b):
+                        if bag_stats_cache is not None and id(b) in bag_stats_cache:
+                            stats = bag_stats_cache[id(b)]
+                            n, _, scatter = stats
+                            sc_dev = scatter.to(device).float()
+                            if bd_metric == "trace":
+                                tr = ((sc_dev @ bd_basis) * bd_basis).sum() / float(n)
+                                return tr.clamp_min(bd_eps).log()
+                            else:
+                                S_proj = (bd_basis.T @ sc_dev @ bd_basis) / float(n)
+                                S_proj = 0.5 * (S_proj + S_proj.T)
+                        else:
+                            vals = b.to(device).float()
+                            centered = vals - vals.mean(dim=0, keepdim=True)
+                            proj = centered @ bd_basis
+                            if bd_metric == "trace":
+                                tr = (proj.square()).sum() / float(vals.shape[0])
+                                return tr.clamp_min(bd_eps).log()
+                            else:
+                                S_proj = (proj.T @ proj) / float(vals.shape[0])
+
+                        if bd_metric == "entropy":
+                            eigvals = torch.linalg.eigvalsh(S_proj.float()).clamp_min(bd_eps)
+                            p = eigvals / eigvals.sum().clamp_min(bd_eps)
+                            ent = -(p * torch.log(p.clamp_min(bd_eps))).sum()
+                            if dim > 1:
+                                ent = ent / math.log(dim)
+                            return ent
+                        else:
+                            raise ValueError(f"Unknown bd_metric: {bd_metric!r}")
+
+
+                    ctx_v = torch.stack([get_bag_feature(b) for b in episode_bags[:n_context]])
+                    qry_v = torch.stack([get_bag_feature(episode_bags[i]) for i in query_index.tolist()])
+
+
+                    labels = episode_y[:n_context].long().to(device)
+                    if bd_readout == "ordered_typicality":
+                        prototypes = torch.stack([ctx_v[labels == c].mean() for c in range(2)])
+                        dispersions = torch.stack([
+                            (ctx_v[labels == c] - prototypes[c]).square().mean().clamp_min(bd_eps)
+                            for c in range(2)
+                        ])
+                        from src.models.dd_adaptive_rank import ordered_typicality_margin  # noqa: PLC0415
+                        bd_margin = ordered_typicality_margin(
+                            qry_v,
+                            prototypes,
+                            dispersions,
+                            bd_eps,
+                            bd_separation_floor,
+                        )
+                    elif bd_readout == "ridge":
+                        centre = ctx_v.mean()
+                        scale = (ctx_v - centre).square().mean().sqrt().clamp_min(bd_eps)
+                        std_ctx = ((ctx_v - centre) / scale).unsqueeze(-1)
+                        std_qry = ((qry_v - centre) / scale).unsqueeze(-1)
+
+                        targets = torch.nn.functional.one_hot(labels, 2).float()
+                        counts = torch.bincount(labels, minlength=2)
+                        weight = counts.float().reciprocal()[labels]
+                        total = weight.sum().clamp_min(1e-12)
+                        feature_mean = (weight[:, None] * std_ctx).sum(0, keepdim=True) / total
+                        target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
+                        root = weight.sqrt()[:, None]
+
+                        design = (std_ctx - feature_mean) * root
+                        centred_targets = (targets - target_mean) * root
+
+                        gram_f32 = (design @ design.T).float()
+                        targets_f32 = centred_targets.float()
+                        size = gram_f32.shape[-1]
+                        identity = torch.eye(size, device=device, dtype=torch.float32)
+                        jitter = 0.0
+                        dual = None
+                        for _ in range(6):
+                            try:
+                                factor = torch.linalg.cholesky(gram_f32 + (bd_lambda + jitter) * identity)
+                                dual = torch.cholesky_solve(targets_f32, factor)
+                                break
+                            except RuntimeError:
+                                jitter = max(jitter * 10.0, 1e-6 * float(gram_f32.diagonal().abs().mean()) + 1e-12)
+                        if dual is None:
+                            dual = torch.linalg.lstsq(gram_f32 + (bd_lambda + jitter) * identity, targets_f32).solution
+
+                        coefficients = design.T @ dual
+                        intercept = target_mean - feature_mean @ coefficients
+                        bd_logits = std_qry @ coefficients + intercept
+                        bd_margin = bd_logits[:, 1] - bd_logits[:, 0]
+                    else:
+                        raise ValueError(f"Unknown bd_readout: {bd_readout!r}")
+
+                    logits = logits.clone()
+                    logits[:, 0] -= 0.5 * bd_weight * bd_margin
+                    logits[:, 1] += 0.5 * bd_weight * bd_margin
+
         finally:
             if basis_mode in ("pca", "pca_within") and saved_projection is not None:
                 inner._effective_covariance_projection = saved_projection

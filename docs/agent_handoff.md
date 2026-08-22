@@ -1,6 +1,6 @@
 # Agent Handoff Guide & Quick Resume
 
-**Last updated**: `2026-08-21 19:40:00`
+**Last updated**: `2026-08-22 17:10:00`
 
 ---
 
@@ -13,17 +13,17 @@
    ```
    *(하드코딩된 `python3`나 conda 경로 대신 반드시 `$PYTHON`을 사용)*
 
-2. **회귀 테스트 검증 (92 core tests)**:
+2. **회귀 테스트 검증 (102 core tests)**:
    ```bash
    $PYTHON -m unittest discover -s tests -p "test_*.py"
-   # 결과: Ran 92 tests in ~13s, OK
+   # 결과: Ran 102 tests, OK
    ```
 
 3. **활성 Baseline**:
-   - **v115 (0-parameter, Deterministic)**
-   - Within-slide PCA (K=256) + CV(off-diagonal 32,640D) + DD(ordered-typicality, κ=1) + CT(1/8 fraction, seeded k-means++ 256 token) + BM(Bag-mean leading 32D PCA ridge)
-   - Primary 7-task macro: **0.6094** (v114 0.6051 대비 **+0.0043**, 5/7 tasks won)
-   - 활성 러너: `bash scripts/eval_v115.sh <gpu> <tag> [tasks...]` (기본: Primary 7 tasks)
+   - **v116 (0-parameter, Deterministic)**
+   - Within-slide PCA (K=256) + CV(off-diagonal 32,640D) + DD(ordered-typicality, κ=1) + CT(1/8 fraction, seeded k-means++ 256 token) + BM(Bag-mean leading 32D PCA ridge) + BD(Bag-Dispersion Spectral Entropy ordered-typicality, K=256)
+   - Primary 7-task macro: **0.6119** (v115 0.6094 대비 **+0.0025**, v114 0.6051 대비 **+0.0068**)
+   - 활성 러너: `bash scripts/eval_v116.sh <gpu> <tag> [tasks...]` (기본: Primary 7 tasks)
 
 ---
 
@@ -33,9 +33,9 @@
 
 | 문서 | 역할 및 포함 내용 |
 | :--- | :--- |
-| [`docs/current_architecture.md`](current_architecture.md) | **현행 아키텍처 완전 명세**: 활성 4개 브랜치(CV, DD, CT, BM)의 수식, 작동 원리, 모듈 패키지 구조 |
-| [`docs/current_status.md`](current_status.md) | **현재 개발 상태 & 판정 SSOT**: §0 판정 종합 규칙(Primary 7-task / Hold-out 10-task, t 금지, 부호 일치 수, 사용자 판단), 최신 승격 및 실험 내역(§185~§192) |
-| [`docs/current_experiments.md`](current_experiments.md) | **실험 큐**: [완료] BM 7-task 평가 및 v115 승격, [Exp 1] v115 Hold-out 10-task 재현성 검증, [Plan B] TH 이질성 브랜치, [Plan C] QA 분위수 브랜치 |
+| [`docs/current_architecture.md`](current_architecture.md) | **현행 아키텍처 완전 명세**: 활성 5개 브랜치(CV, DD, CT, BM, BD)의 수식, 작동 원리, 모듈 패키지 구조 |
+| [`docs/current_status.md`](current_status.md) | **현재 개발 상태 & 판정 SSOT**: §0 판정 종합 규칙(Primary 7-task / Hold-out 10-task, t 금지, 부호 일치 수, 사용자 판단), 최신 승격 및 실험 내역(§185~§194) |
+| [`docs/current_experiments.md`](current_experiments.md) | **실험 큐**: [완료] BD 7-task 평가 및 v116 승격, [Exp 1] v116 Hold-out 10-task 재현성 검증, [Plan C] QA 분위수 브랜치 |
 | [`docs/history.md`](history.md) | **과거 기록 아카이브**: 과거 학습 계보(v83~v98), 이전 세션 실험(§2~§184), 설계 결정 이력 |
 
 ---
@@ -53,4 +53,4 @@
    - 새 단락 및 긴 내용 작성 직후 반드시 스탬프 첨부:
      `_by <LLM Name> on <server name> at <YYYY-MM-DD HH:MM:SS>_`
 
-_by Antigravity on teasol at 2026-08-21 19:40:00_
+_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-22 17:10:00_

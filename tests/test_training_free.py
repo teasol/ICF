@@ -41,8 +41,9 @@ V107 = TrainingFreeConfig(
     sketch_dim=SKETCH, ct_readout="extreme", ct_pca_dim=None,
     ct_kmeans_iterations=0, cv_blocks="cov+mean", weight_ct=0.286, ct_num_tokens=16,
     ct_sampling="even", ct_tokenizer="fps_lloyd",
-    dd_readout="distance", weight_dd=0.343, weight_bm=0.0,
+    dd_readout="distance", weight_dd=0.343, weight_bm=0.0, weight_bd=0.0,
 )
+
 
 
 def episode(seed=0, context=10, query=3, cells=40):
@@ -145,6 +146,11 @@ class DefaultTest(unittest.TestCase):
         self.assertEqual(config.dd_readout, "ordered_typicality")
         self.assertEqual(config.dd_separation_floor, 1.0)
         self.assertEqual(config.weight_dd, 1.0)
+        self.assertEqual(config.weight_bm, 1.0)
+        self.assertEqual(config.bm_dim, 32)
+        self.assertEqual(config.weight_bd, 1.0)
+        self.assertEqual(config.bd_dim, 256)
+        self.assertEqual(config.bd_metric, "entropy")
 
 
 class OrderedTypicalityDDTest(unittest.TestCase):
@@ -176,7 +182,7 @@ class OrderedTypicalityDDTest(unittest.TestCase):
         )
         self.assertTrue(torch.equal(original, -flipped))
 
-    def test_equal_prototypes_are_finite_zero_evidence(self):
+    def test_zero_separation_emits_zero_margins(self):
         margin = ordered_typicality_margin(
             torch.tensor([-1.0, 0.0, 1.0]),
             torch.zeros(2),
@@ -185,14 +191,15 @@ class OrderedTypicalityDDTest(unittest.TestCase):
         )
         self.assertTrue(torch.equal(margin, torch.zeros_like(margin)))
 
+
     def test_training_free_arm_is_bounded_and_differs_from_distance(self):
         context_bags, labels, query_bags = episode(31)
         legacy = TrainingFreeClassifier(TrainingFreeConfig(
-            sketch_dim=SKETCH, dd_readout="distance", weight_cv=0.0, weight_ct=0.0
+            sketch_dim=SKETCH, dd_readout="distance", weight_cv=0.0, weight_ct=0.0, weight_bm=0.0, weight_bd=0.0
         )).margins(context_bags, labels, query_bags)
         arm = TrainingFreeClassifier(TrainingFreeConfig(
             sketch_dim=SKETCH, dd_readout="ordered_typicality",
-            weight_cv=0.0, weight_ct=0.0,
+            weight_cv=0.0, weight_ct=0.0, weight_bm=0.0, weight_bd=0.0,
         )).margins(context_bags, labels, query_bags)
         self.assertFalse(torch.allclose(legacy, arm))
         self.assertTrue(bool((arm.abs() <= 1.0 + 1e-6).all()))
