@@ -226,6 +226,12 @@ class TrainingFreeConfig:
     weight_bd: float = 1.0
     # Head aggregation (v118): "soft_voting" (probability average via sigmoid) | "linear" (v117 linear sum)
     aggregation: str = "soft_voting"
+    # QA branch (v119): quantile / extremum statistics of projected cells with class-balanced ridge.
+    qa_dim: int = 32
+    qa_quantiles: tuple[float, ...] = (0.05, 0.10, 0.90, 0.95)
+    qa_lambda: float = 1.0
+    weight_qa: float = 0.0  # Default 0.0 for v118 baseline, set to 1.0 for QA arm
+
 
 
 
@@ -465,6 +471,7 @@ class TrainingFreeClassifier:
 
             m_bm = self._bm_features(context_bags, context_labels, query_bags, basis) if config.weight_bm != 0.0 else None
             m_bd = self._bd_features(to_matrices(context), context_labels, to_matrices(query)) if config.weight_bd != 0.0 else None
+            m_qa = self._qa_features(context_bags, context_labels, query_bags, basis) if config.weight_qa != 0.0 else None
 
 
             if config.aggregation == "linear":
@@ -477,6 +484,8 @@ class TrainingFreeClassifier:
                     total_margin = total_margin + config.weight_bm * m_bm
                 if m_bd is not None:
                     total_margin = total_margin + config.weight_bd * m_bd
+                if m_qa is not None:
+                    total_margin = total_margin + config.weight_qa * m_qa
                 return total_margin
             elif config.aggregation == "soft_voting":
                 active_pairs = []
@@ -490,6 +499,8 @@ class TrainingFreeClassifier:
                     active_pairs.append((config.weight_bm, m_bm))
                 if m_bd is not None and config.weight_bd != 0.0:
                     active_pairs.append((config.weight_bd, m_bd))
+                if m_qa is not None and config.weight_qa != 0.0:
+                    active_pairs.append((config.weight_qa, m_qa))
 
                 if not active_pairs:
                     return torch.zeros(cv.shape[0], device=cv.device, dtype=cv.dtype)
@@ -498,8 +509,39 @@ class TrainingFreeClassifier:
                 avg_prob = sum(w * torch.sigmoid(m) for w, m in active_pairs) / total_weight
                 clamped = avg_prob.clamp(1e-7, 1.0 - 1e-7)
                 return torch.log(clamped / (1.0 - clamped))
+            elif config.aggregation == "trimmed_mean":
+                active_probs = []
+                if config.weight_cv != 0.0:
+                    active_probs.append(torch.sigmoid(m_cv))
+                if m_dd is not None and config.weight_dd != 0.0:
+                    active_probs.append(torch.sigmoid(m_dd))
+                if m_ct is not None and config.weight_ct != 0.0:
+                    active_probs.append(torch.sigmoid(m_ct))
+                if m_bm is not None and config.weight_bm != 0.0:
+                    active_probs.append(torch.sigmoid(m_bm))
+                if m_bd is not None and config.weight_bd != 0.0:
+                    active_probs.append(torch.sigmoid(m_bd))
+                if m_qa is not None and config.weight_qa != 0.0:
+                    active_probs.append(torch.sigmoid(m_qa))
+
+                if not active_probs:
+                    return torch.zeros(cv.shape[0], device=cv.device, dtype=cv.dtype)
+
+                if len(active_probs) >= 3:
+                    stacked = torch.stack(active_probs, dim=-1)
+                    sum_p = torch.sum(stacked, dim=-1)
+                    min_p = torch.min(stacked, dim=-1).values
+                    max_p = torch.max(stacked, dim=-1).values
+                    avg_prob = (sum_p - min_p - max_p) / (len(active_probs) - 2)
+                else:
+                    avg_prob = sum(active_probs) / len(active_probs)
+                clamped = avg_prob.clamp(1e-7, 1.0 - 1e-7)
+                return torch.log(clamped / (1.0 - clamped))
             else:
-                raise ValueError(f'aggregation must be "soft_voting" or "linear", got {config.aggregation!r}')
+                raise ValueError(f'aggregation must be "soft_voting", "trimmed_mean", or "linear", got {config.aggregation!r}')
+
+
+
 
 
     def _bd_features(
@@ -612,7 +654,50 @@ class TrainingFreeClassifier:
         logits = qry_means @ coefficients + intercept
         return logits[:, 1] - logits[:, 0]
 
+    def _qa_features(
+        self,
+        context_bags: Sequence[torch.Tensor],
+        context_labels: torch.Tensor,
+        query_bags: Sequence[torch.Tensor],
+        basis: torch.Tensor,
+    ) -> torch.Tensor:
+        """Quantile & Extremum Evidence (QA): multi-quantile features of projected cells with class-balanced ridge."""
+        config = self.config
+        dim = min(config.qa_dim, basis.shape[1])
+        qa_basis = basis[:, :dim].to(dtype=torch.float32)
+        quantiles = torch.tensor(config.qa_quantiles, device=qa_basis.device, dtype=torch.float32)
+
+        def extract_quantiles(bag: torch.Tensor) -> torch.Tensor:
+            z = bag.float().to(qa_basis.device) @ qa_basis
+            q = torch.quantile(z, quantiles, dim=0)  # (n_quantiles, dim)
+            return q.flatten()
+
+        ctx_feats = torch.stack([extract_quantiles(b) for b in context_bags])
+        qry_feats = torch.stack([extract_quantiles(b) for b in query_bags])
+
+        labels = context_labels.long()
+        targets = torch.nn.functional.one_hot(labels, 2).float()
+        counts = torch.bincount(labels, minlength=2)
+        if bool((counts == 0).any()):
+            raise ValueError("Every class must occur in the context set.")
+
+        weight = counts.float().reciprocal()[labels]
+        total = weight.sum().clamp_min(1e-12)
+        feature_mean = (weight[:, None] * ctx_feats).sum(0, keepdim=True) / total
+        target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
+        root = weight.sqrt()[:, None]
+
+        design = (ctx_feats - feature_mean) * root
+        centred_targets = (targets - target_mean) * root
+
+        dual = _solve_ridge(design @ design.T, centred_targets, config.qa_lambda)
+        coefficients = design.T @ dual
+        intercept = target_mean - feature_mean @ coefficients
+        logits = qry_feats @ coefficients + intercept
+        return logits[:, 1] - logits[:, 0]
+
 
     def predict_proba(self, context_bags, context_labels, query_bags) -> torch.Tensor:
         """P(class 1) per query bag."""
         return torch.sigmoid(self.margins(context_bags, context_labels, query_bags))
+

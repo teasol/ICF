@@ -1,4 +1,4 @@
-"""Analyze voting and ensembling methods offline using saved 5-branch logits."""
+"""Analyze voting and ensembling methods offline using saved branch logits."""
 
 from __future__ import annotations
 
@@ -59,6 +59,7 @@ def evaluate_file(path: Path) -> dict[str, float]:
         results = {k: v for k, v in enumerate(results) if v is not None}
 
     methods = [
+        "v119_soft",
         "v118_soft",
         "v117_linear",
         "v116_linear",
@@ -71,6 +72,7 @@ def evaluate_file(path: Path) -> dict[str, float]:
         "ct_only",
         "bm_only",
         "bd_only",
+        "qa_only",
     ]
     fold_scores = {m: [] for m in methods}
 
@@ -86,6 +88,7 @@ def evaluate_file(path: Path) -> dict[str, float]:
         m_ct = fold_data.get("m_ct")
         m_bm = fold_data.get("m_bm")
         m_bd = fold_data.get("m_bd")
+        m_qa = fold_data.get("m_qa")
 
         if m_cv is None or m_ct is None or m_bm is None or m_bd is None:
             # Fallback to saved probability
@@ -99,10 +102,22 @@ def evaluate_file(path: Path) -> dict[str, float]:
         m_ct = m_ct.float()
         m_bm = m_bm.float()
         m_bd = m_bd.float()
+        m_qa = m_qa.float() if m_qa is not None else None
         n = len(label)
 
+        # 1. v119 Soft Voting (5-branch: CV + CT + BM + BD + QA)
+        if m_qa is not None:
+            p_v119 = (
+                torch.sigmoid(m_cv)
+                + torch.sigmoid(m_ct)
+                + torch.sigmoid(m_bm)
+                + torch.sigmoid(m_bd)
+                + torch.sigmoid(m_qa)
+            ) / 5.0
+            fold_scores["v119_soft"].append(compute_auroc(p_v119, label))
+            fold_scores["qa_only"].append(compute_auroc(m_qa, label))
 
-        # 1. v118 Soft Voting (Active Baseline: 4-branch CV + CT + BM + BD)
+        # 2. v118 Soft Voting (Active Baseline: 4-branch CV + CT + BM + BD)
         p_v118 = (
             torch.sigmoid(m_cv)
             + torch.sigmoid(m_ct)
@@ -110,15 +125,15 @@ def evaluate_file(path: Path) -> dict[str, float]:
             + torch.sigmoid(m_bd)
         ) / 4.0
 
-        # 2. v117 Linear Sum (4-branch: CV + CT + BM + BD)
+        # 3. v117 Linear Sum (4-branch: CV + CT + BM + BD)
         m_v117 = m_cv + m_ct + m_bm + m_bd
         p_v117 = torch.sigmoid(m_v117)
 
-        # 3. v116 Linear Sum (5-branch: CV + DD + CT + BM + BD)
+        # 4. v116 Linear Sum (5-branch: CV + DD + CT + BM + BD)
         m_v116 = m_cv + m_dd + m_ct + m_bm + m_bd
         p_v116 = torch.sigmoid(m_v116)
 
-        # 4. v116 Soft Voting (5-branch)
+        # 5. v116 Soft Voting (5-branch)
         p_v116_soft = (
             torch.sigmoid(m_cv)
             + torch.sigmoid(m_dd)
@@ -127,12 +142,12 @@ def evaluate_file(path: Path) -> dict[str, float]:
             + torch.sigmoid(m_bd)
         ) / 5.0
 
-        # 5. Median Voting (5-branch)
+        # 6. Median Voting (5-branch)
         stacked = torch.stack([m_cv, m_dd, m_ct, m_bm, m_bd], dim=-1)
         m_med = torch.median(stacked, dim=-1).values
         p_med = torch.sigmoid(m_med)
 
-        # 6. Percentile Rank Voting (4-branch)
+        # 7. Percentile Rank Voting (4-branch)
         def rank_score(x):
             order = torch.argsort(x)
             ranks = torch.empty_like(x)
@@ -146,7 +161,7 @@ def evaluate_file(path: Path) -> dict[str, float]:
             + rank_score(m_bd)
         ) / 4.0
 
-        # 7. Z-Score Voting (4-branch)
+        # 8. Z-Score Voting (4-branch)
         def zscore(x):
             std = x.std(unbiased=False).clamp_min(1e-6)
             return (x - x.mean()) / std
@@ -186,8 +201,8 @@ def find_pt_file(base_dir: Path, task_name: str, tag: str) -> Path | None:
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze 5-branch voting mechanisms.")
-    parser.add_argument("--tag", type=str, default="v118_seal10", help="Evaluation tag")
-    parser.add_argument("--suite", type=str, default="seal10", choices=["primary7", "seal10", "all"], help="Benchmark suite")
+    parser.add_argument("--tag", type=str, default="qa_w1_primary7", help="Evaluation tag")
+    parser.add_argument("--suite", type=str, default="primary7", choices=["primary7", "seal10", "all"], help="Benchmark suite")
     parser.add_argument("--dir", type=str, default="predictions", help="Directory with .pt files")
     args = parser.parse_args()
 
@@ -214,15 +229,20 @@ def main():
         print("No task results found.")
         return
 
+    # Check if QA is available
+    has_qa = any(not torch.isnan(torch.tensor(task_results[t]["qa_only"])) for t in task_results if "qa_only" in task_results[t])
+
     # Print Table
     methods = [
-        ("v118_soft", "v118 Soft (4B)"),
+        ("v119_soft", "v119 Soft (5B: +QA)"),
+        ("v118_soft", "v118 Soft (4B Base)"),
         ("v117_linear", "v117 Linear (4B)"),
         ("v116_linear", "v116 Linear (5B)"),
-        ("v116_soft", "v116 Soft (5B)"),
         ("median_voting", "Median Voting"),
         ("rank_voting", "Percentile Rank"),
     ]
+    if not has_qa:
+        methods = [m for m in methods if m[0] != "v119_soft"]
 
     header = f"| Task | " + " | ".join(name for _, name in methods) + " |"
     sep = "| :--- | " + " | ".join(":---:" for _ in methods) + " |"
@@ -247,11 +267,14 @@ def main():
     # Standalone Branches Table
     standalones = [
         ("cv_only", "CV alone"),
-        ("dd_only", "DD alone"),
         ("ct_only", "CT alone"),
         ("bm_only", "BM alone"),
         ("bd_only", "BD alone"),
+        ("qa_only", "QA alone"),
     ]
+    if not has_qa:
+        standalones = [s for s in standalones if s[0] != "qa_only"]
+
     print(f"\n\n### Standalone Branch Performance ({args.suite.upper()} Single Branch AUROC)")
     st_header = f"| Task | " + " | ".join(name for _, name in standalones) + " |"
     st_sep = "| :--- | " + " | ".join(":---:" for _ in standalones) + " |"

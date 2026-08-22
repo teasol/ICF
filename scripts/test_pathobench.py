@@ -1211,6 +1211,61 @@ def evaluate_trial(
                     logits[:, 0] -= 0.5 * bd_weight * bd_margin
                     logits[:, 1] += 0.5 * bd_weight * bd_margin
 
+                qa_weight = float(os.environ.get("ICF_FIXED_HEAD_QA_WEIGHT", "0.0"))
+                if qa_weight != 0.0:
+                    qa_dim = int(os.environ.get("ICF_QA_DIM", "32"))
+                    qa_lambda = float(os.environ.get("ICF_QA_LAMBDA", "1.0"))
+                    qa_quantiles = torch.tensor([0.05, 0.10, 0.90, 0.95], device=device, dtype=torch.float32)
+                    basis = inner._effective_covariance_projection()
+                    dim = min(qa_dim, basis.shape[1])
+                    qa_basis = basis[:, :dim].float()
+
+                    def extract_bag_quantiles(b):
+                        z = (b.float().to(device) @ qa_basis).float()
+                        q = torch.quantile(z, qa_quantiles, dim=0)
+                        return q.flatten()
+
+
+                    ctx_qas = torch.stack([extract_bag_quantiles(b) for b in episode_bags[:n_context]])
+                    qry_qas = torch.stack([extract_bag_quantiles(episode_bags[i]) for i in query_index.tolist()])
+
+                    labels = episode_y[:n_context].long().to(device)
+                    targets = torch.nn.functional.one_hot(labels, 2).float()
+                    counts = torch.bincount(labels, minlength=2)
+                    weight = counts.float().reciprocal()[labels]
+                    total = weight.sum().clamp_min(1e-12)
+                    feature_mean = (weight[:, None] * ctx_qas).sum(0, keepdim=True) / total
+                    target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
+                    root = weight.sqrt()[:, None]
+
+                    design = (ctx_qas - feature_mean) * root
+                    centred_targets = (targets - target_mean) * root
+
+                    gram_f32 = (design @ design.T).float()
+                    targets_f32 = centred_targets.float()
+                    size = gram_f32.shape[-1]
+                    identity = torch.eye(size, device=device, dtype=torch.float32)
+                    jitter = 0.0
+                    dual = None
+                    for _ in range(6):
+                        try:
+                            factor = torch.linalg.cholesky(gram_f32 + (qa_lambda + jitter) * identity)
+                            dual = torch.cholesky_solve(targets_f32, factor)
+                            break
+                        except RuntimeError:
+                            jitter = max(jitter * 10.0, 1e-6 * float(gram_f32.diagonal().abs().mean()) + 1e-12)
+                    if dual is None:
+                        dual = torch.linalg.lstsq(gram_f32 + (qa_lambda + jitter) * identity, targets_f32).solution
+
+                    coefficients = design.T @ dual
+                    intercept = target_mean - feature_mean @ coefficients
+                    qa_logits = qry_qas @ coefficients + intercept
+                    qa_margin = qa_logits[:, 1] - qa_logits[:, 0]
+
+                    logits = logits.clone()
+                    logits[:, 0] -= 0.5 * qa_weight * qa_margin
+                    logits[:, 1] += 0.5 * qa_weight * qa_margin
+
         finally:
             if basis_mode in ("pca", "pca_within") and saved_projection is not None:
                 inner._effective_covariance_projection = saved_projection
@@ -1239,8 +1294,34 @@ def evaluate_trial(
         m_ct = (-branch_margins.get("ct", torch.zeros(len(test_ids)))).to(device)
         m_bm = bm_margin.detach() if ("bm_margin" in locals() and bm_margin is not None) else torch.zeros(len(test_ids), device=device)
         m_bd = bd_margin.detach() if ("bd_margin" in locals() and bd_margin is not None) else torch.zeros(len(test_ids), device=device)
+        m_qa = qa_margin.detach() if ("qa_margin" in locals() and qa_margin is not None) else torch.zeros(len(test_ids), device=device)
 
-        if aggregation == "soft_voting":
+        if aggregation == "trimmed_mean":
+            active_probs = []
+            if cv_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_cv.float()))
+            if dd_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_dd.float()))
+            if ct_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_ct.float()))
+            if bm_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_bm.float()))
+            if bd_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_bd.float()))
+            if qa_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_qa.float()))
+
+            if len(active_probs) >= 3:
+                stacked = torch.stack(active_probs, dim=-1)
+                sum_p = torch.sum(stacked, dim=-1)
+                min_p = torch.min(stacked, dim=-1).values
+                max_p = torch.max(stacked, dim=-1).values
+                scores = (sum_p - min_p - max_p) / (len(active_probs) - 2)
+            elif active_probs:
+                scores = sum(active_probs) / len(active_probs)
+            else:
+                scores = torch.softmax(logits.float(), dim=-1)[:, 1]
+        elif aggregation == "soft_voting":
             active_pairs = []
             if cv_weight != 0.0:
                 active_pairs.append((cv_weight, m_cv))
@@ -1252,6 +1333,8 @@ def evaluate_trial(
                 active_pairs.append((bm_weight, m_bm))
             if bd_weight != 0.0:
                 active_pairs.append((bd_weight, m_bd))
+            if qa_weight != 0.0:
+                active_pairs.append((qa_weight, m_qa))
 
             if active_pairs:
                 total_weight = sum(w for w, _ in active_pairs)
@@ -1261,6 +1344,7 @@ def evaluate_trial(
         else:
             scores = torch.softmax(logits.float(), dim=-1)[:, 1]
 
+
         nan_count = int(torch.isnan(scores).sum())
         probabilities = [float(value) for value in scores]
         queried_ids = list(test_ids)
@@ -1269,6 +1353,8 @@ def evaluate_trial(
         m_ct = m_ct.cpu()
         m_bm = m_bm.cpu()
         m_bd = m_bd.cpu()
+        m_qa = m_qa.cpu()
+
 
 
     elif use_cache:
@@ -1404,7 +1490,9 @@ def evaluate_trial(
         "m_ct": m_ct[valid] if ("m_ct" in locals() and isinstance(m_ct, torch.Tensor)) else None,
         "m_bm": m_bm[valid] if ("m_bm" in locals() and isinstance(m_bm, torch.Tensor)) else None,
         "m_bd": m_bd[valid] if ("m_bd" in locals() and isinstance(m_bd, torch.Tensor)) else None,
+        "m_qa": m_qa[valid] if ("m_qa" in locals() and isinstance(m_qa, torch.Tensor)) else None,
     }
+
 
 
 
@@ -1647,7 +1735,9 @@ def evaluate_official_folds(
             "m_ct": result.get("m_ct"),
             "m_bm": result.get("m_bm"),
             "m_bd": result.get("m_bd"),
+            "m_qa": result.get("m_qa"),
         }
+
 
         print(f"  fold {k + 1}/{total_folds}: AUROC {fa:.4f}  n_query {len(probability)}", flush=True)
         if ckpt_path:
