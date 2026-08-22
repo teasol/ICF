@@ -1170,8 +1170,14 @@ class CovarianceMeanDDCTMLPModel(CovarianceMeanDDRidgeModel):
             ),
             dim=-1,
         )
+        self._last_branch_margins = {
+            "cv": (cv1 - cv0).detach().cpu(),
+            "dd": (-(d1 - d0)).detach().cpu(),
+            "ct": (q0 - q1).detach().cpu(),
+        }
         margin = self.cv_dd_ct_head(features).squeeze(-1)
         return torch.stack((-0.5 * margin, 0.5 * margin), dim=-1)
+
 
     @staticmethod
     def _as_bag_list(instances):
@@ -2156,8 +2162,14 @@ class CovarianceMeanCV2DDCTMLPModel(CovarianceMeanDDCTMLPModel):
             ),
             dim=-1,
         )
+        self._last_branch_margins = {
+            "cv": (cv1 - cv0).detach().cpu(),
+            "dd": (-(d1 - d0)).detach().cpu(),
+            "ct": (q0 - q1).detach().cpu(),
+        }
         margin = self.cv_cv2_dd_ct_head(features).squeeze(-1)
         return torch.stack((-0.5 * margin, 0.5 * margin), dim=-1)
+
 
 
 class CovarianceMeanDDMagnitudeMLPModel(CovarianceMeanDDRidgeModel):

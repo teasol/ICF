@@ -39,10 +39,13 @@ SKETCH = 8
 # configuration, not about the live SS183 default.
 V107 = TrainingFreeConfig(
     sketch_dim=SKETCH, ct_readout="extreme", ct_pca_dim=None,
-    ct_kmeans_iterations=0, cv_blocks="cov+mean", weight_ct=0.286, ct_num_tokens=16,
+    ct_kmeans_iterations=0, cv_blocks="cov+mean", weight_cv=1.442, weight_ct=0.286, ct_num_tokens=16,
     ct_sampling="even", ct_tokenizer="fps_lloyd",
     dd_readout="distance", weight_dd=0.343, weight_bm=0.0, weight_bd=0.0,
+    aggregation="linear",
 )
+
+
 
 
 
@@ -142,15 +145,18 @@ class DefaultTest(unittest.TestCase):
         self.assertIsNone(config.ct_dbscan_eps)
         self.assertEqual(config.ct_dbscan_min_samples, 16)
         self.assertEqual(config.cv_blocks, "offdiag")
-        self.assertEqual(config.weight_ct, 0.7)
+        self.assertEqual(config.weight_ct, 1.0)
         self.assertEqual(config.dd_readout, "ordered_typicality")
         self.assertEqual(config.dd_separation_floor, 1.0)
-        self.assertEqual(config.weight_dd, 1.0)
+        self.assertEqual(config.weight_dd, 0.0)
+        self.assertEqual(config.weight_cv, 1.0)
         self.assertEqual(config.weight_bm, 1.0)
         self.assertEqual(config.bm_dim, 32)
         self.assertEqual(config.weight_bd, 1.0)
         self.assertEqual(config.bd_dim, 256)
         self.assertEqual(config.bd_metric, "entropy")
+        self.assertEqual(config.aggregation, "soft_voting")
+
 
 
 class OrderedTypicalityDDTest(unittest.TestCase):
@@ -195,11 +201,11 @@ class OrderedTypicalityDDTest(unittest.TestCase):
     def test_training_free_arm_is_bounded_and_differs_from_distance(self):
         context_bags, labels, query_bags = episode(31)
         legacy = TrainingFreeClassifier(TrainingFreeConfig(
-            sketch_dim=SKETCH, dd_readout="distance", weight_cv=0.0, weight_ct=0.0, weight_bm=0.0, weight_bd=0.0
+            sketch_dim=SKETCH, dd_readout="distance", weight_dd=1.0, weight_cv=0.0, weight_ct=0.0, weight_bm=0.0, weight_bd=0.0, aggregation="linear"
         )).margins(context_bags, labels, query_bags)
         arm = TrainingFreeClassifier(TrainingFreeConfig(
             sketch_dim=SKETCH, dd_readout="ordered_typicality",
-            weight_cv=0.0, weight_ct=0.0, weight_bm=0.0, weight_bd=0.0,
+            weight_dd=1.0, weight_cv=0.0, weight_ct=0.0, weight_bm=0.0, weight_bd=0.0, aggregation="linear",
         )).margins(context_bags, labels, query_bags)
         self.assertFalse(torch.allclose(legacy, arm))
         self.assertTrue(bool((arm.abs() <= 1.0 + 1e-6).all()))
@@ -207,7 +213,7 @@ class OrderedTypicalityDDTest(unittest.TestCase):
     def test_training_free_arm_preserves_label_antisymmetry(self):
         context_bags, labels, query_bags = episode(32)
         model = TrainingFreeClassifier(TrainingFreeConfig(
-            sketch_dim=SKETCH, dd_readout="ordered_typicality"
+            sketch_dim=SKETCH, dd_readout="ordered_typicality", weight_dd=1.0
         ))
         original = model.margins(context_bags, labels, query_bags)
         flipped = model.margins(context_bags, 1 - labels, query_bags)
@@ -222,7 +228,7 @@ class OrderedTypicalityDDTest(unittest.TestCase):
         labels = torch.tensor([0, 1] * 5)
 
         standalone = TrainingFreeClassifier(TrainingFreeConfig(
-            sketch_dim=SKETCH, dd_readout="ordered_typicality"
+            sketch_dim=SKETCH, dd_readout="ordered_typicality", weight_dd=1.0
         ))._dd_features(context_covariance, labels, query_covariance)
         lineage = CovarianceMeanLearnablePDDCTMLPModel(
             input_dim=DIM, token_dim=16, num_heads=1, num_layers=1,
@@ -240,10 +246,11 @@ class OrderedTypicalityDDTest(unittest.TestCase):
     def test_unknown_readout_is_rejected(self):
         context_bags, labels, query_bags = episode(33)
         model = TrainingFreeClassifier(TrainingFreeConfig(
-            sketch_dim=SKETCH, dd_readout="nope", weight_cv=0.0, weight_ct=0.0
+            sketch_dim=SKETCH, dd_readout="nope", weight_dd=1.0, weight_cv=0.0, weight_ct=0.0
         ))
         with self.assertRaisesRegex(ValueError, "dd_readout"):
             model.margins(context_bags, labels, query_bags)
+
 
 
 class V109Test(unittest.TestCase):

@@ -78,6 +78,7 @@ class BDBranchTest(unittest.TestCase):
             weight_bd=1.0,
             bd_metric="trace",
             bd_readout="ordered_typicality",
+            aggregation="linear",
         )
         model = TrainingFreeClassifier(config_bd_only)
         margins = model.margins(context, labels, query)
@@ -97,12 +98,14 @@ class BDBranchTest(unittest.TestCase):
             weight_bd=1.0,
             bd_metric="entropy",
             bd_readout="ridge",
+            aggregation="linear",
         )
         model = TrainingFreeClassifier(config_bd_ridge)
         margins = model.margins(context, labels, query)
         self.assertEqual(margins.shape, (len(query),))
         self.assertTrue(torch.isfinite(margins).all())
         self.assertFalse((margins == 0.0).all())
+
 
     def test_label_swap_flips_bd_margin(self):
         """Label antisymmetry: swapping labels (0 <-> 1) must negate the BD margin."""

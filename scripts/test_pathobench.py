@@ -1232,10 +1232,45 @@ def evaluate_trial(
                 inner._dd_distance_features = saved_ordered_features
             if saved_normalize is not None:
                 inner._normalize_descriptors = saved_normalize
-        scores = torch.softmax(logits.float(), dim=-1)[:, 1]
+        aggregation = os.environ.get("ICF_AGGREGATION", "soft_voting")
+        branch_margins = getattr(inner, "_last_branch_margins", {})
+        m_cv = branch_margins.get("cv", torch.zeros(len(test_ids))).to(device)
+        m_dd = (-branch_margins.get("dd", torch.zeros(len(test_ids)))).to(device)
+        m_ct = (-branch_margins.get("ct", torch.zeros(len(test_ids)))).to(device)
+        m_bm = bm_margin.detach() if ("bm_margin" in locals() and bm_margin is not None) else torch.zeros(len(test_ids), device=device)
+        m_bd = bd_margin.detach() if ("bd_margin" in locals() and bd_margin is not None) else torch.zeros(len(test_ids), device=device)
+
+        if aggregation == "soft_voting":
+            active_pairs = []
+            if cv_weight != 0.0:
+                active_pairs.append((cv_weight, m_cv))
+            if dd_weight != 0.0:
+                active_pairs.append((dd_weight, m_dd))
+            if ct_weight != 0.0:
+                active_pairs.append((ct_weight, m_ct))
+            if bm_weight != 0.0:
+                active_pairs.append((bm_weight, m_bm))
+            if bd_weight != 0.0:
+                active_pairs.append((bd_weight, m_bd))
+
+            if active_pairs:
+                total_weight = sum(w for w, _ in active_pairs)
+                scores = sum(w * torch.sigmoid(m.float()) for w, m in active_pairs) / total_weight
+            else:
+                scores = torch.softmax(logits.float(), dim=-1)[:, 1]
+        else:
+            scores = torch.softmax(logits.float(), dim=-1)[:, 1]
+
         nan_count = int(torch.isnan(scores).sum())
         probabilities = [float(value) for value in scores]
         queried_ids = list(test_ids)
+        m_cv = m_cv.cpu()
+        m_dd = m_dd.cpu()
+        m_ct = m_ct.cpu()
+        m_bm = m_bm.cpu()
+        m_bd = m_bd.cpu()
+
+
     elif use_cache:
         context_ids = sample_context_ids()
         episode_bags = [
@@ -1364,7 +1399,13 @@ def evaluate_trial(
             s for s, v in zip(queried_ids, valid.tolist()) if v
         ],
         "nan_count": nan_count,
+        "m_cv": m_cv[valid] if ("m_cv" in locals() and isinstance(m_cv, torch.Tensor)) else None,
+        "m_dd": m_dd[valid] if ("m_dd" in locals() and isinstance(m_dd, torch.Tensor)) else None,
+        "m_ct": m_ct[valid] if ("m_ct" in locals() and isinstance(m_ct, torch.Tensor)) else None,
+        "m_bm": m_bm[valid] if ("m_bm" in locals() and isinstance(m_bm, torch.Tensor)) else None,
+        "m_bd": m_bd[valid] if ("m_bd" in locals() and isinstance(m_bd, torch.Tensor)) else None,
     }
+
 
 
 def evaluate_cv(
@@ -1601,7 +1642,13 @@ def evaluate_official_folds(
             "slide_id": result["queried_ids"],
             "label": target,
             "probability": probability,
+            "m_cv": result.get("m_cv"),
+            "m_dd": result.get("m_dd"),
+            "m_ct": result.get("m_ct"),
+            "m_bm": result.get("m_bm"),
+            "m_bd": result.get("m_bd"),
         }
+
         print(f"  fold {k + 1}/{total_folds}: AUROC {fa:.4f}  n_query {len(probability)}", flush=True)
         if ckpt_path:
             ckpt_path.parent.mkdir(parents=True, exist_ok=True)

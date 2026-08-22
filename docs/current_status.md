@@ -1,9 +1,10 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-22 17:10:00` — **BD Branch 정식 승격 $\to$ v116 Baseline 확립 (§194)**:
-- **v116 승격**: **BD-branch (Bag Dispersion / Spectral Entropy with Ordered-Typicality Evidence, $w_{BD}=1.0$)**가 Primary 7-Task에서 **Macro 0.6119 (+0.0025 vs v115, +0.0068 vs v114, 4/7 과제 승리)**를 달성하여 공식 baseline으로 승격 (사용자 최종 승인).
-- **활성 baseline**: **v116 (CV + DD + CT + BM + BD)** (학습 파라미터 0, Deterministic). 활성 runner `scripts/eval_v116.sh`.
-- **벤치마크 실측치**: Primary 7-Task Macro Fold-mean AUROC = **0.6119** (v115 Baseline 0.6094 대비 **+0.0025** 개선, v114 대비 **+0.0068** 개선).
+**Last updated**: `2026-08-22 18:20:00` — **DD 제거(v117) 및 4-Branch Soft Voting 정식 승격 $\to$ v118 Baseline 확립 (§195, §196)**:
+- **v118 승격**: **4-Branch Soft Voting (CV + CT + BM + BD, $w_{DD}=0.0$)**이 Primary 7-Task에서 **Macro 0.6205 (+0.0086 vs v116, +0.0154 vs v114, 6/7 과제 승리)**를 달성하여 공식 baseline으로 승격 (사용자 최종 확정 지시).
+- **v117 보존**: **DD 제거 4-Branch 선형합 (CV + CT + BM + BD)**은 **Macro 0.6191 (+0.0072 vs v116, 5/7 과제 승리)**로 v117 식별자로 영구 보존.
+- **활성 baseline**: **v118 (Soft Voting: CV + CT + BM + BD, w_DD=0)** (학습 파라미터 0, Deterministic). 활성 runner `scripts/eval_v118.sh`.
+- **벤치마크 실측치**: Primary 7-Task Macro Fold-mean AUROC = **0.6205** (v116 Baseline 0.6119 대비 **+0.0086** 개선, v114 대비 **+0.0154** 개선).
 
 ---
 
@@ -11,7 +12,7 @@
 
 프로젝트의 모든 모델 평가, 승격 및 기각 판단은 아래 원칙에 따라 수행된다 (2026-08-21 개정).
 
-## 0-1. 활성 결정론적 Arm 판정 규칙 (현 v106~v116 무학습 계보)
+## 0-1. 활성 결정론적 Arm 판정 규칙 (현 v106~v118 무학습 계보)
 - **$t$-통계량, $p$-value, 신뢰구간(CI) 사용 절대 금지 (§151-1)**:
   - 활성 모델은 학습 파라미터 0, 난수 시드 분산이 정확히 0($\text{seed std} = 0.00000$)이므로, task를 표본 단위로 둔 $t$-검정은 통계적 근거가 없다.
 - **벤치마크 2-Tier 구조 (2026-08-21 확정)**:
@@ -38,7 +39,7 @@
 ## 0-3. 닫힌 축 (Closed Axes) 재시도 금지
 실측을 통해 이득이 없거나 단조 열화가 입증된 아래 방향은 **새로운 arm으로 재설계/재시도하지 않는다**:
 1. **합성 데이터 분포 축 (§129)**: 실제 에피소드와의 분포 격차를 닫으려고 할수록 성능이 단조 하락함.
-2. **DD 전반 축 (§147)**: $K > 128$, $r > 1$, $|t|$ 게이트/셀렉터 모두 실패. (현재의 1-D ordered-typicality로 고정)
+2. **DD 전반 축 (§147, §195)**: DD는 Primary 7개 과제에서 단독 Macro 0.4994로 노이즈 판명되어 v117/v118에서 공식 제거(Weight 0) 확정.
 3. **CT Cell 수 단순 증대 (§159)**: Bag당 64개 이상의 full-cell을 써도 성능 향상 없음.
 4. **CT Kernel-Ridge (§188)**: RBF/Poly 비선형 커널 모두 8/10 task 하락 $\to$ 비선형 곡률 부재 확인 및 기각.
 5. **CT Top-k 풀링 (§189)**: Mean 풀링 대비 노이즈만 가중되어 기각.
@@ -55,21 +56,23 @@ _by Antigravity on teasol at 2026-08-21 19:40:00_
 ---
 
 > [!IMPORTANT]
-> **활성 구성은 v116(§194, 사용자 승인 승격) — 학습 파라미터 0, 완전 결정론적이다.**
+> **활성 구성은 v118(§196, 사용자 승인 승격) — 학습 파라미터 0, 완전 결정론적이다.**
 > ```
 > 사영 : fold의 CONTEXT cell을 bag별 자기 평균으로 센터링해 풀링한 공분산의 상위 256 고유벡터 B (1536 x 256)
-> head : margin = 1.0·M_CV - 1.0·M_DD + 1.0·M_CT + 1.0·M_BM + 1.0·M_BD      # 다섯 weight 전부 1.0 (§194)
-> CV   : off-diagonal 32,640차원만 (대각 256·raw mean 1,536 제거) ⚠️ DD는 전체 triangle
-> DD   : rank-1 방향 → ordered-coordinate × nearest-class typicality, κ=1 (§182/§183)
+> 결합 : P(y=1) = (σ(M_CV) + σ(M_CT) + σ(M_BM) + σ(M_BD)) / 4   # 4-Branch Soft Voting (§196)
+> CV   : off-diagonal 32,640차원만 (대각 256·raw mean 1,536 제거) (w=1.0)
 > CT   : bag 자기 크기의 1/8 fraction(floor 64, seeded random seed 0) → 32 PCA 방향
->        → seeded k-means++ + Lloyd(≤8) 로 256 token → match abundance → ridge(λ=1)
-> BM   : 슬라이드 평균의 상위 32차원 사영 μ_i = x̄_i B_{:32} ∈ R^32 → Class-balanced Dual Ridge (λ=1.0)
-> BD   : 슬라이드 기저 사영 공분산 고유값 정규화 스펙트럼 엔트로피 H_i → Ordered-Typicality Evidence (κ=1.0)
+>        → seeded k-means++ + Lloyd(≤8) 로 256 token → match abundance → ridge(λ=1) (w=1.0)
+> BM   : 슬라이드 평균의 상위 32차원 사영 μ_i = x̄_i B_{:32} ∈ R^32 → Class-balanced Dual Ridge (λ=1.0) (w=1.0)
+> BD   : 슬라이드 기저 사영 공분산 고유값 정규화 스펙트럼 엔트로피 H_i → Ordered-Typicality Evidence (κ=1.0) (w=1.0)
+> DD   : 공식 제거 (w=0.0) — Primary 7-Task 단독 0.4994로 노이즈 확인 (§195)
 >
-> 실측치: Primary 7-Task Macro = 0.6119 (v115 0.6094 대비 +0.0025, v114 0.6051 대비 +0.0068)
+> 실측치: Primary 7-Task Macro = 0.6205 (v116 0.6119 대비 +0.0086, 6/7 과제 승리, v114 0.6051 대비 +0.0154)
 >
-> bash scripts/eval_v116.sh <gpu> <tag> [tasks...]     # 활성 baseline entry point (기본: Primary 7 tasks)
+> bash scripts/eval_v118.sh <gpu> <tag> [tasks...]     # 활성 baseline entry point (기본: Primary 7 tasks)
+> bash scripts/eval_v117.sh <gpu> <tag> [tasks...]     # v117 No-DD Linear sum entry point
 > ```
+
 > v113부터 **성립하지 않는다** — seeded random으로 bag의 1/8만 뽑는다(seed 0 고정이라
 > 결정론성 자체는 유지된다). full-cell hierarchical 재현이 필요하면 `scripts/eval_v112.sh`.
 >
@@ -189,3 +192,46 @@ _by Antigravity on teasol at 2026-08-21 19:40:00_
 - **활성 Runner**: `scripts/eval_v116.sh` (기본 실행 시 Primary 7 tasks 평가).
 
 _by Gemini 3.7 Flash (High) on gnode3 at 2026-08-22 17:10:00_
+
+---
+
+## §195. 5-Branch Logit Caching & Offline Voting Ablation Analysis (2026-08-22 18:00)
+
+### 1. 배경 및 목적
+v116 5개 브랜치($M_{CV}, M_{DD}, M_{CT}, M_{BM}, M_{BD}$)의 개별 로짓을 4-GPU 50-fold 평가 과정에서 `.pt` 파일에 영구 기록하고, GPU 재실행 없이 오프라인에서 4대 보팅 기법(Soft Voting, Median Voting, Percentile Rank Voting, Z-Score Voting) 및 단독/조합 성능을 전수 검증함.
+
+### 2. 브랜치 단독 성능 및 노이즈 브랜치 발견
+- **브랜치 단독 AUROC**:
+  - BM alone: **0.6189** (Grade 0.6767, KRAS 0.6913, Prog 0.7658, PBRM1 0.6165)
+  - CT alone: **0.6147** (Grade 0.6742, KRAS 0.7301, Prog 0.7557)
+  - CV alone: **0.6004** (KRAS 0.7122, Prog 0.7631)
+  - BD alone: **0.5257** (ARID1A **0.6084** 독보적 포착)
+  - **DD alone**: **0.4994** (Progression 0.6882 외 5개 과제에서 0.50 미만 $\to$ **결정적 노이즈 요인으로 판명**)
+
+---
+
+## §196. DD 제거(v117) & 4-Branch Soft Voting(v118) 승격 (2026-08-22 18:15)
+
+### 1. Primary 7-Task 50-fold 실측 비교표
+
+| # | Task | v116 Baseline | **v117 (No-DD Linear)** | **v118 Baseline (No-DD Soft Voting)** | $\Delta$ (v118 vs v116) | 승패 (v118 vs v116) |
+| :---: | :--- | :---: | :---: | :---: | :---: | :---: |
+| 1 | `cptac_lscc/ARID1A` | 0.5272 ± 0.1366 | 0.5381 ± 0.1378 | **0.5483 ± 0.1373** | **+0.0211** | **승** 🏆 |
+| 2 | `cptac_lscc/Histologic_Grade` | 0.6531 ± 0.0964 | **0.6636 ± 0.0970** | 0.6617 ± 0.0964 | **+0.0086** | **승** 🏆 |
+| 3 | `cptac_lscc/KEAP1` | 0.6113 ± 0.1217 | **0.6279 ± 0.1205** | 0.6265 ± 0.1197 | **+0.0152** | **승** 🏆 |
+| 4 | `cptac_luad/KRAS` | 0.7247 ± 0.1005 | **0.7317 ± 0.0973** | 0.7310 ± 0.0978 | **+0.0063** | **승** 🏆 |
+| 5 | `cptac_pda/SMAD4` | 0.4513 ± 0.1389 | 0.4611 ± 0.1367 | **0.4615 ± 0.1367** | **+0.0102** | **승** 🏆 |
+| 6 | `ucla_lung/progression` | **0.7757 ± 0.0928** | 0.7744 ± 0.0929 | 0.7733 ± 0.0930 | -0.0024 | v116 승 |
+| 7 | `cptac_ccrcc/PBRM1` | 0.5403 ± 0.1280 | 0.5371 ± 0.1264 | **0.5412 ± 0.1261** | **+0.0009** | **승** 🏆 |
+| **Macro** | **Primary 7-Task Mean** | **0.6119** | **0.6191** | **0.6205** | **+0.0086** | **6 / 7 승** 🚀 |
+
+### 2. 판정 및 승격 결론
+- **사용자 확정 지시**: *"오케이 DD제거를 v117로, softvoting을 v118로 저장하고, v118을 baseline으로 해줘"*
+- **v117 식별자 보존**: $w_{DD}=0.0$ 선형합 (Macro 0.6191, +0.0072 vs v116).
+- **v118 공식 승격 (Active Baseline)**:
+  - 4-Branch (CV + CT + BM + BD) Soft Voting: $P(y=1) = \frac{1}{4}\sum_{b \in \{CV, CT, BM, BD\}} \sigma(M_b)$
+  - Macro AUROC = **0.6205** (v116 대비 **+0.0086**, 6/7 과제 승리, v114 대비 **+0.0154**).
+  - 활성 러너: `scripts/eval_v118.sh`.
+
+_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-22 18:20:00_
+

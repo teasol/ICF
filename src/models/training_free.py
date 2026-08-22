@@ -207,6 +207,11 @@ class TrainingFreeConfig:
     # 13/17). ⚠️ DD still receives the FULL triangle -- it rebuilds its K x K
     # matrices from it, so masking globally would break DD, not just narrow CV.
     cv_blocks: str = "offdiag"
+    weight_ct: float = 1.0
+    dd_readout: str = "ordered_typicality"
+    dd_separation_floor: float = 1.0
+    weight_dd: float = 0.0  # v117/v118: DD removed (ablation win +0.0072)
+    weight_cv: float = 1.0
     # BM branch (v115): projected bag-mean in leading subspace with class-balanced ridge.
     bm_dim: int = 32
     bm_lambda: float = 1.0
@@ -219,6 +224,9 @@ class TrainingFreeConfig:
     bd_eps: float = 1e-6
     bd_readout: str = "ordered_typicality"
     weight_bd: float = 1.0
+    # Head aggregation (v118): "soft_voting" (probability average via sigmoid) | "linear" (v117 linear sum)
+    aggregation: str = "soft_voting"
+
 
 
 
@@ -433,6 +441,8 @@ class TrainingFreeClassifier:
                     f'cv_blocks must be "offdiag" or "cov+mean", got {config.cv_blocks!r}'
                 )
             cv = self._cv_logits(cv_context, context_labels, cv_query, split)
+            m_cv = cv[:, 1] - cv[:, 0]
+
 
             def to_matrices(descriptors):
                 flat = descriptors[..., : triangle.shape[1]]
@@ -441,20 +451,56 @@ class TrainingFreeClassifier:
                 matrices[..., triangle[1], triangle[0]] = flat
                 return matrices
 
-            dd = self._dd_features(to_matrices(context), context_labels, to_matrices(query))
-            q0, q1 = self._ct_features(context_bags, context_labels, query_bags, basis)
-            total_margin = (
-                config.weight_cv * (cv[:, 1] - cv[:, 0])
-                + config.weight_dd * (dd[:, 1] - dd[:, 0])
-                + config.weight_ct * (q1 - q0)
-            )
-            if config.weight_bm != 0.0:
-                bm = self._bm_features(context_bags, context_labels, query_bags, basis)
-                total_margin = total_margin + config.weight_bm * bm
-            if config.weight_bd != 0.0:
-                bd = self._bd_features(to_matrices(context), context_labels, to_matrices(query))
-                total_margin = total_margin + config.weight_bd * bd
-            return total_margin
+            if config.weight_dd != 0.0:
+                dd = self._dd_features(to_matrices(context), context_labels, to_matrices(query))
+                m_dd = dd[:, 1] - dd[:, 0]
+            else:
+                m_dd = None
+
+            if config.weight_ct != 0.0:
+                q0, q1 = self._ct_features(context_bags, context_labels, query_bags, basis)
+                m_ct = q1 - q0
+            else:
+                m_ct = None
+
+            m_bm = self._bm_features(context_bags, context_labels, query_bags, basis) if config.weight_bm != 0.0 else None
+            m_bd = self._bd_features(to_matrices(context), context_labels, to_matrices(query)) if config.weight_bd != 0.0 else None
+
+
+            if config.aggregation == "linear":
+                total_margin = config.weight_cv * m_cv
+                if m_dd is not None:
+                    total_margin = total_margin + config.weight_dd * m_dd
+                if m_ct is not None:
+                    total_margin = total_margin + config.weight_ct * m_ct
+                if m_bm is not None:
+                    total_margin = total_margin + config.weight_bm * m_bm
+                if m_bd is not None:
+                    total_margin = total_margin + config.weight_bd * m_bd
+                return total_margin
+            elif config.aggregation == "soft_voting":
+                active_pairs = []
+                if config.weight_cv != 0.0:
+                    active_pairs.append((config.weight_cv, m_cv))
+                if m_dd is not None and config.weight_dd != 0.0:
+                    active_pairs.append((config.weight_dd, m_dd))
+                if m_ct is not None and config.weight_ct != 0.0:
+                    active_pairs.append((config.weight_ct, m_ct))
+                if m_bm is not None and config.weight_bm != 0.0:
+                    active_pairs.append((config.weight_bm, m_bm))
+                if m_bd is not None and config.weight_bd != 0.0:
+                    active_pairs.append((config.weight_bd, m_bd))
+
+                if not active_pairs:
+                    return torch.zeros(cv.shape[0], device=cv.device, dtype=cv.dtype)
+
+                total_weight = sum(w for w, _ in active_pairs)
+                avg_prob = sum(w * torch.sigmoid(m) for w, m in active_pairs) / total_weight
+                clamped = avg_prob.clamp(1e-7, 1.0 - 1e-7)
+                return torch.log(clamped / (1.0 - clamped))
+            else:
+                raise ValueError(f'aggregation must be "soft_voting" or "linear", got {config.aggregation!r}')
+
 
     def _bd_features(
         self,

@@ -1,15 +1,15 @@
-# Current Architecture Specification (v116 Active Baseline)
+# Current Architecture Specification (v118 Active Baseline)
 
-**Last updated**: `2026-08-22 17:10:00`
+**Last updated**: `2026-08-22 18:15:00`
 
 ---
 
 ## 1. 아키텍처 개요 및 설계 철학
 
-ICF(In-Context Foundation) 모델의 활성 베이스라인(v116)은 **학습 파라미터가 0개(0-parameter)인 완전 결정론적(Deterministic) 인컨텍스트 분류기**다.
+ICF(In-Context Foundation) 모델의 활성 베이스라인(v118)은 **학습 파라미터가 0개(0-parameter)인 완전 결정론적(Deterministic) 4-Branch Soft Voting 인컨텍스트 분류기**다.
 
-- **원리**: 슬라이드(Bag) 단위의 다중 인스턴스(MIL) 병리 이미지 임베딩($X_i \in \mathbb{R}^{N_i \times 1536}$)에서, 레이블이 제공된 Context 슬라이드들만으로 Within-slide PCA 기저를 구축하고 5개 상보적 통계 브랜치(CV, DD, CT, BM, BD)를 추출하여 닫힌 형태(Closed-form)의 Class-balanced Ridge 회귀 및 Ordered-Typicality Evidence로 마진을 산출한다.
-- **불변식**: Query 슬라이드는 기저 생성, 토큰 군집화, 통계 표준화에 일절 참여하지 않으며(No-Leakage), 라벨 반전($y \to 1-y$) 시 마진 부호가 정확히 반전된다(Label Antisymmetry).
+- **원리**: 슬라이드(Bag) 단위의 다중 인스턴스(MIL) 병리 이미지 임베딩($X_i \in \mathbb{R}^{N_i \times 1536}$)에서, 레이블이 제공된 Context 슬라이드들만으로 Within-slide PCA 기저를 구축하고 4개 고성능 상보적 통계 브랜치(**CV, CT, BM, BD**)로부터 각각 독립적인 마진을 산출한 뒤, **Soft Voting (Sigmoid 확률 평균)**으로 최종 예측 확률을 결합한다. (Primary 7-Task에서 노이즈 역할을 하던 DD 브랜치는 v117/v118에서 공식 제거).
+- **불변식**: Query 슬라이드는 기저 생성, 토큰 군집화, 통계 표준화에 일절 참여하지 않으며(No-Leakage), 라벨 반전($y \to 1-y$) 시 각 브랜치 마진과 앙상블 확률이 정확히 반전된다(Label Antisymmetry).
 
 ```
 [Context Bags (Labeled) + Query Bags (Unlabeled)]
@@ -17,28 +17,32 @@ ICF(In-Context Foundation) 모델의 활성 베이스라인(v116)은 **학습 �
                       ▼
    Within-Slide PCA (Context-Only Centered, K=256)
                       │
-     ┌────────────────┼────────────────┬────────────────┬────────────────┐
-     │                │                │                │                │
-     ▼                ▼                ▼                ▼                ▼
-[CV Branch]      [DD Branch]      [CT Branch]      [BM Branch]      [BD Branch]
-2차 공분산       1차원 분산       32D PCA 의사세포형 1차 모멘트       256D 스펙트럼
-비대각 32,640D   Typicality       256 토큰 조성비    상위 32D 사영    엔트로피
-     │                │                │                │                │
-     ▼                ▼                ▼                ▼                ▼
-Dual Ridge (λ=1) Bounded Margin   Dual Ridge (λ=1) Dual Ridge (λ=1) Bounded Margin
-   (M_CV)           (M_DD)           (M_CT)           (M_BM)           (M_BD)
-     │                │                │                │                │
-     └────────────────┼────────────────┴────────────────┴────────────────┘
+     ┌────────────────┼────────────────┬────────────────┐
+     │                │                │                │
+     ▼                ▼                ▼                ▼
+[CV Branch]      [CT Branch]      [BM Branch]      [BD Branch]
+2차 공분산       32D PCA 의사세포형 1차 모멘트       256D 스펙트럼
+비대각 32,640D   256 토큰 조성비    상위 32D 사영    엔트로피
+     │                │                │                │
+     ▼                ▼                ▼                ▼
+Dual Ridge (λ=1) Dual Ridge (λ=1) Dual Ridge (λ=1) Bounded Margin
+   (M_CV)           (M_CT)           (M_BM)           (M_BD)
+     │                │                │                │
+     ▼                ▼                ▼                ▼
+   p_CV             p_CT             p_BM             p_BD
+(sigmoid)        (sigmoid)        (sigmoid)        (sigmoid)
+     │                │                │                │
+     └────────────────┼────────────────┴────────────────┘
                       ▼
-  Total Margin = 1.0·M_CV - 1.0·M_DD + 1.0·M_CT + 1.0·M_BM + 1.0·M_BD
+   Soft Voting: P(y=1) = (p_CV + p_CT + p_BM + p_BD) / 4
                       │
                       ▼
-          Logits = (-M/2, +M/2)  -->  P(y=1) = sigmoid(M)
+   Margin = logit(P) = log(P / (1 - P))  -->  AUROC Ranking
 ```
 
 ---
 
-## 2. 5대 브랜치 상세 작동 원리 및 수식
+## 2. 4대 브랜치 상세 작동 원리 및 수식
 
 ### 2.1. 기저 구축 (Within-Slide PCA Basis)
 - **입력**: Context 슬라이드 집합 $\{X_i\}_{i=1}^{n_{ctx}}$, 각 $X_i \in \mathbb{R}^{N_i \times 1536}$.
@@ -59,19 +63,7 @@ Dual Ridge (λ=1) Bounded Margin   Dual Ridge (λ=1) Dual Ridge (λ=1) Bounded M
 
 ---
 
-### 2.3. DD (Directional Dispersion / 1-D 분산 Typicality 브랜치)
-- **설계 목적**: 두 클래스 간 공분산 차이가 가장 극명한 단일 분산 축 상의 유계 증거 추출.
-- **방향 벡터 $u$**: 축소 추정된 공분산 차이 행렬($\bar{S}_1 - \bar{S}_0$)의 최대 고유값에 해당하는 1차원 벡터 $u \in \mathbb{R}^{256}$.
-- **투영 및 표준화**: $q_i = \log(u^T S_i u + \epsilon) \to$ Context 기준 표준화 $q_i$.
-- **수식 (Bounded Ordered-Typicality Evidence, $\kappa=1$)**:
-  $$m = \frac{p_0 + p_1}{2}, \quad h = \frac{|p_1 - p_0|}{2}, \quad s = \operatorname{sign}(p_1 - p_0)$$
-  $$\sigma_{pool} = \sqrt{\frac{\sigma_0^2 + \sigma_1^2}{2}}, \quad h_{eff} = \max(h, \kappa \sigma_{pool})$$
-  $$a(q) = \operatorname{clip}\left(s \frac{q - m}{h_{eff}}, -1, 1\right), \quad o(q) = \exp\left[-\frac{1}{2} \min_c \frac{(q - p_c)^2}{\sigma_c^2 + \epsilon}\right]$$
-  $$M_{DD}(q) = a(q) \cdot o(q) \in [-1, 1]$$
-
----
-
-### 2.4. CT (Cell-Type Abundance / 의사 세포형 조성비 브랜치)
+### 2.3. CT (Cell-Type Abundance / 의사 세포형 조성비 브랜치)
 - **설계 목적**: 슬라이드 내 주요 세포 아형(Subpopulations)의 상대적 빈도/조성비 비교.
 - **작동 과정**:
   1. **샘플링**: 슬라이드 크기의 $1/8$ fraction (floor 64, seeded random seed 0).
@@ -82,8 +74,8 @@ Dual Ridge (λ=1) Bounded Margin   Dual Ridge (λ=1) Dual Ridge (λ=1) Bounded M
 
 ---
 
-### 2.5. BM (Bag-Mean / 1차 모멘트 저차원 사영 브랜치)
-- **설계 목적**: 2차 공분산(CV/DD) 및 패치 군집(CT)이 담지 못하는 슬라이드 전체 1차 모멘트(세포 평균 $\bar{x}_i$)의 기준점(baseline shift) 정보 포착.
+### 2.4. BM (Bag-Mean / 1차 모멘트 저차원 사영 브랜치)
+- **설계 목적**: 2차 공분산(CV) 및 패치 군집(CT)이 담지 못하는 슬라이드 전체 1차 모멘트(세포 평균 $\bar{x}_i$)의 기준점(baseline shift) 정보 포착.
 - **작동 과정**:
   1. **저차원 사영**: 각 슬라이드의 세포 평균 $\bar{x}_i \in \mathbb{R}^{1536}$을 Within-slide PCA 기저 $B$의 상위 **32차원**으로 사영:
      $$\mu_i = \bar{x}_i B_{:32} \in \mathbb{R}^{32}$$
@@ -92,7 +84,7 @@ Dual Ridge (λ=1) Bounded Margin   Dual Ridge (λ=1) Dual Ridge (λ=1) Bounded M
 
 ---
 
-### 2.6. BD (Bag-Dispersion / 고유값 스펙트럼 엔트로피 브랜치, v116 신규)
+### 2.5. BD (Bag-Dispersion / 고유값 스펙트럼 엔트로피 브랜치)
 - **설계 목적**: 슬라이드 내 세포 임베딩의 전방위적 다형성 및 이질성(Pleomorphism / Spectral Diversity)을 측정하여 절대 분산 크기(스케일 편차)에 불변인 1차원 유계 증거 추출.
 - **작동 과정**:
   1. **고유값 정규화 (Scale Invariance)**: 각 슬라이드의 기저 사영 공분산 $S_i = B^T C_i B \in \mathbb{R}^{256 \times 256}$의 고유값 $\{\lambda_1, \dots, \lambda_K\}$ 정규화:
@@ -104,13 +96,18 @@ Dual Ridge (λ=1) Bounded Margin   Dual Ridge (λ=1) Dual Ridge (λ=1) Bounded M
 
 ---
 
-## 3. Head 마진 결합
+## 3. Head 마진 결합: Soft Voting Aggregation (v118)
 
-최종 마진 $M$은 5개 브랜치의 가중합으로 계산된다:
-$$M = 1.0 \cdot M_{CV} - 1.0 \cdot M_{DD} + 1.0 \cdot M_{CT} + 1.0 \cdot M_{BM} + 1.0 \cdot M_{BD}$$
+v118 베이스라인은 4개 활성 브랜치의 독립 확률을 평균하는 **Soft Voting (Probabilistic Mean)** 방식을 사용한다:
 
-- **출력 로짓 및 확률**:
-  $$\text{logits} = \left(-\frac{M}{2}, +\frac{M}{2}\right), \quad P(y=1) = \sigma(M)$$
+$$P(y=1) = \frac{1}{4} \left( \sigma(M_{CV}) + \sigma(M_{CT}) + \sigma(M_{BM}) + \sigma(M_{BD}) \right)$$
+
+- **유효 마진 및 로짓 반환**:
+  $$M_{eff} = \operatorname{logit}(P(y=1)) = \log \frac{P(y=1)}{1 - P(y=1)}$$
+  $$\text{logits} = \left(-\frac{M_{eff}}{2}, +\frac{M_{eff}}{2}\right)$$
+- **장점**: 특정 단일 브랜치에서 극단적으로 발생하는 과도한 로짓 마진(Outlier magnitude)을 Sigmoid가 자연스럽게 유계화하여, 저신호 과제(ARID1A, PBRM1)에서의 오분류 쏠림 현상을 방지함.
+
+*(v117 선형합 모드: $M = M_{CV} + M_{CT} + M_{BM} + M_{BD}$ 또한 `aggregation="linear"` 플래그로 100% 지원)*
 
 ---
 
@@ -123,7 +120,7 @@ ICF/
 │   ├── models/
 │   │   ├── base.py                # InContextClassifierProtocol & BaseInContextClassifier
 │   │   ├── registry.py            # @register_model 데코레이터 및 build_model 팩토리
-│   │   ├── training_free.py       # v116 활성 baseline (TrainingFreeClassifier: CV+DD+CT+BM+BD)
+│   │   ├── training_free.py       # v118 활성 baseline (Soft Voting: CV+CT+BM+BD, w_DD=0)
 │   │   ├── stream_eval.py         # 고속 스트리밍 평가 및 통계 캐싱
 │   │   ├── ct/                    # CT Readout 서브패키지 (config, tokenizers, abundance, readout)
 │   │   ├── ct_readout.py          # src.models.ct Re-export Facade (100% 하위 호환)
@@ -134,11 +131,14 @@ ICF/
 │   └── modules/                   # Lightning 학습 인터페이스 (losses, diagnostics, guards)
 ├── scripts/
 │   ├── node_env.sh                # 실행 노드별 Conda / Python 경로 자동 탐색 SSOT
-│   ├── eval_v116.sh               # v116 활성 baseline 평가 스크립트 (기본: Primary 7 tasks)
-│   ├── eval_v115.sh               # v115 baseline 평가 스크립트
+│   ├── eval_v118.sh               # v118 활성 baseline 평가 스크립트 (Soft Voting, Primary 7 tasks)
+│   ├── eval_v117.sh               # v117 baseline 평가 스크립트 (No-DD Linear, Primary 7 tasks)
+│   ├── eval_v116.sh               # v116 baseline 평가 스크립트 (5-Branch Linear)
+│   ├── analyze_voting.py          # 저장된 5-Branch Logit 오프라인 앙상블 분석기
 │   ├── eval_seal_tasks.sh         # 태스크별 평가 러너
 │   └── diagnostics/               # diagnose_*.py (14개 분석/진단 스크립트)
-└── tests/                         # 핵심 회귀 테스트 스위트 (102개 핵심 계약 검증, ~20s)
+└── tests/                         # 핵심 회귀 테스트 스위트 (107개 핵심 계약 검증)
+    ├── test_soft_voting.py        # v118 Soft Voting 앙상블 불변식 및 계약 검증
     ├── test_bd_branch.py          # BD 브랜치 8대 불변식 계약 검증
     ├── test_bm_branch.py          # BM 브랜치 6대 불변식 계약 검증
     └── ...
@@ -152,15 +152,15 @@ ICF/
 # 2. 회귀 테스트 실행
 $PYTHON -m unittest discover -s tests -p "test_*.py"
 
-# 3. v116 Baseline Primary 7-Task 평가 (기본)
-bash scripts/eval_v116.sh <gpu_id> <tag>
+# 3. v118 Baseline Primary 7-Task 평가 (기본)
+bash scripts/eval_v118.sh <gpu_id> <tag>
 
-# 4. v116 Hold-out 10-Task (SEAL) 검증
-bash scripts/eval_v116.sh <gpu_id> <tag> \
+# 4. v118 Hold-out 10-Task (SEAL) 검증
+bash scripts/eval_v118.sh <gpu_id> <tag> \
   bc_therapy/er_status bc_therapy/grade bc_therapy/her2_status \
   cptac_brca/PIK3CA_mutation cptac_brca/TP53_mutation \
   cptac_luad/EGFR_mutation cptac_luad/STK11_mutation cptac_luad/TP53_mutation \
   cptac_ccrcc/BAP1_mutation cptac_ccrcc/VHL_mutation
 ```
 
-_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-22 17:10:00_
+_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-22 18:15:00_

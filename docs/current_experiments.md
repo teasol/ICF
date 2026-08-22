@@ -1,11 +1,11 @@
 # Current Experiments & Active Queue (2026-08-22)
 
-**Last updated**: `2026-08-22 17:10:00`
+**Last updated**: `2026-08-22 18:22:00`
 
 > [!IMPORTANT]
-> **활성 baseline = v116** (`docs/current_status.md` §194, 사용자 결정). 학습 파라미터 0, 완전 결정론적(Deterministic).
+> **활성 baseline = v118** (`docs/current_status.md` §196, 사용자 결정). 학습 파라미터 0, 완전 결정론적(Deterministic).
 > ⚠️ **판정 프로토콜**: **Primary Benchmark (7 tasks)** 가 주 판정 기준이며, **Hold-out Validation (SEAL 10 tasks)** 는 독립 교차 검증용이다.
-> 실행: `bash scripts/eval_v116.sh <gpu> <tag> [tasks...]` (기본: Primary 7 tasks)
+> 실행: `bash scripts/eval_v118.sh <gpu> <tag> [tasks...]` (기본: Primary 7 tasks)
 > 
 > ⚠️ **판정 규칙 종합 SSOT**: [`docs/current_status.md` §0](current_status.md)을 준수할 것. 결정론적 arm에는 t·p·CI를 일절 쓰지 않으며, **Primary 7-task 부호 일치 수 ($\ge 5/7$)** 및 **Hold-out 10-task 동시 재현**으로 판정하고 최종 승격/기각은 **사용자 판단**이다.
 
@@ -15,21 +15,21 @@
 
 | 실험 | 가설 및 설정 | 결과 | 판정 |
 | :--- | :--- | :--- | :--- |
-| **§191 Plan A BM 구현** | 1차 모멘트(Bag Mean) 32D 사영 Ridge 브랜치 추가 | 6개 전용 단위 테스트 통과, 92 tests 100% PASS | **구현 완료** |
-| **§192 BM 7-Task 실측** | BM Branch ($w_{BM}=1.0$) Primary 7-Task 50-fold 평가 | Macro 0.6094 (+0.0043), 7개 중 5개 과제 승리 ($5/7$) | **v115 공식 승격** |
-| **§193 BD Option A 실측** | BD Branch Log-Trace ($w_{BD}=1.0$) Ordered Typicality | Macro 0.6071 (−0.0023 vs v115, 3/7 승), 스케일 노이즈 한계 | **후보 B로 전환** |
 | **§194 BD Option B 실측** | BD Branch Spectral Entropy ($w_{BD}=1.0$) Ordered Typicality | Macro **0.6119** (+0.0025 vs v115, +0.0048 vs 후보 A, 4/7 승) | **v116 공식 승격** |
+| **§195 5-Branch Logit Caching & Voting 분석** | 4-GPU 50-fold에서 5개 브랜치 로짓 저장 및 4대 Voting 전수 검증 | DD 단독 Macro 0.4994로 노이즈 확인. Soft Voting 효과 입증 | **분석 완료** |
+| **§196 DD 제거 (v117)** | 4-Branch Linear Sum (CV + CT + BM + BD, $w_{DD}=0.0$) | Macro **0.6191** (+0.0072 vs v116, 5/7 과제 승리) | **v117 영구 보존** |
+| **§196 4-Branch Soft Voting (v118)** | 4-Branch Soft Voting ($P = \frac{1}{4}\sum \sigma(M_b)$, $w_{DD}=0.0$) | Macro **0.6205** (+0.0086 vs v116, 6/7 과제 승리) | **v118 공식 승격** 🚀 |
 
 ---
 
 ## 2. 활성 실험 큐 (Active Experiment Queue)
 
-### [Exp 1] v116 Hold-out 10-Task (SEAL 10) 독립 교차 검증 (준비 완료)
-- **목적**: Primary 7-Task에서 승격된 **v116 (CV + DD + CT + BM + BD)** 아키텍처의 홀드아웃 10개 과제(SEAL 10) 재현성 및 일반화 성능 검증.
+### [Exp 1] v118 Hold-out 10-Task (SEAL 10) 독립 교차 검증 (준비 완료)
+- **목적**: Primary 7-Task에서 승격된 **v118 (Soft Voting: CV + CT + BM + BD)** 아키텍처의 홀드아웃 10개 과제(SEAL 10) 재현성 및 일반화 성능 검증.
 - **실행**:
   ```bash
   . scripts/node_env.sh
-  bash scripts/eval_v116.sh 0 v116_holdout10 \
+  bash scripts/eval_v118.sh 0 v118_holdout10 \
     bc_therapy/er_status bc_therapy/grade bc_therapy/her2_status \
     cptac_brca/PIK3CA_mutation cptac_brca/TP53_mutation \
     cptac_luad/EGFR_mutation cptac_luad/STK11_mutation cptac_luad/TP53_mutation \
@@ -54,4 +54,4 @@
    - 신규/수정 단락 작성 직후 스탬프 작성:
      `_by <LLM Name> on <server name> at <YYYY-MM-DD HH:MM:SS>_`
 
-_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-22 17:10:00_
+_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-22 18:22:00_
