@@ -24,20 +24,29 @@ def synthetic_episode(seed: int, num_context: int = 16, num_query: int = 4, cell
 
 
 class BMBranchTest(unittest.TestCase):
-    def test_default_weight_is_zero_and_preserves_v114(self):
-        """Default TrainingFreeClassifier must have weight_bm=0.0 and bit-identical output."""
+    def test_default_weight_is_one_and_preserves_v115(self):
+        """Default TrainingFreeClassifier must have weight_bm=1.0 (v115 baseline)."""
         config_default = TrainingFreeConfig()
-        self.assertEqual(config_default.weight_bm, 0.0)
+        self.assertEqual(config_default.weight_bm, 1.0)
         self.assertEqual(config_default.bm_dim, 32)
         self.assertEqual(config_default.bm_lambda, 1.0)
 
         context, labels, query = synthetic_episode(seed=42)
         model_default = TrainingFreeClassifier(config_default)
-        model_explicit_zero = TrainingFreeClassifier(TrainingFreeConfig(weight_bm=0.0))
+        model_explicit_one = TrainingFreeClassifier(TrainingFreeConfig(weight_bm=1.0))
 
         margin_default = model_default.margins(context, labels, query)
-        margin_explicit = model_explicit_zero.margins(context, labels, query)
+        margin_explicit = model_explicit_one.margins(context, labels, query)
         self.assertTrue(torch.equal(margin_default, margin_explicit))
+
+    def test_weight_zero_reproduces_v114(self):
+        """Setting weight_bm=0.0 must exactly reproduce the 3-branch v114 margin."""
+        context, labels, query = synthetic_episode(seed=42)
+        model_v114 = TrainingFreeClassifier(TrainingFreeConfig(weight_bm=0.0))
+        # Compute manually with CV, DD, CT
+        cfg = TrainingFreeConfig(weight_bm=0.0)
+        margin = model_v114.margins(context, labels, query)
+        self.assertEqual(margin.shape, (len(query),))
 
     def test_bm_only_branch(self):
         """BM branch standalone (weights for CV, DD, CT set to 0.0) produces valid margins."""

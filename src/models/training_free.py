@@ -75,16 +75,21 @@ def _solve_ridge(gram: torch.Tensor, targets: torch.Tensor, penalty: float) -> t
     escalating jitter on failure. The dual Gram matrix is context-bags square and
     can be near-singular when two slides are nearly identical.
     """
-    size = gram.shape[-1]
-    identity = torch.eye(size, device=gram.device, dtype=gram.dtype)
+    orig_dtype = targets.dtype
+    gram_f32 = gram.float()
+    targets_f32 = targets.to(dtype=torch.float32, device=gram.device)
+    size = gram_f32.shape[-1]
+    identity = torch.eye(size, device=gram.device, dtype=torch.float32)
     jitter = 0.0
     for _ in range(6):
         try:
-            factor = torch.linalg.cholesky(gram + (penalty + jitter) * identity)
-            return torch.cholesky_solve(targets, factor)
+            factor = torch.linalg.cholesky(gram_f32 + (penalty + jitter) * identity)
+            sol = torch.cholesky_solve(targets_f32, factor)
+            return sol.to(dtype=orig_dtype)
         except RuntimeError:
-            jitter = max(jitter * 10.0, 1e-6 * float(gram.diagonal().abs().mean()) + 1e-12)
-    return torch.linalg.lstsq(gram + (penalty + jitter) * identity, targets).solution
+            jitter = max(jitter * 10.0, 1e-6 * float(gram_f32.diagonal().abs().mean()) + 1e-12)
+    sol = torch.linalg.lstsq(gram_f32 + (penalty + jitter) * identity, targets_f32).solution
+    return sol.to(dtype=orig_dtype)
 
 
 def _standardise(context: torch.Tensor, query: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -202,11 +207,10 @@ class TrainingFreeConfig:
     # 13/17). ⚠️ DD still receives the FULL triangle -- it rebuilds its K x K
     # matrices from it, so masking globally would break DD, not just narrow CV.
     cv_blocks: str = "offdiag"
-    # BM branch: projected bag-mean in leading subspace with class-balanced ridge.
-    # Default weight 0.0 preserves v114 bit-identically.
+    # BM branch (v115): projected bag-mean in leading subspace with class-balanced ridge.
     bm_dim: int = 32
     bm_lambda: float = 1.0
-    weight_bm: float = 0.0
+    weight_bm: float = 1.0
 
 
 
@@ -217,7 +221,11 @@ class TrainingFreeClassifier:
         self.config = config or TrainingFreeConfig()
 
     # ---- 1. basis ---------------------------------------------------------
-    def within_slide_basis(self, context_bags: Sequence[torch.Tensor]) -> torch.Tensor:
+    def within_slide_basis(
+        self,
+        context_bags: Sequence[torch.Tensor],
+        device: torch.device | None = None,
+    ) -> torch.Tensor:
         """Top-K eigenvectors of the WITHIN-slide pooled covariance.
 
         Accumulated bag by bag, one chunk at a time: concatenating every
@@ -225,16 +233,17 @@ class TrainingFreeClassifier:
         (~12 GB for a full-tile episode), and `bag.double()` of a GPU-resident
         LUAD slide is what tips a 22 GiB card after the cohort is already up.
         """
+        target_device = device if device is not None else context_bags[0].device
         return covariance_basis_from_bags(
             context_bags,
             "pca_within",
             self.config.sketch_dim,
-            context_bags[0].device,
+            target_device,
         )
 
     # ---- 2. descriptors ---------------------------------------------------
     def _descriptor(self, bag: torch.Tensor, basis: torch.Tensor, triangle) -> torch.Tensor:
-        values = bag.float()
+        values = bag.to(basis.device).float()
         mean = values.mean(dim=0, keepdim=True)
         projected = (values - mean) @ basis
         covariance = (projected.T @ projected) / values.shape[0]
@@ -264,6 +273,8 @@ class TrainingFreeClassifier:
     # ---- 4. DD ------------------------------------------------------------
     def _dd_features(self, context_cov: torch.Tensor, labels: torch.Tensor, query_cov: torch.Tensor):
         config = self.config
+        context_cov = context_cov.float()
+        query_cov = query_cov.float()
         labels = labels.long()
         means = torch.stack([context_cov[labels == c].mean(dim=0) for c in range(2)])
         delta = means[1] - means[0]
@@ -387,48 +398,49 @@ class TrainingFreeClassifier:
         query_bags: Sequence[torch.Tensor],
     ) -> torch.Tensor:
         """Signed score per query bag. Positive favours class 1."""
-        config = self.config
-        basis = self.within_slide_basis(context_bags)
-        triangle = torch.triu_indices(config.sketch_dim, config.sketch_dim, device=basis.device)
-        context = torch.stack([self._descriptor(b, basis, triangle) for b in context_bags])
-        query = torch.stack([self._descriptor(b, basis, triangle) for b in query_bags])
+        with torch.cuda.amp.autocast(enabled=False):
+            config = self.config
+            basis = self.within_slide_basis(context_bags, device=context_labels.device)
+            triangle = torch.triu_indices(config.sketch_dim, config.sketch_dim, device=basis.device)
+            context = torch.stack([self._descriptor(b, basis, triangle) for b in context_bags])
+            query = torch.stack([self._descriptor(b, basis, triangle) for b in query_bags])
 
-        covariance_dim = triangle.shape[1]
-        # CV sees only the blocks `cv_blocks` names; DD below always gets the full
-        # triangle out of `context`/`query` (SS156-1).
-        if config.cv_blocks == "cov+mean":
-            cv_context, cv_query = context, query
-            split = (covariance_dim, context.shape[-1] - covariance_dim)
-        elif config.cv_blocks == "offdiag":
-            keep = triangle[0] != triangle[1]
-            cv_context = context[..., :covariance_dim][..., keep]
-            cv_query = query[..., :covariance_dim][..., keep]
-            # One surviving block, so the whole descriptor is standardised together.
-            split = (cv_context.shape[-1], 0)
-        else:
-            raise ValueError(
-                f'cv_blocks must be "offdiag" or "cov+mean", got {config.cv_blocks!r}'
+            covariance_dim = triangle.shape[1]
+            # CV sees only the blocks `cv_blocks` names; DD below always gets the full
+            # triangle out of `context`/`query` (SS156-1).
+            if config.cv_blocks == "cov+mean":
+                cv_context, cv_query = context, query
+                split = (covariance_dim, context.shape[-1] - covariance_dim)
+            elif config.cv_blocks == "offdiag":
+                keep = triangle[0] != triangle[1]
+                cv_context = context[..., :covariance_dim][..., keep]
+                cv_query = query[..., :covariance_dim][..., keep]
+                # One surviving block, so the whole descriptor is standardised together.
+                split = (cv_context.shape[-1], 0)
+            else:
+                raise ValueError(
+                    f'cv_blocks must be "offdiag" or "cov+mean", got {config.cv_blocks!r}'
+                )
+            cv = self._cv_logits(cv_context, context_labels, cv_query, split)
+
+            def to_matrices(descriptors):
+                flat = descriptors[..., : triangle.shape[1]]
+                matrices = flat.new_zeros(flat.shape[0], config.sketch_dim, config.sketch_dim)
+                matrices[..., triangle[0], triangle[1]] = flat
+                matrices[..., triangle[1], triangle[0]] = flat
+                return matrices
+
+            dd = self._dd_features(to_matrices(context), context_labels, to_matrices(query))
+            q0, q1 = self._ct_features(context_bags, context_labels, query_bags, basis)
+            total_margin = (
+                config.weight_cv * (cv[:, 1] - cv[:, 0])
+                + config.weight_dd * (dd[:, 1] - dd[:, 0])
+                + config.weight_ct * (q1 - q0)
             )
-        cv = self._cv_logits(cv_context, context_labels, cv_query, split)
-
-        def to_matrices(descriptors):
-            flat = descriptors[..., : triangle.shape[1]]
-            matrices = flat.new_zeros(flat.shape[0], config.sketch_dim, config.sketch_dim)
-            matrices[..., triangle[0], triangle[1]] = flat
-            matrices[..., triangle[1], triangle[0]] = flat
-            return matrices
-
-        dd = self._dd_features(to_matrices(context), context_labels, to_matrices(query))
-        q0, q1 = self._ct_features(context_bags, context_labels, query_bags, basis)
-        total_margin = (
-            config.weight_cv * (cv[:, 1] - cv[:, 0])
-            + config.weight_dd * (dd[:, 1] - dd[:, 0])
-            + config.weight_ct * (q1 - q0)
-        )
-        if config.weight_bm != 0.0:
-            bm = self._bm_features(context_bags, context_labels, query_bags, basis)
-            total_margin = total_margin + config.weight_bm * bm
-        return total_margin
+            if config.weight_bm != 0.0:
+                bm = self._bm_features(context_bags, context_labels, query_bags, basis)
+                total_margin = total_margin + config.weight_bm * bm
+            return total_margin
 
     def _bm_features(
         self,
@@ -440,8 +452,8 @@ class TrainingFreeClassifier:
         """Projected bag-mean in leading subspace with class-balanced ridge."""
         dim = min(self.config.bm_dim, basis.shape[1])
         bm_basis = basis[:, :dim].to(dtype=torch.float32)
-        ctx_means = torch.stack([b.float().mean(dim=0) for b in context_bags]) @ bm_basis
-        qry_means = torch.stack([b.float().mean(dim=0) for b in query_bags]) @ bm_basis
+        ctx_means = torch.stack([b.float().mean(dim=0).to(bm_basis.device) for b in context_bags]) @ bm_basis
+        qry_means = torch.stack([b.float().mean(dim=0).to(bm_basis.device) for b in query_bags]) @ bm_basis
 
         labels = context_labels.long()
         targets = torch.nn.functional.one_hot(labels, 2).float()

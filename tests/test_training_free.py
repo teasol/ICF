@@ -41,7 +41,7 @@ V107 = TrainingFreeConfig(
     sketch_dim=SKETCH, ct_readout="extreme", ct_pca_dim=None,
     ct_kmeans_iterations=0, cv_blocks="cov+mean", weight_ct=0.286, ct_num_tokens=16,
     ct_sampling="even", ct_tokenizer="fps_lloyd",
-    dd_readout="distance", weight_dd=0.343,
+    dd_readout="distance", weight_dd=0.343, weight_bm=0.0,
 )
 
 

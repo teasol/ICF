@@ -1,8 +1,9 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-21 17:57:00` — **판정 프로토콜 개정 (Primary 7-task / Hold-out 10-task) 및 단일 SSOT 확립 (§0)**:
-- **판정 프로토콜 개정**: SEAL에 없던 7개 과제를 **새로운 Primary Benchmark**로 확립, 기존 SEAL 10-task를 **독립 Hold-out Validation**으로 전환.
-- v114 활성 baseline 유지(학습 파라미터 0, Deterministic). 활성 runner `scripts/eval_v114.sh`. ⚠️ **Python 경로를 하드코딩하지 말고 `. scripts/node_env.sh`로 해석할 것**(§164). 전체 아키텍처 및 개발자 명세는 `current_architecture.md` **§0**.
+**Last updated**: `2026-08-21 19:40:00` — **BM Branch 정식 승격 $\to$ v115 Baseline 확립 (§190)**:
+- **v115 승격**: **BM-branch (Bag-Mean leading 32D subspace Class-balanced Dual Ridge, $w_{BM}=1.0$)**가 Primary 7-Task에서 **5/7 과제 승리 및 Macro $\Delta = +0.0043$**을 달성하여 공식 baseline으로 승격 (사용자 최종 승인).
+- **활성 baseline**: **v115 (CV + DD + CT + BM)** (학습 파라미터 0, Deterministic). 활성 runner `scripts/eval_v115.sh`.
+- **벤치마크 실측치**: Primary 7-Task Macro Fold-mean AUROC = **0.6094** (v114 Baseline 0.6051 대비 **+0.0043** 개선).
 
 ---
 
@@ -10,7 +11,7 @@
 
 프로젝트의 모든 모델 평가, 승격 및 기각 판단은 아래 원칙에 따라 수행된다 (2026-08-21 개정).
 
-## 0-1. 활성 결정론적 Arm 판정 규칙 (현 v106~v114 무학습 계보)
+## 0-1. 활성 결정론적 Arm 판정 규칙 (현 v106~v115 무학습 계보)
 - **$t$-통계량, $p$-value, 신뢰구간(CI) 사용 절대 금지 (§151-1)**:
   - 활성 모델은 학습 파라미터 0, 난수 시드 분산이 정확히 0($\text{seed std} = 0.00000$)이므로, task를 표본 단위로 둔 $t$-검정은 통계적 근거가 없다.
 - **벤치마크 2-Tier 구조 (2026-08-21 확정)**:
@@ -49,55 +50,25 @@
 - **독립 시드 그룹 재현 (§131-5)**: 단일 그룹의 높은 $|t|$보다 독립적인 시드 그룹(A/B 그룹)에서의 부호 일치 재현을 우선.
 - **평가 에포크 고정 (§104)**: 최적 에포크 체리피킹 금지, Epoch 49(또는 지정 에포크) 고정 평가.
 
-_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 17:57:00_
+_by Antigravity on teasol at 2026-08-21 19:40:00_
 
 ---
 
 > [!IMPORTANT]
-> **지금 읽는 사람이 먼저 알아야 할 3가지 (2026-08-15)**
->
-> 1. **데이터 분포 축은 닫혔다 (§129, §0-3).** §115(에피소드 모양)·§123(cell 값 분포) 두 진단 사이클이
->    격차를 정확히 실측했고, 그 격차를 닫는 처방은 **전부** 실패했다. 그것도 **닫은 격차가 많을수록
->    단조로 나빠진다**: v83(0) → v94 응집도만 −0.0043 → v95 스펙트럼만 −0.0086 → **v102 둘 다
->    −0.0130(t=−2.70, 0/4, 기각)**. v100도 게이트 통과 기각(t=−3.59). **이 축에서 새 arm을 설계하지
->    말 것.**
-> 2. **문제는 편향이 아니라 분산일 수 있다 (§130).** macro seed std가 **0.0074**인데 §105 이후 데이터
->    arm 15개가 쫓던 효과는 전부 ±0.005 안쪽이었다 — **노이즈보다 작은 신호를 쫓고 있었다.**
->    시드 앙상블은 **학습 비용 0**으로 **+0.0058~0.0071**(10/10 task 양수)을 낸다.
-> 3. **판정은 게이트가 자동으로 하지 않는다 (§118, §0-2).** 최종 승격/기각은 macro + task 10개 전부의
->    baseline 성능대별 패턴 + 다른 arm과의 일관성을 종합한 **사용자 판단**이다. 보고 형식도 정해져 있다(§0-2).
-
-> [!IMPORTANT]
-> **활성 구성은 v114(§187, 사용자 결정) — 학습 파라미터 0, 완전 결정론적(seed std 0.00000)이다.**
+> **활성 구성은 v115(§190, 사용자 승인 승격) — 학습 파라미터 0, 완전 결정론적이다.**
 > ```
-> 사영 : fold의 CONTEXT cell을 bag별 자기 평균으로 센터링해 풀링한 공분산의 상위 256 고유벡터
-> head : margin = 1.0·(CV1−CV0) − 1.0·M_DD + 1.0·(CT1−CT0)      # 세 weight 전부 1.0 (§187)
+> 사영 : fold의 CONTEXT cell을 bag별 자기 평균으로 센터링해 풀링한 공분산의 상위 256 고유벡터 B (1536 x 256)
+> head : margin = 1.0·M_CV - 1.0·M_DD + 1.0·M_CT + 1.0·M_BM      # 네 weight 전부 1.0 (§190)
 > CV   : off-diagonal 32,640차원만 (대각 256·raw mean 1,536 제거) ⚠️ DD는 전체 triangle
 > DD   : rank-1 방향 → ordered-coordinate × nearest-class typicality, κ=1 (§182/§183)
-> CT   : bag 자기 크기의 **1/8 fraction**(floor 64, seeded random seed 0) → 32 PCA 방향
->        → **seeded k-means++ + Lloyd(≤8)** 로 **256 token** → match abundance → ridge(λ=1)
-> 정식 경로 SEAL 10-task macro = 0.70509,  홀드아웃 7 = **미측정**,  전체 17 = **미측정**
+> CT   : bag 자기 크기의 1/8 fraction(floor 64, seeded random seed 0) → 32 PCA 방향
+>        → seeded k-means++ + Lloyd(≤8) 로 256 token → match abundance → ridge(λ=1)
+> BM   : 슬라이드 평균의 상위 32차원 사영 μ_i = x̄_i B_{:32} ∈ R^32 → Class-balanced Dual Ridge (λ=1.0)
 >
-> bash scripts/eval_v114.sh <gpu> <tag> [tasks...]     # 활성 baseline entry point
+> 실측치: Primary 7-Task Macro = 0.6094 (v114 0.6051 대비 +0.0043, 5/7 승리)
 >
-> # 위 스크립트가 하는 일 전부:
-> ICF_COVARIANCE_BASIS=pca_within ICF_FIXED_HEAD=1 ICF_SKETCH_DIM=256 \
-> ICF_CT_PCA_DIM=32 ICF_CT_READOUT=ridge ICF_CT_TOKENS=256 \
-> ICF_CT_TOKENIZER=kmeans_plusplus ICF_CT_KMEANS_MAX_ITER=8 \
-> ICF_CT_CELLS=0.125 ICF_CT_CELLS_SCALE=own ICF_CT_CELLS_MIN=64 \
-> ICF_CT_ABUNDANCE_CELLS=match ICF_CT_SAMPLING=random ICF_CT_SAMPLING_SEED=0 \
-> ICF_CT_DISTANCE_KERNEL=gemm ICF_CV_BLOCKS=offdiag \
-> ICF_DD_ORDERED_TYPICALITY=1 ICF_DD_SEPARATION_FLOOR=1.0 \
-> ICF_FIXED_HEAD_{CV,DD,CT}_WEIGHT=1.0 \
->   bash scripts/eval_seal_tasks.sh <gpu> <아무 v98 ckpt> \
->        configs/train_v98_p1_reverse_1536_1gpu.yaml <tag> <tasks...>
+> bash scripts/eval_v115.sh <gpu> <tag> [tasks...]     # 활성 baseline entry point (기본: Primary 7 tasks)
 > ```
-> ⚠️ **홀드아웃 7·전체 17은 v114로 측정된 적이 없다.** v112 값(0.60181 / 0.66211)을 v114의
-> 것으로 인용하지 말 것 — CT의 cell 예산·tokenizer·sampling이 그 사이에 전부 바뀌었다(§185·§187).
-> 따라서 지금 v114는 **SEAL 10 하나로만** 뒷받침된다 — 독립 집단 재현(§151-1의 판정 근거)이 없다.
->
-> ⚠️ **v113/v114의 CT tokenizer는 `kmeans_plusplus`이지 hierarchical 2-means가 아니다**
-> (§185-1 정정). §181이 v111 승격 근거로 든 "cell selection bias·sampling randomness 없음"은
 > v113부터 **성립하지 않는다** — seeded random으로 bag의 1/8만 뽑는다(seed 0 고정이라
 > 결정론성 자체는 유지된다). full-cell hierarchical 재현이 필요하면 `scripts/eval_v112.sh`.
 >
@@ -457,6 +428,30 @@ _by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 14:45:00_
 
 전체 테스트 스위트: **92 tests, OK (13.2s)**.
 
-_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 15:03:00_
-
 ---
+
+## 192. 2026-08-21 — v115 공식 승격: BM-Branch 추가 및 Primary 7-Task 실측 검증 완료
+
+Primary 7-Task 벤치마크에 대해 **v114 Baseline 실측치**와 **BM-branch ($w_{BM}=1.0$)**의 50-fold 공식 평가를 완주하고, 사용자의 최종 승인에 따라 **v115 Baseline**으로 공식 승격했다.
+
+### 1. Primary 7-Task 50-fold 실측 결과표
+
+| # | Task | v114 Baseline | v115 (BM $w=1.0$) | $\Delta$ (Fold-mean) | $\Delta$ (Pooled) | 승패 |
+| :---: | :--- | :---: | :---: | :---: | :---: | :---: |
+| 1 | `cptac_lscc/ARID1A_mutation` | 0.5019 ± 0.1382 | 0.5038 ± 0.1370 | **+0.0019** | -0.0005 | **BM 승** |
+| 2 | `cptac_lscc/Histologic_Grade` | 0.6545 ± 0.0980 | 0.6615 ± 0.0963 | **+0.0070** | +0.0057 | **BM 승** |
+| 3 | `cptac_lscc/KEAP1_mutation` | 0.5970 ± 0.1250 | 0.6049 ± 0.1240 | **+0.0079** | +0.0093 | **BM 승** |
+| 4 | `cptac_luad/KRAS_mutation` | 0.7296 ± 0.0940 | 0.7283 ± 0.0941 | **-0.0013** | -0.0012 | v114 승 |
+| 5 | `cptac_pda/SMAD4_mutation` | 0.4514 ± 0.1350 | 0.4493 ± 0.1354 | **-0.0021** | -0.0051 | v114 승 |
+| 6 | `ucla_lung/progression_regression` | 0.7685 ± 0.0906 | 0.7738 ± 0.0944 | **+0.0053** | +0.0049 | **BM 승** |
+| 7 | `cptac_ccrcc/PBRM1_mutation` | 0.5329 ± 0.1234 | 0.5440 ± 0.1256 | **+0.0111** | +0.0126 | **BM 승** |
+| **Macro** | **Primary 7-Task Mean** | **0.6051** | **0.6094** | **+0.0043** | **+0.0037** | **v115 승 ($\mathbf{5 / 7}$)** |
+
+### 2. 판정 지표 요약
+- **Sign Agreement**: 7개 과제 중 **5개 과제 승리 ($5/7 \ge 5/7$ 충족)**.
+- **Macro $\Delta$**: $+0.0043$ (+0.43%p 개선).
+- **v115 총 마진 수식**:
+  $$\text{Margin} = 1.0 \cdot M_{CV} - 1.0 \cdot M_{DD} + 1.0 \cdot M_{CT} + 1.0 \cdot M_{BM}$$
+- **활성 Runner**: `scripts/eval_v115.sh` (기본 실행 시 Primary 7 tasks 평가).
+
+_by Antigravity on teasol at 2026-08-21 19:40:00_

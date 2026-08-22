@@ -1,14 +1,14 @@
-# Current Architecture Specification (v114 Active Baseline)
+# Current Architecture Specification (v115 Active Baseline)
 
-**Last updated**: `2026-08-21 15:47:00`
+**Last updated**: `2026-08-21 19:40:00`
 
 ---
 
 ## 1. 아키텍처 개요 및 설계 철학
 
-ICF(In-Context Foundation) 모델의 활성 베이스라인(v114)은 **학습 파라미터가 0개(0-parameter)인 완전 결정론적(Deterministic) 인컨텍스트 분류기**다.
+ICF(In-Context Foundation) 모델의 활성 베이스라인(v115)은 **학습 파라미터가 0개(0-parameter)인 완전 결정론적(Deterministic) 인컨텍스트 분류기**다.
 
-- **원리**: 슬라이드(Bag) 단위의 다중 인스턴스(MIL) 병리 이미지 임베딩($X_i \in \mathbb{R}^{N_i \times 1536}$)에서, 레이블이 제공된 Context 슬라이드들만으로 Within-slide PCA 기저를 구축하고 3개 상보적 통계 브랜치(CV, DD, CT)를 추출하여 닫힌 형태(Closed-form)의 Class-balanced Ridge 회귀로 마진을 산출한다.
+- **원리**: 슬라이드(Bag) 단위의 다중 인스턴스(MIL) 병리 이미지 임베딩($X_i \in \mathbb{R}^{N_i \times 1536}$)에서, 레이블이 제공된 Context 슬라이드들만으로 Within-slide PCA 기저를 구축하고 4개 상보적 통계 브랜치(CV, DD, CT, BM)를 추출하여 닫힌 형태(Closed-form)의 Class-balanced Ridge 회귀로 마진을 산출한다.
 - **불변식**: Query 슬라이드는 기저 생성, 토큰 군집화, 통계 표준화에 일절 참여하지 않으며(No-Leakage), 라벨 반전($y \to 1-y$) 시 마진 부호가 정확히 반전된다(Label Antisymmetry).
 
 ```
@@ -17,20 +17,20 @@ ICF(In-Context Foundation) 모델의 활성 베이스라인(v114)은 **학습 �
                       ▼
    Within-Slide PCA (Context-Only Centered, K=256)
                       │
-     ┌────────────────┼────────────────┐
-     │                │                │
-     ▼                ▼                ▼
-[CV Branch]      [DD Branch]      [CT Branch]
-2차 공분산       1차원 분산       32D PCA 의사세포형
-비대각 32,640D   Typicality       256 토큰 조성비
-     │                │                │
-     ▼                ▼                ▼
-Dual Ridge (λ=1) Bounded Margin   Dual Ridge (λ=1)
-   (M_CV)           (M_DD)           (M_CT)
-     │                │                │
-     └────────────────┼────────────────┘
+     ┌────────────────┼────────────────┬────────────────┐
+     │                │                │                │
+     ▼                ▼                ▼                ▼
+[CV Branch]      [DD Branch]      [CT Branch]      [BM Branch]
+2차 공분산       1차원 분산       32D PCA 의사세포형 1차 모멘트
+비대각 32,640D   Typicality       256 토큰 조성비    상위 32D 사영
+     │                │                │                │
+     ▼                ▼                ▼                ▼
+Dual Ridge (λ=1) Bounded Margin   Dual Ridge (λ=1) Dual Ridge (λ=1)
+   (M_CV)           (M_DD)           (M_CT)           (M_BM)
+     │                │                │                │
+     └────────────────┼────────────────┴────────────────┘
                       ▼
-  Total Margin = 1.0·M_CV - 1.0·M_DD + 1.0·M_CT
+  Total Margin = 1.0·M_CV - 1.0·M_DD + 1.0·M_CT + 1.0·M_BM
                       │
                       ▼
           Logits = (-M/2, +M/2)  -->  P(y=1) = sigmoid(M)
@@ -38,7 +38,7 @@ Dual Ridge (λ=1) Bounded Margin   Dual Ridge (λ=1)
 
 ---
 
-## 2. 3대 브랜치 상세 작동 원리 및 수식
+## 2. 4대 브랜치 상세 작동 원리 및 수식
 
 ### 2.1. 기저 구축 (Within-Slide PCA Basis)
 - **입력**: Context 슬라이드 집합 $\{X_i\}_{i=1}^{n_{ctx}}$, 각 $X_i \in \mathbb{R}^{N_i \times 1536}$.
@@ -82,10 +82,20 @@ Dual Ridge (λ=1) Bounded Margin   Dual Ridge (λ=1)
 
 ---
 
+### 2.5. BM (Bag-Mean / 1차 모멘트 저차원 사영 브랜치, v115 신규)
+- **설계 목적**: 2차 공분산(CV/DD) 및 패치 군집(CT)이 담지 못하는 슬라이드 전체 1차 모멘트(세포 평균 $\bar{x}_i$)의 기준점(baseline shift) 정보 포착.
+- **작동 과정**:
+  1. **저차원 사영**: 각 슬라이드의 세포 평균 $\bar{x}_i \in \mathbb{R}^{1536}$을 Within-slide PCA 기저 $B$의 상위 **32차원**으로 사영:
+     $$\mu_i = \bar{x}_i B_{:32} \in \mathbb{R}^{32}$$
+  2. **분류기**: Context $\mu_i$에 대해 Class-balanced Dual Ridge ($\lambda=1.0$) 적용:
+     $$M_{BM} = \text{logit}_1 - \text{logit}_0$$
+
+---
+
 ## 3. Head 마진 결합
 
-최종 마진 $M$은 3개 브랜치의 가중합으로 계산된다:
-$$M = 1.0 \cdot M_{CV} - 1.0 \cdot M_{DD} + 1.0 \cdot M_{CT}$$
+최종 마진 $M$은 4개 브랜치의 가중합으로 계산된다:
+$$M = 1.0 \cdot M_{CV} - 1.0 \cdot M_{DD} + 1.0 \cdot M_{CT} + 1.0 \cdot M_{BM}$$
 
 - **출력 로짓 및 확률**:
   $$\text{logits} = \left(-\frac{M}{2}, +\frac{M}{2}\right), \quad P(y=1) = \sigma(M)$$
@@ -101,7 +111,8 @@ ICF/
 │   ├── models/
 │   │   ├── base.py                # InContextClassifierProtocol & BaseInContextClassifier
 │   │   ├── registry.py            # @register_model 데코레이터 및 build_model 팩토리
-│   │   ├── training_free.py       # v114 활성 baseline (TrainingFreeClassifier)
+│   │   ├── training_free.py       # v115 활성 baseline (TrainingFreeClassifier: CV+DD+CT+BM)
+│   │   ├── stream_eval.py         # 고속 스트리밍 평가 및 통계 캐싱
 │   │   ├── ct/                    # CT Readout 서브패키지 (config, tokenizers, abundance, readout)
 │   │   ├── ct_readout.py          # src.models.ct Re-export Facade (100% 하위 호환)
 │   │   └── dd_adaptive_rank.py    # DD ordered-typicality margin
@@ -111,10 +122,12 @@ ICF/
 │   └── modules/                   # Lightning 학습 인터페이스 (losses, diagnostics, guards)
 ├── scripts/
 │   ├── node_env.sh                # 실행 노드별 Conda / Python 경로 자동 탐색 SSOT
-│   ├── eval_v114.sh               # v114 활성 baseline 평가 스크립트
-│   ├── eval_seal_tasks.sh         # SEAL 10 tasks 평가 러너
+│   ├── eval_v115.sh               # v115 활성 baseline 평가 스크립트 (기본: Primary 7 tasks)
+│   ├── eval_seal_tasks.sh         # 태스크별 평가 러너
 │   └── diagnostics/               # diagnose_*.py (14개 분석/진단 스크립트)
 └── tests/                         # 핵심 회귀 테스트 스위트 (92개 핵심 계약 검증, ~13s)
+    ├── test_bm_branch.py          # BM 브랜치 6대 불변식 계약 검증
+    └── ...
 ```
 
 ### 4.2. 실행 가이드
@@ -125,8 +138,15 @@ ICF/
 # 2. 회귀 테스트 실행
 $PYTHON -m unittest discover -s tests -p "test_*.py"
 
-# 3. v114 Baseline 평가
-bash scripts/eval_v114.sh <gpu_id> <tag> [tasks...]
+# 3. v115 Baseline Primary 7-Task 평가 (기본)
+bash scripts/eval_v115.sh <gpu_id> <tag>
+
+# 4. v115 Hold-out 10-Task (SEAL) 검증
+bash scripts/eval_v115.sh <gpu_id> <tag> \
+  bc_therapy/er_status bc_therapy/grade bc_therapy/her2_status \
+  cptac_brca/PIK3CA_mutation cptac_brca/TP53_mutation \
+  cptac_luad/EGFR_mutation cptac_luad/STK11_mutation cptac_luad/TP53_mutation \
+  cptac_ccrcc/BAP1_mutation cptac_ccrcc/VHL_mutation
 ```
 
-_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-21 15:49:00_
+_by Antigravity on teasol at 2026-08-21 19:40:00_

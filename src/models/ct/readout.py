@@ -176,6 +176,7 @@ def ct_margins(
     query_bags: Sequence[torch.Tensor],
     config: CTReadoutConfig | None = None,
     mode: str = "extreme",
+    calibrated: bool = False,
     pca_basis: torch.Tensor | None = None,
 ) -> tuple[CTMargins, CTAbundance]:
     """Two-token or all-token abundance readout over context and query bags."""
@@ -183,17 +184,22 @@ def ct_margins(
         config = CTReadoutConfig()
     abundance = ct_abundance(context_bags, query_bags, config, pca_basis=pca_basis)
     if mode == "extreme":
-        return readout_extreme(abundance, labels, config), abundance
-    if mode == "prototype":
-        return readout_prototype(abundance, labels, config), abundance
-    if mode == "ridge":
-        return readout_ridge(abundance, labels, config), abundance
-    if mode in ("kernel_ridge", "kernel-ridge"):
-        return readout_kernel_ridge(abundance, labels, config), abundance
-    if mode == "calibrated":
+        margins = readout_extreme(abundance, labels, config)
+    elif mode == "prototype":
+        margins = readout_prototype(abundance, labels, config)
+    elif mode == "ridge":
+        margins = readout_ridge(abundance, labels, config)
+    elif mode in ("kernel_ridge", "kernel-ridge"):
+        margins = readout_kernel_ridge(abundance, labels, config)
+    elif mode == "calibrated":
         ref = readout_extreme(abundance, labels, config)
         alt = readout_ridge(abundance, labels, config)
         return calibrate(alt, ref, config), abundance
-    raise ValueError(
-        f"mode must be 'extreme', 'prototype', 'ridge', 'kernel_ridge', or 'calibrated', got {mode!r}"
-    )
+    else:
+        raise ValueError(
+            f"mode must be 'extreme', 'prototype', 'ridge', 'kernel_ridge', or 'calibrated', got {mode!r}"
+        )
+    if calibrated and mode != "extreme":
+        ref = readout_extreme(abundance, labels, config)
+        margins = calibrate(margins, ref, config)
+    return margins, abundance

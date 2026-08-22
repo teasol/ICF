@@ -1045,54 +1045,62 @@ def evaluate_trial(
                 print(f"fixed head: cv={cv_weight} dd={dd_weight} ct={ct_weight}", flush=True)
         try:
             with torch.no_grad(), autocast:
-                if os.environ.get("ICF_TRAINING_FREE") == "1" or os.environ.get("ICF_FIXED_HEAD_BM_WEIGHT") is not None:
-                    from src.models.training_free import TrainingFreeClassifier, TrainingFreeConfig
-                    cells_per_bag_val = os.environ.get("ICF_CT_CELLS", "0.125")
-                    try:
-                        cells_per_bag_parsed = float(cells_per_bag_val)
-                    except ValueError:
-                        cells_per_bag_parsed = None if cells_per_bag_val == "all" else 64
-                    pca_dim_val = os.environ.get("ICF_CT_PCA_DIM", "32")
-                    pca_dim_parsed = int(pca_dim_val) if pca_dim_val.isdigit() else None
+                logits = stream_lineage_forward(
+                    model.model, episode_bags, episode_y, query_index, device
+                )
+                bm_weight = float(os.environ.get("ICF_FIXED_HEAD_BM_WEIGHT", "0.0"))
+                if bm_weight != 0.0:
+                    bm_dim = int(os.environ.get("ICF_BM_DIM", "32"))
+                    bm_lambda = float(os.environ.get("ICF_BM_LAMBDA", "1.0"))
+                    basis = inner._effective_covariance_projection()
+                    dim = min(bm_dim, basis.shape[1])
+                    bm_basis = basis[:, :dim].float()
 
-                    cfg = TrainingFreeConfig(
-                        sketch_dim=int(os.environ.get("ICF_SKETCH_DIM", "256")),
-                        ridge_lambda=float(os.environ.get("ICF_RIDGE_LAMBDA", "1.0")),
-                        ridge_scale=float(os.environ.get("ICF_RIDGE_SCALE", "2.0")),
-                        dd_ordered_typicality=bool(os.environ.get("ICF_DD_ORDERED_TYPICALITY", "1") == "1"),
-                        dd_kappa=float(os.environ.get("ICF_DD_SEPARATION_FLOOR", "1.0")),
-                        ct_cells_per_bag=cells_per_bag_parsed,
-                        ct_cells_scale=os.environ.get("ICF_CT_CELLS_SCALE", "own"),
-                        ct_cells_min=int(os.environ.get("ICF_CT_CELLS_MIN", "64")),
-                        ct_abundance_cells=os.environ.get("ICF_CT_ABUNDANCE_CELLS", "match"),
-                        ct_sampling=os.environ.get("ICF_CT_SAMPLING", "random"),
-                        ct_sampling_seed=int(os.environ.get("ICF_CT_SAMPLING_SEED", "0")),
-                        ct_num_tokens=int(os.environ.get("ICF_CT_TOKENS", "256")),
-                        ct_tokenizer=os.environ.get("ICF_CT_TOKENIZER", "kmeans_plusplus"),
-                        ct_kmeans_max_iterations=int(os.environ.get("ICF_CT_KMEANS_MAX_ITER", "8")),
-                        ct_readout=os.environ.get("ICF_CT_READOUT", "ridge"),
-                        ct_pca_dim=pca_dim_parsed,
-                        cv_blocks=os.environ.get("ICF_CV_BLOCKS", "offdiag"),
-                        weight_cv=float(os.environ.get("ICF_FIXED_HEAD_CV_WEIGHT", "1.0")),
-                        weight_dd=float(os.environ.get("ICF_FIXED_HEAD_DD_WEIGHT", "1.0")),
-                        weight_ct=float(os.environ.get("ICF_FIXED_HEAD_CT_WEIGHT", "1.0")),
-                        weight_bm=float(os.environ.get("ICF_FIXED_HEAD_BM_WEIGHT", "0.0")),
-                        bm_dim=int(os.environ.get("ICF_BM_DIM", "32")),
-                        bm_lambda=float(os.environ.get("ICF_BM_LAMBDA", "1.0")),
-                    )
-                    classifier = TrainingFreeClassifier(cfg)
-                    context_bags = [b.to(device) for b in episode_bags[:n_context]]
-                    context_labels = episode_y[:n_context].to(device)
-                    query_bags = [episode_bags[i].to(device) for i in query_index.tolist()]
-                    margins = classifier.margins(context_bags, context_labels, query_bags)
-                    logits = torch.stack((-0.5 * margins, 0.5 * margins), dim=-1)
-                else:
-                    # Official / generic models have no aggregator. Keep the
-                    # tiles on CPU and stream one bag through `_descriptors`
-                    # so LUAD's 21 GiB of fp32 cells never sit on the GPU.
-                    logits = stream_lineage_forward(
-                        model.model, episode_bags, episode_y, query_index, device
-                    )
+                    def get_bag_mean(b):
+                        if bag_stats_cache is not None and id(b) in bag_stats_cache:
+                            stats = bag_stats_cache[id(b)]
+                            return (stats.mean if hasattr(stats, 'mean') else stats[1]).to(device).float()
+                        return b.float().mean(dim=0).to(device)
+
+                    ctx_means = torch.stack([get_bag_mean(b) for b in episode_bags[:n_context]]) @ bm_basis
+                    qry_means = torch.stack([get_bag_mean(episode_bags[i]) for i in query_index.tolist()]) @ bm_basis
+
+                    labels = episode_y[:n_context].long().to(device)
+                    targets = torch.nn.functional.one_hot(labels, 2).float()
+                    counts = torch.bincount(labels, minlength=2)
+                    weight = counts.float().reciprocal()[labels]
+                    total = weight.sum().clamp_min(1e-12)
+                    feature_mean = (weight[:, None] * ctx_means).sum(0, keepdim=True) / total
+                    target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
+                    root = weight.sqrt()[:, None]
+
+                    design = (ctx_means - feature_mean) * root
+                    centred_targets = (targets - target_mean) * root
+
+                    gram_f32 = (design @ design.T).float()
+                    targets_f32 = centred_targets.float()
+                    size = gram_f32.shape[-1]
+                    identity = torch.eye(size, device=device, dtype=torch.float32)
+                    jitter = 0.0
+                    dual = None
+                    for _ in range(6):
+                        try:
+                            factor = torch.linalg.cholesky(gram_f32 + (bm_lambda + jitter) * identity)
+                            dual = torch.cholesky_solve(targets_f32, factor)
+                            break
+                        except RuntimeError:
+                            jitter = max(jitter * 10.0, 1e-6 * float(gram_f32.diagonal().abs().mean()) + 1e-12)
+                    if dual is None:
+                        dual = torch.linalg.lstsq(gram_f32 + (bm_lambda + jitter) * identity, targets_f32).solution
+
+                    coefficients = design.T @ dual
+                    intercept = target_mean - feature_mean @ coefficients
+                    bm_logits = qry_means @ coefficients + intercept
+                    bm_margin = bm_logits[:, 1] - bm_logits[:, 0]
+
+                    logits = logits.clone()
+                    logits[:, 0] -= 0.5 * bm_weight * bm_margin
+                    logits[:, 1] += 0.5 * bm_weight * bm_margin
         finally:
             if basis_mode in ("pca", "pca_within") and saved_projection is not None:
                 inner._effective_covariance_projection = saved_projection
