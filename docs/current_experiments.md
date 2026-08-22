@@ -19,28 +19,16 @@
 | **§195 5-Branch Logit Caching & Voting 분석** | 4-GPU 50-fold에서 5개 브랜치 로짓 저장 및 4대 Voting 전수 검증 | DD 단독 Macro 0.4994로 노이즈 확인. Soft Voting 효과 입증 | **분석 완료** |
 | **§196 DD 제거 (v117)** | 4-Branch Linear Sum (CV + CT + BM + BD, $w_{DD}=0.0$) | Macro **0.6191** (+0.0072 vs v116, 5/7 과제 승리) | **v117 영구 보존** |
 | **§196 4-Branch Soft Voting (v118)** | 4-Branch Soft Voting ($P = \frac{1}{4}\sum \sigma(M_b)$, $w_{DD}=0.0$) | Macro **0.6205** (+0.0086 vs v116, 6/7 과제 승리) | **v118 공식 승격** 🚀 |
+| **§197 v118 SEAL 10 홀드아웃 검증** | 4-GPU로 SEAL 10개 과제(50-fold) 독립 교차 검증 | SEAL 10 Macro **0.7011** (프로젝트 사상 최초 0.70 돌파) | **검증 완료** 🏆 |
 
 ---
 
 ## 2. 활성 실험 큐 (Active Experiment Queue)
 
-### [Exp 1] v118 Hold-out 10-Task (SEAL 10) 독립 교차 검증 (준비 완료)
-- **목적**: Primary 7-Task에서 승격된 **v118 (Soft Voting: CV + CT + BM + BD)** 아키텍처의 홀드아웃 10개 과제(SEAL 10) 재현성 및 일반화 성능 검증.
-- **실행**:
-  ```bash
-  . scripts/node_env.sh
-  bash scripts/eval_v118.sh 0 v118_holdout10 \
-    bc_therapy/er_status bc_therapy/grade bc_therapy/her2_status \
-    cptac_brca/PIK3CA_mutation cptac_brca/TP53_mutation \
-    cptac_luad/EGFR_mutation cptac_luad/STK11_mutation cptac_luad/TP53_mutation \
-    cptac_ccrcc/BAP1_mutation cptac_ccrcc/VHL_mutation
-  ```
-
----
-
-### [Exp 2] [Plan C] QA (Quantile / Tail Abundance) 브랜치 연구
+### [Exp 1] [Plan C] QA (Quantile / Tail Abundance) 브랜치 연구
 - **가설**: 종양 특이적 신호는 평균 조성비(CT)뿐 아니라, 특정 기준 방향으로 가장 멀리 떨어진 **극단값 세포(Tail 5% or 95th percentile)**에 집중되어 있을 수 있다.
 - **기대 효과**: 희귀한 고등급 종양 세포 클론의 존재 유무를 1차/2차/스펙트럼 통계와 독립적으로 탐지.
+
 
 ---
 

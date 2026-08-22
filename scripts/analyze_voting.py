@@ -38,6 +38,19 @@ PRIMARY_7_TASKS = [
     "cptac_ccrcc_PBRM1_mutation",
 ]
 
+SEAL_10_TASKS = [
+    "bc_therapy_er_status",
+    "bc_therapy_grade",
+    "bc_therapy_her2_status",
+    "cptac_brca_PIK3CA_mutation",
+    "cptac_brca_TP53_mutation",
+    "cptac_luad_EGFR_mutation",
+    "cptac_luad_STK11_mutation",
+    "cptac_luad_TP53_mutation",
+    "cptac_ccrcc_BAP1_mutation",
+    "cptac_ccrcc_VHL_mutation",
+]
+
 
 def evaluate_file(path: Path) -> dict[str, float]:
     data = torch.load(path, map_location="cpu", weights_only=False)
@@ -46,14 +59,13 @@ def evaluate_file(path: Path) -> dict[str, float]:
         results = {k: v for k, v in enumerate(results) if v is not None}
 
     methods = [
+        "v118_soft",
+        "v117_linear",
         "v116_linear",
-        "soft_voting",
-        "zscore_voting",
+        "v116_soft",
         "median_voting",
         "rank_voting",
-        "no_dd_linear",
-        "no_dd_soft",
-        "weighted_linear",
+        "zscore_voting",
         "cv_only",
         "dd_only",
         "ct_only",
@@ -75,26 +87,39 @@ def evaluate_file(path: Path) -> dict[str, float]:
         m_bm = fold_data.get("m_bm")
         m_bd = fold_data.get("m_bd")
 
-        if m_cv is None or m_dd is None or m_ct is None or m_bm is None or m_bd is None:
+        if m_cv is None or m_ct is None or m_bm is None or m_bd is None:
             # Fallback to saved probability
             prob = fold_data["probability"].float()
             fa = compute_auroc(prob, label)
-            fold_scores["v116_linear"].append(fa)
+            fold_scores["v118_soft"].append(fa)
             continue
 
         m_cv = m_cv.float()
-        m_dd = -m_dd.float()  # Align: slot 4/5 in head is (d1 - d0)
-        m_ct = -m_ct.float()  # Align: slot 8/9 in head is (q1 - q0)
+        m_dd = m_dd.float() if m_dd is not None else torch.zeros_like(m_cv)
+        m_ct = m_ct.float()
         m_bm = m_bm.float()
         m_bd = m_bd.float()
         n = len(label)
 
-        # 0. v116 Linear Sum
-        m_lin = m_cv + m_dd + m_ct + m_bm + m_bd
-        p_lin = torch.sigmoid(m_lin)
 
-        # 1. Soft Voting (Probability Average)
-        p_soft = (
+        # 1. v118 Soft Voting (Active Baseline: 4-branch CV + CT + BM + BD)
+        p_v118 = (
+            torch.sigmoid(m_cv)
+            + torch.sigmoid(m_ct)
+            + torch.sigmoid(m_bm)
+            + torch.sigmoid(m_bd)
+        ) / 4.0
+
+        # 2. v117 Linear Sum (4-branch: CV + CT + BM + BD)
+        m_v117 = m_cv + m_ct + m_bm + m_bd
+        p_v117 = torch.sigmoid(m_v117)
+
+        # 3. v116 Linear Sum (5-branch: CV + DD + CT + BM + BD)
+        m_v116 = m_cv + m_dd + m_ct + m_bm + m_bd
+        p_v116 = torch.sigmoid(m_v116)
+
+        # 4. v116 Soft Voting (5-branch)
+        p_v116_soft = (
             torch.sigmoid(m_cv)
             + torch.sigmoid(m_dd)
             + torch.sigmoid(m_ct)
@@ -102,20 +127,12 @@ def evaluate_file(path: Path) -> dict[str, float]:
             + torch.sigmoid(m_bd)
         ) / 5.0
 
-        # 2. Z-Score Calibrated Voting
-        def zscore(x):
-            std = x.std(unbiased=False).clamp_min(1e-6)
-            return (x - x.mean()) / std
-
-        m_z = zscore(m_cv) + zscore(m_dd) + zscore(m_ct) + zscore(m_bm) + zscore(m_bd)
-        p_z = torch.sigmoid(m_z)
-
-        # 3. Median Voting
+        # 5. Median Voting (5-branch)
         stacked = torch.stack([m_cv, m_dd, m_ct, m_bm, m_bd], dim=-1)
         m_med = torch.median(stacked, dim=-1).values
         p_med = torch.sigmoid(m_med)
 
-        # 4. Percentile Rank Voting
+        # 6. Percentile Rank Voting (4-branch)
         def rank_score(x):
             order = torch.argsort(x)
             ranks = torch.empty_like(x)
@@ -124,36 +141,26 @@ def evaluate_file(path: Path) -> dict[str, float]:
 
         p_rank = (
             rank_score(m_cv)
-            + rank_score(m_dd)
             + rank_score(m_ct)
             + rank_score(m_bm)
             + rank_score(m_bd)
-        ) / 5.0
-
-        # 5. No-DD Linear (4-branch: CV + CT + BM + BD)
-        m_no_dd = m_cv + m_ct + m_bm + m_bd
-        p_no_dd = torch.sigmoid(m_no_dd)
-
-        # 6. No-DD Soft Voting (4-branch: CV, CT, BM, BD)
-        p_no_dd_soft = (
-            torch.sigmoid(m_cv)
-            + torch.sigmoid(m_ct)
-            + torch.sigmoid(m_bm)
-            + torch.sigmoid(m_bd)
         ) / 4.0
 
-        # 7. Weighted Linear (CV=1.0, DD=0.5, CT=1.0, BM=1.0, BD=1.0)
-        m_weighted = 1.0 * m_cv + 0.5 * m_dd + 1.0 * m_ct + 1.0 * m_bm + 1.0 * m_bd
-        p_weighted = torch.sigmoid(m_weighted)
+        # 7. Z-Score Voting (4-branch)
+        def zscore(x):
+            std = x.std(unbiased=False).clamp_min(1e-6)
+            return (x - x.mean()) / std
 
-        fold_scores["v116_linear"].append(compute_auroc(p_lin, label))
-        fold_scores["soft_voting"].append(compute_auroc(p_soft, label))
-        fold_scores["zscore_voting"].append(compute_auroc(p_z, label))
+        m_z = zscore(m_cv) + zscore(m_ct) + zscore(m_bm) + zscore(m_bd)
+        p_z = torch.sigmoid(m_z)
+
+        fold_scores["v118_soft"].append(compute_auroc(p_v118, label))
+        fold_scores["v117_linear"].append(compute_auroc(p_v117, label))
+        fold_scores["v116_linear"].append(compute_auroc(p_v116, label))
+        fold_scores["v116_soft"].append(compute_auroc(p_v116_soft, label))
         fold_scores["median_voting"].append(compute_auroc(p_med, label))
         fold_scores["rank_voting"].append(compute_auroc(p_rank, label))
-        fold_scores["no_dd_linear"].append(compute_auroc(p_no_dd, label))
-        fold_scores["no_dd_soft"].append(compute_auroc(p_no_dd_soft, label))
-        fold_scores["weighted_linear"].append(compute_auroc(p_weighted, label))
+        fold_scores["zscore_voting"].append(compute_auroc(p_z, label))
         fold_scores["cv_only"].append(compute_auroc(m_cv, label))
         fold_scores["dd_only"].append(compute_auroc(m_dd, label))
         fold_scores["ct_only"].append(compute_auroc(m_ct, label))
@@ -179,16 +186,23 @@ def find_pt_file(base_dir: Path, task_name: str, tag: str) -> Path | None:
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze 5-branch voting mechanisms.")
-    parser.add_argument("--tag", type=str, default="v116_branch_logits", help="Evaluation tag")
+    parser.add_argument("--tag", type=str, default="v118_seal10", help="Evaluation tag")
+    parser.add_argument("--suite", type=str, default="seal10", choices=["primary7", "seal10", "all"], help="Benchmark suite")
     parser.add_argument("--dir", type=str, default="predictions", help="Directory with .pt files")
     args = parser.parse_args()
 
     dir_path = Path(args.dir)
-    print(f"=== Analyzing Voting & Ensembling Mechanisms for Tag: {args.tag} ===")
+    print(f"=== Analyzing Voting & Ensembling Mechanisms for Tag: {args.tag} (Suite: {args.suite}) ===")
+
+    task_list = (
+        PRIMARY_7_TASKS if args.suite == "primary7"
+        else SEAL_10_TASKS if args.suite == "seal10"
+        else PRIMARY_7_TASKS + SEAL_10_TASKS
+    )
 
     task_results: dict[str, dict[str, float]] = {}
 
-    for task_name in PRIMARY_7_TASKS:
+    for task_name in task_list:
         pt_path = find_pt_file(dir_path, task_name, args.tag)
         if pt_path is None or not pt_path.exists():
             print(f"Warning: file for {task_name} with tag {args.tag} not found.")
@@ -202,14 +216,12 @@ def main():
 
     # Print Table
     methods = [
-        ("v116_linear", "v116 Linear"),
-        ("soft_voting", "Soft Voting (Prob)"),
-        ("zscore_voting", "Z-Score Voting"),
+        ("v118_soft", "v118 Soft (4B)"),
+        ("v117_linear", "v117 Linear (4B)"),
+        ("v116_linear", "v116 Linear (5B)"),
+        ("v116_soft", "v116 Soft (5B)"),
         ("median_voting", "Median Voting"),
         ("rank_voting", "Percentile Rank"),
-        ("no_dd_linear", "4-Branch (No-DD) Lin"),
-        ("no_dd_soft", "4-Branch (No-DD) Soft"),
-        ("weighted_linear", "Weighted (DD=0.5)"),
     ]
 
     header = f"| Task | " + " | ".join(name for _, name in methods) + " |"
@@ -217,7 +229,7 @@ def main():
     print("\n" + header)
     print(sep)
 
-    for task_name in PRIMARY_7_TASKS:
+    for task_name in task_list:
         if task_name not in task_results:
             continue
         res = task_results[task_name]
@@ -226,19 +238,11 @@ def main():
         print(row)
 
     # Macro Averages
-    macro_row = "| **Primary 7 Macro** | " + " | ".join(
+    macro_row = f"| **{args.suite.upper()} Macro** | " + " | ".join(
         f"**{sum(task_results[t][k] for t in task_results)/len(task_results):.4f}**"
         for k, _ in methods
     ) + " |"
     print(macro_row)
-
-    # Delta vs Linear
-    linear_macro = sum(task_results[t]["v116_linear"] for t in task_results) / len(task_results)
-    delta_row = "| *Delta vs Linear* | " + " | ".join(
-        f"*{sum(task_results[t][k] for t in task_results)/len(task_results) - linear_macro:+.4f}*"
-        for k, _ in methods
-    ) + " |"
-    print(delta_row)
 
     # Standalone Branches Table
     standalones = [
@@ -248,12 +252,12 @@ def main():
         ("bm_only", "BM alone"),
         ("bd_only", "BD alone"),
     ]
-    print("\n\n### Standalone Branch Performance (Single Branch AUROC)")
+    print(f"\n\n### Standalone Branch Performance ({args.suite.upper()} Single Branch AUROC)")
     st_header = f"| Task | " + " | ".join(name for _, name in standalones) + " |"
     st_sep = "| :--- | " + " | ".join(":---:" for _ in standalones) + " |"
     print(st_header)
     print(st_sep)
-    for task_name in PRIMARY_7_TASKS:
+    for task_name in task_list:
         if task_name not in task_results:
             continue
         res = task_results[task_name]
@@ -261,7 +265,7 @@ def main():
         row = f"| `{short_name}` | " + " | ".join(f"{res[k]:.4f}" for k, _ in standalones) + " |"
         print(row)
 
-    st_macro = "| **Primary 7 Macro** | " + " | ".join(
+    st_macro = f"| **{args.suite.upper()} Macro** | " + " | ".join(
         f"**{sum(task_results[t][k] for t in task_results)/len(task_results):.4f}**"
         for k, _ in standalones
     ) + " |"
