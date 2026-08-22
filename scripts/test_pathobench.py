@@ -1266,6 +1266,113 @@ def evaluate_trial(
                     logits[:, 0] -= 0.5 * qa_weight * qa_margin
                     logits[:, 1] += 0.5 * qa_weight * qa_margin
 
+                ds_weight = float(os.environ.get("ICF_FIXED_HEAD_DS_WEIGHT", "0.0"))
+                if ds_weight != 0.0:
+                    ds_dim = int(os.environ.get("ICF_DS_DIM", "32"))
+                    ds_lambda = float(os.environ.get("ICF_DS_LAMBDA", "1.0"))
+                    ds_temperature = float(os.environ.get("ICF_DS_TEMPERATURE", "1.0"))
+                    ds_tokens = int(os.environ.get("ICF_DS_TOKENS", "256"))
+                    basis = inner._effective_covariance_projection()
+                    dim = min(ds_dim, basis.shape[1])
+                    ds_basis = basis[:, :dim].float()
+
+                    # 1. Project all context and query bags
+                    ctx_proj = [(b.float().to(device) @ ds_basis).float() for b in episode_bags[:n_context]]
+                    qry_proj = [(episode_bags[i].float().to(device) @ ds_basis).float() for i in query_index.tolist()]
+
+                    # 2. Select K centroids from context cells
+                    sampled_cells = []
+                    for p in ctx_proj:
+                        n_c = p.shape[0]
+                        if n_c > 0:
+                            idx = torch.linspace(0, n_c - 1, min(n_c, 64), device=device).long()
+                            sampled_cells.append(p[idx])
+                    all_c = torch.cat(sampled_cells, dim=0) if sampled_cells else torch.zeros(1, dim, device=device)
+                    K = min(ds_tokens, all_c.shape[0])
+                    if all_c.shape[0] > K:
+                        stride = all_c.shape[0] / K
+                        centroids = all_c[(torch.arange(K, device=device) * stride).long()]
+                    else:
+                        centroids = all_c
+                    centroids = torch.nn.functional.normalize(centroids, dim=-1)
+
+                    # 3. Soft cluster assignments
+                    def get_ds_assignments(proj_bags):
+                        abundances = []
+                        patch_assignments = []
+                        for p in proj_bags:
+                            p_norm = torch.nn.functional.normalize(p, dim=-1)
+                            sim = p_norm @ centroids.T
+                            soft_p = torch.nn.functional.softmax(sim * 5.0, dim=-1)
+                            a = soft_p.mean(dim=0)
+                            abundances.append(a)
+                            patch_assignments.append(soft_p)
+                        return torch.stack(abundances), patch_assignments
+
+                    ctx_abundances, ctx_assignments = get_ds_assignments(ctx_proj)
+                    qry_abundances, qry_assignments = get_ds_assignments(qry_proj)
+
+                    # 4. Salience log-odds
+                    eps = 1e-5
+                    labels = episode_y[:n_context].long().to(device)
+                    mask1 = (labels == 1)
+                    mask0 = (labels == 0)
+                    a1 = ctx_abundances[mask1].mean(dim=0) if mask1.any() else ctx_abundances.mean(dim=0)
+                    a0 = ctx_abundances[mask0].mean(dim=0) if mask0.any() else ctx_abundances.mean(dim=0)
+                    s = torch.log((a1 + eps) / (a0 + eps))
+                    s_abs = s.abs()
+
+                    # 5. Denoised bag mean
+                    def extract_denoised_mean(proj_bags, assignments):
+                        feats = []
+                        for p, soft_p in zip(proj_bags, assignments):
+                            u = soft_p @ s_abs
+                            u_std = u.std().clamp_min(1e-6)
+                            w = torch.nn.functional.softmax(ds_temperature * (u - u.mean()) / u_std, dim=0)
+                            z_denoised = (w.unsqueeze(-1) * p).sum(dim=0)
+                            feats.append(z_denoised)
+                        return torch.stack(feats)
+
+                    ctx_ds = extract_denoised_mean(ctx_proj, ctx_assignments)
+                    qry_ds = extract_denoised_mean(qry_proj, qry_assignments)
+
+                    # 6. Class-balanced ridge
+                    targets = torch.nn.functional.one_hot(labels, 2).float()
+                    counts = torch.bincount(labels, minlength=2)
+                    weight = counts.float().reciprocal()[labels]
+                    total = weight.sum().clamp_min(1e-12)
+                    feature_mean = (weight[:, None] * ctx_ds).sum(0, keepdim=True) / total
+                    target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
+                    root = weight.sqrt()[:, None]
+
+                    design = (ctx_ds - feature_mean) * root
+                    centred_targets = (targets - target_mean) * root
+
+                    gram_f32 = (design @ design.T).float()
+                    targets_f32 = centred_targets.float()
+                    size = gram_f32.shape[-1]
+                    identity = torch.eye(size, device=device, dtype=torch.float32)
+                    jitter = 0.0
+                    dual = None
+                    for _ in range(6):
+                        try:
+                            factor = torch.linalg.cholesky(gram_f32 + (ds_lambda + jitter) * identity)
+                            dual = torch.cholesky_solve(targets_f32, factor)
+                            break
+                        except RuntimeError:
+                            jitter = max(jitter * 10.0, 1e-6 * float(gram_f32.diagonal().abs().mean()) + 1e-12)
+                    if dual is None:
+                        dual = torch.linalg.lstsq(gram_f32 + (ds_lambda + jitter) * identity, targets_f32).solution
+
+                    coefficients = design.T @ dual
+                    intercept = target_mean - feature_mean @ coefficients
+                    ds_logits = qry_ds @ coefficients + intercept
+                    ds_margin = ds_logits[:, 1] - ds_logits[:, 0]
+
+                    logits = logits.clone()
+                    logits[:, 0] -= 0.5 * ds_weight * ds_margin
+                    logits[:, 1] += 0.5 * ds_weight * ds_margin
+
         finally:
             if basis_mode in ("pca", "pca_within") and saved_projection is not None:
                 inner._effective_covariance_projection = saved_projection
@@ -1295,6 +1402,7 @@ def evaluate_trial(
         m_bm = bm_margin.detach() if ("bm_margin" in locals() and bm_margin is not None) else torch.zeros(len(test_ids), device=device)
         m_bd = bd_margin.detach() if ("bd_margin" in locals() and bd_margin is not None) else torch.zeros(len(test_ids), device=device)
         m_qa = qa_margin.detach() if ("qa_margin" in locals() and qa_margin is not None) else torch.zeros(len(test_ids), device=device)
+        m_ds = ds_margin.detach() if ("ds_margin" in locals() and ds_margin is not None) else torch.zeros(len(test_ids), device=device)
 
         if aggregation == "trimmed_mean":
             active_probs = []
@@ -1310,6 +1418,8 @@ def evaluate_trial(
                 active_probs.append(torch.sigmoid(m_bd.float()))
             if qa_weight != 0.0:
                 active_probs.append(torch.sigmoid(m_qa.float()))
+            if ds_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_ds.float()))
 
             if len(active_probs) >= 3:
                 stacked = torch.stack(active_probs, dim=-1)
@@ -1335,6 +1445,8 @@ def evaluate_trial(
                 active_pairs.append((bd_weight, m_bd))
             if qa_weight != 0.0:
                 active_pairs.append((qa_weight, m_qa))
+            if ds_weight != 0.0:
+                active_pairs.append((ds_weight, m_ds))
 
             if active_pairs:
                 total_weight = sum(w for w, _ in active_pairs)
@@ -1343,7 +1455,6 @@ def evaluate_trial(
                 scores = torch.softmax(logits.float(), dim=-1)[:, 1]
         else:
             scores = torch.softmax(logits.float(), dim=-1)[:, 1]
-
 
         nan_count = int(torch.isnan(scores).sum())
         probabilities = [float(value) for value in scores]
@@ -1354,6 +1465,8 @@ def evaluate_trial(
         m_bm = m_bm.cpu()
         m_bd = m_bd.cpu()
         m_qa = m_qa.cpu()
+        m_ds = m_ds.cpu()
+
 
 
 
@@ -1491,7 +1604,9 @@ def evaluate_trial(
         "m_bm": m_bm[valid] if ("m_bm" in locals() and isinstance(m_bm, torch.Tensor)) else None,
         "m_bd": m_bd[valid] if ("m_bd" in locals() and isinstance(m_bd, torch.Tensor)) else None,
         "m_qa": m_qa[valid] if ("m_qa" in locals() and isinstance(m_qa, torch.Tensor)) else None,
+        "m_ds": m_ds[valid] if ("m_ds" in locals() and isinstance(m_ds, torch.Tensor)) else None,
     }
+
 
 
 
@@ -1736,7 +1851,9 @@ def evaluate_official_folds(
             "m_bm": result.get("m_bm"),
             "m_bd": result.get("m_bd"),
             "m_qa": result.get("m_qa"),
+            "m_ds": result.get("m_ds"),
         }
+
 
 
         print(f"  fold {k + 1}/{total_folds}: AUROC {fa:.4f}  n_query {len(probability)}", flush=True)

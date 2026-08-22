@@ -374,6 +374,69 @@ _by Gemini 3.7 Flash (High) on gnode3 at 2026-08-22 19:15:00_
 
 _by Gemini 3.7 Flash (High) on gnode3 at 2026-08-22 22:25:00_
 
+---
+
+## §201. DS (In-Context Salience Denoising) Branch 구현 및 v120 공식 승격 (2026-08-22 23:45)
+
+### 1. 배경 및 설계 동기
+- **가설**: 10,000개 패치 중 95%의 정상 조직(기질/지방)이 전역 평균을 희석하여 ABMIL 대비 유전자 변이 탐지력을 저하시킴.
+- **수학적 설계**:
+  1. Context 슬라이드들의 K-means($K=256$) 클러스터 점유율로부터 클래스 간 로그 승산비(Log-Odds) 산출:
+     $$s_k = \log \left( \frac{\bar{a}_k^{(1)} + \epsilon}{\bar{a}_k^{(0)} + \epsilon} \right), \quad \sigma_k = |s_k|$$
+  2. 각 슬라이드의 모든 패치에 대해 Discriminative Salience 가중치 부여:
+     $$u_{i,j} = \sum_{k=1}^K p_{j,k} \cdot \sigma_k, \quad w_{i,j} = \operatorname{softmax}(\beta \cdot \tilde{u}_{i,j}), \quad \mathbf{z}_i^{DS} = \sum_{j=1}^{N_i} w_{i,j} \cdot x_{i,j} \in \mathbb{R}^{32}$$
+  3. Class-Balanced Dual Ridge ($\lambda=1.0$) Readout 적용 $\to M_{DS} \in \mathbb{R}$.
+  4. 엄격한 라벨 반전 대칭성($y \to 1-y \implies M_{DS} \to -M_{DS}$) 수학적 입증 및 단위 테스트 통과.
+
+### 2. Primary 7-Task 50-fold 실측 결과
+
+| 과제 (Task) | DS alone (신규) | v118 Base (4B) | v119 Base (5B Trim) | **v120 Final (6B Trimmed)** | $\Delta$ (vs v119) |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| `cptac_lscc / ARID1A` | **`0.5830`** | 0.5484 | 0.5353 | **`0.5471`** | **+0.0118** 🏆 |
+| `cptac_lscc / Histologic_Grade` | **`0.6927`** | 0.6616 | 0.6771 | **`0.6823`** | **+0.0052** 🏆 |
+| `cptac_lscc / KEAP1` | 0.5751 | 0.6265 | 0.6140 | **`0.6129`** | -0.0011 |
+| `cptac_luad / KRAS` | 0.6434 | 0.7310 | 0.7364 | **`0.7295`** | -0.0069 |
+| `cptac_pda / SMAD4` | 0.4441 | 0.4615 | 0.4478 | **`0.4465`** | -0.0013 |
+| `ucla_lung / progression` | **`0.7932`** | 0.7733 | 0.7908 | **`0.7986`** | **+0.0078** 🏆 |
+| `cptac_ccrcc / PBRM1` | 0.5196 | 0.5412 | 0.5715 | **`0.5685`** | -0.0030 |
+| **PRIMARY 7 MACRO** | **`0.6073`** | **0.6205** | **0.6247** | **`0.6265`** | **`+0.0018`** |
+
+### 3. SEAL 10-Task 50-fold 공식 비교표 (Supervised vs v120)
+
+| # | 과제 (Task) | Supervised ABMIL | Supervised MeanMIL | v119 Final (5B) | **v120 Final (6B Trimmed)** | vs ABMIL | vs MeanMIL | v120 성과 |
+| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| 1 | `bc_therapy/er_status` | 0.717 | 0.712 | 0.6945 | **0.6825 ± 0.0966** | -0.0345 | -0.0295 | - |
+| 2 | `bc_therapy/grade` | 0.770 | 0.751 | 0.7382 | **0.7414 ± 0.0639** | -0.0286 | -0.0096 | - |
+| 3 | `bc_therapy/her2_status` | 0.663 | 0.684 | 0.6746 | **0.6700 ± 0.0760** | **+0.0070** | -0.0140 | **ABMIL 승** 🏆 |
+| 4 | `cptac_brca/PIK3CA_mutation` | 0.595 | 0.544 | 0.5377 | **0.5466 ± 0.1425** | -0.0484 | **+0.0026** | **MeanMIL 승** 🏆 |
+| 5 | `cptac_brca/TP53_mutation` | 0.801 | 0.787 | 0.7900 | **0.7928 ± 0.0879** | -0.0082 | **+0.0058** | **MeanMIL 승** 🏆 |
+| 6 | `cptac_luad/EGFR_mutation` | 0.830 | 0.777 | 0.7668 | **0.7604 ± 0.0927** | -0.0696 | -0.0166 | - |
+| 7 | `cptac_luad/STK11_mutation` | 0.908 | 0.873 | 0.8772 | **0.8801 ± 0.0868** | -0.0279 | **+0.0071** | **MeanMIL 승** 🏆 |
+| 8 | `cptac_luad/TP53_mutation` | 0.751 | 0.735 | 0.6967 | **0.6911 ± 0.0985** | -0.0599 | -0.0439 | - |
+| 9 | `cptac_ccrcc/BAP1_mutation` | 0.693 | 0.720 | 0.7042 | **0.6871 ± 0.1222** | -0.0059 | -0.0329 | - |
+| 10 | `cptac_ccrcc/VHL_mutation` | 0.538 | 0.542 | 0.5134 | **0.5195 ± 0.1576** | -0.0185 | -0.0225 | - |
+| **Macro** | **SEAL 10-Task Mean** | **0.7266** | **0.7125** | **0.6993** | **`0.6972`** | **-0.0294** | **-0.0153** | **MeanMIL 승 3개, ABMIL 승 1개** |
+
+### 4. 전체 17개 과제 종합 요약
+- **Primary 7-Task Macro**: **`0.6265`** (v119 0.6247 대비 **+0.0018**, v118 0.6205 대비 **+0.0060**)
+- **SEAL 10-Task Macro**: **`0.6972`**
+- **All 17-Task Total Macro**: **`0.6681`**
+
+### 5. v120 아키텍처 확정 및 승격 (사용자 결정)
+- **Active 6 Branches**:
+  - $M_{CV}$: PCA-256 Off-Diagonal Covariance Ridge ($w=1.0$)
+  - $M_{CT}$: PCA-32 K256 Soft Abundance Ridge ($w=1.0$)
+  - $M_{BM}$: PCA-32 Bag-Mean Ridge ($w=1.0$)
+  - $M_{BD}$: Top-256 Spectral Entropy Ordered-Typicality ($w=1.0$)
+  - $M_{QA}$: PCA-32 Quantile & Extremum Evidence Ridge ($w=1.0$)
+  - $M_{DS}$: PCA-32 Salience Denoised Bag-Mean Ridge ($w=1.0$)
+  - $M_{DD}$: OFF ($w=0.0$)
+- **Aggregation Head**: 6-Branch Trimmed Mean Voting (최고/최저 2개 절사, 중앙 4개 평균)
+
+_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-23 00:25:00_
+
+
+
 
 
 

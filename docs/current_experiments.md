@@ -3,10 +3,10 @@
 **Last updated**: `2026-08-22 21:30:00`
 
 > [!IMPORTANT]
-> **활성 baseline = v119** (`docs/current_status.md` §200, 사용자 결정). 학습 파라미터 0, 완전 결정론적(Deterministic).
-> **아키텍처**: 5-Branch (CV + CT + BM + BD + QA, $w_{DD}=0.0$) + Trimmed Mean Voting
+> **활성 baseline = v120** (`docs/current_status.md` §201, 사용자 결정). 학습 파라미터 0, 완전 결정론적(Deterministic).
+> **아키텍처**: 6-Branch (CV + CT + BM + BD + QA + DS, $w_{DD}=0.0$) + Trimmed Mean Voting
 > ⚠️ **판정 프로토콜**: **Primary Benchmark (7 tasks)** 가 주 판정 기준이며, **Hold-out Validation (SEAL 10 tasks)** 는 독립 교차 검증용이다.
-> 실행: `bash scripts/eval_v119.sh <gpu> <tag> [tasks...]` (기본: Primary 7 tasks)
+> 실행: `bash scripts/eval_v120.sh <gpu> <tag> [tasks...]` (기본: Primary 7 tasks)
 > 
 > ⚠️ **판정 규칙 종합 SSOT**: [`docs/current_status.md` §0](current_status.md)을 준수할 것. 결정론적 arm에는 t·p·CI를 일절 쓰지 않으며, **Primary 7-task 부호 일치 수 ($\ge 5/7$)** 및 **Hold-out 10-task 동시 재현**으로 판정하고 최종 승격/기각은 **사용자 판단**이다.
 
@@ -16,11 +16,11 @@
 
 | 실험 | 가설 및 설정 | 결과 | 판정 |
 | :--- | :--- | :--- | :--- |
-| **§196 4-Branch Soft Voting (v118)** | 4-Branch Soft Voting ($P = \frac{1}{4}\sum \sigma(M_b)$, $w_{DD}=0.0$) | Macro **0.6205** (+0.0086 vs v116, 6/7 과제 승리) | **v118 공식 승격** 🚀 |
-| **§197 v118 SEAL 10 홀드아웃 검증** | 4-GPU로 SEAL 10개 과제(50-fold) 독립 교차 검증 | SEAL 10 Macro **0.7011** (프로젝트 사상 최초 0.70 돌파) | **검증 완료** 🏆 |
 | **§198 QA (Quantile Evidence) 실측** | 32 PCA 차원별 4대 분위수 $[Q_{0.05}, Q_{0.10}, Q_{0.90}, Q_{0.95}]$ Ridge | 단독 Progression **0.8068**, KRAS **0.7420**, Grade **0.6930** | **채택 완료** |
 | **§199 9대 Voting 전수 비교** | 5개 브랜치 기반 Soft/Linear/Median/Trimmed Mean/Rank/Z-score 비교 | Trimmed Mean 적용 시 최고 성능 달성 | **Trimmed Mean 채택** |
-| **§200 v119 공식 승격** | 5-Branch (CV + CT + BM + BD + QA) + Trimmed Mean Voting | Primary 7 **`0.6247`**, SEAL 10 **`0.6993`**, All 17 **`0.6686`** | **v119 공식 승격** 🚀 |
+| **§200 v119 공식 승격** | 5-Branch (CV + CT + BM + BD + QA) + Trimmed Mean Voting | Primary 7 **`0.6247`**, SEAL 10 **`0.6993`**, All 17 **`0.6686`** | **v119 공식 승격** |
+| **§201 DS (Salience Denoising) 실측** | 클래스 승산비(Log-Odds) 패치 가중치 기반 Denoised Bag-Mean Ridge | 단독 ARID1A **0.5830** (1위), 6-Branch Primary 7 **`0.6265`** | **v120 공식 승격** 🚀 |
+
 
 
 ---
