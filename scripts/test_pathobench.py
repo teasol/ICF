@@ -55,9 +55,12 @@ from src.models.stream_eval import (  # noqa: E402
     BagStatsCache,
     covariance_basis_from_bags,
     cpu_bag_mapping,
+    fisher_basis_from_bags,
     project_bags_to_cpu,
     stream_lineage_forward,
 )
+
+from src.models.training_free import _solve_kernel_ridge  # noqa: E402
 from src.utils.metrics import auroc, log_loss  # noqa: E402
 from src.utils.utils import (  # noqa: E402
     add_eval_precision_argument,
@@ -65,6 +68,7 @@ from src.utils.utils import (  # noqa: E402
     eval_autocast,
     merge_train_config,
 )
+
 
 MODEL_INPUT_DIM = 512
 FEATURE_DIM = 1536
@@ -473,33 +477,28 @@ def evaluate_trial(
         inner = model.model
         saved_projection = getattr(inner, "_effective_covariance_projection", None)
         saved_head = None
-        if basis_mode in ("pca", "pca_within"):
-            # `pca`        pools every context cell around one GLOBAL mean, so the
-            #              covariance carries both within-slide variation and the
-            #              between-slide mean differences. SS123-4 measured the
-            #              latter at ICC 31.6%, i.e. roughly a third of this
-            #              basis is spent on directions that merely tell slides
-            #              apart -- staining, scanner, patient -- which is
-            #              nuisance unless the task rides on it.
-            # `pca_within` centres each bag on its OWN mean before accumulating,
-            #              which drops the between-slide term exactly and leaves
-            #              sum_i n_i * C_i / sum_i n_i. SS138-5's hypothesis for why
-            #              pooled PCA loses on the full-tile path is that better
-            #              per-slide mean estimates sharpen the between-slide term
-            #              and pull the basis further toward it.
+        if basis_mode in ("pca", "pca_within", "fisher", "fisher_within"):
             with torch.no_grad():
-                # Stream one bag/chunk to `device`. The raw tiles stay on
-                # CPU; only the D x D scatter and the resulting K-basis
-                # reside on the GPU. Per-bag (n, mean, S) can be reused
-                # across official folds that share the same tensor objects.
-                pca = covariance_basis_from_bags(
-                    episode_bags[:n_context],
-                    basis_mode,
-                    inner.covariance_sketch_dim,
-                    device,
-                    cache=bag_stats_cache,
-                )
+                if basis_mode in ("fisher", "fisher_within"):
+                    shrinkage = float(os.environ.get("ICF_FISHER_SHRINKAGE", "0.1"))
+                    pca = fisher_basis_from_bags(
+                        episode_bags[:n_context],
+                        episode_y[:n_context],
+                        inner.covariance_sketch_dim,
+                        device,
+                        cache=bag_stats_cache,
+                        shrinkage=shrinkage,
+                    )
+                else:
+                    pca = covariance_basis_from_bags(
+                        episode_bags[:n_context],
+                        basis_mode,
+                        inner.covariance_sketch_dim,
+                        device,
+                        cache=bag_stats_cache,
+                    )
             inner._effective_covariance_projection = lambda b=pca: b
+
         # docs SS145. `ICF_SKETCH_DIM_DD` gives the DD branch its OWN K, so the K
         # effect measured in SS142 can be attributed to a branch instead of to
         # "the model". K enters two places and SS142 moved both at once:
@@ -760,11 +759,12 @@ def evaluate_trial(
                 ),
                 kmeans_seed=int(os.environ.get("ICF_CT_KMEANS_SEED", "0")),
             )
-            if ct_pca_dim is not None and basis_mode not in ("pca", "pca_within"):
+            if ct_pca_dim is not None and basis_mode not in ("pca", "pca_within", "fisher", "fisher_within"):
                 raise ValueError(
                     "ICF_CT_PCA_DIM reuses the CV branch's PCA basis, so it needs "
-                    "ICF_COVARIANCE_BASIS=pca or pca_within."
+                    "ICF_COVARIANCE_BASIS=pca, pca_within, or fisher."
                 )
+
             saved_ct_features = inner._ct_features
             calibrated = os.environ.get("ICF_CT_CALIBRATE", "1") == "1"
 
@@ -1067,38 +1067,20 @@ def evaluate_trial(
                     ctx_means = torch.stack([get_bag_mean(b) for b in episode_bags[:n_context]]) @ bm_basis
                     qry_means = torch.stack([get_bag_mean(episode_bags[i]) for i in query_index.tolist()]) @ bm_basis
 
+                    krr_kernel = os.environ.get("ICF_KRR_KERNEL", "linear")
+                    krr_gamma = float(os.environ["ICF_KRR_GAMMA"]) if "ICF_KRR_GAMMA" in os.environ else None
+                    krr_degree = int(os.environ.get("ICF_KRR_DEGREE", "2"))
+                    krr_coef0 = float(os.environ.get("ICF_KRR_COEF0", "1.0"))
+
                     labels = episode_y[:n_context].long().to(device)
-                    targets = torch.nn.functional.one_hot(labels, 2).float()
-                    counts = torch.bincount(labels, minlength=2)
-                    weight = counts.float().reciprocal()[labels]
-                    total = weight.sum().clamp_min(1e-12)
-                    feature_mean = (weight[:, None] * ctx_means).sum(0, keepdim=True) / total
-                    target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
-                    root = weight.sqrt()[:, None]
-
-                    design = (ctx_means - feature_mean) * root
-                    centred_targets = (targets - target_mean) * root
-
-                    gram_f32 = (design @ design.T).float()
-                    targets_f32 = centred_targets.float()
-                    size = gram_f32.shape[-1]
-                    identity = torch.eye(size, device=device, dtype=torch.float32)
-                    jitter = 0.0
-                    dual = None
-                    for _ in range(6):
-                        try:
-                            factor = torch.linalg.cholesky(gram_f32 + (bm_lambda + jitter) * identity)
-                            dual = torch.cholesky_solve(targets_f32, factor)
-                            break
-                        except RuntimeError:
-                            jitter = max(jitter * 10.0, 1e-6 * float(gram_f32.diagonal().abs().mean()) + 1e-12)
-                    if dual is None:
-                        dual = torch.linalg.lstsq(gram_f32 + (bm_lambda + jitter) * identity, targets_f32).solution
-
-                    coefficients = design.T @ dual
-                    intercept = target_mean - feature_mean @ coefficients
-                    bm_logits = qry_means @ coefficients + intercept
-                    bm_margin = bm_logits[:, 1] - bm_logits[:, 0]
+                    bm_margin = _solve_kernel_ridge(
+                        ctx_means, labels, qry_means,
+                        kernel=os.environ.get("ICF_BM_KERNEL", krr_kernel),
+                        gamma=krr_gamma,
+                        degree=krr_degree,
+                        coef0=krr_coef0,
+                        reg_lambda=bm_lambda,
+                    )
 
                     logits = logits.clone()
                     logits[:, 0] -= 0.5 * bm_weight * bm_margin
@@ -1147,10 +1129,8 @@ def evaluate_trial(
                         else:
                             raise ValueError(f"Unknown bd_metric: {bd_metric!r}")
 
-
                     ctx_v = torch.stack([get_bag_feature(b) for b in episode_bags[:n_context]])
                     qry_v = torch.stack([get_bag_feature(episode_bags[i]) for i in query_index.tolist()])
-
 
                     labels = episode_y[:n_context].long().to(device)
                     if bd_readout == "ordered_typicality":
@@ -1225,42 +1205,22 @@ def evaluate_trial(
                         q = torch.quantile(z, qa_quantiles, dim=0)
                         return q.flatten()
 
-
                     ctx_qas = torch.stack([extract_bag_quantiles(b) for b in episode_bags[:n_context]])
                     qry_qas = torch.stack([extract_bag_quantiles(episode_bags[i]) for i in query_index.tolist()])
 
                     labels = episode_y[:n_context].long().to(device)
-                    targets = torch.nn.functional.one_hot(labels, 2).float()
-                    counts = torch.bincount(labels, minlength=2)
-                    weight = counts.float().reciprocal()[labels]
-                    total = weight.sum().clamp_min(1e-12)
-                    feature_mean = (weight[:, None] * ctx_qas).sum(0, keepdim=True) / total
-                    target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
-                    root = weight.sqrt()[:, None]
-
-                    design = (ctx_qas - feature_mean) * root
-                    centred_targets = (targets - target_mean) * root
-
-                    gram_f32 = (design @ design.T).float()
-                    targets_f32 = centred_targets.float()
-                    size = gram_f32.shape[-1]
-                    identity = torch.eye(size, device=device, dtype=torch.float32)
-                    jitter = 0.0
-                    dual = None
-                    for _ in range(6):
-                        try:
-                            factor = torch.linalg.cholesky(gram_f32 + (qa_lambda + jitter) * identity)
-                            dual = torch.cholesky_solve(targets_f32, factor)
-                            break
-                        except RuntimeError:
-                            jitter = max(jitter * 10.0, 1e-6 * float(gram_f32.diagonal().abs().mean()) + 1e-12)
-                    if dual is None:
-                        dual = torch.linalg.lstsq(gram_f32 + (qa_lambda + jitter) * identity, targets_f32).solution
-
-                    coefficients = design.T @ dual
-                    intercept = target_mean - feature_mean @ coefficients
-                    qa_logits = qry_qas @ coefficients + intercept
-                    qa_margin = qa_logits[:, 1] - qa_logits[:, 0]
+                    krr_kernel = os.environ.get("ICF_KRR_KERNEL", "linear")
+                    krr_gamma = float(os.environ["ICF_KRR_GAMMA"]) if "ICF_KRR_GAMMA" in os.environ else None
+                    krr_degree = int(os.environ.get("ICF_KRR_DEGREE", "2"))
+                    krr_coef0 = float(os.environ.get("ICF_KRR_COEF0", "1.0"))
+                    qa_margin = _solve_kernel_ridge(
+                        ctx_qas, labels, qry_qas,
+                        kernel=os.environ.get("ICF_QA_KERNEL", krr_kernel),
+                        gamma=krr_gamma,
+                        degree=krr_degree,
+                        coef0=krr_coef0,
+                        reg_lambda=qa_lambda,
+                    )
 
                     logits = logits.clone()
                     logits[:, 0] -= 0.5 * qa_weight * qa_margin
@@ -1336,46 +1296,112 @@ def evaluate_trial(
                     ctx_ds = extract_denoised_mean(ctx_proj, ctx_assignments)
                     qry_ds = extract_denoised_mean(qry_proj, qry_assignments)
 
-                    # 6. Class-balanced ridge
-                    targets = torch.nn.functional.one_hot(labels, 2).float()
-                    counts = torch.bincount(labels, minlength=2)
-                    weight = counts.float().reciprocal()[labels]
-                    total = weight.sum().clamp_min(1e-12)
-                    feature_mean = (weight[:, None] * ctx_ds).sum(0, keepdim=True) / total
-                    target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
-                    root = weight.sqrt()[:, None]
-
-                    design = (ctx_ds - feature_mean) * root
-                    centred_targets = (targets - target_mean) * root
-
-                    gram_f32 = (design @ design.T).float()
-                    targets_f32 = centred_targets.float()
-                    size = gram_f32.shape[-1]
-                    identity = torch.eye(size, device=device, dtype=torch.float32)
-                    jitter = 0.0
-                    dual = None
-                    for _ in range(6):
-                        try:
-                            factor = torch.linalg.cholesky(gram_f32 + (ds_lambda + jitter) * identity)
-                            dual = torch.cholesky_solve(targets_f32, factor)
-                            break
-                        except RuntimeError:
-                            jitter = max(jitter * 10.0, 1e-6 * float(gram_f32.diagonal().abs().mean()) + 1e-12)
-                    if dual is None:
-                        dual = torch.linalg.lstsq(gram_f32 + (ds_lambda + jitter) * identity, targets_f32).solution
-
-                    coefficients = design.T @ dual
-                    intercept = target_mean - feature_mean @ coefficients
-                    ds_logits = qry_ds @ coefficients + intercept
-                    ds_margin = ds_logits[:, 1] - ds_logits[:, 0]
+                    # 6. Class-balanced kernel ridge
+                    krr_kernel = os.environ.get("ICF_KRR_KERNEL", "linear")
+                    krr_gamma = float(os.environ["ICF_KRR_GAMMA"]) if "ICF_KRR_GAMMA" in os.environ else None
+                    krr_degree = int(os.environ.get("ICF_KRR_DEGREE", "2"))
+                    krr_coef0 = float(os.environ.get("ICF_KRR_COEF0", "1.0"))
+                    ds_margin = _solve_kernel_ridge(
+                        ctx_ds, labels, qry_ds,
+                        kernel=os.environ.get("ICF_DS_KERNEL", krr_kernel),
+                        gamma=krr_gamma,
+                        degree=krr_degree,
+                        coef0=krr_coef0,
+                        reg_lambda=ds_lambda,
+                    )
 
                     logits = logits.clone()
                     logits[:, 0] -= 0.5 * ds_weight * ds_margin
                     logits[:, 1] += 0.5 * ds_weight * ds_margin
 
+                lr_weight = float(os.environ.get("ICF_FIXED_HEAD_LR_WEIGHT", "0.0"))
+                if lr_weight != 0.0:
+                    lr_dim = int(os.environ.get("ICF_LR_DIM", "32"))
+                    lr_lambda = float(os.environ.get("ICF_LR_LAMBDA", "1.0"))
+                    lr_tau = float(os.environ.get("ICF_LR_TAU", "5.0"))
+                    lr_topk_fraction = float(os.environ.get("ICF_LR_TOPK_FRACTION", "0.05"))
+                    lr_topk_min = int(os.environ.get("ICF_LR_TOPK_MIN", "4"))
+                    lr_topk_max = int(os.environ.get("ICF_LR_TOPK_MAX", "64"))
+                    lr_patches_per_ctx = int(os.environ.get("ICF_LR_PATCHES_PER_CTX", "64"))
+                    basis = inner._effective_covariance_projection()
+                    dim = min(lr_dim, basis.shape[1])
+                    lr_basis = basis[:, :dim].float()
+
+                    # 1. Project bags
+                    ctx_proj = [(b.float().to(device) @ lr_basis).float() for b in episode_bags[:n_context]]
+                    qry_proj = [(episode_bags[i].float().to(device) @ lr_basis).float() for i in query_index.tolist()]
+                    labels = episode_y[:n_context].long().to(device)
+
+                    # 2. Build Class 0 and Class 1 patch memory banks
+                    bank_0, bank_1 = [], []
+                    for p, y in zip(ctx_proj, labels):
+                        n_c = p.shape[0]
+                        if n_c == 0:
+                            continue
+                        n_sample = min(n_c, lr_patches_per_ctx)
+                        idx = torch.linspace(0, n_c - 1, n_sample, device=device).long()
+                        sampled = p[idx]
+                        if y == 1:
+                            bank_1.append(sampled)
+                        else:
+                            bank_0.append(sampled)
+
+                    if bank_0 and bank_1:
+                        P0 = torch.cat(bank_0, dim=0)
+                        P1 = torch.cat(bank_1, dim=0)
+                        P0_norm = torch.nn.functional.normalize(P0, dim=-1)
+                        P1_norm = torch.nn.functional.normalize(P1, dim=-1)
+
+                        def get_slide_lr_features(proj_bags):
+                            feats = []
+                            for bag in proj_bags:
+                                n_c = bag.shape[0]
+                                if n_c == 0:
+                                    feats.append(torch.zeros(dim + 1, device=device))
+                                    continue
+                                bag_norm = torch.nn.functional.normalize(bag, dim=-1)
+                                sim1 = bag_norm @ P1_norm.T
+                                sim0 = bag_norm @ P0_norm.T
+
+                                score1 = torch.logsumexp(sim1 * lr_tau, dim=-1) - torch.log(torch.tensor(P1_norm.shape[0], dtype=torch.float32, device=device))
+                                score0 = torch.logsumexp(sim0 * lr_tau, dim=-1) - torch.log(torch.tensor(P0_norm.shape[0], dtype=torch.float32, device=device))
+                                lr = score1 - score0
+
+                                k = max(lr_topk_min, min(lr_topk_max, int(n_c * lr_topk_fraction)))
+                                k = min(k, n_c)
+
+                                topk_vals, topk_idx = torch.topk(lr, k=k, largest=True)
+                                botk_vals, botk_idx = torch.topk(lr, k=k, largest=False)
+
+                                z_plus = bag[topk_idx].mean(dim=0)
+                                z_minus = bag[botk_idx].mean(dim=0)
+
+                                delta_z = z_plus - z_minus
+                                e_scalar = 0.5 * (topk_vals.mean() + botk_vals.mean())
+
+                                v_i = torch.cat([delta_z, e_scalar.unsqueeze(0)], dim=-1)
+                                feats.append(v_i)
+                            return torch.stack(feats)
+
+                        ctx_lr = get_slide_lr_features(ctx_proj)
+                        qry_lr = get_slide_lr_features(qry_proj)
+
+                        lr_margin = _solve_kernel_ridge(
+                            ctx_lr, labels, qry_lr,
+                            kernel="linear",
+                            reg_lambda=lr_lambda,
+                        )
+
+                        logits = logits.clone()
+                        logits[:, 0] -= 0.5 * lr_weight * lr_margin
+                        logits[:, 1] += 0.5 * lr_weight * lr_margin
+                    else:
+                        lr_margin = torch.zeros(len(query_index), device=device)
+
         finally:
-            if basis_mode in ("pca", "pca_within") and saved_projection is not None:
+            if basis_mode in ("pca", "pca_within", "fisher", "fisher_within") and saved_projection is not None:
                 inner._effective_covariance_projection = saved_projection
+
             if saved_head is not None:
                 with torch.no_grad():
                     inner.cv_dd_ct_head[0].weight.copy_(saved_head[0])
@@ -1403,6 +1429,7 @@ def evaluate_trial(
         m_bd = bd_margin.detach() if ("bd_margin" in locals() and bd_margin is not None) else torch.zeros(len(test_ids), device=device)
         m_qa = qa_margin.detach() if ("qa_margin" in locals() and qa_margin is not None) else torch.zeros(len(test_ids), device=device)
         m_ds = ds_margin.detach() if ("ds_margin" in locals() and ds_margin is not None) else torch.zeros(len(test_ids), device=device)
+        m_lr = lr_margin.detach() if ("lr_margin" in locals() and lr_margin is not None) else torch.zeros(len(test_ids), device=device)
 
         if aggregation == "trimmed_mean":
             active_probs = []
@@ -1420,6 +1447,8 @@ def evaluate_trial(
                 active_probs.append(torch.sigmoid(m_qa.float()))
             if ds_weight != 0.0:
                 active_probs.append(torch.sigmoid(m_ds.float()))
+            if lr_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_lr.float()))
 
             if len(active_probs) >= 3:
                 stacked = torch.stack(active_probs, dim=-1)
@@ -1447,6 +1476,8 @@ def evaluate_trial(
                 active_pairs.append((qa_weight, m_qa))
             if ds_weight != 0.0:
                 active_pairs.append((ds_weight, m_ds))
+            if lr_weight != 0.0:
+                active_pairs.append((lr_weight, m_lr))
 
             if active_pairs:
                 total_weight = sum(w for w, _ in active_pairs)
@@ -1466,6 +1497,8 @@ def evaluate_trial(
         m_bd = m_bd.cpu()
         m_qa = m_qa.cpu()
         m_ds = m_ds.cpu()
+        m_lr = m_lr.cpu()
+
 
 
 
@@ -1605,7 +1638,9 @@ def evaluate_trial(
         "m_bd": m_bd[valid] if ("m_bd" in locals() and isinstance(m_bd, torch.Tensor)) else None,
         "m_qa": m_qa[valid] if ("m_qa" in locals() and isinstance(m_qa, torch.Tensor)) else None,
         "m_ds": m_ds[valid] if ("m_ds" in locals() and isinstance(m_ds, torch.Tensor)) else None,
+        "m_lr": m_lr[valid] if ("m_lr" in locals() and isinstance(m_lr, torch.Tensor)) else None,
     }
+
 
 
 
@@ -1852,7 +1887,9 @@ def evaluate_official_folds(
             "m_bd": result.get("m_bd"),
             "m_qa": result.get("m_qa"),
             "m_ds": result.get("m_ds"),
+            "m_lr": result.get("m_lr"),
         }
+
 
 
 
@@ -1932,11 +1969,12 @@ def apply_sketch_dim_override(config: dict) -> int | None:
     previous = config["model"].get("covariance_sketch_dim")
     config["model"]["covariance_sketch_dim"] = sketch_dim
     print(f"ICF_SKETCH_DIM: covariance_sketch_dim {previous} -> {sketch_dim}", flush=True)
-    if os.environ.get("ICF_COVARIANCE_BASIS") not in ("pca", "pca_within"):
+    if os.environ.get("ICF_COVARIANCE_BASIS") not in ("pca", "pca_within", "fisher", "fisher_within"):
         raise ValueError(
-            "ICF_SKETCH_DIM requires ICF_COVARIANCE_BASIS=pca or pca_within; "
+            "ICF_SKETCH_DIM requires ICF_COVARIANCE_BASIS=pca, pca_within, or fisher; "
             "the trained projection has no K-agnostic form."
         )
+
     return sketch_dim
 
 

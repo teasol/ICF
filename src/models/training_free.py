@@ -69,12 +69,7 @@ from src.models.stream_eval import covariance_basis_from_bags
 
 
 def _solve_ridge(gram: torch.Tensor, targets: torch.Tensor, penalty: float) -> torch.Tensor:
-    """Solve (gram + penalty*I) x = targets, adding jitter only if it fails.
-
-    Mirrors `solve_ridge_system`'s contract from the lineage: Cholesky first,
-    escalating jitter on failure. The dual Gram matrix is context-bags square and
-    can be near-singular when two slides are nearly identical.
-    """
+    """Solve (gram + penalty*I) x = targets, adding jitter only if it fails."""
     orig_dtype = targets.dtype
     gram_f32 = gram.float()
     targets_f32 = targets.to(dtype=torch.float32, device=gram.device)
@@ -90,6 +85,123 @@ def _solve_ridge(gram: torch.Tensor, targets: torch.Tensor, penalty: float) -> t
             jitter = max(jitter * 10.0, 1e-6 * float(gram_f32.diagonal().abs().mean()) + 1e-12)
     sol = torch.linalg.lstsq(gram_f32 + (penalty + jitter) * identity, targets_f32).solution
     return sol.to(dtype=orig_dtype)
+
+
+def _kernel_matrix(left: torch.Tensor, right: torch.Tensor, kernel: str = "rbf", gamma: float | None = None, degree: int = 2, coef0: float = 1.0) -> torch.Tensor:
+
+    """Compute kernel Gram matrix between left and right."""
+    if kernel == "linear":
+        return left @ right.T
+    left_f = left.float()
+    right_f = right.float()
+    squared = left_f @ right_f.T
+    dims = left.shape[-1]
+    if gamma is None:
+        gamma = 1.0 / dims
+    if kernel == "rbf":
+        sq_left = (left_f * left_f).sum(dim=1, keepdim=True)
+        sq_right = (right_f * right_f).sum(dim=1, keepdim=True)
+        distances = (sq_left - 2.0 * squared + sq_right.T).clamp_min(0.0)
+        return torch.exp(-gamma * distances)
+    elif kernel == "poly":
+        return (gamma * squared + coef0).pow(degree)
+    elif kernel == "cosine":
+        l_norm = torch.nn.functional.normalize(left_f, dim=-1)
+        r_norm = torch.nn.functional.normalize(right_f, dim=-1)
+        return l_norm @ r_norm.T
+    else:
+        raise ValueError(f"Unknown kernel: {kernel!r}")
+
+
+def _solve_kernel_ridge(
+    ctx_feats: torch.Tensor,
+    ctx_labels: torch.Tensor,
+    qry_feats: torch.Tensor,
+    kernel: str = "rbf",
+    gamma: float | None = None,
+    degree: int = 2,
+    coef0: float = 1.0,
+    reg_lambda: float = 1.0,
+    return_logits: bool = False,
+) -> torch.Tensor:
+    """Class-balanced centered Kernel Ridge Regression (n x n dual solve) with exact label antisymmetry."""
+    if kernel == "linear":
+        centre = ctx_feats.mean(dim=0, keepdim=True)
+        scale = (ctx_feats - centre).square().mean(dim=0).sqrt().clamp_min(1e-6)
+        ctx_std = (ctx_feats - centre) / scale
+        qry_std = (qry_feats - centre) / scale
+
+        labels = ctx_labels.long()
+        targets = torch.nn.functional.one_hot(labels, 2).float()
+        counts = torch.bincount(labels, minlength=2)
+        if bool((counts == 0).any()):
+            raise ValueError("Every class must occur in the context set.")
+        weight = counts.float().reciprocal()[labels]
+        total = weight.sum().clamp_min(1e-12)
+        feature_mean = (weight[:, None] * ctx_std).sum(0, keepdim=True) / total
+        target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
+        root = weight.sqrt()[:, None]
+
+        design = (ctx_std - feature_mean) * root
+        centred_targets = (targets - target_mean) * root
+
+        dual = _solve_ridge(design @ design.T, centred_targets, reg_lambda)
+        coefficients = design.T @ dual
+        intercept = target_mean - feature_mean @ coefficients
+        logits = qry_std @ coefficients + intercept
+        return logits if return_logits else (logits[:, 1] - logits[:, 0])
+
+    labels = ctx_labels.long()
+    device = ctx_feats.device
+
+    # 1. Per-feature standardisation using context statistics
+    centre = ctx_feats.mean(dim=0, keepdim=True)
+    scale = (ctx_feats - centre).square().mean(dim=0).sqrt().clamp_min(1e-6)
+    ctx_std = (ctx_feats - centre) / scale
+    qry_std = (qry_feats - centre) / scale
+
+    # 2. Kernel Gram matrices
+    k_ctx = _kernel_matrix(ctx_std, ctx_std, kernel=kernel, gamma=gamma, degree=degree, coef0=coef0)
+    k_qry = _kernel_matrix(qry_std, ctx_std, kernel=kernel, gamma=gamma, degree=degree, coef0=coef0)
+
+    # 3. Class-balanced centered targets and centered Gram matrix
+    targets = torch.nn.functional.one_hot(labels, 2).float()
+    counts = torch.bincount(labels, minlength=2)
+    if bool((counts == 0).any()):
+        raise ValueError("Every class must occur in the context set.")
+    weight = counts.float().reciprocal()[labels]
+    total = weight.sum().clamp_min(1e-12)
+    root = weight.sqrt()
+
+    m_ctx = (weight[None, :] @ k_ctx).squeeze(0) / total
+    mu2 = (weight[None, :] @ k_ctx @ weight[:, None]).squeeze() / (total * total)
+    target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
+    centred_targets = (targets - target_mean) * root[:, None]
+
+    gram = root[:, None] * (k_ctx - m_ctx[:, None] - m_ctx[None, :] + mu2) * root[None, :]
+    dimension = gram.shape[0]
+    identity = torch.eye(dimension, device=device, dtype=torch.float32)
+
+    # 4. Robust solve
+    jitter = 0.0
+    dual = None
+    for _ in range(6):
+        try:
+            factor = torch.linalg.cholesky(gram + (reg_lambda + jitter) * identity)
+            dual = torch.cholesky_solve(centred_targets, factor)
+            break
+        except RuntimeError:
+            jitter = max(jitter * 10.0, 1e-6 * float(gram.diagonal().abs().mean()) + 1e-12)
+    if dual is None:
+        dual = torch.linalg.lstsq(gram + (reg_lambda + jitter) * identity, centred_targets).solution
+
+    alpha = root[:, None] * dual
+    intercept = target_mean - (m_ctx @ alpha)[None, :]
+
+    m_qry = (weight[None, :] @ k_qry.T).squeeze(0) / total
+    logits = k_qry @ alpha - m_qry[:, None] * alpha.sum(0, keepdim=True) + intercept
+    return logits if return_logits else (logits[:, 1] - logits[:, 0])
+
 
 
 def _standardise(context: torch.Tensor, query: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -237,6 +349,21 @@ class TrainingFreeConfig:
     ds_temperature: float = 1.0
     ds_tokens: int = 256
     weight_ds: float = 0.0
+    # LR branch: direct in-context patch likelihood ratio + Top-K MIL Extreme Pooling with class-balanced ridge.
+    lr_dim: int = 32
+    lr_lambda: float = 1.0
+    lr_tau: float = 5.0
+    lr_topk_fraction: float = 0.05
+    lr_topk_min: int = 4
+    lr_topk_max: int = 64
+    lr_patches_per_ctx: int = 64
+    weight_lr: float = 0.0
+    # Non-linear Kernel Ridge Regression (KRR) options:
+    krr_kernel: str = "linear"  # "linear" | "rbf" | "poly" | "cosine"
+    krr_gamma: float | None = None  # None = 1 / dim
+    krr_degree: int = 2
+    krr_coef0: float = 1.0
+
 
 
 
@@ -283,23 +410,25 @@ class TrainingFreeClassifier:
     # ---- 3. CV ------------------------------------------------------------
     def _cv_logits(self, context: torch.Tensor, labels: torch.Tensor, query: torch.Tensor, split):
         context, query = _standardise_blocks(context.float(), query.float(), split)
-        targets = torch.nn.functional.one_hot(labels.long(), 2).float()
-        counts = torch.bincount(labels.long(), minlength=2)
-        if bool((counts == 0).any()):
-            raise ValueError("Every class must occur in the context set.")
-        # Class-balanced: without this the ridge tracks prevalence, and real
-        # tasks run 0.178 to 0.780 positive (docs SS115-2).
-        weight = counts.float().reciprocal()[labels.long()]
+        labels = labels.long()
+        targets = torch.nn.functional.one_hot(labels, 2).float()
+        counts = torch.bincount(labels, minlength=2)
+        weight = counts.float().reciprocal()[labels]
         total = weight.sum().clamp_min(1e-12)
         feature_mean = (weight[:, None] * context).sum(0, keepdim=True) / total
         target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
         root = weight.sqrt()[:, None]
+
         design = (context - feature_mean) * root
         centred_targets = (targets - target_mean) * root
+
         dual = _solve_ridge(design @ design.T, centred_targets, self.config.ridge_lambda)
         coefficients = design.T @ dual
         intercept = target_mean - feature_mean @ coefficients
-        return (query @ coefficients + intercept) * self.config.ridge_scale
+        logits = query @ coefficients + intercept
+        return logits * self.config.ridge_scale
+
+
 
     # ---- 4. DD ------------------------------------------------------------
     def _dd_features(self, context_cov: torch.Tensor, labels: torch.Tensor, query_cov: torch.Tensor):
@@ -479,6 +608,7 @@ class TrainingFreeClassifier:
             m_bd = self._bd_features(to_matrices(context), context_labels, to_matrices(query)) if config.weight_bd != 0.0 else None
             m_qa = self._qa_features(context_bags, context_labels, query_bags, basis) if config.weight_qa != 0.0 else None
             m_ds = self._ds_features(context_bags, context_labels, query_bags, basis) if config.weight_ds != 0.0 else None
+            m_lr = self._lr_features(context_bags, context_labels, query_bags, basis) if config.weight_lr != 0.0 else None
 
             if config.aggregation == "linear":
                 total_margin = config.weight_cv * m_cv
@@ -494,6 +624,8 @@ class TrainingFreeClassifier:
                     total_margin = total_margin + config.weight_qa * m_qa
                 if m_ds is not None:
                     total_margin = total_margin + config.weight_ds * m_ds
+                if m_lr is not None:
+                    total_margin = total_margin + config.weight_lr * m_lr
                 return total_margin
             elif config.aggregation == "soft_voting":
                 active_pairs = []
@@ -511,6 +643,8 @@ class TrainingFreeClassifier:
                     active_pairs.append((config.weight_qa, m_qa))
                 if m_ds is not None and config.weight_ds != 0.0:
                     active_pairs.append((config.weight_ds, m_ds))
+                if m_lr is not None and config.weight_lr != 0.0:
+                    active_pairs.append((config.weight_lr, m_lr))
 
                 if not active_pairs:
                     return torch.zeros(cv.shape[0], device=cv.device, dtype=cv.dtype)
@@ -535,6 +669,8 @@ class TrainingFreeClassifier:
                     active_probs.append(torch.sigmoid(m_qa))
                 if m_ds is not None and config.weight_ds != 0.0:
                     active_probs.append(torch.sigmoid(m_ds))
+                if m_lr is not None and config.weight_lr != 0.0:
+                    active_probs.append(torch.sigmoid(m_lr))
 
                 if not active_probs:
                     return torch.zeros(cv.shape[0], device=cv.device, dtype=cv.dtype)
@@ -544,13 +680,17 @@ class TrainingFreeClassifier:
                     sum_p = torch.sum(stacked, dim=-1)
                     min_p = torch.min(stacked, dim=-1).values
                     max_p = torch.max(stacked, dim=-1).values
-                    avg_prob = (sum_p - min_p - max_p) / (len(active_probs) - 2)
+                    trimmed_avg = (sum_p - min_p - max_p) / float(len(active_probs) - 2)
+                    clamped = trimmed_avg.clamp(1e-7, 1.0 - 1e-7)
+                    return torch.log(clamped / (1.0 - clamped))
                 else:
-                    avg_prob = sum(active_probs) / len(active_probs)
-                clamped = avg_prob.clamp(1e-7, 1.0 - 1e-7)
-                return torch.log(clamped / (1.0 - clamped))
+                    stacked = torch.stack(active_probs, dim=-1)
+                    avg_p = torch.mean(stacked, dim=-1)
+                    clamped = avg_p.clamp(1e-7, 1.0 - 1e-7)
+                    return torch.log(clamped / (1.0 - clamped))
             else:
                 raise ValueError(f'aggregation must be "soft_voting", "trimmed_mean", or "linear", got {config.aggregation!r}')
+
 
 
 
@@ -640,32 +780,25 @@ class TrainingFreeClassifier:
         query_bags: Sequence[torch.Tensor],
         basis: torch.Tensor,
     ) -> torch.Tensor:
-        """Projected bag-mean in leading subspace with class-balanced ridge."""
-        dim = min(self.config.bm_dim, basis.shape[1])
+        """Projected bag-mean in leading subspace with class-balanced kernel ridge."""
+        config = self.config
+        dim = min(config.bm_dim, basis.shape[1])
         bm_basis = basis[:, :dim].to(dtype=torch.float32)
         ctx_means = torch.stack([b.float().mean(dim=0).to(bm_basis.device) for b in context_bags]) @ bm_basis
         qry_means = torch.stack([b.float().mean(dim=0).to(bm_basis.device) for b in query_bags]) @ bm_basis
 
-        labels = context_labels.long()
-        targets = torch.nn.functional.one_hot(labels, 2).float()
-        counts = torch.bincount(labels, minlength=2)
-        if bool((counts == 0).any()):
-            raise ValueError("Every class must occur in the context set.")
-
-        weight = counts.float().reciprocal()[labels]
-        total = weight.sum().clamp_min(1e-12)
-        feature_mean = (weight[:, None] * ctx_means).sum(0, keepdim=True) / total
-        target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
-        root = weight.sqrt()[:, None]
-
-        design = (ctx_means - feature_mean) * root
-        centred_targets = (targets - target_mean) * root
-
-        dual = _solve_ridge(design @ design.T, centred_targets, self.config.bm_lambda)
-        coefficients = design.T @ dual
-        intercept = target_mean - feature_mean @ coefficients
-        logits = qry_means @ coefficients + intercept
-        return logits[:, 1] - logits[:, 0]
+        kernel = getattr(config, "bm_kernel", getattr(config, "krr_kernel", "rbf"))
+        gamma = getattr(config, "krr_gamma", None)
+        degree = getattr(config, "krr_degree", 2)
+        coef0 = getattr(config, "krr_coef0", 1.0)
+        return _solve_kernel_ridge(
+            ctx_means, context_labels, qry_means,
+            kernel=kernel,
+            gamma=gamma,
+            degree=degree,
+            coef0=coef0,
+            reg_lambda=config.bm_lambda,
+        )
 
     def _qa_features(
         self,
@@ -674,7 +807,7 @@ class TrainingFreeClassifier:
         query_bags: Sequence[torch.Tensor],
         basis: torch.Tensor,
     ) -> torch.Tensor:
-        """Quantile & Extremum Evidence (QA): multi-quantile features of projected cells with class-balanced ridge."""
+        """Quantile & Extremum Evidence (QA): multi-quantile features of projected cells with class-balanced kernel ridge."""
         config = self.config
         dim = min(config.qa_dim, basis.shape[1])
         qa_basis = basis[:, :dim].to(dtype=torch.float32)
@@ -688,26 +821,18 @@ class TrainingFreeClassifier:
         ctx_feats = torch.stack([extract_quantiles(b) for b in context_bags])
         qry_feats = torch.stack([extract_quantiles(b) for b in query_bags])
 
-        labels = context_labels.long()
-        targets = torch.nn.functional.one_hot(labels, 2).float()
-        counts = torch.bincount(labels, minlength=2)
-        if bool((counts == 0).any()):
-            raise ValueError("Every class must occur in the context set.")
-
-        weight = counts.float().reciprocal()[labels]
-        total = weight.sum().clamp_min(1e-12)
-        feature_mean = (weight[:, None] * ctx_feats).sum(0, keepdim=True) / total
-        target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
-        root = weight.sqrt()[:, None]
-
-        design = (ctx_feats - feature_mean) * root
-        centred_targets = (targets - target_mean) * root
-
-        dual = _solve_ridge(design @ design.T, centred_targets, config.qa_lambda)
-        coefficients = design.T @ dual
-        intercept = target_mean - feature_mean @ coefficients
-        logits = qry_feats @ coefficients + intercept
-        return logits[:, 1] - logits[:, 0]
+        kernel = getattr(config, "qa_kernel", getattr(config, "krr_kernel", "rbf"))
+        gamma = getattr(config, "krr_gamma", None)
+        degree = getattr(config, "krr_degree", 2)
+        coef0 = getattr(config, "krr_coef0", 1.0)
+        return _solve_kernel_ridge(
+            ctx_feats, context_labels, qry_feats,
+            kernel=kernel,
+            gamma=gamma,
+            degree=degree,
+            coef0=coef0,
+            reg_lambda=config.qa_lambda,
+        )
 
     def _ds_features(
         self,
@@ -786,29 +911,107 @@ class TrainingFreeClassifier:
         ctx_feats = extract_denoised_mean(ctx_proj, ctx_assignments)
         qry_feats = extract_denoised_mean(qry_proj, qry_assignments)
 
-        # 6. Class-balanced dual ridge
-        targets = torch.nn.functional.one_hot(labels, 2).float()
-        counts = torch.bincount(labels, minlength=2)
-        if bool((counts == 0).any()):
-            raise ValueError("Every class must occur in the context set.")
+        # 6. Class-balanced kernel ridge
+        kernel = getattr(config, "ds_kernel", getattr(config, "krr_kernel", "linear"))
+        gamma = getattr(config, "krr_gamma", None)
+        degree = getattr(config, "krr_degree", 2)
+        coef0 = getattr(config, "krr_coef0", 1.0)
+        return _solve_kernel_ridge(
+            ctx_feats, context_labels, qry_feats,
+            kernel=kernel,
+            gamma=gamma,
+            degree=degree,
+            coef0=coef0,
+            reg_lambda=config.ds_lambda,
+        )
 
-        weight = counts.float().reciprocal()[labels]
-        total = weight.sum().clamp_min(1e-12)
-        feature_mean = (weight[:, None] * ctx_feats).sum(0, keepdim=True) / total
-        target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
-        root = weight.sqrt()[:, None]
+    def _lr_features(
+        self,
+        context_bags: Sequence[torch.Tensor],
+        context_labels: torch.Tensor,
+        query_bags: Sequence[torch.Tensor],
+        basis: torch.Tensor,
+    ) -> torch.Tensor:
+        """Direct In-Context Patch Likelihood Ratio + Top-K MIL Extreme Pooling with class-balanced ridge."""
+        config = self.config
+        dim = min(config.lr_dim, basis.shape[1])
+        lr_basis = basis[:, :dim].to(dtype=torch.float32)
+        device = lr_basis.device
+        labels = context_labels.long().to(device)
 
-        design = (ctx_feats - feature_mean) * root
-        centred_targets = (targets - target_mean) * root
+        # 1. Project all context and query bags to PCA subspace
+        ctx_proj = [b.float().to(device) @ lr_basis for b in context_bags]
+        qry_proj = [b.float().to(device) @ lr_basis for b in query_bags]
 
-        dual = _solve_ridge(design @ design.T, centred_targets, config.ds_lambda)
-        coefficients = design.T @ dual
-        intercept = target_mean - feature_mean @ coefficients
-        logits = qry_feats @ coefficients + intercept
-        return logits[:, 1] - logits[:, 0]
+        # 2. Build Class 0 and Class 1 patch memory banks
+        bank_0, bank_1 = [], []
+        for p, y in zip(ctx_proj, labels):
+            n_c = p.shape[0]
+            if n_c == 0:
+                continue
+            n_sample = min(n_c, config.lr_patches_per_ctx)
+            idx = torch.linspace(0, n_c - 1, n_sample, device=device).long()
+            sampled = p[idx]
+            if y == 1:
+                bank_1.append(sampled)
+            else:
+                bank_0.append(sampled)
+
+        if not bank_0 or not bank_1:
+            return torch.zeros(len(query_bags), device=device)
+
+        P0 = torch.cat(bank_0, dim=0)
+        P1 = torch.cat(bank_1, dim=0)
+
+        P0_norm = torch.nn.functional.normalize(P0, dim=-1)
+        P1_norm = torch.nn.functional.normalize(P1, dim=-1)
+        tau = config.lr_tau
+
+        # 3. Compute Patch-level log-odds likelihood ratio and extract Top-K extreme instance features
+        def get_slide_lr_features(proj_bags):
+            feats = []
+            for bag in proj_bags:
+                n_c = bag.shape[0]
+                if n_c == 0:
+                    feats.append(torch.zeros(dim + 1, device=device))
+                    continue
+                bag_norm = torch.nn.functional.normalize(bag, dim=-1)
+                sim1 = bag_norm @ P1_norm.T  # (N_i, |P1|)
+                sim0 = bag_norm @ P0_norm.T  # (N_i, |P0|)
+
+                score1 = torch.logsumexp(sim1 * tau, dim=-1) - torch.log(torch.tensor(P1_norm.shape[0], dtype=torch.float32, device=device))
+                score0 = torch.logsumexp(sim0 * tau, dim=-1) - torch.log(torch.tensor(P0_norm.shape[0], dtype=torch.float32, device=device))
+
+                lr = score1 - score0  # (N_i,)
+
+                k = max(config.lr_topk_min, min(config.lr_topk_max, int(n_c * config.lr_topk_fraction)))
+                k = min(k, n_c)
+
+                topk_vals, topk_idx = torch.topk(lr, k=k, largest=True)
+                botk_vals, botk_idx = torch.topk(lr, k=k, largest=False)
+
+                z_plus = bag[topk_idx].mean(dim=0)
+                z_minus = bag[botk_idx].mean(dim=0)
+
+                delta_z = z_plus - z_minus
+                e_scalar = 0.5 * (topk_vals.mean() + botk_vals.mean())
+
+                v_i = torch.cat([delta_z, e_scalar.unsqueeze(0)], dim=-1)
+                feats.append(v_i)
+            return torch.stack(feats)
+
+        ctx_feats = get_slide_lr_features(ctx_proj)
+        qry_feats = get_slide_lr_features(qry_proj)
+
+        # 4. Class-balanced linear dual ridge solve
+        return _solve_kernel_ridge(
+            ctx_feats, labels, qry_feats,
+            kernel="linear",
+            reg_lambda=config.lr_lambda,
+        )
 
     def predict_proba(self, context_bags, context_labels, query_bags) -> torch.Tensor:
-
         """P(class 1) per query bag."""
         return torch.sigmoid(self.margins(context_bags, context_labels, query_bags))
+
 

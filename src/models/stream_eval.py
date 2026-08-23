@@ -151,6 +151,87 @@ def covariance_basis_from_bags(
     return covariance_basis_from_scatter(scatter, total, sketch_dim)
 
 
+def fisher_basis_from_bags(
+    bags: Sequence[torch.Tensor],
+    labels: torch.Tensor,
+    sketch_dim: int,
+    device: torch.device | str | None = None,
+    chunk: int = DEFAULT_STREAM_CHUNK,
+    cache: BagStatsCache | None = None,
+    shrinkage: float = 0.1,
+) -> torch.Tensor:
+    """Compute Fisher-augmented Within-Slide basis from context bags and labels.
+
+    Col 0 is the closed-form Fisher linear discriminant direction Sigma_W^{-1} (mu1 - mu0),
+    followed by the top within-slide PCA eigenvectors orthogonalized against col 0.
+    """
+    if not bags:
+        raise ValueError("Need at least one context bag.")
+    target = _as_device(device) or bags[0].device
+    stats = [bag_within_stats(bag, target, chunk, cache) for bag in bags]
+    y = labels.long().to(target)
+
+    # 1. Total within-bag scatter and bag means
+    total_cells = sum(s[0] for s in stats)
+    dim = stats[0][1].shape[0]
+    S_within = torch.zeros((dim, dim), device=target, dtype=torch.float32)
+    for s in stats:
+        S_within += s[2].to(dtype=torch.float32, device=target)
+
+    S_within = S_within / max(1, total_cells)
+    bag_means = torch.stack([s[1].to(dtype=torch.float32, device=target) for s in stats])  # (N_ctx, dim)
+
+
+    # 2. Class centroids
+    if (y == 0).sum() == 0 or (y == 1).sum() == 0:
+        return covariance_basis_from_scatter(S_within * total_cells, total_cells, sketch_dim)
+
+    mu0 = bag_means[y == 0].mean(dim=0)
+    mu1 = bag_means[y == 1].mean(dim=0)
+    delta = mu1 - mu0  # (dim,)
+
+    # 3. Slide-level within-class scatter
+    dev0 = bag_means[y == 0] - mu0
+    dev1 = bag_means[y == 1] - mu1
+    S_slide = (dev0.T @ dev0 + dev1.T @ dev1) / max(1, len(bags))
+
+    # 4. Total within-class pooled covariance with regularization
+    Sigma_W = S_within + shrinkage * S_slide
+    trace_scale = Sigma_W.diagonal().mean().clamp_min(1e-6)
+    identity = torch.eye(dim, device=target, dtype=torch.float32)
+    Sigma_W_reg = Sigma_W + (1e-4 * trace_scale) * identity
+
+    # 5. Fisher linear discriminant direction: w = Sigma_W^{-1} (mu1 - mu0)
+    try:
+        w_fisher = torch.linalg.solve(Sigma_W_reg, delta)
+    except RuntimeError:
+        w_fisher = torch.linalg.lstsq(Sigma_W_reg, delta).solution
+
+    v1 = w_fisher / w_fisher.norm().clamp_min(1e-12)
+
+    # 6. Top eigenvectors of S_within
+    _, eigvecs = torch.linalg.eigh(S_within)
+    pca_vecs = eigvecs[:, -sketch_dim:].flip(-1)  # (dim, sketch_dim)
+
+    # 7. Gram-Schmidt orthogonalization: v1 as 1st vector
+    basis_cols = [v1]
+    for k in range(sketch_dim - 1):
+        vk = pca_vecs[:, k]
+        for b in basis_cols:
+            vk = vk - (vk @ b) * b
+        norm = vk.norm()
+        if norm > 1e-6:
+            basis_cols.append(vk / norm)
+        else:
+            rand_v = torch.randn(dim, device=target)
+            for b in basis_cols:
+                rand_v = rand_v - (rand_v @ b) * b
+            basis_cols.append(rand_v / rand_v.norm())
+
+    return torch.stack(basis_cols, dim=-1).float()
+
+
+
 def cpu_bag_mapping(
     bags: Mapping[str, torch.Tensor],
 ) -> dict[str, torch.Tensor]:

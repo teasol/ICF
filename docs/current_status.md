@@ -1,10 +1,17 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-22 18:20:00` — **DD 제거(v117) 및 4-Branch Soft Voting 정식 승격 $\to$ v118 Baseline 확립 (§195, §196)**:
-- **v118 승격**: **4-Branch Soft Voting (CV + CT + BM + BD, $w_{DD}=0.0$)**이 Primary 7-Task에서 **Macro 0.6205 (+0.0086 vs v116, +0.0154 vs v114, 6/7 과제 승리)**를 달성하여 공식 baseline으로 승격 (사용자 최종 확정 지시).
-- **v117 보존**: **DD 제거 4-Branch 선형합 (CV + CT + BM + BD)**은 **Macro 0.6191 (+0.0072 vs v116, 5/7 과제 승리)**로 v117 식별자로 영구 보존.
-- **활성 baseline**: **v118 (Soft Voting: CV + CT + BM + BD, w_DD=0)** (학습 파라미터 0, Deterministic). 활성 runner `scripts/eval_v118.sh`.
-- **벤치마크 실측치**: Primary 7-Task Macro Fold-mean AUROC = **0.6205** (v116 Baseline 0.6119 대비 **+0.0086** 개선, v114 대비 **+0.0154** 개선).
+**Last updated**: `2026-08-23 09:30:00` — **v120 Baseline 확립 (6-Branch Trimmed Mean) 및 후속 4대 실험 (KRR, LR, Trimming 변형, Fisher Subspace) 전수 사후분석 (§199~§203)**:
+- **활성 baseline**: **v120 (6-Branch Trimmed Mean: CV + CT + BM + BD + QA + DS, $w_{DD}=0.0$)** (학습 파라미터 0, Deterministic). 활성 runner `scripts/eval_v120.sh` / `scripts/run_v120_seal_multi_gpu.sh`.
+- **벤치마크 실측치**: 
+  - **Primary 7-Task Macro Fold-mean AUROC**: **`0.6265`** (v119 0.6247 대비 +0.0018, v118 0.6205 대비 +0.0060 개선)
+  - **SEAL 10-Task Macro Fold-mean AUROC**: **`0.6972`** (Supervised ABMIL 0.7266 대비 불과 0.0294 격차, MeanMIL 승 3개/ABMIL 승 1개)
+  - **All 17-Task Total Macro AUROC**: **`0.6681`** (역대 전 계보 통합 최고치 경신)
+- **후속 탐색 실험 사후분석 완료**:
+  1. **Non-Linear KRR (§199)**: Primary 7 0.6125 (기각, Few-shot $N_{ctx}=40$ 과적합으로 SMAD4 0.4290 붕괴).
+  2. **LR (Patch Likelihood Ratio + Top-K MIL) (§200)**: 단독 0.5874, 7-Branch 0.6195 (기각, 원천 패치 간 염색 톤 Confounder 간섭).
+  3. **절사 집계 방식 스윕 (§201)**: Drop Min Only(0.6247) 대칭성 위배 하락, Drop 2 Furthest(Total 17 0.6576) 피처 브랜치 담합으로 공분산(CV/BD) 신호 소거 입증 $\to$ Trimmed Mean(1 min, 1 max) 최적성 재확인.
+  4. **In-Context Fisher Subspace (§202)**: Primary 7 0.5709 (기각, $N_{ctx}=40 \ll D=1536$ 고차원 LDA 차원의 저주로 노이즈 증폭).
+
 
 ---
 
@@ -420,20 +427,144 @@ _by Gemini 3.7 Flash (High) on gnode3 at 2026-08-22 22:25:00_
 ### 4. 전체 17개 과제 종합 요약
 - **Primary 7-Task Macro**: **`0.6265`** (v119 0.6247 대비 **+0.0018**, v118 0.6205 대비 **+0.0060**)
 - **SEAL 10-Task Macro**: **`0.6972`**
-- **All 17-Task Total Macro**: **`0.6681`**
-
-### 5. v120 아키텍처 확정 및 승격 (사용자 결정)
-- **Active 6 Branches**:
-  - $M_{CV}$: PCA-256 Off-Diagonal Covariance Ridge ($w=1.0$)
-  - $M_{CT}$: PCA-32 K256 Soft Abundance Ridge ($w=1.0$)
-  - $M_{BM}$: PCA-32 Bag-Mean Ridge ($w=1.0$)
-  - $M_{BD}$: Top-256 Spectral Entropy Ordered-Typicality ($w=1.0$)
-  - $M_{QA}$: PCA-32 Quantile & Extremum Evidence Ridge ($w=1.0$)
-  - $M_{DS}$: PCA-32 Salience Denoised Bag-Mean Ridge ($w=1.0$)
-  - $M_{DD}$: OFF ($w=0.0$)
-- **Aggregation Head**: 6-Branch Trimmed Mean Voting (최고/최저 2개 절사, 중앙 4개 평균)
-
 _by Gemini 3.7 Flash (High) on gnode3 at 2026-08-23 00:25:00_
+
+---
+
+## §199. Non-Linear Kernel Ridge Regression (KRR) 전면 교체 실험 및 심층 분석 (기각)
+
+### 1. 가설 및 실험 설계
+- **가설**: 슬라이드 레벨의 선형 Ridge 판별 경계면을 RBF / Cosine 커널 기반 비선형 Kernel Ridge Regression (KRR)으로 전환하면, 복잡한 유전자 변이 경계를 비선형 매니폴드로 분리할 수 있을 것이다.
+- **수식**:
+  $$\tilde{K} = \sqrt{W} \left( K - \mathbf{m}\mathbf{1}^\top - \mathbf{1}\mathbf{m}^\top + \mu_2 \mathbf{1}\mathbf{1}^\top \right) \sqrt{W}$$
+  $$\boldsymbol{\alpha} = (\tilde{K} + \lambda I)^{-1} \tilde{\mathbf{y}}, \quad M(Q) = (K_{qry, ctx} \sqrt{W}) \boldsymbol{\alpha} + \text{intercept}$$
+- **실측 결과 (Primary 7-Task 50-fold)**:
+  - **v120 Linear Baseline**: **`0.6265`**
+  - **KRR (RBF)**: **`0.6125`** (**-0.0140 하락**)
+  - **KRR (Cosine)**: **`0.6125`** (**-0.0140 하락**)
+  - `ARID1A`: 0.5471 $\to$ **`0.6613`** (+0.1142 폭등, 역대 최고치 경신)
+  - `SMAD4`: 0.5447 $\to$ **`0.4290`** (**-0.1157 폭락**, Random 0.50보다 낮은 역방향 왜곡)
+  - `Histologic_Grade`: 0.6865 $\to$ **0.6337** (-0.0528 하락)
+
+### 2. 기각 사유 및 사후 분석 (Post-Mortem)
+1. **Few-Shot 환경($N_{ctx} \approx 40$)에서의 파멸적인 국소 과적합**:
+   - $N_{ctx}=40$개의 데이터 포인트를 무한 차원 RKHS로 보내면, Gram 행렬이 대각선 근처만 1이고 나머지는 0에 수렴하여 40개 샘플의 국소적 노이즈를 암기(Memorization)해 버림.
+   - `ARID1A` 1개 과제의 상승을 위해 나머지 6개 중 5개 과제를 희생시키는 것은 일반화 관점에서 치명적 결함.
+2. **선형 + RBF 앙상블 ($\beta=0.30$) 스코어 `0.6271`의 통계적 허상**:
+   - 0.6265 $\to$ 0.6271 (+0.0006)은 50-fold 표준오차($\approx \pm 0.015$) 범위 내의 통계적 노이즈에 불과.
+   - 연산량과 복잡도를 2배로 늘린 대가로 무의미한 수준이므로 **전면 KRR 접근을 공식 기각**함.
+3. **핵심 교훈**:
+   - 슬라이드 수준에서 32차원으로 이미 압축된 벡터에 비선형 커널을 씌우는 것은 "이미 뭉개진 정보를 꼬아놓는 것"에 불과함. Readout 단은 강력한 Inductive Bias를 가진 **선형 Ridge(v120) 체제를 유지**해야 함.
+
+_by Antigravity on gnode3 at 2026-08-23 03:00:00_
+
+---
+
+## §200. LR (Direct In-Context Patch Likelihood Ratio + Top-K MIL) 실험 및 분석 (기각)
+
+### 1. 가설 및 구현
+- **가설**: 256개 군집 병목 없이, Context 세트의 Class 1 및 Class 0 패치 메모리 뱅크로부터 직접 비모수 우도비(Log-Odds)를 구하고, 상/하위 $K$개 극값 패치만 풀링(Top-K MIL)하면 95% 정상 기질 희석 문제를 원천 차단할 수 있을 것이다.
+- **수식**:
+  $$\ell(\mathbf{x}_{i,j}) = \log \frac{\frac{1}{|P_1|} \sum_{p \in P_1} \exp(\tau \mathbf{x}_{i,j}^\top p)}{\frac{1}{|P_0|} \sum_{p \in P_0} \exp(\tau \mathbf{x}_{i,j}^\top p)}$$
+  $$\Delta \mathbf{z}_i = \frac{1}{K}\sum_{j \in \text{Top-}K} \mathbf{x}_{i,j} - \frac{1}{K}\sum_{j \in \text{Bottom-}K} \mathbf{x}_{i,j}, \quad \mathbf{v}_i = [\Delta \mathbf{z}_i; e_i] \in \mathbb{R}^{33}$$
+- **실측 결과 (Primary 7-Task 50-fold)**:
+  - **LR 단독 Macro**: **`0.5874`** (CT 0.6147, DS 0.6058, QA 0.6057, BM 0.6034 대비 열세)
+  - **7-Branch Trimmed Mean (+LR)**: **`0.6195`** (v120 0.6265 대비 **-0.0070 하락**)
+  - `KRAS`: **0.7199** (+0.0265 상승), `PBRM1`: **0.5615** (+0.0393 상승)
+  - `SMAD4`: 0.5447 $\to$ **0.4298** (-0.1149 폭락)
+
+### 2. 기각 사유 및 사후 분석 (Post-Mortem)
+1. **슬라이드 간 염색 차이(Stain Confounder)의 왜곡**:
+   - `DS`는 256개 공통 군집 중심(Centroid)에 대한 슬라이드 전체의 거시적 빈도 분포를 비교하여 슬라이드별 염색 노이즈를 평균화(Smoothing)함.
+   - 반면 `LR`은 원천 패치 간 내적을 직접 계산하다 보니, **특정 Context 슬라이드의 '염색 톤/배경 노이즈'가 우연히 일치하는 패치가 높은 점수를 받아 상위 $K$개로 오선별**됨.
+2. **Trimmed Mean 다수결 함정**:
+   - 피처 기반 브랜치가 5개(CT, BM, QA, DS, LR)로 늘어나면서, 이들이 공통으로 실패하는 과제(`SMAD4`)에서 유일하게 정상 작동하던 공분산 브랜치(`CV`: 0.5483, `BD`: 0.5322)가 '상위 이상치'로 취급되어 잘려나가는 부작용 발생.
+3. **결론**: 원천 패치 레벨 비교가 작동하려면 무감독 PCA 공간의 염색 노이즈를 제거하는 사전 투영이 필수적임.
+
+_by Antigravity on gnode3 at 2026-08-23 03:40:00_
+
+---
+
+## §201. 절사 집계 방식 전수 검증 (Drop Min Only, Drop 2 Furthest vs Trimmed Mean)
+
+### 1. 가설 및 실험 내용
+- **사용자 제안 1**: 위/아래 1개씩 자르지 말고 아래(Min)만 1개 자르는 것은 어떤가?
+- **사용자 제안 2**: 상/하단 고정이 아니라 중앙값(Median)에서 가장 많이 튄 2개(Drop 2 Furthest)를 자르는 것은 어떤가?
+
+### 2. 17개 전체 과제 실측 비교 (50-fold)
+| 집계 방식 | Primary 7 | SEAL 10 | Total 17 (전체) | 비고 |
+| :--- | :---: | :---: | :---: | :--- |
+| **기존 Trimmed Mean (1 min, 1 max)** | **`0.6265`** | **`0.6972`** | **`0.6681` 🏆** | **현행 v120 활성** |
+| **Drop Min Only (하단 1개만 절사)** | 0.6247 | 0.6958 | 0.6665 | Class 1 편향(Positive Bias) 대칭성 파괴 |
+| **Drop Max Only (상단 1개만 절사)** | 0.6246 | 0.6955 | 0.6662 | Class 0 편향 대칭성 파괴 |
+| **Drop 1 Furthest from Median** | 0.6261 | 0.6864 | 0.6616 | SEAL 10 대폭 하락 (-0.0108) |
+| **Drop 2 Furthest from Median** | 0.6213 | 0.6831 | 0.6576 | 17개 중 15개 과제 일제히 하락 (-0.0105) |
+| **Standard Mean (무절사 평균)** | 0.6232 | 0.6979 | 0.6671 | 이상치 방어 불가 |
+
+### 3. 수학적 원인 분석 (The Echo Chamber Fallacy)
+1. **Drop Min Only의 대칭성 파괴**:
+   - $p \in [0, 1]$ 공간에서 하단만 자르면 실제 음성(Class 0, $p=0.05$)인 정답 브랜치를 버리고 오작동한 False Positive($p=0.95$)를 살려두게 되어 라벨 대칭성이 깨짐.
+2. **Drop 2 Furthest의 "다수파 피처 브랜치 담합" 함정**:
+   - 6개 중 4개(BM, QA, CT, DS)는 피처 공간을 공유하므로 예측값이 서로 밀집되어 중앙값(Median)을 독점함.
+   - 공분산 행렬에서 나오는 완전히 독립적이고 강력한 신호인 `CV`와 `BD`는 필연적으로 중앙값과의 편차($|p - \text{median}|$)가 커서 **'많이 튄 이상치'로 오인되어 집중적으로 잘려나감**.
+   - 결과적으로 앙상블의 핵심인 "이종 정보의 결합"이 파괴되고 동일한 피처 브랜치들끼리만 끼리끼리 투표하게 됨.
+3. **결론**: 순서 통계량(Order Statistics)에 기반한 **양방향 1개씩 절사 (`Trimmed Mean: 1 min, 1 max`)가 수학적/실측적으로 최적의 앙상블 기법**임을 재확인.
+
+_by Antigravity on gnode3 at 2026-08-23 09:00:00_
+
+---
+
+## §202. In-Context Fisher Discriminant Subspace (방안 3) 실험 및 사후분석 (기각)
+
+### 1. 가설 및 수식 설계
+- **가설**: 무감독 Within-Slide PCA 대신, Context 세트의 라벨을 활용하여 클래스 간 차이($\boldsymbol{\mu}_1 - \boldsymbol{\mu}_0$)와 클래스 내 분산($\Sigma_W$)을 극대화하는 선형 판별 방향 $\mathbf{w}_{\text{Fisher}} = \Sigma_W^{-1}(\boldsymbol{\mu}_1 - \boldsymbol{\mu}_0)$을 1번 축으로 정렬한 Gram-Schmidt 256D 기저를 사용하면, 염색 노이즈를 배제하고 형태학적 클래스 분리면을 바로잡을 수 있을 것이다.
+- **수식**:
+  $$\Sigma_W = S_{\text{within}} + \alpha S_{\text{slide}} + \epsilon I \in \mathbb{R}^{1536 \times 1536}$$
+  $$\mathbf{w}_{\text{Fisher}} = \Sigma_W^{-1} (\boldsymbol{\mu}_1 - \boldsymbol{\mu}_0), \quad B_{\text{Fisher}} = [\mathbf{v}_1, \mathbf{v}_2', \dots, \mathbf{v}_{256}']$$
+- **실측 결과 (Primary 7-Task 50-fold)**:
+  - **v120 Baseline (무감독 PCA)**: **`0.6265`**
+  - **In-Context Fisher Subspace**: **`0.5709`** (**`-0.0556` 폭락**, 6/7 과제 하락)
+  - `SMAD4`: 0.5447 $\to$ **`0.3725`** (-0.1722 폭락)
+  - `ARID1A`: 0.5471 $\to$ **`0.4440`** (-0.1031 폭락)
+  - `PBRM1`: 0.5222 $\to$ **`0.4345`** (-0.0877 폭락)
+  - BM (0.6034 $\to$ 0.5585), QA (0.6057 $\to$ 0.5560), CT (0.6147 $\to$ 0.5660), DS (0.6058 $\to$ 0.5614) 전 피처 브랜치 붕괴.
+
+### 2. 기각 사유 및 고차원 통계학적 원인 규명
+1. **고차원 Few-Shot 환경에서의 "차원의 저주" ($N_{\text{slides}} \ll D$)**:
+   - In-Context 세트의 슬라이드 수는 $N_{ctx} \approx 40$개뿐인데, 피처 차원은 $D = 1536$차원임.
+   - 고차원 통계학(Bickel & Levina 2004, Fan & Fan 2008)에 따르면, $N \ll D$일 때 표본 라벨 차이 벡터 $\boldsymbol{\Delta}$는 **실제 질병 형태가 아니라 '20개 표본에 우연히 포함된 염색 톤/스캐너/환자별 노이즈'를 100% 분리 방향으로 오인하여 노이즈가 기하급수적으로 누적**됨.
+2. **왜 무감독 Within-Slide PCA($S_W$)가 우월했는가?**:
+   - Within-Slide PCA는 슬라이드 단위($N=40$)가 아니라 슬라이드 내부의 **수만 개 패치($N_{\text{patches}} \approx 50,000 \sim 200,000$)**로부터 공분산 $S_W$를 추정함.
+   - $N_{\text{patches}} \gg 1536$이므로 $S_W$ 행렬은 통계적으로 완벽히 수렴하며 극도로 안정적인 일반 세포 기하학을 제공함.
+3. **결론**: Few-Shot 에피소드 내에서 1536D 감독형 부분공간을 학습/추정하는 접근은 수학적으로 필연적인 과적합을 초래하므로 **공식 기각**하며, 무감독 `within_slide_basis`를 유지함.
+
+_by Antigravity on gnode3 at 2026-08-23 09:30:00_
+
+---
+
+## §203. 현행 최강 베이스라인 (v120) 확고한 유지 및 향후 로드맵
+
+### 1. 현행 공식 베이스라인: v120 (6-Branch Trimmed Mean)
+- **Primary 7-Task Macro Fold-mean AUROC**: **`0.6265`**
+- **SEAL 10-Task Macro Fold-mean AUROC**: **`0.6972`**
+- **All 17-Task Total Macro AUROC**: **`0.6681`**
+- **6개 활성 브랜치**:
+  1. $M_{CV}$: PCA-256 Off-Diagonal Covariance Ridge ($w=1.0$)
+  2. $M_{CT}$: PCA-32 K256 Soft Abundance Ridge ($w=1.0$)
+  3. $M_{BM}$: PCA-32 Bag-Mean Ridge ($w=1.0$)
+  4. $M_{BD}$: Top-256 Spectral Entropy Ordered-Typicality ($w=1.0$)
+  5. $M_{QA}$: PCA-32 Quantile & Extremum Evidence Ridge ($w=1.0$)
+  6. $M_{DS}$: PCA-32 Salience Denoised Bag-Mean Ridge ($w=1.0$)
+- **집계 방식**: 6-Branch Trimmed Mean (상/하단 1개씩 절사, 중앙 4개 평균)
+
+### 2. 검증 완료된 "닫힌 축 (Closed Axes)" 추가 등록
+- **Non-Linear KRR Readout 축 (§199)**: Few-shot $N_{ctx}=40$ 과적합 입증 $\to$ 폐기.
+- **원천 패치 단위 Direct Likelihood Matching 축 (§200)**: 슬라이드 간 염색 노이즈 Confounder 간섭 입증 $\to$ 폐기.
+- **비대칭 / 편차 기반 절사 집계 축 (§201)**: Drop Min Only(대칭성 파괴), Drop 2 Furthest(피처 담합으로 공분산 소거) 입증 $\to$ 폐기.
+- **In-Context 1536D 감독형 Fisher 부분공간 축 (§202)**: $N_{ctx} \ll D$ 차원의 저주 입증 $\to$ 폐기.
+
+_by Antigravity on gnode3 at 2026-08-23 09:30:00_
+
 
 
 
