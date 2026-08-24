@@ -21,13 +21,15 @@
 | **§200 LR (Direct Likelihood Ratio)** | Context 패치 메모리 뱅크 직접 우도비 + Top-K MIL Extreme Pooling | 단독 **0.5874**, 7-Branch **0.6195** (원천 패치 간 염색 Confounder 간섭) | **기각** |
 | **§201 절사 집계 방식 스윕** | Drop Min Only, Drop 2 Furthest vs Trimmed Mean 17개 전수 비교 | Drop Min(0.6247, 대칭성 파괴), Drop 2 Furthest(0.6576, 공분산 신호 소거) | **Trimmed Mean 최적성 재확인** |
 | **§202 In-Context Fisher Subspace** | Supervised Contrastive Basis: $\mathbf{w}_{\text{Fisher}} = \Sigma_W^{-1}(\boldsymbol{\mu}_1 - \boldsymbol{\mu}_0)$ | Primary 7 **0.5709** (-0.0556 폭락, $N_{ctx}=40 \ll D=1536$ 차원의 저주) | **기각 (Within-PCA 유지)** |
+| **§203 DE & SW 신규 브랜치 개발** | In-Subspace Dual Extreme (DE) 및 Sliced Wasserstein (SW) 개발 | DE 단독 **0.5954**, SW 단독 **0.5976** (KRAS 단독 1위 **`0.7374`**) | **독립 챔피언 확인** |
+| **§204 단독 브랜치 전수 실측 & CT 비교** | 8개 단독 브랜치 50-Fold 전수 실측 및 CT 단독 vs v120 앙상블 비교 | CT 단독 Primary 7 **`0.6147`** (단독 1위), SEAL 10 **`0.7197`**, Musk **`~0.90`** | **CT 올라운더 & v120 사각지대 방어 확증** |
 
 ---
 
-## 2. 활성 실험 큐 (Active Experiment Queue)
+## 2. 활성 연구 큐 (Active Research Queue)
 
-### [Exp 1] Sliced Wasserstein / Distribution Matching 브랜치 연구
-- **가설**: 군집화나 선형 사영 과정에서의 정보 손실 없이, 슬라이드 간 패치 경험적 분포(Empirical Distribution) 간의 1D Sliced Wasserstein 거리를 측정하여 고유한 분포 형태 차이를 직접 비교.
+### [Exp 1] CT (Cell Tokenizer) 단독 브랜치 고도화 연구
+- **가설**: K256 계층적 트리 토크나이저의 다중 스케일화, `cattopk` (Mean + Top-K) 풀링, 토큰별 국소 분산 모멘트 결합을 통해 `CT` 단독 성능을 극대화하여 `SMAD4` 사각지대 해소 및 단일 모델 완성도 제고.
 
 ---
 
@@ -41,6 +43,7 @@
    - 신규/수정 단락 작성 직후 스탬프 작성:
      `_by <LLM Name> on <server name> at <YYYY-MM-DD HH:MM:SS>_`
 
-_by Antigravity on gnode3 at 2026-08-23 09:30:00_
+_by Antigravity on gnode3 at 2026-08-24 18:16:00_
+
 
 

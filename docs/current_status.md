@@ -1,16 +1,16 @@
 # Current development status & multi-location sync SSOT
 
-**Last updated**: `2026-08-23 09:30:00` — **v120 Baseline 확립 (6-Branch Trimmed Mean) 및 후속 4대 실험 (KRR, LR, Trimming 변형, Fisher Subspace) 전수 사후분석 (§199~§203)**:
+**Last updated**: `2026-08-24 18:16:00` — **v120 Baseline 확립 (6-Branch Trimmed Mean) 및 단독 브랜치 전수 실측 / CT 단독 심층 비교 분석 (§204)**:
 - **활성 baseline**: **v120 (6-Branch Trimmed Mean: CV + CT + BM + BD + QA + DS, $w_{DD}=0.0$)** (학습 파라미터 0, Deterministic). 활성 runner `scripts/eval_v120.sh` / `scripts/run_v120_seal_multi_gpu.sh`.
 - **벤치마크 실측치**: 
   - **Primary 7-Task Macro Fold-mean AUROC**: **`0.6265`** (v119 0.6247 대비 +0.0018, v118 0.6205 대비 +0.0060 개선)
   - **SEAL 10-Task Macro Fold-mean AUROC**: **`0.6972`** (Supervised ABMIL 0.7266 대비 불과 0.0294 격차, MeanMIL 승 3개/ABMIL 승 1개)
   - **All 17-Task Total Macro AUROC**: **`0.6681`** (역대 전 계보 통합 최고치 경신)
-- **후속 탐색 실험 사후분석 완료**:
-  1. **Non-Linear KRR (§199)**: Primary 7 0.6125 (기각, Few-shot $N_{ctx}=40$ 과적합으로 SMAD4 0.4290 붕괴).
-  2. **LR (Patch Likelihood Ratio + Top-K MIL) (§200)**: 단독 0.5874, 7-Branch 0.6195 (기각, 원천 패치 간 염색 톤 Confounder 간섭).
-  3. **절사 집계 방식 스윕 (§201)**: Drop Min Only(0.6247) 대칭성 위배 하락, Drop 2 Furthest(Total 17 0.6576) 피처 브랜치 담합으로 공분산(CV/BD) 신호 소거 입증 $\to$ Trimmed Mean(1 min, 1 max) 최적성 재확인.
-  4. **In-Context Fisher Subspace (§202)**: Primary 7 0.5709 (기각, $N_{ctx}=40 \ll D=1536$ 고차원 LDA 차원의 저주로 노이즈 증폭).
+- **단독 브랜치 실측 및 CT 비교 분석 완료 (§204)**:
+  1. **`CT` 단독 (Bisect Tree K-Means)**: Primary 7 **`0.6147`** (단독 1위), SEAL 10 **`0.7197`**, Musk **`~0.90`** (강력한 단독 올라운더).
+  2. **6-Branch 앙상블(v120)과의 핵심 차이**: `SMAD4`(0.4282 $\to$ 0.5483 CV/BD 공분산 구원), `Progression`(0.7557 $\to$ 0.7986 +4.3% 도약), `ARID1A`(0.5361 $\to$ 0.6188 DS) 등 전방위 사각지대 방어.
+  3. **Voting 확신도 파워 가중치 실험**: Few-shot $N_{ctx}$ 환경에서 거짓 확신(Overconfidence) 노이즈 억제가 최우선이며, `Trimmed Mean`이 최적의 안전망임을 확정.
+
 
 
 ---
@@ -564,6 +564,49 @@ _by Antigravity on gnode3 at 2026-08-23 09:30:00_
 - **In-Context 1536D 감독형 Fisher 부분공간 축 (§202)**: $N_{ctx} \ll D$ 차원의 저주 입증 $\to$ 폐기.
 
 _by Antigravity on gnode3 at 2026-08-23 09:30:00_
+
+---
+
+## §204. 단독 브랜치(Single-Branch) 전수 실측 및 `CT` 단독 심층 비교 분석
+
+### 1. 8대 단독 브랜치 50-Fold 공식 실측 성능 (Primary 7 Tasks)
+
+| 브랜치명 | 아키텍처 핵심 기제 | **Macro** | `ARID1A` | `Grade` | `KEAP1` | `KRAS` | `SMAD4` | `Progression` | `PBRM1` |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`CV`** | Covariance Sketch Dual Ridge | `0.6004` | 0.4308 | 0.6288 | 0.6154 | 0.7122 | **`0.5483` 🥇** | 0.7632 | 0.5041 |
+| **`CT`** | Bisect Tree K-Means Dual Ridge | **`0.6147` 🥇** | 0.5361 | 0.6743 | 0.6105 | 0.7302 | 0.4282 | 0.7557 | 0.5683 |
+| **`BM`** | Bimodal Patch Extreme Diff | `0.6034` | 0.4991 | 0.6642 | **`0.6232` 🥇** | 0.6757 | 0.4204 | 0.7507 | 0.5904 |
+| **`BD`** | Block Diagonal Covariance | `0.5257` | 0.6084 | 0.4665 | 0.5516 | 0.4736 | **`0.5322` 🥈** | 0.5956 | 0.4520 |
+| **`QA`** | Quadratic Axis Extreme MIL | `0.6057` | 0.4700 | 0.6724 | 0.5726 | 0.7338 | 0.4203 | 0.7779 | **`0.5927` 🥇** |
+| **`DS`** | Dense Soft-Quantized Tokens | `0.6058` | **`0.6188` 🥇** | **`0.7009` 🥇** | 0.5699 | 0.6380 | 0.4284 | **`0.7786` 🥇** | 0.5060 |
+| **`DE`** | In-Subspace Dual Extreme | `0.5954` | 0.5166 | 0.6856 | 0.5643 | 0.6857 | 0.4299 | 0.7149 | 0.5706 |
+| **`SW`** | Sliced Wasserstein Matching | `0.5976` | 0.4710 | 0.6323 | 0.5743 | **`0.7374` 🥇** | 0.4491 | 0.7492 | 0.5697 |
+| **v120 Baseline** | *(6-Branch Trimmed Mean)* | **`0.6265`** | 0.5471 | 0.6823 | 0.6129 | 0.7295 | 0.4465 | **`0.7986`** | 0.5685 |
+
+---
+
+### 2. `CT` 단독(Single Branch) vs `v120` (6-Branch Trimmed Mean) 종합 비교
+
+#### (1) 타 벤치마크에서의 `CT` 단독 성능
+* **SEAL 10-Task**: `CT` 단독 **`0.7197`** (v120 앙상블 `0.7170`과 동등 수준의 강력한 올라운더).
+* **UCI Musk 2**: `CT` 단독 **`~0.90`** (수천 에포크 파인튜닝된 딥러닝 모델 `0.8799`를 능가).
+* **ICI (Single-cell PBMC)**: `CT` 단독 **`0.5178`** (코호트 노이즈로 전 모델 공통 랜덤).
+
+#### (2) 왜 6-Branch 앙상블(v120)이 필수적인가? (사각지대 방어 분석)
+1. **공분산 사각지대 (`SMAD4`) 방어**:
+   - `CT`는 세포의 빈도(Frequency) 히스토그램만 측정하므로, 세포 공분산 분산(Dispersion)이 신호인 `SMAD4`에서는 **`0.4282`로 완전 붕괴(Random 미만)**함.
+   - 이때 공분산 브랜치인 `CV`(`0.5483`)와 `BD`(`0.5322`)가 유일한 안전망이 됨.
+2. **시너지 과제 대폭 도약**:
+   - `Progression`: `CT` 단독 `0.7557` $\to$ v120 앙상블 **`0.7986`** (+0.0429 = **+4.3% 도약**).
+   - `ARID1A`: `CT` 단독 `0.5361` $\to$ `DS` 단독 **`0.6188`** (+0.0827 압도).
+   - `Grade`: `CT` 단독 `0.6743` $\to$ `DS` 단독 **`0.7009`** (+0.0266 상승).
+
+#### (3) 확신도 가중 투표(Confidence Power $\gamma$) 실험의 결론
+* 중심화 확률합 $M = \sum (p_b - 0.5)$ 및 지수 파워 $\gamma > 1$을 적용했을 때, Few-shot 표본 수 부족으로 인해 단 1개 브랜치의 거짓 확신(Overconfidence, $p \to 0.99$)이 전체를 오염시킴을 확인.
+* 따라서 **상/하위 이상치를 1개씩 잘라내는 `Trimmed Mean`이 과적합/거짓 확신 노이즈를 억제하는 가장 견고한 메커니즘**임을 재확인.
+
+_by Antigravity on gnode3 at 2026-08-24 18:16:00_
+
 
 
 

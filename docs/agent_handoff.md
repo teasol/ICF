@@ -36,8 +36,8 @@
 | 문서 | 역할 및 포함 내용 |
 | :--- | :--- |
 | [`docs/current_architecture.md`](current_architecture.md) | **현행 아키텍처 완전 명세**: 활성 6개 브랜치(CV, CT, BM, BD, QA, DS) 및 Trimmed Mean Voting의 수식, 작동 원리, 모듈 패키지 구조 |
-| [`docs/current_status.md`](current_status.md) | **현재 개발 상태 & 판정 SSOT**: §0 판정 종합 규칙, 최신 승격 및 실험 내역(§197~§198: v119/v120 승격, §199~§203: KRR, LR, Trimming 스윕, Fisher Subspace 사후분석) |
-| [`docs/current_experiments.md`](current_experiments.md) | **실험 큐**: [완료] v120 승격, [완료] KRR/LR/Fisher Subspace 사후분석, [Next] Sliced Wasserstein / Distribution Matching |
+| [`docs/current_status.md`](current_status.md) | **현재 개발 상태 & 판정 SSOT**: §0 판정 종합 규칙, 최신 승격 및 실험 내역(§198: v120 승격, §199~§203: 후속 실험 사후분석, §204: 단독 브랜치 전수 실측 및 CT 단독 심층 비교) |
+| [`docs/current_experiments.md`](current_experiments.md) | **실험 큐**: [완료] v120 승격, [완료] DE/SW 개발, [완료] 단독 브랜치 실측 및 CT 비교 분석, [Next] CT 단독 고도화 연구 |
 | [`docs/history.md`](history.md) | **과거 기록 아카이브**: 과거 학습 계보(v83~v98), 이전 세션 실험(§2~§184), 설계 결정 이력 |
 
 ---
@@ -55,5 +55,6 @@
    - 새 단락 및 긴 내용 작성 직후 반드시 스탬프 첨부:
      `_by <LLM Name> on <server name> at <YYYY-MM-DD HH:MM:SS>_`
 
-_by Antigravity on gnode3 at 2026-08-23 09:30:00_
+_by Antigravity on gnode3 at 2026-08-24 18:16:00_
+
 
