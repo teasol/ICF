@@ -1,0 +1,108 @@
+# Integration spec for experiment 'baseline' — verifies the ASSEMBLED whole once
+# both modules are done: the real v120 evaluation on the Primary 7 tasks, parsed
+# into metrics.json, gated at the recorded 0.6265 +/- 0.005.
+#
+# This is the only place the actual GPU work runs. Module acceptance deliberately
+# stays under the Worker timeout by using dry-run, preflight and fixture logs.
+name: baseline
+description: >
+  Run the unmodified v120 arm over the 7 Primary PathoBench tasks, extract
+  per-task fold-mean AUROC, and confirm the Primary 7 macro reproduces the
+  recorded 0.6265 within +/-0.005.
+seed: 42
+
+steps:
+  - id: preflight
+    # Fails fast on a broken node (missing torch, unmounted feature symlinks,
+    # too few GPUs) instead of discovering it 90 minutes into the sweep.
+    run: bash scripts/baseline/run_primary7_v120.sh --preflight --gpus 0,1,2,3
+    timeout: 300
+    checks: []
+
+  - id: run-primary7
+    # ~66 min for these 7 tasks sequentially on 8x B200 (the v114 sweep of
+    # 2026-08-21); this node is 4x RTX A5000, so the ceiling is generous.
+    run: |
+      set -euo pipefail
+      mkdir -p "${HARNESS_RESULTS_DIR}" results/baseline
+      bash scripts/baseline/run_primary7_v120.sh \
+        --tag baseline_v120_primary7 \
+        --gpus 0,1,2,3 \
+        --manifest "${HARNESS_RESULTS_DIR}/manifest.json"
+      cp "${HARNESS_RESULTS_DIR}/manifest.json" results/baseline/manifest.json
+    timeout: 21600
+    checks:
+      - type: file_exists
+        path: ${HARNESS_RESULTS_DIR}/manifest.json
+      - type: text_contains
+        path: ${HARNESS_RESULTS_DIR}/manifest.json
+        contains:
+          - "cptac_lscc/ARID1A_mutation"
+          - "cptac_lscc/Histologic_Grade"
+          - "cptac_lscc/KEAP1_mutation"
+          - "cptac_luad/KRAS_mutation"
+          - "cptac_pda/SMAD4_mutation"
+          - "ucla_lung/progression_regression"
+          - "cptac_ccrcc/PBRM1_mutation"
+
+  - id: extract-metrics
+    run: |
+      set -euo pipefail
+      ${HARNESS_PYTHON} src/baseline/extract_metrics.py \
+        --manifest "${HARNESS_RESULTS_DIR}/manifest.json" \
+        --out "${HARNESS_RESULTS_DIR}/metrics.json" \
+        --reference 0.6265 \
+        --tolerance 0.005
+      cp "${HARNESS_RESULTS_DIR}/metrics.json" results/baseline/metrics.json
+    timeout: 600
+    checks:
+      - type: file_exists
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+      # All 7 tasks present and each a complete 50-fold evaluation. A crashed or
+      # OOM task must fail here, never be averaged away.
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: primary7.n_tasks
+        equals: 7
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.cptac_lscc/ARID1A_mutation.n_folds
+        equals: 50
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.cptac_lscc/Histologic_Grade.n_folds
+        equals: 50
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.cptac_lscc/KEAP1_mutation.n_folds
+        equals: 50
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.cptac_luad/KRAS_mutation.n_folds
+        equals: 50
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.cptac_pda/SMAD4_mutation.n_folds
+        equals: 50
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.ucla_lung/progression_regression.n_folds
+        equals: 50
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.cptac_ccrcc/PBRM1_mutation.n_folds
+        equals: 50
+      # THE GATE the researcher set: macro fold-mean AUROC = 0.6265 +/- 0.005.
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: primary7.macro_fold_mean_auroc
+        min: 0.6215
+        max: 0.6315
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: primary7.abs_delta_vs_reference
+        max: 0.005
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: primary7.within_tolerance
+        equals: 1

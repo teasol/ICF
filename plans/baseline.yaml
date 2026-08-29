@@ -1,0 +1,539 @@
+# Plan for experiment 'baseline' — written by the Planner, read by Workers.
+#
+# Question (recorded verbatim, experiments/baseline/question.md):
+#   Reproduce the v120 baseline (6-branch CV+CT+BM+BD+QA+DS trimmed-mean voting,
+#   training-free, 0 learned parameters) under the harness on the Primary 7
+#   tasks, and confirm the measured Primary 7 macro fold-mean AUROC reproduces
+#   the recorded value of 0.6265 within +/-0.005.
+plan:
+  name: baseline
+  goal: >
+    Stand up a harness-verified reproduction of the v120 arm on the Primary 7
+    PathoBench tasks, so that every future arm has a machine-checked reference
+    instead of a number copied out of docs/current_status.md. The v120 model
+    code is NOT touched: this experiment wraps the existing, unmodified
+    scripts/eval_v120.sh in a deterministic runner, extracts per-task fold-mean
+    AUROC from the evaluation logs into a stable JSON artifact, and gates the
+    Primary 7 macro fold-mean AUROC at 0.6265 +/- 0.005. The recorded 0.6265 was
+    measured on 8x B200; this node is 4x RTX A5000 with bf16-mixed, so the
+    tolerance exists to absorb GPU-architecture float drift while still failing
+    a genuine regression such as a branch silently dropping out.
+
+  # What the researcher asked to see. Declares WHERE each number lives; the
+  # harness extracts the value from the real artifact produced by the run.
+  report:
+    question: |
+      Reproduce the v120 baseline (6-branch CV+CT+BM+BD+QA+DS trimmed-mean
+      voting, training-free, 0 learned parameters) under the harness on the
+      Primary 7 tasks, and confirm the measured Primary 7 macro fold-mean AUROC
+      reproduces the recorded value of 0.6265 within +/-0.005.
+    metrics:
+      - name: primary7_macro_fold_mean_auroc
+        source: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: primary7.macro_fold_mean_auroc
+        description: >
+          Arithmetic mean of the 7 Primary task fold-mean AUROCs. This is the
+          number the experiment exists to reproduce; recorded reference 0.6265.
+      - name: primary7_abs_delta_vs_reference
+        source: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: primary7.abs_delta_vs_reference
+        description: Absolute distance from the recorded 0.6265. Pass band is <= 0.005.
+      - name: primary7_within_tolerance
+        source: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: primary7.within_tolerance
+        description: 1 if the macro reproduced within +/-0.005, else 0.
+      - name: arid1a_fold_mean_auroc
+        source: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.cptac_lscc/ARID1A_mutation.fold_mean_auroc
+        description: Per-task fold-mean AUROC (docs/current_status.md 0-2 reporting format).
+      - name: histologic_grade_fold_mean_auroc
+        source: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.cptac_lscc/Histologic_Grade.fold_mean_auroc
+        description: Per-task fold-mean AUROC.
+      - name: keap1_fold_mean_auroc
+        source: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.cptac_lscc/KEAP1_mutation.fold_mean_auroc
+        description: Per-task fold-mean AUROC.
+      - name: kras_fold_mean_auroc
+        source: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.cptac_luad/KRAS_mutation.fold_mean_auroc
+        description: Per-task fold-mean AUROC.
+      - name: smad4_fold_mean_auroc
+        source: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.cptac_pda/SMAD4_mutation.fold_mean_auroc
+        description: >
+          Per-task fold-mean AUROC. SMAD4 is the documented blind spot the
+          ensemble rescues (0.4282 CT-alone -> 0.5483 under v120); a collapse
+          here is the most likely signature of a branch failing to load.
+      - name: progression_fold_mean_auroc
+        source: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.ucla_lung/progression_regression.fold_mean_auroc
+        description: Per-task fold-mean AUROC.
+      - name: pbrm1_fold_mean_auroc
+        source: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.cptac_ccrcc/PBRM1_mutation.fold_mean_auroc
+        description: Per-task fold-mean AUROC.
+    artifacts:
+      - results/baseline/metrics.json
+      - results/baseline/manifest.json
+
+  integration:
+    spec: configs/baseline.yaml
+
+  modules:
+    - id: primary7-runner
+      title: Deterministic Primary-7 v120 evaluation runner + manifest
+      depends_on: []
+      deliverables:
+        - scripts/baseline/run_primary7_v120.sh
+      contract:
+        inputs:
+          - name: repo_scripts
+            type: existing-shell-scripts
+            description: >
+              scripts/eval_v120.sh and scripts/node_env.sh, already present in
+              this repository and used UNMODIFIED.
+          - name: gpu_list
+            type: string
+            description: Comma-separated CUDA device indices, default "0,1,2,3".
+          - name: tag
+            type: string
+            description: Run tag embedded in every log and prediction filename.
+        outputs:
+          - name: manifest
+            type: json-file
+            description: >
+              Maps each of the 7 Primary tasks to the log file and prediction
+              file the run produces. Consumed by metrics-extractor.
+          - name: eval_logs
+            type: log-files
+            description: One logs/official50/<task>_<tag>.log per Primary task.
+      brief: |
+        Write ONE bash script: scripts/baseline/run_primary7_v120.sh
+
+        PURPOSE
+        It runs the existing v120 evaluation over the 7 "Primary" PathoBench
+        tasks, spreading them across GPUs, and writes a JSON manifest saying
+        where each task's log and prediction file landed. A separate module
+        parses that manifest. You do NOT compute AUROC and you do NOT touch any
+        model code.
+
+        THE 7 PRIMARY TASKS, in exactly this order:
+          1. cptac_lscc/ARID1A_mutation
+          2. cptac_lscc/Histologic_Grade
+          3. cptac_lscc/KEAP1_mutation
+          4. cptac_luad/KRAS_mutation
+          5. cptac_pda/SMAD4_mutation
+          6. ucla_lung/progression_regression
+          7. cptac_ccrcc/PBRM1_mutation
+
+        WHAT ALREADY EXISTS (read these before writing anything)
+        - scripts/eval_v120.sh — usage: `bash scripts/eval_v120.sh <gpu> <tag> [task]...`
+          It sets ~30 ICF_* environment variables that define the v120 arm and
+          then execs scripts/eval_seal_tasks.sh. DO NOT MODIFY IT, DO NOT COPY
+          ITS ENVIRONMENT VARIABLES INTO YOUR SCRIPT, and do not re-implement it.
+          Your script's only job is to call it correctly. Copying its env vars
+          would fork the definition of v120 and silently break future arms.
+        - scripts/eval_seal_tasks.sh — invoked by the above. For each task it
+          writes:
+            log         logs/official50/${TASK_WITH_SLASHES_AS_UNDERSCORES}_${TAG}.log
+            prediction  predictions/pathobench_${TASK_WITH_SLASHES_AS_UNDERSCORES}_${TAG}_official50_bf16.pt
+          e.g. task `cptac_luad/KRAS_mutation` with tag `t` gives
+            logs/official50/cptac_luad_KRAS_mutation_t.log
+            predictions/pathobench_cptac_luad_KRAS_mutation_t_official50_bf16.pt
+          Derive both paths with that exact rule (replace every "/" with "_").
+        - scripts/node_env.sh — resolves ICF_PYTHON, ICF_DATA_ROOT, OFFICIAL,
+          FEATURES, NGPU. Source it (`. scripts/node_env.sh`) rather than
+          hardcoding any interpreter or data path.
+        - scripts/run_v120_seal_multi_gpu.sh — an existing example of the
+          multi-GPU fan-out pattern (background jobs per GPU, then `wait`).
+          Follow its shape.
+
+        CLI
+          bash scripts/baseline/run_primary7_v120.sh [options]
+        Options (all optional, with these exact defaults):
+          --tag <str>        default: baseline_v120_primary7
+          --gpus <csv>       default: 0,1,2,3
+          --manifest <path>  default: results/baseline/manifest.json
+          --dry-run          build and write the manifest, print the exact
+                             per-GPU command lines to stdout, run NO GPU work,
+                             exit 0.
+          --preflight        environment check only; no GPU work; exit 0 on a
+                             healthy node, non-zero otherwise. See below.
+          --help             usage text, exit 0.
+        Unknown option: print usage to stderr and exit 2.
+
+        BEHAVIOUR
+        - Resolve PROJECT_ROOT as the parent of the script's directory's parent
+          (the script lives in scripts/baseline/, so go up two levels) and cd
+          there, matching the existing scripts. Then `. scripts/node_env.sh`.
+        - Assign tasks to GPUs round-robin over --gpus, in the task order above.
+          With the default 4 GPUs that is: gpu0 -> tasks 1,5; gpu1 -> 2,6;
+          gpu2 -> 3,7; gpu3 -> 4. Assignment must be a pure function of the task
+          list and the gpu list — no randomness, no "pick the idle GPU".
+        - Write the manifest BEFORE launching any GPU work, so a crashed run
+          still leaves a manifest describing what it attempted. Create the
+          manifest's parent directory if needed.
+        - Launch one background `bash scripts/eval_v120.sh <gpu> <tag> <task>...`
+          per GPU, redirecting its stdout/stderr to
+          logs/baseline/primary7_gpu<gpu>.log, then `wait` for all of them.
+        - Exit non-zero if any per-GPU job exited non-zero. On success, exit 0.
+        - Do NOT parse AUROC. Do NOT delete or move logs or predictions.
+
+        MANIFEST FORMAT (exact)
+        {
+          "tag": "baseline_v120_primary7",
+          "arm": "v120",
+          "gpus": [0, 1, 2, 3],
+          "tasks": [
+            {
+              "task": "cptac_lscc/ARID1A_mutation",
+              "gpu": 0,
+              "log": "logs/official50/cptac_lscc_ARID1A_mutation_baseline_v120_primary7.log",
+              "predictions": "predictions/pathobench_cptac_lscc_ARID1A_mutation_baseline_v120_primary7_official50_bf16.pt"
+            }
+            ... all 7, in the task order above ...
+          ]
+        }
+        Paths are relative to PROJECT_ROOT. Keys exactly as spelled. Emit it with
+        2-space indentation. Writing JSON by hand from bash is fine (printf); if
+        you prefer, shell out to "$ICF_PYTHON" or python3 — but the file must be
+        valid JSON and byte-identical across two runs with the same arguments.
+
+        --preflight MUST check, printing one PASS/FAIL line per item:
+          1. "$ICF_PYTHON" -c "import torch, lightning" succeeds
+          2. "$OFFICIAL" directory exists and contains a subdirectory for each
+             of the 5 distinct dataset prefixes used above (cptac_lscc,
+             cptac_luad, cptac_pda, ucla_lung, cptac_ccrcc)
+          3. "$FEATURES" directory exists and is non-empty
+          4. nvidia-smi lists at least as many GPUs as --gpus requests
+        Exit 0 only if all pass.
+
+        NOTE ON THE CHECKPOINT: ICF_CKPT resolves to the empty string on this
+        node (no v98_p1_reverse_seed42 checkpoint present). That is EXPECTED and
+        correct for this arm — v120 is training-free with 0 learned parameters,
+        and scripts/eval_seal_tasks.sh already omits --checkpoint when ICF_CKPT
+        is empty. Do not "fix" this, do not search for a checkpoint, and do not
+        make an empty ICF_CKPT a preflight failure.
+      constraints:
+        - "Do not modify any existing file in the repository. The only file you create is scripts/baseline/run_primary7_v120.sh (plus its parent directory)."
+        - "Do not copy, inline, or re-declare any ICF_* environment variable that scripts/eval_v120.sh sets. Call that script; never re-implement the arm."
+        - "bash only, `set -uo pipefail`. No python dependency beyond what node_env.sh resolves."
+        - "Deterministic: same arguments must produce a byte-identical manifest. No timestamps, hostnames, PIDs, or random values in the manifest."
+        - "--dry-run and --preflight must never launch GPU work and must finish in well under 60 seconds."
+        - "chmod +x the script."
+      acceptance:
+        steps:
+          - id: runner-help
+            run: bash scripts/baseline/run_primary7_v120.sh --help
+            checks: []
+          - id: runner-dry-run
+            run: |
+              set -euo pipefail
+              rm -rf results/acceptance/runner
+              mkdir -p results/acceptance/runner
+              bash scripts/baseline/run_primary7_v120.sh \
+                --dry-run \
+                --tag accept_dryrun \
+                --manifest results/acceptance/runner/manifest.json
+              /usr/bin/env python3 -c "import json,sys; d=json.load(open('results/acceptance/runner/manifest.json')); assert len(d['tasks'])==7, d; assert [t['task'] for t in d['tasks']]==['cptac_lscc/ARID1A_mutation','cptac_lscc/Histologic_Grade','cptac_lscc/KEAP1_mutation','cptac_luad/KRAS_mutation','cptac_pda/SMAD4_mutation','ucla_lung/progression_regression','cptac_ccrcc/PBRM1_mutation'], d; assert d['tag']=='accept_dryrun', d; print('manifest ok')"
+            checks:
+              - type: file_exists
+                path: results/acceptance/runner/manifest.json
+              - type: text_contains
+                path: results/acceptance/runner/manifest.json
+                contains:
+                  - "logs/official50/cptac_lscc_ARID1A_mutation_accept_dryrun.log"
+                  - "logs/official50/cptac_lscc_Histologic_Grade_accept_dryrun.log"
+                  - "logs/official50/cptac_lscc_KEAP1_mutation_accept_dryrun.log"
+                  - "logs/official50/cptac_luad_KRAS_mutation_accept_dryrun.log"
+                  - "logs/official50/cptac_pda_SMAD4_mutation_accept_dryrun.log"
+                  - "logs/official50/ucla_lung_progression_regression_accept_dryrun.log"
+                  - "logs/official50/cptac_ccrcc_PBRM1_mutation_accept_dryrun.log"
+                  - "predictions/pathobench_cptac_pda_SMAD4_mutation_accept_dryrun_official50_bf16.pt"
+          - id: runner-dry-run-deterministic
+            run: |
+              set -euo pipefail
+              bash scripts/baseline/run_primary7_v120.sh \
+                --dry-run --tag accept_dryrun \
+                --manifest results/acceptance/runner/manifest_b.json
+              cmp results/acceptance/runner/manifest.json results/acceptance/runner/manifest_b.json
+              echo "byte-identical across runs"
+            checks: []
+          - id: runner-no-arm-redefinition
+            run: |
+              set -euo pipefail
+              if grep -nE '^[[:space:]]*(export[[:space:]]+)?ICF_(FIXED_HEAD|AGGREGATION|CT_|CV_|BM_|BD_|QA_|DS_|SKETCH_DIM|COVARIANCE_BASIS)' scripts/baseline/run_primary7_v120.sh; then
+                echo "FAIL: runner re-declares v120 arm variables; it must call scripts/eval_v120.sh instead" >&2
+                exit 1
+              fi
+              grep -q 'scripts/eval_v120.sh' scripts/baseline/run_primary7_v120.sh
+              git diff --quiet -- scripts/eval_v120.sh scripts/eval_seal_tasks.sh scripts/node_env.sh
+              echo "arm definition untouched"
+            checks: []
+          - id: runner-preflight
+            run: bash scripts/baseline/run_primary7_v120.sh --preflight
+            checks: []
+
+    - id: metrics-extractor
+      title: Parse evaluation logs into a stable metrics.json with the tolerance gate
+      depends_on: [primary7-runner]
+      deliverables:
+        - src/baseline/extract_metrics.py
+        - tests/baseline/test_extract_metrics.py
+        - tests/baseline/fixtures/sample_task_log.txt
+      contract:
+        inputs:
+          - name: manifest
+            type: json-file
+            description: >
+              The manifest emitted by scripts/baseline/run_primary7_v120.sh,
+              listing 7 tasks each with a `task` name and a `log` path.
+          - name: eval_logs
+            type: log-files
+            description: The per-task evaluation logs the manifest points at.
+        outputs:
+          - name: metrics
+            type: json-file
+            description: >
+              Per-task fold-mean AUROC, the Primary 7 macro, the absolute delta
+              against the recorded 0.6265, and an integer pass flag.
+      brief: |
+        Write a stdlib-only Python 3 program: src/baseline/extract_metrics.py
+        plus its tests. It reads the run manifest, parses each task's evaluation
+        log, and writes one JSON metrics file. It runs no models and imports no
+        third-party package.
+
+        WHY STDLIB ONLY: this program is executed by the harness under
+        ${HARNESS_PYTHON}, which is /usr/bin/python3 (Python 3.10.12) — a bare
+        interpreter with NO torch, NO numpy, NO yaml. Importing any of them
+        fails at acceptance time.
+
+        CLI
+          python3 src/baseline/extract_metrics.py \
+            --manifest <path> --out <path> [--reference 0.6265] [--tolerance 0.005]
+        --manifest and --out are required. Log paths inside the manifest are
+        relative to the current working directory (the repository root).
+
+        THE LOG FORMAT YOU MUST PARSE
+        Each task log ends with a summary block. Here are four real, verbatim
+        lines from logs/official50/cptac_luad_KRAS_mutation_ensemble_8branch_primary7.log
+        (truncated in the middle of the per-fold list only):
+
+          === PathoBench official 50-fold — cptac_luad/KRAS_mutation — 312 slides (folds 1..50) ===
+          per-fold AUROC: 0.7786 0.6949 0.7203 0.6786 0.7988 ... 0.7915 0.8193 0.7642 0.5044
+          fold-mean AUROC: 0.7340 ± 0.0944   pooled AUROC: 0.7270
+          Saved official-fold predictions to /home/kimds/ICF/predictions/pathobench_cptac_luad_KRAS_mutation_ensemble_8branch_primary7_official50_bf16.pt
+
+        Notes that WILL bite you if ignored:
+        - The separator in "0.7340 ± 0.0944" is U+00B1 (±), not "+/-". The logs
+          are UTF-8 but can contain stray bytes from progress output, so open
+          them with encoding="utf-8", errors="replace".
+        - The em dashes in the "===" header line are U+2014.
+        - The spacing between "± 0.0944" and "pooled" is multiple spaces. Match
+          with a tolerant regex (\s+), not a fixed number of spaces.
+        - A log may contain MANY interleaved lines; the summary block is at the
+          end. If a pattern somehow matches more than once, take the LAST match.
+        - The per-fold line has exactly 50 space-separated floats.
+
+        WHAT TO EXTRACT PER TASK
+          fold_mean_auroc   float from "fold-mean AUROC: <X> ±"
+          fold_std          float after the ±
+          pooled_auroc      float from "pooled AUROC: <X>"
+          per_fold_auroc    the list of 50 floats from the "per-fold AUROC:" line
+          n_folds           len(per_fold_auroc)
+
+        FAIL LOUDLY (exit code 1, message to stderr naming the task and path) if:
+          - the manifest does not list exactly 7 tasks
+          - a log file named in the manifest does not exist
+          - a log has no "fold-mean AUROC:" line (this is what a crashed or OOM
+            evaluation looks like — it must never be silently averaged away)
+          - n_folds != 50
+        Never substitute a default, a NaN, or skip a task.
+
+        ARITHMETIC — follow this order exactly so the output is reproducible:
+          1. round each task's fold_mean_auroc to 6 decimals
+          2. macro_fold_mean_auroc = round(sum(those rounded values) / 7, 6)
+          3. abs_delta_vs_reference = round(abs(macro_fold_mean_auroc - reference), 6)
+          4. within_tolerance = 1 if abs_delta_vs_reference <= tolerance else 0
+        Round pooled_auroc, fold_std and every per-fold value to 6 decimals too.
+
+        OUTPUT JSON (exact shape; task keys keep their slash)
+        {
+          "tag": "<manifest tag>",
+          "arm": "<manifest arm>",
+          "tasks": {
+            "cptac_lscc/ARID1A_mutation": {
+              "fold_mean_auroc": 0.61,
+              "fold_std": 0.09,
+              "pooled_auroc": 0.6,
+              "n_folds": 50,
+              "per_fold_auroc": [ ... 50 floats ... ],
+              "log": "logs/official50/..."
+            },
+            ... all 7 ...
+          },
+          "primary7": {
+            "n_tasks": 7,
+            "macro_fold_mean_auroc": 0.63,
+            "reference_macro_fold_mean_auroc": 0.6265,
+            "tolerance": 0.005,
+            "abs_delta_vs_reference": 0.0035,
+            "within_tolerance": 1
+          }
+        }
+        Write it with json.dump(..., sort_keys=True, indent=2) plus a trailing
+        newline. within_tolerance, n_tasks and n_folds must be Python ints, NOT
+        booleans — the harness's json_metric check rejects bool as non-numeric.
+        Create the --out parent directory if it does not exist.
+
+        Also print a plain-text table to stdout: one line per task
+        "<task> <fold_mean_auroc>", then a final line
+        "MACRO <macro> DELTA <abs_delta> TOLERANCE <tolerance> WITHIN <0|1>".
+
+        DELIVERABLE: tests/baseline/fixtures/sample_task_log.txt
+        Create this file containing a REALISTIC task log tail: at minimum the
+        four verbatim lines quoted above, with a full 50-value per-fold list
+        (make up plausible values, but the count must be 50 and the fold-mean
+        line must be internally consistent with the task you name). Keep the ±
+        and — characters as real UTF-8. It must NOT be named *.log — the
+        repository .gitignore excludes *.log and the fixture must be committed.
+
+        DELIVERABLE: tests/baseline/test_extract_metrics.py
+        A unittest module (runnable via `python3 -m unittest`) that, using only
+        tempfile + the stdlib, covers at least:
+          1. parsing tests/baseline/fixtures/sample_task_log.txt yields the
+             fold-mean, std, pooled and 50 per-fold values in that file;
+          2. a 7-task manifest whose logs have fold-means
+             0.60 0.61 0.62 0.63 0.64 0.65 0.66 produces
+             macro_fold_mean_auroc == 0.63, abs_delta_vs_reference == 0.0035,
+             within_tolerance == 1;
+          3. a 7-task manifest whose logs all have fold-mean 0.70 produces
+             macro_fold_mean_auroc == 0.7, abs_delta_vs_reference == 0.0735,
+             within_tolerance == 0;
+          4. a manifest naming a missing log exits non-zero;
+          5. a log with no "fold-mean AUROC:" line exits non-zero;
+          6. a log whose per-fold line has 49 values exits non-zero;
+          7. running the extractor twice on the same input produces
+             byte-identical output files.
+        Tests must not require a GPU, a network, or any file outside the repo.
+      constraints:
+        - "Python 3.10 standard library only. No torch, numpy, yaml, pandas, pytest, or any third-party import — in the program or the tests."
+        - "Do not modify any existing file in the repository; create only the three declared deliverables and their parent directories."
+        - "Do not read the model, the .pt prediction files, or any evaluation log outside the manifest. Logs are the only source of truth here."
+        - "Deterministic: byte-identical output for identical input. Sorted keys, fixed 6-decimal rounding, no timestamps or absolute paths in the JSON."
+        - "Never invent, default, or interpolate a missing metric — a missing or malformed log is a hard error."
+      acceptance:
+        steps:
+          - id: extractor-stdlib-only
+            run: |
+              set -euo pipefail
+              if grep -nE '^\s*(import|from)\s+(torch|numpy|np|pandas|yaml|scipy|sklearn|lightning|pytest)\b' src/baseline/extract_metrics.py tests/baseline/test_extract_metrics.py; then
+                echo "FAIL: third-party import found; ${HARNESS_PYTHON} is a bare interpreter" >&2
+                exit 1
+              fi
+              echo "stdlib-only ok"
+            checks: []
+          - id: extractor-unit-tests
+            run: ${HARNESS_PYTHON} -m unittest discover -s tests/baseline -p "test_*.py" -v
+            checks: []
+          - id: extractor-golden-pass
+            run: |
+              set -euo pipefail
+              rm -rf results/acceptance/extractor
+              mkdir -p results/acceptance/extractor/logs
+              ${HARNESS_PYTHON} - <<'PY'
+              import json, os
+              base = "results/acceptance/extractor"
+              tasks = ["cptac_lscc/ARID1A_mutation","cptac_lscc/Histologic_Grade",
+                       "cptac_lscc/KEAP1_mutation","cptac_luad/KRAS_mutation",
+                       "cptac_pda/SMAD4_mutation","ucla_lung/progression_regression",
+                       "cptac_ccrcc/PBRM1_mutation"]
+              means = [0.60,0.61,0.62,0.63,0.64,0.65,0.66]
+              entries = []
+              for task, mean in zip(tasks, means):
+                  name = task.replace("/", "_")
+                  log = f"{base}/logs/{name}.log"
+                  folds = " ".join(f"{mean:.4f}" for _ in range(50))
+                  with open(log, "w", encoding="utf-8") as fh:
+                      fh.write(f"=== PathoBench official 50-fold — {task} — 312 slides (folds 1..50) ===\n")
+                      fh.write(f"per-fold AUROC: {folds}\n")
+                      fh.write(f"fold-mean AUROC: {mean:.4f} ± 0.0900   pooled AUROC: {mean:.4f}\n")
+                  entries.append({"task": task, "gpu": 0, "log": log,
+                                  "predictions": f"predictions/pathobench_{name}_golden_official50_bf16.pt"})
+              with open(f"{base}/manifest.json", "w", encoding="utf-8") as fh:
+                  json.dump({"tag": "golden", "arm": "v120", "gpus": [0], "tasks": entries}, fh, indent=2)
+              PY
+              ${HARNESS_PYTHON} src/baseline/extract_metrics.py \
+                --manifest results/acceptance/extractor/manifest.json \
+                --out results/acceptance/extractor/metrics.json
+            checks:
+              - type: file_exists
+                path: results/acceptance/extractor/metrics.json
+              - type: json_metric
+                path: results/acceptance/extractor/metrics.json
+                metric: primary7.macro_fold_mean_auroc
+                equals: 0.63
+              - type: json_metric
+                path: results/acceptance/extractor/metrics.json
+                metric: primary7.abs_delta_vs_reference
+                equals: 0.0035
+              - type: json_metric
+                path: results/acceptance/extractor/metrics.json
+                metric: primary7.within_tolerance
+                equals: 1
+              - type: json_metric
+                path: results/acceptance/extractor/metrics.json
+                metric: primary7.n_tasks
+                equals: 7
+              - type: json_metric
+                path: results/acceptance/extractor/metrics.json
+                metric: tasks.cptac_pda/SMAD4_mutation.fold_mean_auroc
+                equals: 0.64
+              - type: json_metric
+                path: results/acceptance/extractor/metrics.json
+                metric: tasks.cptac_ccrcc/PBRM1_mutation.n_folds
+                equals: 50
+          - id: extractor-rejects-broken-log
+            run: |
+              set -euo pipefail
+              mkdir -p results/acceptance/extractor_bad
+              ${HARNESS_PYTHON} - <<'PY'
+              import json
+              base = "results/acceptance/extractor_bad"
+              tasks = ["cptac_lscc/ARID1A_mutation","cptac_lscc/Histologic_Grade",
+                       "cptac_lscc/KEAP1_mutation","cptac_luad/KRAS_mutation",
+                       "cptac_pda/SMAD4_mutation","ucla_lung/progression_regression",
+                       "cptac_ccrcc/PBRM1_mutation"]
+              entries = []
+              for i, task in enumerate(tasks):
+                  name = task.replace("/", "_")
+                  log = f"{base}/{name}.log"
+                  with open(log, "w", encoding="utf-8") as fh:
+                      if i == 4:
+                          fh.write("CUDA out of memory. Tried to allocate 2.00 GiB\n")
+                      else:
+                          folds = " ".join("0.6300" for _ in range(50))
+                          fh.write(f"per-fold AUROC: {folds}\n")
+                          fh.write("fold-mean AUROC: 0.6300 ± 0.0900   pooled AUROC: 0.6300\n")
+                  entries.append({"task": task, "gpu": 0, "log": log, "predictions": "x.pt"})
+              with open(f"{base}/manifest.json", "w", encoding="utf-8") as fh:
+                  json.dump({"tag": "bad", "arm": "v120", "gpus": [0], "tasks": entries}, fh, indent=2)
+              PY
+              if ${HARNESS_PYTHON} src/baseline/extract_metrics.py \
+                   --manifest results/acceptance/extractor_bad/manifest.json \
+                   --out results/acceptance/extractor_bad/metrics.json; then
+                echo "FAIL: extractor accepted a crashed (OOM) evaluation log" >&2
+                exit 1
+              fi
+              echo "correctly rejected a crashed evaluation log"
+            checks: []
+          - id: extractor-deterministic
+            run: |
+              set -euo pipefail
+              ${HARNESS_PYTHON} src/baseline/extract_metrics.py \
+                --manifest results/acceptance/extractor/manifest.json \
+                --out results/acceptance/extractor/metrics_b.json
+              cmp results/acceptance/extractor/metrics.json results/acceptance/extractor/metrics_b.json
+              echo "byte-identical across runs"
+            checks: []

@@ -1,0 +1,224 @@
+task:
+  id: primary7-runner
+  plan: baseline
+  title: Deterministic Primary-7 v120 evaluation runner + manifest
+  depends_on: []
+  brief: |
+    Write ONE bash script: scripts/baseline/run_primary7_v120.sh
+
+    PURPOSE
+    It runs the existing v120 evaluation over the 7 "Primary" PathoBench
+    tasks, spreading them across GPUs, and writes a JSON manifest saying
+    where each task's log and prediction file landed. A separate module
+    parses that manifest. You do NOT compute AUROC and you do NOT touch any
+    model code.
+
+    THE 7 PRIMARY TASKS, in exactly this order:
+      1. cptac_lscc/ARID1A_mutation
+      2. cptac_lscc/Histologic_Grade
+      3. cptac_lscc/KEAP1_mutation
+      4. cptac_luad/KRAS_mutation
+      5. cptac_pda/SMAD4_mutation
+      6. ucla_lung/progression_regression
+      7. cptac_ccrcc/PBRM1_mutation
+
+    WHAT ALREADY EXISTS (read these before writing anything)
+    - scripts/eval_v120.sh — usage: `bash scripts/eval_v120.sh <gpu> <tag> [task]...`
+      It sets ~30 ICF_* environment variables that define the v120 arm and
+      then execs scripts/eval_seal_tasks.sh. DO NOT MODIFY IT, DO NOT COPY
+      ITS ENVIRONMENT VARIABLES INTO YOUR SCRIPT, and do not re-implement it.
+      Your script's only job is to call it correctly. Copying its env vars
+      would fork the definition of v120 and silently break future arms.
+    - scripts/eval_seal_tasks.sh — invoked by the above. For each task it
+      writes:
+        log         logs/official50/${TASK_WITH_SLASHES_AS_UNDERSCORES}_${TAG}.log
+        prediction  predictions/pathobench_${TASK_WITH_SLASHES_AS_UNDERSCORES}_${TAG}_official50_bf16.pt
+      e.g. task `cptac_luad/KRAS_mutation` with tag `t` gives
+        logs/official50/cptac_luad_KRAS_mutation_t.log
+        predictions/pathobench_cptac_luad_KRAS_mutation_t_official50_bf16.pt
+      Derive both paths with that exact rule (replace every "/" with "_").
+    - scripts/node_env.sh — resolves ICF_PYTHON, ICF_DATA_ROOT, OFFICIAL,
+      FEATURES, NGPU. Source it (`. scripts/node_env.sh`) rather than
+      hardcoding any interpreter or data path.
+    - scripts/run_v120_seal_multi_gpu.sh — an existing example of the
+      multi-GPU fan-out pattern (background jobs per GPU, then `wait`).
+      Follow its shape.
+
+    CLI
+      bash scripts/baseline/run_primary7_v120.sh [options]
+    Options (all optional, with these exact defaults):
+      --tag <str>        default: baseline_v120_primary7
+      --gpus <csv>       default: 0,1,2,3
+      --manifest <path>  default: results/baseline/manifest.json
+      --dry-run          build and write the manifest, print the exact
+                         per-GPU command lines to stdout, run NO GPU work,
+                         exit 0.
+      --preflight        environment check only; no GPU work; exit 0 on a
+                         healthy node, non-zero otherwise. See below.
+      --help             usage text, exit 0.
+    Unknown option: print usage to stderr and exit 2.
+
+    BEHAVIOUR
+    - Resolve PROJECT_ROOT as the parent of the script's directory's parent
+      (the script lives in scripts/baseline/, so go up two levels) and cd
+      there, matching the existing scripts. Then `. scripts/node_env.sh`.
+    - Assign tasks to GPUs round-robin over --gpus, in the task order above.
+      With the default 4 GPUs that is: gpu0 -> tasks 1,5; gpu1 -> 2,6;
+      gpu2 -> 3,7; gpu3 -> 4. Assignment must be a pure function of the task
+      list and the gpu list — no randomness, no "pick the idle GPU".
+    - Write the manifest BEFORE launching any GPU work, so a crashed run
+      still leaves a manifest describing what it attempted. Create the
+      manifest's parent directory if needed.
+    - Launch one background `bash scripts/eval_v120.sh <gpu> <tag> <task>...`
+      per GPU, redirecting its stdout/stderr to
+      logs/baseline/primary7_gpu<gpu>.log, then `wait` for all of them.
+    - Exit non-zero if any per-GPU job exited non-zero. On success, exit 0.
+    - Do NOT parse AUROC. Do NOT delete or move logs or predictions.
+
+    MANIFEST FORMAT (exact)
+    {
+      "tag": "baseline_v120_primary7",
+      "arm": "v120",
+      "gpus": [0, 1, 2, 3],
+      "tasks": [
+        {
+          "task": "cptac_lscc/ARID1A_mutation",
+          "gpu": 0,
+          "log": "logs/official50/cptac_lscc_ARID1A_mutation_baseline_v120_primary7.log",
+          "predictions": "predictions/pathobench_cptac_lscc_ARID1A_mutation_baseline_v120_primary7_official50_bf16.pt"
+        }
+        ... all 7, in the task order above ...
+      ]
+    }
+    Paths are relative to PROJECT_ROOT. Keys exactly as spelled. Emit it with
+    2-space indentation. Writing JSON by hand from bash is fine (printf); if
+    you prefer, shell out to "$ICF_PYTHON" or python3 — but the file must be
+    valid JSON and byte-identical across two runs with the same arguments.
+
+    --preflight MUST check, printing one PASS/FAIL line per item:
+      1. "$ICF_PYTHON" -c "import torch, lightning" succeeds
+      2. "$OFFICIAL" directory exists and contains a subdirectory for each
+         of the 5 distinct dataset prefixes used above (cptac_lscc,
+         cptac_luad, cptac_pda, ucla_lung, cptac_ccrcc)
+      3. "$FEATURES" directory exists and is non-empty
+      4. nvidia-smi lists at least as many GPUs as --gpus requests
+    Exit 0 only if all pass.
+
+    NOTE ON THE CHECKPOINT: ICF_CKPT resolves to the empty string on this
+    node (no v98_p1_reverse_seed42 checkpoint present). That is EXPECTED and
+    correct for this arm — v120 is training-free with 0 learned parameters,
+    and scripts/eval_seal_tasks.sh already omits --checkpoint when ICF_CKPT
+    is empty. Do not "fix" this, do not search for a checkpoint, and do not
+    make an empty ICF_CKPT a preflight failure.
+  contract:
+    inputs:
+    - name: repo_scripts
+      type: existing-shell-scripts
+      description: |
+        scripts/eval_v120.sh and scripts/node_env.sh, already present in this repository and used UNMODIFIED.
+    - name: gpu_list
+      type: string
+      description: Comma-separated CUDA device indices, default "0,1,2,3".
+    - name: tag
+      type: string
+      description: Run tag embedded in every log and prediction filename.
+    outputs:
+    - name: manifest
+      type: json-file
+      description: |
+        Maps each of the 7 Primary tasks to the log file and prediction file the run produces. Consumed by metrics-extractor.
+    - name: eval_logs
+      type: log-files
+      description: One logs/official50/<task>_<tag>.log per Primary task.
+  deliverables:
+  - scripts/baseline/run_primary7_v120.sh
+  constraints:
+  - Do not modify any existing file in the repository. The only file you create is
+    scripts/baseline/run_primary7_v120.sh (plus its parent directory).
+  - Do not copy, inline, or re-declare any ICF_* environment variable that scripts/eval_v120.sh
+    sets. Call that script; never re-implement the arm.
+  - bash only, `set -uo pipefail`. No python dependency beyond what node_env.sh resolves.
+  - 'Deterministic: same arguments must produce a byte-identical manifest. No timestamps,
+    hostnames, PIDs, or random values in the manifest.'
+  - --dry-run and --preflight must never launch GPU work and must finish in well under
+    60 seconds.
+  - chmod +x the script.
+  acceptance:
+    steps:
+    - id: runner-help
+      run: bash scripts/baseline/run_primary7_v120.sh --help
+    - id: runner-dry-run
+      run: |
+        set -euo pipefail
+        rm -rf results/acceptance/runner
+        mkdir -p results/acceptance/runner
+        bash scripts/baseline/run_primary7_v120.sh \
+          --dry-run \
+          --tag accept_dryrun \
+          --manifest results/acceptance/runner/manifest.json
+        /usr/bin/env python3 -c "import json,sys; d=json.load(open('results/acceptance/runner/manifest.json')); assert len(d['tasks'])==7, d; assert [t['task'] for t in d['tasks']]==['cptac_lscc/ARID1A_mutation','cptac_lscc/Histologic_Grade','cptac_lscc/KEAP1_mutation','cptac_luad/KRAS_mutation','cptac_pda/SMAD4_mutation','ucla_lung/progression_regression','cptac_ccrcc/PBRM1_mutation'], d; assert d['tag']=='accept_dryrun', d; print('manifest ok')"
+      checks:
+      - type: file_exists
+        path: results/acceptance/runner/manifest.json
+      - type: text_contains
+        path: results/acceptance/runner/manifest.json
+        contains:
+        - logs/official50/cptac_lscc_ARID1A_mutation_accept_dryrun.log
+        - logs/official50/cptac_lscc_Histologic_Grade_accept_dryrun.log
+        - logs/official50/cptac_lscc_KEAP1_mutation_accept_dryrun.log
+        - logs/official50/cptac_luad_KRAS_mutation_accept_dryrun.log
+        - logs/official50/cptac_pda_SMAD4_mutation_accept_dryrun.log
+        - logs/official50/ucla_lung_progression_regression_accept_dryrun.log
+        - logs/official50/cptac_ccrcc_PBRM1_mutation_accept_dryrun.log
+        - predictions/pathobench_cptac_pda_SMAD4_mutation_accept_dryrun_official50_bf16.pt
+    - id: runner-dry-run-deterministic
+      run: |
+        set -euo pipefail
+        bash scripts/baseline/run_primary7_v120.sh \
+          --dry-run --tag accept_dryrun \
+          --manifest results/acceptance/runner/manifest_b.json
+        cmp results/acceptance/runner/manifest.json results/acceptance/runner/manifest_b.json
+        echo "byte-identical across runs"
+    - id: runner-no-arm-redefinition
+      run: |
+        set -euo pipefail
+        if grep -nE '^[[:space:]]*(export[[:space:]]+)?ICF_(FIXED_HEAD|AGGREGATION|CT_|CV_|BM_|BD_|QA_|DS_|SKETCH_DIM|COVARIANCE_BASIS)' scripts/baseline/run_primary7_v120.sh; then
+          echo "FAIL: runner re-declares v120 arm variables; it must call scripts/eval_v120.sh instead" >&2
+          exit 1
+        fi
+        grep -q 'scripts/eval_v120.sh' scripts/baseline/run_primary7_v120.sh
+        git diff --quiet -- scripts/eval_v120.sh scripts/eval_seal_tasks.sh scripts/node_env.sh
+        echo "arm definition untouched"
+    - id: runner-preflight
+      run: bash scripts/baseline/run_primary7_v120.sh --preflight
+  status: done
+  worker: worker
+  log:
+  - '2026-08-29T08:07:11Z worker worker [antigravity gemini-3.7-flash high] attempt
+    1/6: acceptance failed'
+  - '2026-08-29T08:07:11Z worker worker [antigravity gemini-3.7-flash high] attempt
+    2/6: acceptance failed'
+  - '2026-08-29T08:07:12Z worker worker [antigravity gemini-3.7-flash high] attempt
+    3/6: acceptance failed'
+  - '2026-08-29T08:07:12Z worker worker [antigravity gemini-3.7-flash high] attempt
+    4/6: acceptance failed'
+  - '2026-08-29T08:07:12Z worker worker [antigravity gemini-3.7-flash high] attempt
+    5/6: acceptance failed'
+  - '2026-08-29T08:07:12Z worker worker [antigravity gemini-3.7-flash high] attempt
+    6/6: acceptance failed'
+  - '2026-08-29T08:07:12Z blocked: worker worker exhausted 6 attempts'
+  - 2026-08-29T08:12:14Z claimed by worker
+  - '2026-08-29T08:18:16Z worker worker [antigravity gemini-3.7-flash high] attempt
+    1/6: acceptance failed'
+  - '2026-08-29T08:48:16Z worker worker [antigravity gemini-3.7-flash high] attempt
+    2/6: worker timed out after 1800s'
+  - '2026-08-29T08:49:36Z worker worker [antigravity gemini-3.7-flash high] attempt
+    3/6: acceptance failed'
+  - '2026-08-29T08:53:19Z worker worker [antigravity gemini-3.7-flash high] attempt
+    4/6: acceptance failed'
+  - '2026-08-29T08:56:35Z worker worker [antigravity gemini-3.7-flash high] attempt
+    5/6: acceptance failed'
+  - '2026-08-29T08:58:46Z worker worker [antigravity gemini-3.7-flash high] attempt
+    6/6: acceptance failed'
+  - '2026-08-29T08:58:47Z blocked: worker worker exhausted 6 attempts'
+  - 2026-08-29T09:02:59Z acceptance passed (6 step(s)) — done

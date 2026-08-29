@@ -77,3 +77,10 @@ Thumbs.db
 .codex/
 .claude/
 scripts/node_env.local.sh
+
+# Added by Research Harness
+# Run artifacts: reproducible from the specs, so the record is the report.
+results/*
+!results/README.md
+# Harness state (agent config, Planner registry) — infrastructure, not the experiment.
+.harness/
