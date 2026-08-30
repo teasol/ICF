@@ -1,0 +1,125 @@
+# Integration spec for experiment 'modularize-arms' — verifies the ASSEMBLED
+# whole once the module is done: the rewritten eval_v120.sh (now a thin wrapper
+# over scripts/lib/arms.sh) must drive the same Primary-7 sweep the baseline
+# experiment gated, and land inside the researcher's 0.6265 +/- 0.005 band.
+# CPU parity is re-proven here too, so the integration record carries both
+# halves of the preservation contract in one place.
+name: modularize-arms
+description: >
+  Re-run the v120 arm over the 7 Primary PathoBench tasks THROUGH THE
+  REWRITTEN wrapper + library, re-check git-base env parity, and confirm the
+  Primary 7 macro reproduces the recorded 0.6265 within +/- 0.005.
+seed: 42
+
+steps:
+  - id: preflight
+    # Fails fast on a broken node instead of discovering it hours in.
+    run: bash scripts/baseline/run_primary7_v120.sh --preflight --gpus 0,1,2,3
+    timeout: 300
+    checks: []
+
+  - id: env-parity
+    # CPU-only re-proof of the byte-identical environment/argv contract.
+    run: ${HARNESS_PYTHON} scripts/lib/arms_env_check.py --base c776443ce44dc289a39d4b8388ca45a6eadbf5d2 --out ${HARNESS_RESULTS_DIR}/parity.json
+    timeout: 300
+    checks:
+      - type: file_exists
+        path: ${HARNESS_RESULTS_DIR}/parity.json
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/parity.json
+        metric: parity.all_identical
+        equals: 1
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/parity.json
+        metric: parity.usage_ok
+        equals: 1
+
+  - id: run-primary7
+    # The full GPU sweep, now exercised through the rewritten wrapper via the
+    # baseline runner (which calls scripts/eval_v120.sh). Fresh tag so the
+    # baseline run's logs/predictions are never overwritten.
+    run: |
+      set -euo pipefail
+      mkdir -p "${HARNESS_RESULTS_DIR}" results/modularize-arms
+      bash scripts/baseline/run_primary7_v120.sh \
+        --tag modularize_v120_primary7 \
+        --gpus 0,1,2,3 \
+        --manifest "${HARNESS_RESULTS_DIR}/manifest.json"
+      cp "${HARNESS_RESULTS_DIR}/manifest.json" results/modularize-arms/manifest.json
+    timeout: 21600
+    checks:
+      - type: file_exists
+        path: ${HARNESS_RESULTS_DIR}/manifest.json
+      - type: text_contains
+        path: ${HARNESS_RESULTS_DIR}/manifest.json
+        contains:
+          - "cptac_lscc/ARID1A_mutation"
+          - "cptac_lscc/Histologic_Grade"
+          - "cptac_lscc/KEAP1_mutation"
+          - "cptac_luad/KRAS_mutation"
+          - "cptac_pda/SMAD4_mutation"
+          - "ucla_lung/progression_regression"
+          - "cptac_ccrcc/PBRM1_mutation"
+
+  - id: extract-metrics
+    run: |
+      set -euo pipefail
+      ${HARNESS_PYTHON} src/baseline/extract_metrics.py \
+        --manifest "${HARNESS_RESULTS_DIR}/manifest.json" \
+        --out "${HARNESS_RESULTS_DIR}/metrics.json" \
+        --reference 0.6265 \
+        --tolerance 0.005
+      cp "${HARNESS_RESULTS_DIR}/parity.json" results/modularize-arms/parity.json
+      cp "${HARNESS_RESULTS_DIR}/metrics.json" results/modularize-arms/metrics.json
+    timeout: 600
+    checks:
+      - type: file_exists
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+      # All 7 tasks present and each a complete 50-fold evaluation. A crashed or
+      # OOM task must fail here, never be averaged away.
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: primary7.n_tasks
+        equals: 7
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.cptac_lscc/ARID1A_mutation.n_folds
+        equals: 50
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.cptac_lscc/Histologic_Grade.n_folds
+        equals: 50
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.cptac_lscc/KEAP1_mutation.n_folds
+        equals: 50
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.cptac_luad/KRAS_mutation.n_folds
+        equals: 50
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.cptac_pda/SMAD4_mutation.n_folds
+        equals: 50
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.ucla_lung/progression_regression.n_folds
+        equals: 50
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: tasks.cptac_ccrcc/PBRM1_mutation.n_folds
+        equals: 50
+      # THE GATE the researcher set: macro fold-mean AUROC = 0.6265 +/- 0.005.
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: primary7.macro_fold_mean_auroc
+        min: 0.6215
+        max: 0.6315
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: primary7.abs_delta_vs_reference
+        max: 0.005
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/metrics.json
+        metric: primary7.within_tolerance
+        equals: 1
