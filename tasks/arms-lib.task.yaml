@@ -1,0 +1,253 @@
+task:
+  id: arms-lib
+  plan: modularize-arms
+  title: Arm-definition library + thin wrappers + git-base env parity checker
+  depends_on: []
+  brief: |
+    You are modularizing the arm-definition layer of a pathology-benchmark
+    evaluation pipeline. Work ONLY inside this repository (experiment
+    worktree). Read AGENTS.md first if present.
+
+    BACKGROUND — WHY
+    scripts/eval_v114.sh .. scripts/eval_v120.sh each define one "arm"
+    (a model configuration) as ~24-38 `export ICF_*=...` lines plus a
+    fixed tail that resolves CKPT/CONFIG, parses GPU/TAG args, defaults to
+    the Primary-7 task list, prints a one-line summary, and execs
+    `bash scripts/eval_seal_tasks.sh "$GPU" "$CKPT" "$CONFIG" "$TAG" "$@"`.
+    Each new version was made by copying the previous script and editing a
+    few lines (v119 -> v120: 6 lines changed out of ~75). That copy pattern
+    is how an arm definition silently forks. Your job: ONE library, ONE
+    function per arm, wrappers become trivial, and a checker that PROVES
+    nothing changed.
+
+    THE 7 ARMS AND THEIR SCRIPTS (all exist at git base c776443):
+      v114 v115 v116 v117 v118 v119 v120  ->  scripts/eval_v114.sh ... scripts/eval_v120.sh
+
+    DELIVERABLE 1 — scripts/lib/arms.sh
+    - A bash library (sourced, never executed directly). Sourcing it must
+      define functions and do NOTHING else: no cd, no exports at top
+      level, no output.
+    - One function per arm, named exactly icf_arm_v114 ... icf_arm_v120.
+    - Each function's body is the original script's export block, copied
+      VERBATIM (same variables, same values, same ${VAR:-default}
+      defaulting syntax, same order). Values must come from the git-base
+      originals below, not from memory:
+        git show c776443:scripts/eval_v114.sh   (repeat for v115..v120)
+    - Add a 5-10 line header comment at the top of arms.sh stating: this
+      file is the single definition of arms v114-v120, wrappers live in
+      scripts/eval_v*.sh, and that a new arm is a new function here plus
+      a new thin wrapper — never a copied script.
+
+    DELIVERABLE 2 — seven thin wrappers scripts/eval_vNNN.sh
+    Rewrite each scripts/eval_vNNN.sh so that it:
+      1. keeps the original's shebang, full header comment block, and
+         `set -uo pipefail`;
+      2. keeps the original's PROJECT_ROOT resolution and
+         `. scripts/node_env.sh` sourcing (same lines, verbatim);
+      3. keeps the original's CKPT/CONFIG env-override fallback chain
+         VERBATIM (e.g. v120 has
+         CKPT="${ICF_V120_CKPT:-${ICF_V119_CKPT:-${ICF_V118_CKPT:-$ICF_CKPT}}}"
+         — copy that exact nesting per arm);
+      4. keeps the original's GPU/TAG parsing with the identical
+         `:?usage:` message and `shift 2`, and the identical default
+         Primary-7 task list block;
+      5. replaces the inline export block with exactly two lines:
+           . "$(dirname "${BASH_SOURCE[0]}")/lib/arms.sh"
+           icf_arm_vNNN
+      6. keeps the original's echo summary line and the final
+         `exec bash scripts/eval_seal_tasks.sh "$GPU" "$CKPT" "$CONFIG" "$TAG" "$@"`.
+    All seven wrappers stay executable (chmod +x). Do not add flags,
+    logging, or any behaviour the original did not have.
+
+    DELIVERABLE 3 — scripts/lib/env_capture_stub
+    A tiny executable bash script (shebang + chmod +x). When invoked with
+    any arguments it must append to the file named by $CAPTURE_OUT:
+      - one line: "ARGV <all args joined by single spaces>"
+      - then the current environment filtered to variables whose name
+        starts with ICF_ , emitted as NAME=VALUE lines sorted with
+        LC_ALL=C sort
+    and exit 0. It must touch nothing else. (Its purpose: it temporarily
+    replaces the python entry point so the checker can observe exactly
+    what the wrapper hands downstream.)
+
+    DELIVERABLE 4 — scripts/lib/arms_env_check.py
+    A stdlib-only python script (no third-party imports). CLI:
+      ${HARNESS_PYTHON} scripts/lib/arms_env_check.py \
+        --base c776443ce44dc289a39d4b8388ca45a6eadbf5d2 \
+        --out <path>/parity.json
+    Algorithm, per arm v114..v120:
+      a. Materialize the ORIGINAL from git:
+         `git show <base>:scripts/eval_vNNN.sh` -> write to
+         scripts/.parity_orig_eval_vNNN.sh (chmod +x). Placing it directly
+         in scripts/ is REQUIRED so its own PROJECT_ROOT resolution
+         (dirname/..) finds the repo root. Delete these files when done
+         (finally-block semantics) so the worktree stays clean.
+      b. Run ORIGINAL with a controlled environment:
+         env -i HOME=$HOME PATH=$PATH TERM=dumb \
+           ICF_PYTHON=<abs path to scripts/lib/env_capture_stub> \
+           PYTHON_BIN=<same abs path> \
+           CAPTURE_OUT=<tmpdir>/orig_vNNN.txt \
+           bash scripts/.parity_orig_eval_vNNN.sh 0 parity_vNNN cptac_lscc/ARID1A_mutation
+         (`env -i` guarantees no caller ICF_* leaks in; ICF_PYTHON is
+         pre-set so node_env.sh adopts the stub as $PY without its
+         torch-import probe.)
+         Ignore the script's exit status. eval_seal_tasks.sh will call
+         the stub once per task (one task is passed, so once); the stub
+         writes ARGV + sorted ICF_* env; a grep inside eval_seal_tasks.sh
+         may emit an error about a missing log — harmless, stdout/stderr
+         of the run are discarded except the capture file.
+      c. Run the REWRITTEN wrapper identically:
+         same env -i skeleton, CAPTURE_OUT=<tmpdir>/new_vNNN.txt,
+         bash scripts/eval_vNNN.sh 0 parity_vNNN cptac_lscc/ARID1A_mutation
+      d. Parity for the arm holds iff:
+         - both capture files contain the same number of ARGV lines
+           (>= 1; zero means the run died before reaching the stub —
+           that is a FAIL, not a pass), and
+         - the two files are byte-identical after
+           LC_ALL=C sort of their lines.
+         The argv line carries --checkpoint/--config, so CKPT/CONFIG
+         resolution drift is caught here, not just the ICF_* exports.
+      e. Usage check, per arm: run `env -i HOME=$HOME PATH=$PATH \
+         bash scripts/eval_vNNN.sh` with NO arguments; the wrapper must
+         exit non-zero AND print a line containing "usage:" to stderr.
+      f. Write --out as JSON with EXACTLY this shape:
+         {
+           "base": "<base sha>",
+           "all_identical": 1-or-0,
+           "usage_ok": 1-or-0,
+           "arms": {
+             "v114": {"identical": 1-or-0, "diff": null-or-first-differing-line},
+             ... v115 .. v120 ...
+           }
+         }
+         2-space indent, keys sorted. Exit 0 iff all_identical==1 and
+         usage_ok==1, else exit 1 after still writing the JSON.
+      g. The script must be deterministic: fixed arm list, fixed task
+         argument, no timestamps inside the JSON, no randomness.
+
+    WHAT YOU MUST NOT TOUCH
+    scripts/eval_seal_tasks.sh, scripts/node_env.sh, scripts/run_*.sh,
+    scripts/baseline/, src/, configs/, tests/, docs/. If you believe one
+    of them is wrong, STOP and block the task with the reason instead of
+    editing it.
+
+    VERIFICATION BEFORE YOU MARK DONE
+    Run the acceptance steps below yourself; all must pass. They are
+    CPU-only and need no GPU, no torch, no data.
+  contract:
+    inputs:
+    - name: original_arm_scripts
+      type: existing-shell-scripts
+      description: |
+        scripts/eval_v114.sh .. eval_v120.sh at git base c776443ce44dc289a39d4b8388ca45a6eadbf5d2 (the commit this experiment started from). Read-only reference: the checker materializes each original from git itself; the Worker never edits the originals' semantics, only replaces the files with wrappers.
+    - name: node_env
+      type: existing-shell-scripts
+      description: scripts/node_env.sh, sourced by every wrapper, UNMODIFIED.
+    - name: seal_runner
+      type: existing-shell-scripts
+      description: |
+        scripts/eval_seal_tasks.sh, the exec target of every wrapper, UNMODIFIED. It invokes "$PY" scripts/test_pathobench.py with --checkpoint/--config in the argv, which is why argv capture proves checkpoint-resolution parity too.
+    outputs:
+    - name: arms_library
+      type: sourced-bash-library
+      description: |
+        scripts/lib/arms.sh exporting one function per arm — icf_arm_v114 ... icf_arm_v120 — each exporting EXACTLY that arm's ICF_* variable set with the original values. Sourcing it must be side-effect-free apart from defining functions.
+    - name: thin_wrappers
+      type: shell-scripts
+      description: |
+        Seven rewritten scripts/eval_vNNN.sh, each: same shebang and header comment as the original, same set -uo pipefail, same PROJECT_ROOT resolution and node_env sourcing, same CKPT/CONFIG env-override fallback chain VERBATIM, same GPU/TAG argument parsing and usage message, same default Primary-7 task list, same echo line, same exec of eval_seal_tasks.sh with identical arguments. The ONLY new line is sourcing arms.sh and calling the arm's function instead of the inline export block.
+    - name: parity_checker
+      type: python-script
+      description: |
+        scripts/lib/arms_env_check.py — proves, without any GPU work, that for every arm v114..v120 the rewritten wrapper hands eval_seal_tasks.sh (and thereby the python entry point) an environment and argv byte-identical to the git-base original, and that no-arg invocation still fails with usage text.
+  deliverables:
+  - scripts/lib/arms.sh
+  - scripts/lib/env_capture_stub
+  - scripts/lib/arms_env_check.py
+  - scripts/eval_v114.sh
+  - scripts/eval_v115.sh
+  - scripts/eval_v116.sh
+  - scripts/eval_v117.sh
+  - scripts/eval_v118.sh
+  - scripts/eval_v119.sh
+  - scripts/eval_v120.sh
+  constraints:
+  - Bash for scripts; stdlib-only python for the checker (no numpy/torch/yaml imports).
+  - The only files you may create or modify are the 10 deliverables listed above.
+  - No new CLI flags, no logging, no output changes beyond the originals'.
+  - 'Deterministic checker: no timestamps, no randomness, fixed task argument.'
+  - git base for originals is c776443ce44dc289a39d4b8388ca45a6eadbf5d2 — never compare
+    against the current files.
+  acceptance:
+    steps:
+    - id: syntax
+      run: |
+        set -euo pipefail
+        bash -n scripts/lib/arms.sh
+        for v in 114 115 116 117 118 119 120; do
+          bash -n "scripts/eval_v${v}.sh"
+        done
+        test -x scripts/lib/env_capture_stub
+    - id: env-parity
+      run: ${HARNESS_PYTHON} scripts/lib/arms_env_check.py --base c776443ce44dc289a39d4b8388ca45a6eadbf5d2
+        --out ${HARNESS_RESULTS_DIR}/parity.json
+      checks:
+      - type: file_exists
+        path: ${HARNESS_RESULTS_DIR}/parity.json
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/parity.json
+        metric: parity.all_identical
+        equals: 1
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/parity.json
+        metric: parity.usage_ok
+        equals: 1
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/parity.json
+        metric: parity.arms.v114.identical
+        equals: 1
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/parity.json
+        metric: parity.arms.v115.identical
+        equals: 1
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/parity.json
+        metric: parity.arms.v116.identical
+        equals: 1
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/parity.json
+        metric: parity.arms.v117.identical
+        equals: 1
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/parity.json
+        metric: parity.arms.v118.identical
+        equals: 1
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/parity.json
+        metric: parity.arms.v119.identical
+        equals: 1
+      - type: json_metric
+        path: ${HARNESS_RESULTS_DIR}/parity.json
+        metric: parity.arms.v120.identical
+        equals: 1
+    - id: worktree-clean
+      run: |
+        set -euo pipefail
+        unexpected="$(git status --porcelain scripts/ | grep -v 'scripts/eval_v1' | grep -v 'scripts/lib/' || true)"
+        if [ -n "$unexpected" ]; then echo "unexpected changes under scripts/: $unexpected"; exit 1; fi
+  executor: sub
+  status: done
+  worker: worker
+  log:
+  - '2026-08-30T11:40:13Z worker worker [opencode deepseek/deepseek-v4-flash high]
+    attempt 1/6: acceptance failed at step ''syntax'' (exit=127): bash: scripts/lib/arms.sh:
+    No such file or directory (no deliverable changed)'
+  - '2026-08-30T11:45:20Z worker worker [opencode deepseek/deepseek-v4-flash high]
+    attempt 2/6: acceptance failed at step ''env-parity'' (exit=0): (empty)'
+  - '2026-08-30T11:45:20Z note: undeclared new file(s) after attempt 2: scripts/lib/'
+  - '2026-08-30T11:47:55Z worker worker [opencode deepseek/deepseek-v4-flash high]
+    attempt 3/6: acceptance failed at step ''env-parity'' (exit=0): (empty) (no deliverable
+    changed)'
+  - '2026-08-30T11:51:53Z worker worker [opencode deepseek/deepseek-v4-flash high]
+    attempt 4/6: acceptance passed'
+  - 2026-08-30T11:51:53Z acceptance passed on attempt 4 — done

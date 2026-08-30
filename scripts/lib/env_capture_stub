@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+{
+  printf 'ARGV %s\n' "$*"
+  env | LC_ALL=C sort | grep '^ICF_' || true
+} >> "$CAPTURE_OUT"
+exit 0

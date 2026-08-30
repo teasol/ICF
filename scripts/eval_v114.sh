@@ -26,26 +26,7 @@ if [ "$#" -eq 0 ]; then
     cptac_ccrcc/BAP1_mutation cptac_ccrcc/VHL_mutation
 fi
 
-export ICF_COVARIANCE_BASIS=pca_within
-export ICF_FIXED_HEAD=1
-export ICF_SKETCH_DIM=256
-export ICF_CT_PCA_DIM=32
-export ICF_CT_READOUT=ridge
-export ICF_CT_CELLS="${ICF_CT_CELLS:-0.125}"
-export ICF_CT_CELLS_SCALE="${ICF_CT_CELLS_SCALE:-own}"
-export ICF_CT_CELLS_MIN="${ICF_CT_CELLS_MIN:-64}"
-export ICF_CT_ABUNDANCE_CELLS="${ICF_CT_ABUNDANCE_CELLS:-match}"
-export ICF_CT_SAMPLING=random
-export ICF_CT_SAMPLING_SEED="${ICF_CT_SAMPLING_SEED:-0}"
-export ICF_CT_TOKENS=256
-export ICF_CT_TOKENIZER=kmeans_plusplus
-export ICF_CT_KMEANS_MAX_ITER="${ICF_CT_KMEANS_MAX_ITER:-8}"
-export ICF_CT_DISTANCE_KERNEL=gemm
-export ICF_CV_BLOCKS=offdiag
-export ICF_DD_ORDERED_TYPICALITY=1
-export ICF_DD_SEPARATION_FLOOR=1.0
-export ICF_FIXED_HEAD_CV_WEIGHT=1.0
-export ICF_FIXED_HEAD_DD_WEIGHT=1.0
-export ICF_FIXED_HEAD_CT_WEIGHT=1.0
+. "$(dirname "${BASH_SOURCE[0]}")/lib/arms.sh"
+icf_arm_v114
 echo "v114: CV=offdiag w=1.0 DD=ordered_typicality(kappa=1) w=1.0 CT=pca32/random-frac=${ICF_CT_CELLS}/${ICF_CT_CELLS_SCALE}/min=${ICF_CT_CELLS_MIN}/kmeans++/K256/match-abundance/ridge w=1.0"
 exec bash scripts/eval_seal_tasks.sh "$GPU" "$CKPT" "$CONFIG" "$TAG" "$@"
