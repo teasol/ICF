@@ -60,8 +60,9 @@ from src.models.stream_eval import (  # noqa: E402
     stream_lineage_forward,
 )
 
-from src.models.training_free import _solve_kernel_ridge  # noqa: E402
+from src.models.training_free import _solve_kernel_ridge, _fast_context_auroc  # noqa: E402
 from src.utils.metrics import auroc, log_loss  # noqa: E402
+
 from src.utils.utils import (  # noqa: E402
     add_eval_precision_argument,
     build_model,
@@ -1397,6 +1398,107 @@ def evaluate_trial(
                         logits[:, 1] += 0.5 * lr_weight * lr_margin
                     else:
                         lr_margin = torch.zeros(len(query_index), device=device)
+                else:
+                    lr_margin = torch.zeros(len(query_index), device=device)
+
+                de_weight = float(os.environ.get("ICF_FIXED_HEAD_DE_WEIGHT", "0.0"))
+                if de_weight != 0.0:
+                    de_dim = int(os.environ.get("ICF_DE_DIM", "32"))
+                    de_lambda = float(os.environ.get("ICF_DE_LAMBDA", "1.0"))
+                    de_topk_fraction = float(os.environ.get("ICF_DE_TOPK_FRACTION", "0.05"))
+                    de_topk_min = int(os.environ.get("ICF_DE_TOPK_MIN", "4"))
+                    de_topk_max = int(os.environ.get("ICF_DE_TOPK_MAX", "64"))
+                    basis = inner._effective_covariance_projection()
+                    dim = min(de_dim, basis.shape[1])
+                    de_basis = basis[:, :dim].float()
+
+                    ctx_proj = [(b.float().to(device) @ de_basis).float() for b in episode_bags[:n_context]]
+                    qry_proj = [(episode_bags[i].float().to(device) @ de_basis).float() for i in query_index.tolist()]
+                    labels = episode_y[:n_context].long().to(device)
+
+                    ctx_means = torch.stack([p.mean(dim=0) for p in ctx_proj])
+                    if (labels == 0).sum() > 0 and (labels == 1).sum() > 0:
+                        mu0 = ctx_means[labels == 0].mean(dim=0)
+                        mu1 = ctx_means[labels == 1].mean(dim=0)
+                        w_contrast = mu1 - mu0
+                        w_dir = w_contrast / w_contrast.norm().clamp_min(1e-12)
+
+                        def extract_de_vector(p_bag):
+                            n_c = p_bag.shape[0]
+                            if n_c == 0:
+                                return torch.zeros(dim + 1, device=device)
+                            scores = p_bag @ w_dir
+                            k = max(de_topk_min, min(de_topk_max, int(n_c * de_topk_fraction)))
+                            k = min(k, n_c)
+                            topk_vals, topk_idx = torch.topk(scores, k=k, largest=True)
+                            botk_vals, botk_idx = torch.topk(scores, k=k, largest=False)
+                            z_plus = p_bag[topk_idx].mean(dim=0)
+                            z_minus = p_bag[botk_idx].mean(dim=0)
+                            delta_z = z_plus - z_minus
+                            score_diff = 0.5 * (topk_vals.mean() + botk_vals.mean())
+                            return torch.cat([delta_z, score_diff.unsqueeze(0)], dim=-1)
+
+                        ctx_feats = torch.stack([extract_de_vector(p) for p in ctx_proj])
+                        qry_feats = torch.stack([extract_de_vector(p) for p in qry_proj])
+                        de_margin = _solve_kernel_ridge(
+                            ctx_feats, labels, qry_feats,
+                            kernel="linear",
+                            reg_lambda=de_lambda,
+                        )
+                        logits = logits.clone()
+                        logits[:, 0] -= 0.5 * de_weight * de_margin
+                        logits[:, 1] += 0.5 * de_weight * de_margin
+                    else:
+                        de_margin = torch.zeros(len(query_index), device=device)
+                else:
+                    de_margin = torch.zeros(len(query_index), device=device)
+
+                sw_weight = float(os.environ.get("ICF_FIXED_HEAD_SW_WEIGHT", "0.0"))
+                if sw_weight != 0.0:
+                    sw_dim = int(os.environ.get("ICF_SW_DIM", "32"))
+                    sw_lambda = float(os.environ.get("ICF_SW_LAMBDA", "1.0"))
+                    sw_num_slices = int(os.environ.get("ICF_SW_NUM_SLICES", "32"))
+                    sw_num_quantiles = int(os.environ.get("ICF_SW_NUM_QUANTILES", "32"))
+                    basis = inner._effective_covariance_projection()
+                    dim = min(sw_dim, basis.shape[1])
+                    sw_basis = basis[:, :dim].float()
+
+                    g = torch.Generator(device="cpu").manual_seed(42)
+                    rand_dirs = torch.randn(dim, sw_num_slices, generator=g, dtype=torch.float32)
+                    q_dirs, _ = torch.linalg.qr(rand_dirs)
+                    slice_dirs = q_dirs.to(device=device)
+
+                    q_levels = torch.linspace(0.5 / sw_num_quantiles, 1.0 - 0.5 / sw_num_quantiles, sw_num_quantiles, device=device)
+                    labels = episode_y[:n_context].long().to(device)
+
+                    def extract_sw_profile(bag):
+                        proj = bag.float().to(device) @ sw_basis
+                        n_c = proj.shape[0]
+                        if n_c == 0:
+                            return torch.zeros(sw_num_slices * sw_num_quantiles, device=device)
+                        slices = proj @ slice_dirs
+                        sorted_slices, _ = torch.sort(slices, dim=0)
+                        indices = (q_levels * (n_c - 1)).clamp(0, n_c - 1)
+                        low_idx = indices.floor().long()
+                        high_idx = indices.ceil().long()
+                        weights = (indices - low_idx.float())[:, None]
+                        low_vals = sorted_slices[low_idx, :]
+                        high_vals = sorted_slices[high_idx, :]
+                        quantiles = (1.0 - weights) * low_vals + weights * high_vals
+                        return quantiles.flatten()
+
+                    ctx_feats = torch.stack([extract_sw_profile(b) for b in episode_bags[:n_context]])
+                    qry_feats = torch.stack([extract_sw_profile(episode_bags[i]) for i in query_index.tolist()])
+                    sw_margin = _solve_kernel_ridge(
+                        ctx_feats, labels, qry_feats,
+                        kernel="linear",
+                        reg_lambda=sw_lambda,
+                    )
+                    logits = logits.clone()
+                    logits[:, 0] -= 0.5 * sw_weight * sw_margin
+                    logits[:, 1] += 0.5 * sw_weight * sw_margin
+                else:
+                    sw_margin = torch.zeros(len(query_index), device=device)
 
         finally:
             if basis_mode in ("pca", "pca_within", "fisher", "fisher_within") and saved_projection is not None:
@@ -1430,6 +1532,8 @@ def evaluate_trial(
         m_qa = qa_margin.detach() if ("qa_margin" in locals() and qa_margin is not None) else torch.zeros(len(test_ids), device=device)
         m_ds = ds_margin.detach() if ("ds_margin" in locals() and ds_margin is not None) else torch.zeros(len(test_ids), device=device)
         m_lr = lr_margin.detach() if ("lr_margin" in locals() and lr_margin is not None) else torch.zeros(len(test_ids), device=device)
+        m_de = de_margin.detach() if ("de_margin" in locals() and de_margin is not None) else torch.zeros(len(test_ids), device=device)
+        m_sw = sw_margin.detach() if ("sw_margin" in locals() and sw_margin is not None) else torch.zeros(len(test_ids), device=device)
 
         if aggregation == "trimmed_mean":
             active_probs = []
@@ -1449,6 +1553,10 @@ def evaluate_trial(
                 active_probs.append(torch.sigmoid(m_ds.float()))
             if lr_weight != 0.0:
                 active_probs.append(torch.sigmoid(m_lr.float()))
+            if de_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_de.float()))
+            if sw_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_sw.float()))
 
             if len(active_probs) >= 3:
                 stacked = torch.stack(active_probs, dim=-1)
@@ -1478,6 +1586,10 @@ def evaluate_trial(
                 active_pairs.append((ds_weight, m_ds))
             if lr_weight != 0.0:
                 active_pairs.append((lr_weight, m_lr))
+            if de_weight != 0.0:
+                active_pairs.append((de_weight, m_de))
+            if sw_weight != 0.0:
+                active_pairs.append((sw_weight, m_sw))
 
             if active_pairs:
                 total_weight = sum(w for w, _ in active_pairs)
@@ -1498,6 +1610,9 @@ def evaluate_trial(
         m_qa = m_qa.cpu()
         m_ds = m_ds.cpu()
         m_lr = m_lr.cpu()
+        m_de = m_de.cpu()
+        m_sw = m_sw.cpu()
+
 
 
 
@@ -1639,7 +1754,10 @@ def evaluate_trial(
         "m_qa": m_qa[valid] if ("m_qa" in locals() and isinstance(m_qa, torch.Tensor)) else None,
         "m_ds": m_ds[valid] if ("m_ds" in locals() and isinstance(m_ds, torch.Tensor)) else None,
         "m_lr": m_lr[valid] if ("m_lr" in locals() and isinstance(m_lr, torch.Tensor)) else None,
+        "m_de": m_de[valid] if ("m_de" in locals() and isinstance(m_de, torch.Tensor)) else None,
+        "m_sw": m_sw[valid] if ("m_sw" in locals() and isinstance(m_sw, torch.Tensor)) else None,
     }
+
 
 
 
@@ -1888,7 +2006,10 @@ def evaluate_official_folds(
             "m_qa": result.get("m_qa"),
             "m_ds": result.get("m_ds"),
             "m_lr": result.get("m_lr"),
+            "m_de": result.get("m_de"),
+            "m_sw": result.get("m_sw"),
         }
+
 
 
 
