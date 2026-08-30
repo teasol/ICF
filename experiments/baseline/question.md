@@ -1,0 +1,1 @@
+Reproduce the v120 baseline (6-branch CV+CT+BM+BD+QA+DS trimmed-mean voting, training-free, 0 learned parameters) under the harness on the Primary 7 tasks, and confirm the measured Primary 7 macro fold-mean AUROC reproduces the recorded value of 0.6265 within +/-0.005.
