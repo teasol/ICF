@@ -77,3 +77,12 @@ Thumbs.db
 .codex/
 .claude/
 scripts/node_env.local.sh
+
+# Added by Research Harness
+.experiments/
+data/*
+!data/README.md
+results/*
+!results/README.md
+# Harness state (agent config, Planner registry) — infrastructure, not the experiment.
+.harness/
