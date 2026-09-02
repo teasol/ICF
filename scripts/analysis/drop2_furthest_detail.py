@@ -1,3 +1,13 @@
+import sys
+from pathlib import Path
+
+# Moved out of tests/ on 2026-09-02 (docs SS206): this is an analysis script, not
+# a unittest module. `scripts/analysis/` is two levels below the repo root, so the
+# repo root has to go on sys.path before `src` imports resolve.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 import torch
 import numpy as np
 from src.utils.metrics import auroc

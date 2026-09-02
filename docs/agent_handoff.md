@@ -9,13 +9,28 @@
 1. **환경 로드 및 파이썬 확인**:
    ```bash
    . scripts/node_env.sh
-   echo "$PYTHON_BIN / NGPU=$NGPU"
+   echo "$PYTHON / NGPU=$NGPU"
    ```
    *(하드코딩된 `python3`나 conda 경로 대신 반드시 `$PYTHON`을 사용)*
 
+   프로젝트 환경은 **uv venv (`ICF/.venv`, Python 3.12)** 다 — conda `BagPFN` 환경은
+   2026-09-02에 소실됐고 되살리지 않는다(§206). `node_env.sh`가 `.venv`를 자동으로
+   찾으므로 activate 단계는 없다. venv가 없으면:
+   ```bash
+   uv venv --python 3.12 .venv && uv pip install -r requirements.txt
+   ```
+
 2. **회귀 테스트 검증**:
    ```bash
-   $PYTHON -m unittest discover -s tests -p "test_*.py"
+   $PYTHON -m unittest discover -s tests -p "test_*.py"   # 16 모듈 / 119 테스트
+   ```
+   ⚠️ **CPU 전용이고 매우 느리다**: 테스트는 CPU 텐서로 에피소드를 만들므로 6-브랜치
+   파이프라인이 전부 CPU BLAS로 돈다. 계측치(§206) — **`predict_proba` 1회 = 97.3초**,
+   `test_soft_voting`(5개) = 4분 이상. **스위트 전체는 수십 분**이고, 노드가 다른
+   사용자로 포화(load 160/72코어)면 더 늘어난다. 시작 전에 `uptime`으로 부하를
+   확인하고, 급하면 모듈 단위로 돌린다:
+   ```bash
+   $PYTHON -m unittest discover -s tests -p "test_soft_voting.py"
    ```
 
 3. **활성 Baseline**:

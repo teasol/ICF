@@ -15,7 +15,10 @@ set -uo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
-PY="${PYTHON_BIN:-/home/aibio_3/miniconda3/envs/BagPFN/bin/python}"
+# The interpreter comes from node_env.sh (the project uv venv at ICF/.venv);
+# the old hardcoded conda default died with the BagPFN env.
+. "$(dirname "${BASH_SOURCE[0]}")/node_env.sh"
+PY="$PYTHON"
 CHECKPOINT="checkpoints/20260806_215800/v34_phase0_largectx_1536/epoch=048-val_ce_loss=0.4419.ckpt"
 CONFIG="configs/archive/v34_largectx/train_v34_phase0_largectx_1536.yaml"
 FEATURES="/NHNHOME/BASE/kimds/Data/PathoBench/features"

@@ -688,3 +688,90 @@ archive 파일 헤더 200여 개가 없는 절을 인용하고 있다 — config
 `docs/README.md` §3으로 이번에 명시했다.
 
 _by Claude Opus 5 on NEXGEM at 2026-09-02 15:53:26_
+
+---
+
+## §206. conda → uv 환경 이관 및 테스트 스위트 실태 계측 (2026-09-02)
+
+**동기**: §205-4에 기록한 대로 conda `BagPFN` 환경이 소실됐다 (`~/.conda/environments.txt`가
+사라진 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3`를 가리킴 — 홈 마운트 이동의 후속
+피해). 사용자 결정에 따라 conda를 되살리지 않고 **uv venv로 이관**했다.
+
+### 1. 프로젝트 환경 (uv venv)
+
+```bash
+uv venv --python 3.12 .venv && uv pip install -r requirements.txt
+```
+
+| 항목 | 값 |
+| :--- | :--- |
+| 위치 | `ICF/.venv` (git-ignored), Python **3.12.3**, uv 0.12.7 |
+| torch | **2.14.0+cu130** — `is_available()` True, **B200 8장**, `get_device_capability` = **(10, 0)** = sm_100 |
+| 인덱스 | torch만 `https://download.pytorch.org/whl/cu130` (PyPI 기본 휠은 sm_100 커널 미포함) |
+| 나머지 | lightning 2.6.5 / numpy 2.4.4 / pandas 3.0.3 / scipy 1.18.1 / h5py 3.16.0 / torcheval 0.0.7 / wandb 0.28.0 / tensorboard 2.21.0 |
+
+- **`requirements.txt`에 torch·scipy·torcheval이 빠져 있었다**. torch는 lightning의 전제이고,
+  scipy는 `scripts/test_saved_logits_weighting.py`(`scipy.optimize.nnls`), torcheval은
+  `tests/test_context_weighting.py`(현 `scripts/analysis/context_weighting.py`)가 쓴다. 셋을
+  추가하고 cu130 인덱스를 명시해 **현 venv를 정확히 재현**함을 확인했다
+  (`uv pip install --dry-run -r requirements.txt` → `Would make no changes`).
+- `.python-version`(3.12)을 추가해 `uv venv`가 플래그 없이 같은 버전을 고른다.
+- **`scripts/node_env.sh`가 `$ICF_ROOT/.venv/bin/python`을 최우선 후보로 탐색**하므로 activate
+  단계가 없다. `ICF_ROOT`는 이 파일 위치에서 유도하므로 repo 마운트가 또 바뀌어도 안 깨진다.
+  conda 후보는 fallback으로만 남겼고, 실패 메시지가 uv 레시피를 직접 안내한다.
+- 죽은 conda 절대경로를 참조하던 **활성 스크립트 5개**를 고쳤다:
+  `run_official50_batch.sh`(인터프리터 기본값), `launch_ici_protocol.sh`(`TORCHRUN_BIN`),
+  `diagnose_population_routing.py` / `probe_slot_headroom.py` / `summarize_slot_headroom.py`
+  (docstring 사용례). 나머지 하드코딩은 전부 `scripts/archive/`·`tests/history/`에만 남는다.
+- **`cuml-cu13`(선택, §169 GPU HDBSCAN)은 설치하지 않았다** — 활성 v120은
+  `ICF_CT_TOKENIZER=kmeans_plusplus`이고 cuml import는 `hdbscan_tokens()` 안에서 lazy다.
+  필요 시 `uv pip install -r requirements-hdbscan.txt`로 이 venv에 깨끗하게 해석된다(확인함).
+
+### 2. ⚠️ 회귀 스위트는 CPU 전용이고 수십 분 규모다 (계측치)
+
+문서 어디에도 실행 시간 기준이 없어 이번에 처음 계측했다.
+
+| 계측 | 값 |
+| :--- | :--- |
+| **`predict_proba` 1회** (context 16 bag + query 4 bag, bag당 64 cell, 1536D) | **97.3초** |
+| `test_soft_voting` (테스트 5개) | **4분 이상** (기본 스레드) |
+| 그때 프로세스 | 스레드 **135개**, CPU **1,442~2,050%** |
+| torch 스레드 기본값 | intra-op **72**, inter-op **72** (= `nproc`) |
+
+- **원인 1 — GPU를 안 쓴다**: 테스트는 `torch.randn(...)`(device 미지정 = CPU)로 에피소드를
+  만들고 `TrainingFreeClassifier()`도 기본값이라, 6-브랜치 파이프라인이 전부 CPU BLAS로 돈다.
+  프로세스가 CUDA 컨텍스트는 로드하지만 GPU 메모리를 잡지 않는다.
+- **원인 2 — 노드가 타 사용자로 포화**: 본 프로젝트 프로세스를 전부 종료한 상태에서도
+  **load average 159~220 / 72코어**. `hajh`의 `main_cv.py` 2개(각 ~1,550% CPU, 78스레드),
+  `train_rough_dual_balanced.py` 4개, 그리고 **GPU 0-5 전부**가 그 사용자 것이다. 여기에
+  torch가 72스레드를 더 얹는다.
+- 이관과 무관함을 확인한 근거: 임포트·`merge_train_config` 스모크 통과, 그리고
+  `test_scheduler`(2) · `test_config_numeric_types`(1) · `test_precision_contract`(6) =
+  **9개 전부 OK** (각 5~6초, 대부분 torch import).
+- **스위트 전수 실행은 사용자 결정으로 보류**했다. 노드 부하가 내려간 뒤 실행할 것.
+
+### 3. `tests/`에서 테스트가 아닌 파일 8개 분리
+
+`unittest discover -s tests -p "test_*.py"`(§1의 표준 명령)가 수집하던 24개 `test_*.py` 중
+**8개는 unittest 모듈이 아니었다** — `import unittest`도 `TestCase`도 없는 일회성 분석
+스크립트다. 결과적으로:
+
+- `test_context_weighting` / `test_drop2_furthest_detail` / `test_furthest_trimming`은
+  `__main__` 가드가 없어 **discover가 모듈 본문을 실행**했다(수집만 해도 실험이 돌았다).
+- 그중 2개는 `predictions/pathobench_cptac_lscc_ARID1A_mutation_ds_w1_primary7_official50_bf16.pt`
+  를 읽어 **항상 import 에러 2건**을 냈다(특정 sweep 산출물 의존, 이관과 무관한 기존 파손).
+
+**조치**: 8개를 `scripts/analysis/`로 이관하고 `test_` 접두사를 제거했다
+(`context_weighting`, `drop2_furthest_detail`, `ds_branch_probe`, `fisher_basis_probe`,
+`furthest_trimming`, `kernel_ridge_probe`, `loo_formula`, `patch_likelihood`). `src`를
+import하는 3개에는 repo-root `sys.path` 부트스트랩을 넣어 단독 실행이 가능해졌고,
+`scripts/analysis/README.md`에 각 스크립트가 어느 실험(§199~§203)의 기록인지 적었다.
+
+**검증**: discover 결과가 **121개 수집 / import 실패 2건 → 119개 수집 / import 실패 0건**,
+16개 모듈로 정리됐다.
+
+**후속 Action**: (a) 노드 부하가 내려가면 회귀 스위트 전수 실행, (b) 테스트를 GPU에서 돌릴지
+검토 — 결정론적 불변식 테스트라 부동소수점 결과가 바뀌면 깨질 수 있으므로 별도 판단 필요,
+(c) §205 후속 (b)(`docs/README.md` 헤더의 v112 서술)·(c)(`agent_handoff.md` §7 소실)는 미해결.
+
+_by Claude Opus 5 on NEXGEM at 2026-09-02 16:37:24_

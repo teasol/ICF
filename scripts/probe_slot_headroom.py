@@ -43,7 +43,7 @@ retrained model, not a guarantee.
 
 Example
 -------
-    PY=/home/aibio_3/miniconda3/envs/BagPFN/bin/python
+    . scripts/node_env.sh   # PY -> the project uv venv (ICF/.venv)
     $PY scripts/probe_slot_headroom.py \
       --config configs/archive/v34_largectx/train_v34_phase0_largectx_1536.yaml \
       --checkpoint checkpoints/20260807_224559/v35_largebag/epoch=048-val_ce_loss=0.3469.ckpt \

@@ -6,7 +6,7 @@ the SAME official folds, so comparisons must be fold-paired rather than a
 difference of two independent means. Reports paired mean deltas with a paired
 bootstrap CI over folds.
 
-    PY=/home/aibio_3/miniconda3/envs/BagPFN/bin/python
+    . scripts/node_env.sh   # PY -> the project uv venv (ICF/.venv)
     $PY scripts/summarize_slot_headroom.py predictions/probe_slots_*.pt
 """
 

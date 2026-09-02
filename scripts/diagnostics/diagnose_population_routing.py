@@ -12,7 +12,7 @@ This reports the distribution, not an AUROC. Running a `structured` checkpoint-
 less model (i.e. weights trained at T=1) produces meaningless logits; only the
 weight distribution is informative before training.
 
-    PY=/home/aibio_3/miniconda3/envs/BagPFN/bin/python
+    . scripts/node_env.sh   # PY -> the project uv venv (ICF/.venv)
     $PY scripts/diagnose_population_routing.py \
       --config configs/archive/v35_v39_pre_cvonly/train_v36_q1_structured_1536.yaml \
       --checkpoint checkpoints/.../epoch=048-....ckpt \

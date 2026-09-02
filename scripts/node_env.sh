@@ -11,6 +11,9 @@
 # write them into scripts/node_env.local.sh (git-ignored, sourced at the end).
 #
 #   ICF_PYTHON     interpreter that has torch + lightning
+#                  (default: the project's uv venv at ICF/.venv, created with
+#                   `uv venv --python 3.12 .venv` and populated from
+#                   requirements.txt -- see docs SS206)
 #   ICF_DATA_ROOT  parent of official/ and features/
 #   ICF_CKPT       v98 checkpoint used as the shell for the training-free configs
 #   ICF_CONFIG     model config that checkpoint was built with
@@ -22,9 +25,15 @@
 # 0-3. On a node you have to yourself, export NGPU to the real count.
 
 # ---- interpreter ----------------------------------------------------------
+# ICF_ROOT is derived from this file's own location, so the venv is found no
+# matter which directory a runner is invoked from -- and no matter where the
+# repo is mounted. The conda candidates below are kept only as a fallback for
+# nodes that still carry a BagPFN env; the project environment is the uv venv.
+ICF_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [ -z "${ICF_PYTHON:-}" ]; then
   for candidate in \
     "${PYTHON_BIN:-}" \
+    "$ICF_ROOT/.venv/bin/python" \
     /home/aibio_3/miniconda3/envs/BagPFN/bin/python \
     "$HOME/miniconda3/envs/BagPFN/bin/python" \
     "$HOME/miniforge3/envs/BagPFN/bin/python" \
@@ -39,7 +48,10 @@ if [ -z "${ICF_PYTHON:-}" ]; then
   done
 fi
 if [ -z "${ICF_PYTHON:-}" ]; then
-  echo "node_env: no interpreter with torch+lightning found. Set ICF_PYTHON." >&2
+  echo "node_env: no interpreter with torch+lightning found." >&2
+  echo "  Create the project env:  cd $ICF_ROOT && uv venv --python 3.12 .venv" >&2
+  echo "                           uv pip install -r requirements.txt" >&2
+  echo "  Or point ICF_PYTHON at an existing interpreter." >&2
   return 1 2>/dev/null || exit 1
 fi
 PYTHON_BIN="${PYTHON_BIN:-$ICF_PYTHON}"
@@ -82,4 +94,4 @@ GPU_OFFSET="${GPU_OFFSET:-0}"
 
 PY="${PYTHON_BIN:-$ICF_PYTHON}"
 PYTHON="${PYTHON_BIN:-$ICF_PYTHON}"
-export ICF_PYTHON PYTHON_BIN PY PYTHON ICF_DATA_ROOT OFFICIAL FEATURES ICF_CKPT ICF_CONFIG NGPU GPU_OFFSET
+export ICF_ROOT ICF_PYTHON PYTHON_BIN PY PYTHON ICF_DATA_ROOT OFFICIAL FEATURES ICF_CKPT ICF_CONFIG NGPU GPU_OFFSET

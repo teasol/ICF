@@ -1,7 +1,28 @@
+# ICF project environment. Managed with uv, not conda (docs SS206):
+#
+#   uv venv --python 3.12 .venv
+#   uv pip install -r requirements.txt
+#
+# scripts/node_env.sh discovers ICF/.venv automatically, so every runner picks
+# this environment up with no activation step.
+#
+# torch comes from the PyTorch CUDA 13.0 index, not PyPI: this node is 8x B200
+# (sm_100, compute capability 10.0) on driver 580.95.05 / CUDA 13.1, and the
+# default PyPI wheel does not carry sm_100 kernels.
+--extra-index-url https://download.pytorch.org/whl/cu130
+
+torch==2.14.0+cu130
 lightning==2.6.5
 PyYAML==6.0.3
 pandas==3.0.3
+numpy==2.4.4
+scipy==1.18.1
+h5py==3.16.0
+
+# torcheval supplies binary_auroc for tests/test_context_weighting.py.
+torcheval==0.0.7
+
+# Optional loggers, selected by the `logger:` block of a train config. wandb is
+# imported lazily (src/utils/utils.py); tensorboard backs TensorBoardLogger.
 wandb==0.28.0
 tensorboard==2.21.0
-numpy==2.4.4
-h5py==3.16.0

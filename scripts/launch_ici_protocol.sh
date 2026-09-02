@@ -23,6 +23,8 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${PROJECT_ROOT}"
+# Resolves ICF_ROOT / PYTHON against the project uv venv (ICF/.venv).
+. "${PROJECT_ROOT}/scripts/node_env.sh"
 
 # Seed partitions present under data/ICI_CVOnly_scConcept_512/SEED*.
 SEEDS="${SEEDS:-42 1234 2026 271828 314159}"
@@ -63,7 +65,7 @@ for SEED in ${SEEDS}; do
         CV="${FOLD}" \
         CUDA_DEVICES=0 \
         NPROC_PER_NODE=1 \
-        TORCHRUN_BIN=/home/aibio_3/miniconda3/envs/BagPFN/bin/torchrun \
+        TORCHRUN_BIN="${TORCHRUN_BIN:-$ICF_ROOT/.venv/bin/torchrun}" \
         NETRC=/NHNHOME/BASE/kimds/.netrc \
         CKPT_PATH="${PRETRAINED_CKPT}" \
         ICF_RUN_TIME="${RUN_TIME}" \
