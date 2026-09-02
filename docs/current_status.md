@@ -624,3 +624,67 @@ _by Antigravity on gnode3 at 2026-08-24 18:20:00_
 
 
 
+
+---
+
+## §205. Config 자산 정리 및 활성 경로 재확인 (2026-09-02)
+
+**동기**: 활성 baseline v120은 **학습 파라미터 0개**이므로 학습 계보(v18~v105)의 config는
+어느 것도 활성 경로에 닿지 않는다. 그런데 `configs/` 루트에는 학습 arm config 27개가 남아
+있어, 새 세션이 "루트 = 활성 entry point"라는 §7 규칙을 읽고도 **어느 것이 활성인지 판별할 수
+없는 상태**였다.
+
+### 1. 활성 경로 실측 (정리 전 정적 분석)
+
+| 항목 | 실측 |
+| :--- | :--- |
+| v120 활성 경로가 로드하는 yaml | **`configs/train_v98_p1_reverse_1536_1gpu.yaml` 단 1개** ([`scripts/node_env.sh`](../scripts/node_env.sh) `ICF_CONFIG` 기본값) |
+| 그 config의 역할 | **체크포인트 껍데기 전용** — v106+ 가 projection과 head를 덮어쓰므로 학습값이 마진에 닿지 않는다(§152) |
+| 루트 config가 참조하는 config-group | **0개** — 루트 config는 전부 자체 포함형(inline dict)이고, group 참조는 `configs/archive/`만 한다 |
+| 코드에서 참조되는 루트 config | `train_v98`(node_env + diagnostics 2개), `train_v83`(diagnostics 1개, **stale 절대경로**) |
+
+### 2. 정리 결과 (tracked config 277 → 249)
+
+| 조치 | 대상 | 개수 |
+| :--- | :--- | :---: |
+| `configs/archive/<시대>/` 이관 | 학습 계보 루트 config v77~v105 (v98 제외) | **26** |
+| 삭제 (참조 0) | config-group 파일 — `model/` 17, `optimizer/` 3, `trainer/ddp5`, `scheduler/reduce_on_plateau`, `logger/tensorboard` | **23** |
+| 삭제 (도구 부재) | Research Harness 전용 yaml — `agents`, `agent-platforms`, `project`, `baseline`, `modularize-arms` | **5** |
+
+- 신규 이관 폴더: `v77_hard_orthogonal/`, `v83_linear_head/`, `v86_v93_episode_shape/`,
+  `v94_v102_cell_value/`, `v103_v105_head_proj/` (+ 기존 `v80_v82_seed_batch/`에 v82 2개 합류).
+- `base_config` 체인이 있던 2개(`train_v77_..._1gpu`, `train_v82_..._1536`)는 자체 포함형 규칙대로
+  **인라인 자체 포함형으로 평탄화**했고, 평탄화 전/후 `merge_train_config` 출력의 **sha256이
+  동일**함을 확인했다 (`ddbfd2c8…e792219`, `f176a08e…00701c1f`).
+- 삭제 대상의 원문은 git 이력에 보존된다(아카이브 정책: `docs/README.md` §3).
+
+### 3. 검증 (정적 검증으로 대체 — 사유는 §4)
+
+- **config 해석 가능성**: 전 entry point 정리 전 221/10-파손 → 정리 후 **216/10-파손**.
+  줄어든 5개는 삭제한 harness yaml이고, **파손 10개는 정리 전과 완전히 동일한 파일**
+  (`archive/v18_v19/train_learnability_*`, 오래 전 삭제된 group 참조 — 기존 파손이며 이번 정리와 무관).
+- **테스트 계약 복제 실행**: `tests/test_precision_contract.py`와
+  `tests/test_config_numeric_types.py`의 config 단정(assertion)을 순수 yaml로 복제해 통과 확인 —
+  루트 `train_*.yaml` 1개 존재·`bf16-mixed` 해석, `trainer/default.yaml` = `bf16-mixed`,
+  잔존 trainer group 5개 전부 `bf16-mixed`, 숫자 키의 문자열 오파싱 0건.
+- **dangling 참조**: 코드/Living 문서에서 존재하지 않는 config 경로 참조 0건
+  (`trainer/ddp5.yaml`은 삭제 사실을 명시한 테스트 docstring의 역사 서술만 남김).
+
+### 4. ⚠️ 이번에 드러난 환경 파손 2건 (경로 이동 후속 피해)
+
+1. **BagPFN conda env 소실** — `~/.conda/environments.txt`가 사라진
+   `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3`를 가리키고, `node_env.sh`의 후보 경로
+   어디에도 torch+lightning 인터프리터가 없다. 따라서 **이 노드에서 회귀 테스트 스위트를
+   실행할 수 없다** (그래서 위 검증을 정적 복제로 수행). env 복구 후
+   `$PYTHON -m unittest discover -s tests -p "test_*.py"` 재실행이 필요하다.
+2. **`scripts/diagnostics/diagnose_synthetic_vs_real.py`** 가 `--config` 기본값으로
+   `/NHNHOME/BASE/kimds/ICF/configs/...` 절대경로를 하드코딩해 깨져 있었다 → 형제 진단
+   스크립트와 같이 repo 루트 상대경로로 고쳤고, v83 config의 새 아카이브 위치를 가리킨다.
+
+**후속 Action**: (a) BagPFN env 복구 후 회귀 테스트 전수 재실행, (b) `docs/README.md` 헤더의
+"Active 구성: v112" 서술이 v120과 불일치 — config 절은 이번에 갱신했으나 헤더/본문 서술은
+남아 있어 별도 동기화가 필요하다, (c) `agent_handoff.md` §7이 문서 압축 때 소실돼 README와
+archive 파일 헤더 200여 개가 없는 절을 인용하고 있다 — config 규칙의 현행 단일 출처는
+`docs/README.md` §3으로 이번에 명시했다.
+
+_by Claude Opus 5 on NEXGEM at 2026-09-02 15:53:26_

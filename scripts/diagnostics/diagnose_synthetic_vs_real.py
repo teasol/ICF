@@ -155,7 +155,13 @@ def describe(name, bags, dim):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="/NHNHOME/BASE/kimds/ICF/configs/train_v83_linear_head_1536_1gpu.yaml")
+    # Repo-root-relative, like the sibling diagnostics: the absolute /NHNHOME/BASE
+    # path broke when the home mount moved. v83 is the generator this diagnostic
+    # describes, so it follows the config into configs/archive/ (docs SS110).
+    parser.add_argument(
+        "--config",
+        default="configs/archive/v83_linear_head/train_v83_linear_head_1536_1gpu.yaml",
+    )
     parser.add_argument("--bags", type=int, default=80)
     parser.add_argument("--max-cells", type=int, default=4096)
     parser.add_argument("--seed", type=int, default=0)

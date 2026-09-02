@@ -68,28 +68,27 @@ v107(0.6945)·v106(0.6864)과 직전 baseline v98(8 seed 0.6852)은 historical.
 - **Living 문서 유지**: `docs/` 최상위 루트에는 5개의 Living 문서와 현행 proposal 1개만 유지합니다.
 - **Git 커밋 동기화**: 세션 핸드오프 시 작업을 남김없이 커밋하고 커밋 내역/diff를 `agent_handoff.md` 및 `current_status.md`에 반영합니다.
 - **아카이빙 규칙**: 특정 버전 딥다이브 보고서나 계획 문서는 완료 시 **핵심 결론(ADR·트레이드오프·레슨)을 `docs/history.md`의 해당 시기 절에 추가**하고, 개별 원문 파일은 새로 만들지 않습니다(원문은 git 이력에 보존). `docs/` 루트를 단순하고 가독성 높게 유지합니다.
-- **Config 루트 관리**: `configs/` 루트에는 **현재 활성 파이프라인의 entry point만** 둔다
-  (상세는 [`agent_handoff.md`](agent_handoff.md) §7). **2026-08-15 기준 루트 구성**:
+- **Config 루트 관리**: `configs/` 루트에는 **현재 활성 파이프라인의 entry point만** 둔다.
+  ⚠️ 이 규칙의 상세는 원래 `agent_handoff.md` §7에 있었으나 그 문서가 3개 절로 압축될 때
+  사라졌다 — **이 절이 현행 단일 출처**다(archive 파일 헤더 200여 개가 인용하는 "agent_handoff
+  SS7.3"도 같은 옛 절을 가리키는 역사적 표기다). **2026-09-02 정리 기준 루트 구성**:
 
   | config | 역할 |
   |---|---|
-  | `train_v83_linear_head_1536_1gpu.yaml` | **canonical baseline** (§109). 모든 arm의 비교 대상 |
-  | `train_v82_medium_classsep_1536{,_1gpu}.yaml` | 직전 baseline(historical) |
-  | `train_v77_hard_orthogonal_1536{,_1gpu}.yaml` | historical control |
-  | `train_v86_noise / v87_rare` | §105-6 데이터 스윕 재검증 — 둘 다 null |
-  | `train_v89_episode_shape / v91_cell_axis / v92_big_bags / v93_cell_axis_clean` | §115 에피소드 **모양** 축 — 전부 닫힘/기각 |
-  | `train_v88_population_attention` | 레이블 조건 분기 — 기각(§114) |
-  | `train_v90_class_prior` | 클래스 비율 축 — 기각(§118) |
-  | `train_v94~v97, v98_p1_reverse, v99_p2_norm, v100_nuisance_min, v101_donor_shift_zero, v102_tail_bagshared` | §123 cell **값 분포** 축 — 전부 null~기각(§129) |
+  | `train_v98_p1_reverse_1536_1gpu.yaml` | **루트에 남은 유일한 config**. v120 활성 경로가 로드하는 **체크포인트 껍데기**([`scripts/node_env.sh`](../scripts/node_env.sh) `ICF_CONFIG` 기본값). v106+ 가 projection과 head를 덮어쓰므로 이 파일의 학습값은 마진에 닿지 않는다(§152) |
 
-  ⚠️ v94/v95/v96/v97은 **1 seed 스크리닝 전용**이다(헤더에 명시). §3-1 판정표에 넣지 말 것.
-  §107-6(fixed P × Medium, v85)은 한 번도 실행되지 않은 채 **취소**됐고 config도 삭제됐다.
-  종결된 arm 72개는 `configs/archive/` 아래 시대별
-  폴더(`v34_largectx/`, `v40_v45_cvonly/`, `v50_v54_encoder/`, `v57_v61_data_arms/`,
-  `v62_v68_hybrid/`, `v69_v76_relation/`, `v77_pop_residual/`, `v78_dd_gradient/`,
-  `v79_dual_projection/`, `v80_v82_seed_batch/`, `v84_deep_head/`)로 이관하고 전부 `base_config` 없는
-  자체 포함형으로 보관한다. ICI의 fold/seed는 config가 아니라 `--cv`/`--seed`로 주입하므로
-  fold별 config를 만들지 않는다.
+  ⚠️ **활성 baseline v120은 학습 파라미터가 0개**다. 따라서 루트에 학습 arm config를 새로 만들
+  이유가 없고, arm 정의는 config가 아니라 [`scripts/lib/arms.sh`](../scripts/lib/arms.sh)의
+  `icf_arm_v1xx` 함수 + 환경변수로 주입한다. ICI의 fold/seed도 config가 아니라 `--cv`/`--seed`로
+  주입하므로 fold별 config를 만들지 않는다.
+
+  **2026-09-02 정리 내역 (§205)**: 학습 파라미터 계보(v77~v105) 루트 config 26개를 시대별
+  `configs/archive/` 폴더로 이관하고, 참조가 0인 config-group 파일 23개와 Research Harness
+  전용 yaml 5개를 삭제했다(tracked config 277 → 249). 이관 폴더는
+  `v77_hard_orthogonal/`, `v80_v82_seed_batch/`, `v83_linear_head/`,
+  `v86_v93_episode_shape/`, `v94_v102_cell_value/`, `v103_v105_head_proj/`이며,
+  기존 시대별 폴더(`v34_largectx/` … `v84_deep_head/`)와 함께 전부 `base_config` 없는
+  **자체 포함형**으로 보관한다. 원문은 git 이력에 보존된다.
 - **단일 출처화**: 동일한 수치나 진행 상태를 중복해 기록하지 않으며, 상태는 `current_status.md`에만 기록합니다.
 - **자율 연속 실행과 추적성**: `current_status.md`에 다음 Action과 판정 기준이 명확하면 재확인 없이 실행합니다. 각 논리 단위의 결과·명령·로그/산출물 경로·판단·후속 Action을 SSOT에 기록하고 Git 커밋하여 다른 작업공간이 즉시 이어받을 수 있게 합니다.
 

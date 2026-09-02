@@ -110,6 +110,9 @@ class TestPrecisionContract(unittest.TestCase):
 
         `configs/trainer/ddp5.yaml` and `ddp8.yaml` carried `16-mixed` (fp16)
         until 2026-08-08; that is exactly the overflow path SS3.4 forbids.
+        (`ddp5.yaml` was deleted on 2026-09-02 -- no config referenced it once
+        the learned-parameter lineage moved to `configs/archive/`; `ddp8.yaml`
+        is still selectable and still checked here.)
         """
         import yaml
 

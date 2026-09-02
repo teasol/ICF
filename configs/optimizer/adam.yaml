@@ -1,3 +1,0 @@
-optimizer_src: torch.optim.Adam
-optimizer_kwargs:
-  lr: 0.0001
