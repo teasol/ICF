@@ -1056,6 +1056,7 @@ def evaluate_trial(
                 logits = stream_lineage_forward(
                     model.model, episode_bags, episode_y, query_index, device
                 )
+                do_context_loo = os.environ.get("ICF_AGGREGATION", "").startswith("context_loo")
                 bm_weight = float(os.environ.get("ICF_FIXED_HEAD_BM_WEIGHT", "0.0"))
                 if bm_weight != 0.0:
                     bm_dim = int(os.environ.get("ICF_BM_DIM", "32"))
@@ -1079,14 +1080,16 @@ def evaluate_trial(
                     krr_coef0 = float(os.environ.get("ICF_KRR_COEF0", "1.0"))
 
                     labels = episode_y[:n_context].long().to(device)
-                    bm_margin = _solve_kernel_ridge(
+                    bm_res = _solve_kernel_ridge(
                         ctx_means, labels, qry_means,
                         kernel=os.environ.get("ICF_BM_KERNEL", krr_kernel),
                         gamma=krr_gamma,
                         degree=krr_degree,
                         coef0=krr_coef0,
                         reg_lambda=bm_lambda,
+                        return_loo=do_context_loo,
                     )
+                    bm_margin, loo_bm = (bm_res[0], bm_res[1]) if do_context_loo else (bm_res, None)
 
                     logits = logits.clone()
                     logits[:, 0] -= 0.5 * bm_weight * bm_margin
@@ -1219,14 +1222,16 @@ def evaluate_trial(
                     krr_gamma = float(os.environ["ICF_KRR_GAMMA"]) if "ICF_KRR_GAMMA" in os.environ else None
                     krr_degree = int(os.environ.get("ICF_KRR_DEGREE", "2"))
                     krr_coef0 = float(os.environ.get("ICF_KRR_COEF0", "1.0"))
-                    qa_margin = _solve_kernel_ridge(
+                    qa_res = _solve_kernel_ridge(
                         ctx_qas, labels, qry_qas,
                         kernel=os.environ.get("ICF_QA_KERNEL", krr_kernel),
                         gamma=krr_gamma,
                         degree=krr_degree,
                         coef0=krr_coef0,
                         reg_lambda=qa_lambda,
+                        return_loo=do_context_loo,
                     )
+                    qa_margin, loo_qa = (qa_res[0], qa_res[1]) if do_context_loo else (qa_res, None)
 
                     logits = logits.clone()
                     logits[:, 0] -= 0.5 * qa_weight * qa_margin
@@ -1423,14 +1428,16 @@ def evaluate_trial(
                         qry_ds = extract_denoised_mean(qry_proj_eval, qry_assignments)
 
                         # 6. Class-balanced kernel ridge
-                        raw_ds_margin = _solve_kernel_ridge(
+                        raw_ds_res = _solve_kernel_ridge(
                             ctx_ds, labels_eval, qry_ds,
                             kernel=os.environ.get("ICF_DS_KERNEL", krr_kernel),
                             gamma=krr_gamma,
                             degree=krr_degree,
                             coef0=krr_coef0,
                             reg_lambda=ds_lambda,
+                            return_loo=do_context_loo,
                         )
+                        raw_ds_margin, loo_ds = (raw_ds_res[0], raw_ds_res[1]) if do_context_loo else (raw_ds_res, None)
 
                         # If query TTA was used, aggregate multiple sub-bag margins per query slide
                         if qry_slide_indices is not None:
@@ -1730,6 +1737,49 @@ def evaluate_trial(
                 scores = sum(w * torch.sigmoid(m.float()) for w, m in active_pairs) / total_weight
             else:
                 scores = torch.softmax(logits.float(), dim=-1)[:, 1]
+        elif aggregation.startswith("context_loo"):
+            branch_pool = []
+            context_labels = episode_y[:n_context].long().to(device)
+            if cv_weight != 0.0:
+                branch_pool.append(("cv", cv_weight, m_cv, None))
+            if dd_weight != 0.0:
+                branch_pool.append(("dd", dd_weight, m_dd, None))
+            if ct_weight != 0.0:
+                branch_pool.append(("ct", ct_weight, m_ct, None))
+            if bm_weight != 0.0:
+                branch_pool.append(("bm", bm_weight, m_bm, loo_bm if "loo_bm" in locals() else None))
+            if bd_weight != 0.0:
+                branch_pool.append(("bd", bd_weight, m_bd, loo_bd if "loo_bd" in locals() else None))
+            if qa_weight != 0.0:
+                branch_pool.append(("qa", qa_weight, m_qa, loo_qa if "loo_qa" in locals() else None))
+            if ds_weight != 0.0:
+                branch_pool.append(("ds", ds_weight, m_ds, loo_ds if "loo_ds" in locals() else None))
+            if lr_weight != 0.0:
+                branch_pool.append(("lr", lr_weight, m_lr, None))
+            if de_weight != 0.0:
+                branch_pool.append(("de", de_weight, m_de, loo_de if "loo_de" in locals() else None))
+            if sw_weight != 0.0:
+                branch_pool.append(("sw", sw_weight, m_sw, loo_sw if "loo_sw" in locals() else None))
+
+            gamma = float(os.environ.get("ICF_LOO_GAMMA", "2.0"))
+            floor = float(os.environ.get("ICF_LOO_FLOOR", "0.50"))
+
+            r_list = []
+            for name, w_init, q_m, l_m in branch_pool:
+                if l_m is not None and len(context_labels.unique()) >= 2:
+                    r = _fast_context_auroc(l_m, context_labels)
+                else:
+                    r = 0.50
+                r_list.append(r)
+
+            q_list = [max(0.0, r - floor) ** gamma for r in r_list]
+            sum_q = sum(q_list)
+            if sum_q > 0:
+                weights = [q / sum_q for q in q_list]
+            else:
+                weights = [1.0 / len(branch_pool)] * len(branch_pool)
+
+            scores = sum(w * torch.sigmoid(q_m.float()) for w, (_, _, q_m, _) in zip(weights, branch_pool))
         else:
             scores = torch.softmax(logits.float(), dim=-1)[:, 1]
 

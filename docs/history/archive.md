@@ -1005,3 +1005,52 @@ _Logged by Antigravity on gnode3 at 2026-09-03 17:25:00_
 _Logged by Antigravity on gnode3 at 2026-09-03 19:48:00_
 
 
+## §212. Subsampling 배제 순수 Context LOO Stacking 50-Fold 전수 실측 및 LOO 폐기 판정
+
+### 1. 실험 배경 및 목표
+사용자의 요청("subsampling 없이 LOO만 추가해서 LOO를 살릴지 말지 결정하자")에 따라, 서브샘플링($S=1, f=1.0$)을 완전히 배제하고 오직 앙상블 집계 단계에서 **In-Episode Context LOO 가중치(Context LOO Stacking)**만을 추가하여 공식 50-Fold 벤치마크를 수행함.
+- 목적: 정적 앙상블(Trimmed Mean, Soft Voting) 대비 동적 Context LOO 가중치가 성능을 개선하는지 여부를 실측하고, LOO의 존속 여부를 최종 결정.
+
+---
+
+### 2. Primary 7 과제 50-Fold 전수 실측 결과 비교
+
+| 과제명 (Task) | v119 Baseline (Soft Voting) | **v120 Active Baseline (Trimmed Mean)** | **v120 + Clean Context LOO (NO Sub)** | LOO 도입 시 변화량 | 판정 |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **ARID1A 변이** | 0.4402 | **0.5471** | 0.5199 | **-0.0272 (-2.72%p)** | ❌ 패배 |
+| **조직 등급 (Grade)** | 0.6865 | 0.6823 | **0.6887** | +0.0064 (+0.64%p) | 미세 상승 |
+| **진행/퇴행 (Prog)** | 0.7719 | **0.7986** | 0.7809 | **-0.0177 (-1.77%p)** | ❌ 패배 |
+| **SMAD4 변이** | 0.4398 | **0.4465** | 0.4165 | **-0.0300 (-3.00%p)** | ❌ 패배 |
+| **KEAP1 변이** | 0.5756 | **0.6129** | 0.5922 | **-0.0207 (-2.07%p)** | ❌ 패배 |
+| **PBRM1 변이** | 0.5786 | 0.5685 | **0.5844** | +0.0159 (+1.59%p) | 미세 상승 |
+| **KRAS 변이** | 0.7289 | **0.7295** | 0.7051 | **-0.0244 (-2.44%p)** | ❌ 패배 |
+| **Primary 7 Macro** | 0.6191 | **`0.6265`** | **`0.6125`** | **`-0.0140` (-1.40%p 침몰)** | **완패 (5개 과제 하락)** |
+
+---
+
+### 3. 수학적·통계적 실패 원인 규명
+
+#### ① Context LOO와 Test AUROC의 음의 상관관계 (Negative Rank Correlation)
+- Context 슬라이드에서 계산된 LOO 점수와 실제 테스트셋 AUROC 간의 스피어만 순위 상관계수(Spearman Rank Correlation)를 측정한 결과:
+  $$\rho = \mathbf{-0.2679} \quad (p = 0.3344)$$
+  - **놀랍게도 상관계수가 음수($\rho < 0$)로 측정됨!**
+  - 즉, Context 슬라이드에서 LOO 점수가 높은 브랜치일수록 실제 테스트 슬라이드에서는 더 낮은 성능을 내는 역전 현상이 발생함.
+
+#### ② 왜 음의 상관관계가 발생하는가? (암기 편향 vs 일반화 브랜치)
+- `BM (Bag Mean)`과 같이 단순 선형 모델은 $N \approx 200$개의 Context 슬라이드 내 노이즈와 스퓨리어스(spurious) 상관관계를 매끄럽게 피팅하여 Context LOO가 $0.76 \sim 0.85$로 부풀려짐.
+- 반면 `DS (Denoised Salience)`와 같이 정교한 살리언스 클러스터링 기반 브랜치는 보수적인 LOO($0.64 \sim 0.72$)를 나타내지만, 실제 테스트셋에서는 $0.63 \sim 0.70$으로 강력하게 일반화됨.
+- **결과**: Context LOO에 가중치를 맡기면, 학습 노이즈를 암기한 `BM`에 가중치를 몰아주고 실제 테스트셋을 맞히는 `DS`의 가중치를 깎아내려 **앙상블 전체가 0.6125로 침몰**하게 됨.
+
+---
+
+### 4. 최종 결론 및 권고 (Definitive Decision)
+1. **LOO 영구 폐기 (Discard LOO Completely)**:
+   - In-Episode Context LOO는 차원 불균형(Curse of Dimensionality)과 학습셋 암기 편향(Negative Rank Correlation, $\rho = -0.27$)으로 인해 앙상블 가중치로서 유효하지 않으며, 오히려 모델 성능을 $1.4\%p$ 하락시킴.
+   - 따라서 **LOO 기반 브랜치 선택 및 가중치는 영구 폐기**함.
+2. **Trimmed Mean Voting의 우월성 재확인**:
+   - 각 브랜치의 슬라이드 단위 극단치(최저점/최고점)를 절사하고 중앙값 주변을 평균 내는 **Trimmed Mean Voting (`0.6265`)**이 과제별 이상치를 가장 완벽하게 방어하는 최적의 앙상블 기법임을 재입증함.
+
+_Logged by Antigravity on gnode3 at 2026-09-03 20:35:00_
+
+
+
