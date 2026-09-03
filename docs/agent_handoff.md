@@ -12,10 +12,16 @@ The **In-Context Foundation (ICF)** project develops in-context classification m
 ### Active Baseline: v120 (0-Parameter Deterministic 6-Branch Trimmed Mean Voting)
 The active baseline is **v120**, a completely training-free (0 learned parameters), fully deterministic classifier ($\text{seed std} = 0.00000$):
 - **Core Principle**: Given labeled Context slides and unlabeled Query slides, a within-slide PCA basis ($K=256$) is constructed using only Context slides. Six complementary statistical branches extract slide representations, compute independent decision margins, convert margins to probabilities via sigmoid, and aggregate them using **Trimmed Mean Voting** (discarding the highest and lowest probability per slide, averaging the remaining 4).
-- **Benchmark Performance**:
+- **Benchmark Performance (6-branch 계보 기록값 — 현행 비교 기준 아님)**:
   - **Primary 7-Task Benchmark**: Macro Fold-mean AUROC **`0.6265`** (v119: 0.6247, v118: 0.6205).
   - **SEAL 10-Task Hold-out**: Macro Fold-mean AUROC **`0.6972`** (independent validation).
-  - **All 17-Task Overall Macro**: **`0.6681`** (highest across all lineages).
+  - **All 17-Task Overall Macro**: **`0.6681`**.
+
+### 현행 비교 기준: v121 5-Branch (CT 제외)
+CT 브랜치는 k-means 병목으로 350-fold 소요를 45분 → 12분으로 늘리는 반면 기여가 확인되지 않아, §214-V부터 **모든 승격 비교는 CT를 제외한 5-branch(`CV, BM, BD, QA, DS`)에서 수행**한다.
+- **공식 기준선**: v121 5-branch Trimmed Mean, Primary 7 Macro **`0.6171`** (`v121_baseline`, 50-fold, 재현 검증 완료).
+- **Oracle 상한 (과제별 최상 단독 브랜치 선택 시)**: **`0.6565`** — 현 기준선 대비 **+3.94%p**. 이 격차가 현재 프로젝트의 실제 미회수 성능이다.
+- 위 두 수치는 §214-V에서 `predictions/*_v121_baseline_official50_bf16.pt`로부터 독립 재계산하여 확인했다.
 
 ---
 
@@ -56,9 +62,22 @@ The active baseline is **v120**, a completely training-free (0 learned parameter
    - Swapping labels ($y \to 1-y$) must produce exact sign reversal in branch margins and complement probabilities ($P(1-y) = 1 - P(y)$). Checked by regression suite.
 3. **Deterministic Evaluation Protocol**:
    - $t$-statistics, $p$-values, and confidence intervals are strictly prohibited for model promotion decisions ($\text{seed std} = 0.00000$).
-   - Promotions are evaluated on **Primary 7-task sign agreement ($\ge 5/7$)** with **SEAL 10-task hold-out consistency**, subject to final user judgment.
+   - **비교 기준 (Comparison Basis, §214-V 이후)**: 모든 승격 비교는 **CT 제외 5-branch 구성**(`CV, BM, BD, QA, DS` / `ICF_FIXED_HEAD_CT_WEIGHT=0.0`)에서 수행한다.
+     - 공식 기준선: **v121 5-branch Trimmed Mean, Primary 7 Macro `0.6171`** (`v121_baseline` 태그, 50-fold).
+     - v120 6-branch 수치(`0.6265`)와 직접 비교 금지 — 브랜치 집합이 다르므로 비교 불가능하다.
+   - 승격은 **Primary 7 sign agreement $\ge 5/7$**를 요구한다. Macro AUROC 상승만으로는 승격 근거가 되지 않는다.
+   - **분해능 하한 (Resolution Floor)**: Primary 7 macro 변화량이 약 $\pm 1.0\%p$ 미만인 후보는 지금까지 예외 없이 sign agreement 3~4/7에 머물렀다 (§214-V에서 집계 방식 8종 및 브랜치 부분집합 31종 전수 확인). **1%p 미만의 macro 상승은 이 벤치마크로 판별 불가능한 잡음으로 간주하며, 승리로 기록하지 않는다.**
+   - **SEAL 10-task hold-out은 사용자 결정에 따라 현재 유보(DEFERRED) 상태다 (§214-V).** hold-out 없이 내린 판정은 `current_status.md`와 `archive.md` 양쪽에 반드시 `hold-out 미검증`으로 명시한다.
 4. **Closed Axes (Do NOT Retry)**:
-   - Synthetic distribution alignment (§129), DD branch revival (§147, §195), CT cell count scaling (§159), Non-linear KRR (§199), LR direct patch likelihood (§200), Fisher subspace (§202).
+   - Synthetic distribution alignment (§129), DD branch revival (§147, §195), CT cell count scaling (§159), Non-linear KRR (§199), LR direct patch likelihood (§200), Fisher subspace (§202), **In-Episode Context LOO 가중치 (§212, $\rho = -0.27$)**, **집계 함수 변형 탐색 (§214-V — 집계 8종·부분집합 31종 전수에서 5/7 도달 0건; 분해능 하한 아래)**.
+5. **보고 무결성 계약 (Reporting Integrity Contract)** — §214에서 실제 위반이 확인되어 §214-V에서 신설:
+   - **회귀 전량 명시 의무**: 벤치마크 결과 보고 시 **성능이 하락한 과제를 생략할 수 없다.** 상승 과제만 나열한 요약은 금지한다. §214는 `adaptive_trimmed`의 상승 3개만 적고 하락 3개(ARID1A −2.00%p, PBRM1 −2.22%p, Grade −0.41%p)를 누락했다.
+   - **Sign agreement 병기 의무**: macro AUROC를 제시할 때는 반드시 `n/7` sign agreement를 같은 줄에 병기한다.
+   - **측정 방식 정확 기술**: 저장된 브랜치 마진의 **오프라인 재집계**를 "전수 실측"으로 표기하지 않는다. 신규 파이프라인 실행(`logs/`·`predictions/`에 신규 산출물 발생)과 재집계를 용어로 구분한다.
+   - **비교 모집단 한정**: "1위", "최고", "최고치 경신" 등의 표현에는 비교 대상 집합을 괄호로 한정한다 (예: "비교한 집계 방식 8종 중 1위").
+   - **승리 수식어 금지**: "폭등", "초대형 성과", "사상 최고", 이모지 강조 등을 사용하지 않는다. 수치와 부호로만 기술한다.
+   - **미검증 항목 표기 의무**: 수행하지 않은 검증(SEAL hold-out 등)은 침묵하지 않고 `미검증`으로 명시한다.
+   - **자기 검증 우선**: 결과를 문서화하기 전에, 저장된 예측 파일로부터 독립적으로 재계산하여 수치를 대조한다.
 
 ---
 
@@ -85,10 +104,13 @@ bash scripts/run_tests.sh
 # 3. Single Test Module
 bash scripts/run_tests.sh test_bd_branch.py
 
-# 4. Primary 7-Task Benchmark (v120 active baseline)
-bash scripts/eval_v120.sh <gpu_id> <tag>
+# 4. Primary 7-Task Benchmark (v121 CT-excluded 5-branch = 공식 비교 기준)
+bash scripts/eval_v121.sh <gpu_id> <tag>
 
-# 5. SEAL 10-Task Multi-GPU Hold-out Evaluation
+# 5. 브랜치 진단 / 집계·부분집합 절제 (저장 마진 오프라인 재집계, GPU 불필요)
+$PYTHON scripts/analysis/branch_diagnostics.py --tag v121_baseline
+
+# 6. SEAL 10-Task Multi-GPU Hold-out Evaluation (현재 유보 상태)
 bash scripts/run_v120_seal_multi_gpu.sh <tag>
 ```
 
