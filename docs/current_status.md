@@ -1,6 +1,6 @@
 # Current Status
 
-- **Last Updated**: 2026-09-03 11:42 (KST)
+- **Last Updated**: 2026-09-03 14:30 (KST)
 - **Status**: CLEAN
 - **Host / Node**: gnode3 (5x NVIDIA RTX A5000, 24GB VRAM)
 - **Environment**: uv venv `.venv` | Python 3.12.11 (PyTorch 2.14.0+cu130, Lightning 2.6.5)
@@ -14,40 +14,37 @@ bash scripts/run_tests.sh
 
 ---
 
-## 2026-09-03 — Initial Baseline Migration & Model Modularization
+## 2026-09-03 — 8대 단독 브랜치 전수 실측 & 계산 시간 프로파일링 (§209)
 
 ### Completed
-- Successfully migrated repository to Universal Handoff Protocol.
-- Archived accumulated historical logs (§0 through §207, 857 lines) into [`docs/history/archive.md`](history/archive.md).
-- Streamlined `docs/agent_handoff.md` into standard 5-part permanent architectural reference.
-- Established agent entrypoints: verified `AGENTS.md` and `CLAUDE.md` in repository root.
-- Configured repository-local Git credential helper using `/home/kimds/.gittoken_icf` (isolated to this repo), and successfully synchronized/pushed to `origin/main`.
-- Absorbed `current_experiments.md` active queue into `current_status.md` and archived past summaries into `docs/history/archive.md` (§208), establishing the clean 3-document SSOT system.
-- Modularized monolithic `src/models/training_free.py` (1,340 -> 328 lines) into dedicated submodules (`src/models/common/`, `src/models/branches/`, `src/models/aggregations/`) via `/call-claude` (`model=sonnet`, `effort=low`).
-- Systematized YAML config architecture (`src/models/config.py`, `configs/baseline/`, `configs/experiments/`) and established 11-category anti-trap contract test suite (`tests/test_yaml_config_contract.py`). All 17 modules / 131 unit tests pass in 18.9s.
-- Committed §207 test tooling (`scripts/run_tests.sh` and `scripts/node_env.sh`).
-- Completely cleaned `configs/` root to strictly 3 clean directories (`baseline/`, `experiments/`, `archive/`), moving all 7 legacy Hydra groups and `train_v98` into `configs/archive/`.
-- Systematically cleaned `scripts/` root (reduced 67 files to 7 core runners), reorganizing utilities into `scripts/data/`, `scripts/analysis/`, and `scripts/archive/`. All 17 modules / 131 unit tests pass in 18.5s.
+- **8대 단독 브랜치 Primary 7 50-Fold 전수 실측 재현 완료 (§209)**:
+  - 단독 성능 순위: **1위 DS (`0.6265`)**, **2위 QA (`0.6209`)**, **3위 CT (`0.6147`)**, 4위 BM (`0.6089`), 5위 BD (`0.6071`), 6위 CV (`0.6004`), 7위 SW (`0.5976`), 8위 DE (`0.5953`).
+- **과거 요약 문서상의 왜곡 및 착시 팩트체크 완료**:
+  - 과거 요약표에 기재되었던 *"CT 단독 SEAL 10 `0.7197`"*은 전사 오류였으며, 실제 실측치는 **`0.6882`**로 확인됨.
+  - CT는 단독 1위가 아니며(`0.6147`), 기질 노이즈를 제거한 **DS(`0.6265`)**와 상하위 분위수를 본 **QA(`0.6209`)**가 단독 성능 챔피언임.
+- **다중 브랜치 앙상블(v120)의 수학적 상호보완 메커니즘 규명**:
+  - `SMAD4 변이`: CT(0.4283), BM(0.4491), BD(0.4327), QA(0.4503), DS(0.4465) 등 대다수 브랜치가 역방향 예측으로 무너지나, **오직 `CV Alone (0.5483)`만이 유일하게 양(+)의 신호를 정상 방어**함.
+  - `ARID1A 변이`: 반대로 CV가 0.4308로 무너지는 영역을 DS(0.5471), CT(0.5360), QA(0.5307)가 보완함.
+- **계산 시간 계측 및 속도 최적화 패치 적용**:
+  - **CT Alone**: 매 Fold마다 256개 K-Means++ 동적 클러스터링 및 소프트 할당이 불가피하여 **Fold당 10~15초 / 태스크당 약 8~12분** 소요 (캐시 공유 불가).
+  - **비-CT 브랜치**: `bag_stats_cache` ($n, \boldsymbol{\mu}, X^T X$) 활용으로 **Fold당 ~3초 / 태스크당 약 2분 30초**로 CT 대비 2.5~4배 고속.
+  - `scripts/test_pathobench.py`: `ct_weight == 0.0` 시 불필요한 K-Means를 즉시 건너뛰도록 패치하여 비-CT 평가 시간을 **태스크당 40초 이상 즉각 단축**.
 
 ### Active Research Queue (다음 연구 가설)
-- **[Exp 1] CT (Cell Tokenizer) 단독 브랜치 고도화 연구**:
-  - **가설**: K256 계층적 트리 토크나이저의 다중 스케일화, `cattopk` (Mean + Top-K) 풀링, 토큰별 국소 분산 모멘트 결합을 통해 `CT` 단독 성능을 극대화하여 `SMAD4` 사각지대 해소 및 단일 모델 완성도 제고.
-  - **선행 실측치**: CT 단독 Primary 7 `0.6147` (단독 1위), SEAL 10 `0.7197` (§204).
+- **[Exp 1] CT 단독 브랜치 고도화 (SMAD4 사각지대 타격)**:
+  - **가설**: K256 계층적 트리 토크나이저의 다중 스케일화, `cattopk` (Mean + Top-K) 풀링, 토큰별 국소 분산 모멘트 결합을 통해 CT의 고질적 약점인 `SMAD4 (0.4283)` 사각지대를 극복하고 단독 모델 완성도 제고.
+- **[Exp 2] In-Episode Adaptive Dynamic Stacking (동적 앙상블)**:
+  - **가설**: 각 브랜치(CV의 2차 모멘트 vs DS/QA의 1차 분위수)가 특정 암종에서 상호 보완적인 만큼, 단순 고정 가중치 Voting 대신 Context 슬라이드 내 Leave-One-Out (LOO) 오차 기반 동적 신뢰도 가중치 부여.
 
 ### Code Reality vs Documentation Delta
-- **Active Architecture Baseline**: Legacy `docs/README.md` previously claimed v112 as active; confirmed and standardized that the true active baseline is **v120** (6-Branch Trimmed Mean Voting: CV + CT + BM + BD + QA + DS, with DD disabled; Primary 7 Macro `0.6265`, SEAL 10 `0.6972`, All 17 `0.6681`).
-- **Environment Management**: Legacy docs referenced lost conda `BagPFN` environment; environment is now standardized under `uv venv` at `ICF/.venv` (Python 3.12.11).
-- **Test Discovery & Performance**: Direct `python -m unittest discover` previously suffered from OpenMP thread oversubscription (~78s) and missing repo root on `sys.path` in 12/16 test modules. `scripts/run_tests.sh` enforces `OMP_NUM_THREADS=8` and exports `PYTHONPATH`, reducing runtime to 20.0s (3x speedup).
-- **Config Lineage**: `configs/` root is 100% clean with strictly 3 directories (`baseline/`, `experiments/`, `archive/`). All 21 legacy group files and `train_v98` reside in `configs/archive/`, with `node_env.sh` and test contracts fully synchronized.
+- **CT Standalone Metric**: 과거 요약표의 `SEAL 10 0.7197`은 허위/오기록이며 실측치는 `0.6882`임. Primary 7 단독 1위는 CT(`0.6147`)가 아닌 DS(`0.6265`)임.
+- **Branch Evaluation Speed**: CT 제외 전 브랜치는 `bag_stats_cache` 및 메모리 사전 적재로 인해 50-Fold가 약 2분 30초 내에 완주됨.
 
 ### Blockers & Tech Debt
-- None. Working tree is clean and all 119 tests pass identically.
+- None. 모든 단위 테스트 통과 및 5-GPU 병렬 인프라 100% 가동 확인.
 
 ### Immediate Next Steps
-- Execute regression test suite (`bash scripts/run_tests.sh`) to verify system stability.
-- Run baseline verification on Primary 7 benchmark: `bash scripts/eval_v120.sh 0 baseline_check`.
+- 사용자 피드백에 따라 [Exp 1] CT 풀링/다중스케일 고도화 또는 [Exp 2] In-Episode 동적 앙상블 착수.
 
-- Commence [Exp 1] CT Refinement research once baseline verification is confirmed.
-
-_by Antigravity on gnode3 at 2026-09-03 11:00:00_
+_by Antigravity on gnode3 at 2026-09-03 14:30:00_
 

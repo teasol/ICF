@@ -773,6 +773,11 @@ def evaluate_trial(
                 context_bags_, context_labels_, query_bags_,
                 _mode=ct_readout, _config=readout_config, _calibrated=calibrated,
             ):
+                if float(os.environ.get("ICF_FIXED_HEAD_CT_WEIGHT", "0.286")) == 0.0:
+                    nq = len(query_bags_)
+                    dev = context_labels_.device
+                    zero = torch.zeros(nq, device=dev)
+                    return zero, zero, torch.tensor(0.0, device=dev)
                 margins, _ = ct_margins(
                     context_bags_, context_labels_, query_bags_, _config,
                     mode=_mode, calibrated=_calibrated,
