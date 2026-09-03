@@ -63,218 +63,35 @@ from typing import Sequence
 
 import torch
 
-from src.models.ct_readout import CTReadoutConfig, ct_margins
-from src.models.dd_adaptive_rank import ordered_typicality_margin
-from src.models.stream_eval import covariance_basis_from_bags
-
-
-def _solve_ridge(gram: torch.Tensor, targets: torch.Tensor, penalty: float) -> torch.Tensor:
-    """Solve (gram + penalty*I) x = targets, adding jitter only if it fails."""
-    orig_dtype = targets.dtype
-    gram_f32 = gram.float()
-    targets_f32 = targets.to(dtype=torch.float32, device=gram.device)
-    size = gram_f32.shape[-1]
-    identity = torch.eye(size, device=gram.device, dtype=torch.float32)
-    jitter = 0.0
-    for _ in range(6):
-        try:
-            factor = torch.linalg.cholesky(gram_f32 + (penalty + jitter) * identity)
-            sol = torch.cholesky_solve(targets_f32, factor)
-            return sol.to(dtype=orig_dtype)
-        except RuntimeError:
-            jitter = max(jitter * 10.0, 1e-6 * float(gram_f32.diagonal().abs().mean()) + 1e-12)
-    sol = torch.linalg.lstsq(gram_f32 + (penalty + jitter) * identity, targets_f32).solution
-    return sol.to(dtype=orig_dtype)
-
-
-def _kernel_matrix(left: torch.Tensor, right: torch.Tensor, kernel: str = "rbf", gamma: float | None = None, degree: int = 2, coef0: float = 1.0) -> torch.Tensor:
-
-    """Compute kernel Gram matrix between left and right."""
-    if kernel == "linear":
-        return left @ right.T
-    left_f = left.float()
-    right_f = right.float()
-    squared = left_f @ right_f.T
-    dims = left.shape[-1]
-    if gamma is None:
-        gamma = 1.0 / dims
-    if kernel == "rbf":
-        sq_left = (left_f * left_f).sum(dim=1, keepdim=True)
-        sq_right = (right_f * right_f).sum(dim=1, keepdim=True)
-        distances = (sq_left - 2.0 * squared + sq_right.T).clamp_min(0.0)
-        return torch.exp(-gamma * distances)
-    elif kernel == "poly":
-        return (gamma * squared + coef0).pow(degree)
-    elif kernel == "cosine":
-        l_norm = torch.nn.functional.normalize(left_f, dim=-1)
-        r_norm = torch.nn.functional.normalize(right_f, dim=-1)
-        return l_norm @ r_norm.T
-    else:
-        raise ValueError(f"Unknown kernel: {kernel!r}")
-
-
-def _fast_context_auroc(scores: torch.Tensor, labels: torch.Tensor) -> float:
-    """Fast Mann-Whitney U AUROC on context set (tensor-native, no sklearn/scipy)."""
-    labels = labels.long()
-    pos = int((labels == 1).sum())
-    neg = int((labels == 0).sum())
-    if pos == 0 or neg == 0:
-        return 0.5
-    order = torch.argsort(scores)
-    ranks = torch.empty_like(scores, dtype=torch.float32)
-    ordered = scores[order]
-    index = 0
-    n = len(ordered)
-    while index < n:
-        end = index
-        while end + 1 < n and ordered[end + 1] == ordered[index]:
-            end += 1
-        ranks[order[index:end + 1]] = (index + end) / 2.0 + 1.0
-        index = end + 1
-    sum_pos_ranks = ranks[labels == 1].sum().item()
-    return float((sum_pos_ranks - pos * (pos + 1) / 2.0) / (pos * neg))
-
-
-def _solve_kernel_ridge(
-    ctx_feats: torch.Tensor,
-    ctx_labels: torch.Tensor,
-    qry_feats: torch.Tensor,
-    kernel: str = "linear",
-    gamma: float | None = None,
-    degree: int = 2,
-    coef0: float = 1.0,
-    reg_lambda: float = 1.0,
-    return_logits: bool = False,
-    return_loo: bool = False,
-) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-    """Class-balanced centered Kernel Ridge Regression (n x n dual solve) with exact label antisymmetry."""
-    if kernel == "linear":
-        centre = ctx_feats.mean(dim=0, keepdim=True)
-        scale = (ctx_feats - centre).square().mean(dim=0).sqrt().clamp_min(1e-6)
-        ctx_std = (ctx_feats - centre) / scale
-        qry_std = (qry_feats - centre) / scale
-
-        labels = ctx_labels.long()
-        targets = torch.nn.functional.one_hot(labels, 2).float()
-        counts = torch.bincount(labels, minlength=2)
-        if bool((counts == 0).any()):
-            raise ValueError("Every class must occur in the context set.")
-        weight = counts.float().reciprocal()[labels]
-        total = weight.sum().clamp_min(1e-12)
-        feature_mean = (weight[:, None] * ctx_std).sum(0, keepdim=True) / total
-        target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
-        root = weight.sqrt()[:, None]
-
-        design = (ctx_std - feature_mean) * root
-        centred_targets = (targets - target_mean) * root
-
-        gram = design @ design.T
-        dual = _solve_ridge(gram, centred_targets, reg_lambda)
-        coefficients = design.T @ dual
-        intercept = target_mean - feature_mean @ coefficients
-        logits = qry_std @ coefficients + intercept
-        qry_margin = logits if return_logits else (logits[:, 1] - logits[:, 0])
-
-        if return_loo:
-            size = gram.shape[0]
-            identity = torch.eye(size, device=gram.device, dtype=torch.float32)
-            inv_gram = _solve_ridge(gram, identity, reg_lambda)
-            H = gram @ inv_gram
-            h_diag = H.diagonal().clamp(0.0, 0.99)
-
-            ctx_logits = ctx_std @ coefficients + intercept
-            ctx_m = ctx_logits[:, 1] - ctx_logits[:, 0]
-            y_diff = torch.where(labels == 1, 1.0, -1.0).to(ctx_m.dtype).to(ctx_m.device)
-            loo_m = (ctx_m - h_diag * y_diff) / (1.0 - h_diag).clamp_min(1e-4)
-            return qry_margin, loo_m
-
-        return qry_margin
-
-
-    labels = ctx_labels.long()
-    device = ctx_feats.device
-
-    # 1. Per-feature standardisation using context statistics
-    centre = ctx_feats.mean(dim=0, keepdim=True)
-    scale = (ctx_feats - centre).square().mean(dim=0).sqrt().clamp_min(1e-6)
-    ctx_std = (ctx_feats - centre) / scale
-    qry_std = (qry_feats - centre) / scale
-
-    # 2. Kernel Gram matrices
-    k_ctx = _kernel_matrix(ctx_std, ctx_std, kernel=kernel, gamma=gamma, degree=degree, coef0=coef0)
-    k_qry = _kernel_matrix(qry_std, ctx_std, kernel=kernel, gamma=gamma, degree=degree, coef0=coef0)
-
-    # 3. Class-balanced centered targets and centered Gram matrix
-    targets = torch.nn.functional.one_hot(labels, 2).float()
-    counts = torch.bincount(labels, minlength=2)
-    if bool((counts == 0).any()):
-        raise ValueError("Every class must occur in the context set.")
-    weight = counts.float().reciprocal()[labels]
-    total = weight.sum().clamp_min(1e-12)
-    root = weight.sqrt()
-
-    m_ctx = (weight[None, :] @ k_ctx).squeeze(0) / total
-    mu2 = (weight[None, :] @ k_ctx @ weight[:, None]).squeeze() / (total * total)
-    target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
-    centred_targets = (targets - target_mean) * root[:, None]
-
-    gram = root[:, None] * (k_ctx - m_ctx[:, None] - m_ctx[None, :] + mu2) * root[None, :]
-    dimension = gram.shape[0]
-    identity = torch.eye(dimension, device=device, dtype=torch.float32)
-
-    # 4. Robust solve
-    jitter = 0.0
-    dual = None
-    for _ in range(6):
-        try:
-            factor = torch.linalg.cholesky(gram + (reg_lambda + jitter) * identity)
-            dual = torch.cholesky_solve(centred_targets, factor)
-            break
-        except RuntimeError:
-            jitter = max(jitter * 10.0, 1e-6 * float(gram.diagonal().abs().mean()) + 1e-12)
-    if dual is None:
-        dual = torch.linalg.lstsq(gram + (reg_lambda + jitter) * identity, centred_targets).solution
-
-    alpha = root[:, None] * dual
-    intercept = target_mean - (m_ctx @ alpha)[None, :]
-
-    m_qry = (weight[None, :] @ k_qry.T).squeeze(0) / total
-    logits = k_qry @ alpha - m_qry[:, None] * alpha.sum(0, keepdim=True) + intercept
-    return logits if return_logits else (logits[:, 1] - logits[:, 0])
-
-
-
-def _standardise(context: torch.Tensor, query: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """Context-only centring and one scalar RMS scale, applied to both sides."""
-    centre = context.mean(dim=0, keepdim=True)
-    context = context - centre
-    query = query - centre
-    rms = context.square().mean().sqrt().clamp_min(1e-6)
-    return context / rms, query / rms
-
-
-def _standardise_blocks(context, query, split):
-    """Standardise the covariance and mean halves SEPARATELY.
-
-    Not cosmetic. The covariance triangle has ~33k entries and the bag mean 1,536,
-    and their natural scales differ by orders of magnitude; one shared RMS would
-    let whichever block is larger dominate the ridge. The lineage does the same
-    (`CovarianceMeanRidgeModel._normalize_descriptors` calls `_normalize_block`
-    once per block), and skipping it was the one discrepancy that made the first
-    version of this file disagree with the lineage by ~2%.
-    """
-    context_covariance, context_mean = context.split(split, dim=-1)
-    query_covariance, query_mean = query.split(split, dim=-1)
-    context_covariance, query_covariance = _standardise(context_covariance, query_covariance)
-    if context_mean.shape[-1] == 0:
-        # v109's off-diagonal descriptor has no mean block; standardising an empty
-        # tensor would return NaN from the mean of nothing.
-        return context_covariance, query_covariance
-    context_mean, query_mean = _standardise(context_mean, query_mean)
-    return (
-        torch.cat((context_covariance, context_mean), dim=-1),
-        torch.cat((query_covariance, query_mean), dim=-1),
-    )
+from src.models.common.solvers import (
+    solve_ridge as _solve_ridge,
+    kernel_matrix as _kernel_matrix,
+    fast_context_auroc as _fast_context_auroc,
+    solve_kernel_ridge as _solve_kernel_ridge,
+    standardise as _standardise,
+    standardise_blocks as _standardise_blocks,
+)
+from src.models.common.basis import (
+    within_slide_basis as _within_slide_basis_fn,
+    extract_bag_descriptor,
+    to_matrices as _to_matrices_fn,
+)
+from src.models.branches.cv import cv_logits
+from src.models.branches.dd import dd_features
+from src.models.branches.ct import ct_features
+from src.models.branches.bm import bm_features
+from src.models.branches.bd import bd_features
+from src.models.branches.qa import qa_features
+from src.models.branches.ds import ds_features
+from src.models.branches.experimental.lr import lr_features
+from src.models.branches.experimental.de import de_features
+from src.models.branches.experimental.sw import sw_features
+from src.models.aggregations.voting import (
+    linear_aggregation,
+    soft_voting,
+    trimmed_mean as trimmed_mean_aggregation,
+    context_loo_stacking,
+)
 
 
 @dataclass(frozen=True)
@@ -421,15 +238,6 @@ class TrainingFreeConfig:
     loo_floor: float = 0.50
 
 
-
-
-
-
-
-
-
-
-
 class TrainingFreeClassifier:
     """Zero-parameter in-context binary classifier. Nothing here is learned."""
 
@@ -442,187 +250,90 @@ class TrainingFreeClassifier:
         context_bags: Sequence[torch.Tensor],
         device: torch.device | None = None,
     ) -> torch.Tensor:
-        """Top-K eigenvectors of the WITHIN-slide pooled covariance.
-
-        Accumulated bag by bag, one chunk at a time: concatenating every
-        context cell first is what SS62-3 identified as an eval OOM driver
-        (~12 GB for a full-tile episode), and `bag.double()` of a GPU-resident
-        LUAD slide is what tips a 22 GiB card after the cohort is already up.
-        """
-        target_device = device if device is not None else context_bags[0].device
-        return covariance_basis_from_bags(
-            context_bags,
-            "pca_within",
-            self.config.sketch_dim,
-            target_device,
-        )
+        return _within_slide_basis_fn(context_bags, self.config.sketch_dim, device)
 
     # ---- 2. descriptors ---------------------------------------------------
     def _descriptor(self, bag: torch.Tensor, basis: torch.Tensor, triangle) -> torch.Tensor:
-        values = bag.to(basis.device).float()
-        mean = values.mean(dim=0, keepdim=True)
-        projected = (values - mean) @ basis
-        covariance = (projected.T @ projected) / values.shape[0]
-        return torch.cat((covariance[triangle[0], triangle[1]], mean.squeeze(0)))
+        return extract_bag_descriptor(bag, basis, triangle)
 
     # ---- 3. CV ------------------------------------------------------------
     def _cv_logits(self, context: torch.Tensor, labels: torch.Tensor, query: torch.Tensor, split, return_loo: bool = False):
-        context, query = _standardise_blocks(context.float(), query.float(), split)
-        labels = labels.long()
-        targets = torch.nn.functional.one_hot(labels, 2).float()
-        counts = torch.bincount(labels, minlength=2)
-        weight = counts.float().reciprocal()[labels]
-        total = weight.sum().clamp_min(1e-12)
-        feature_mean = (weight[:, None] * context).sum(0, keepdim=True) / total
-        target_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
-        root = weight.sqrt()[:, None]
-
-        design = (context - feature_mean) * root
-        centred_targets = (targets - target_mean) * root
-
-        gram = design @ design.T
-        dual = _solve_ridge(gram, centred_targets, self.config.ridge_lambda)
-        coefficients = design.T @ dual
-        intercept = target_mean - feature_mean @ coefficients
-        logits = (query @ coefficients + intercept) * self.config.ridge_scale
-
-        if return_loo:
-            size = gram.shape[0]
-            identity = torch.eye(size, device=gram.device, dtype=torch.float32)
-            inv_gram = _solve_ridge(gram, identity, self.config.ridge_lambda)
-            H = gram @ inv_gram
-            h_diag = H.diagonal().clamp(0.0, 0.99)
-
-            ctx_logits = (context @ coefficients + intercept) * self.config.ridge_scale
-            ctx_m = ctx_logits[:, 1] - ctx_logits[:, 0]
-            y_diff = torch.where(labels == 1, 1.0, -1.0).to(ctx_m.dtype).to(ctx_m.device)
-            loo_m = (ctx_m - h_diag * y_diff) / (1.0 - h_diag).clamp_min(1e-4)
-            return logits, loo_m
-
-        return logits
-
-
-
+        return cv_logits(self.config, context, labels, query, split, return_loo=return_loo)
 
     # ---- 4. DD ------------------------------------------------------------
     def _dd_features(self, context_cov: torch.Tensor, labels: torch.Tensor, query_cov: torch.Tensor):
-        config = self.config
-        context_cov = context_cov.float()
-        query_cov = query_cov.float()
-        labels = labels.long()
-        means = torch.stack([context_cov[labels == c].mean(dim=0) for c in range(2)])
-        delta = means[1] - means[0]
-        pooled = context_cov.mean(dim=0)
-        trace_scale = pooled.diagonal().mean().clamp_min(config.dd_eps)
-        identity = torch.eye(config.sketch_dim, device=pooled.device, dtype=pooled.dtype)
-        shrunk = (1.0 - config.dd_shrinkage) * pooled + config.dd_shrinkage * trace_scale * identity
-        # eigh here is never differentiated -- docs SS100 / `_dd_direction`: the
-        # backward carries 1/(lambda_i - lambda_j) and the direction is a hard
-        # argmax. Training-free, so the constraint is free to honour.
-        values, vectors = torch.linalg.eigh(shrunk)
-        whitening = (vectors * values.clamp_min(config.dd_eps).rsqrt()[None, :]) @ vectors.T
-        operator = whitening @ delta @ whitening
-        eigenvalues, eigenvectors = torch.linalg.eigh(operator)
-        direction = whitening @ eigenvectors[:, eigenvalues.abs().argmax()]
-
-        def log_variance(covariances):
-            return torch.einsum("d,bdk,k->b", direction, covariances, direction).clamp_min(
-                config.dd_eps
-            ).log()
-
-        context_feature = log_variance(context_cov)
-        centre = context_feature.mean()
-        scale = (context_feature - centre).square().mean().sqrt().clamp_min(config.dd_eps)
-        context_feature = (context_feature - centre) / scale
-        query_feature = (log_variance(query_cov) - centre) / scale
-        prototypes = torch.stack([context_feature[labels == c].mean() for c in range(2)])
-        dispersions = torch.stack([
-            (context_feature[labels == c] - prototypes[c]).square().mean().clamp_min(config.dd_eps)
-            for c in range(2)
-        ])
-        distances = (
-            (query_feature[:, None] - prototypes[None, :]).square()
-            / dispersions[None, :]
-        )
-        if config.dd_readout == "distance":
-            # Logits, not distances: -d_c is the class-c score, so a large
-            # distance is evidence AGAINST that class and the head weighs the
-            # difference (dd1 - dd0) positively, like CV and CT (SS183).
-            return -distances
-        if config.dd_readout == "ordered_typicality":
-            margin = ordered_typicality_margin(
-                query_feature,
-                prototypes,
-                dispersions,
-                config.dd_eps,
-                config.dd_separation_floor,
-            )
-            # Logits, like CT: the pair is (-margin/2, +margin/2) so its
-            # difference IS the class-1-positive margin, consumed by the head
-            # at a positive weight (SS183).
-            return torch.stack((-0.5 * margin, 0.5 * margin), dim=-1)
-        raise ValueError(
-            'dd_readout must be "distance" or "ordered_typicality", '
-            f"got {config.dd_readout!r}"
-        )
+        return dd_features(self.config, context_cov, labels, query_cov)
 
     # ---- 5. CT ------------------------------------------------------------
     def _ct_features(self, context_bags, labels, query_bags, basis=None):
-        """Two-token abundance readout, delegated to `ct_readout` (docs SS148).
+        return ct_features(self.config, context_bags, labels, query_bags, basis)
 
-        Steps 1-5 (sample, standardise, farthest-point tokens, soft assign, per-bag
-        average) live in `ct_readout.ct_abundance` so that the readout experiments
-        cannot accidentally differ from this path in the REPRESENTATION -- only in
-        step 6-7. `mode="extreme"` is today's behaviour and stays the default, so
-        v107's output is unchanged; `tests/test_training_free.py` pins that against
-        the lineage and `tests/test_ct_readout.py` pins the refactor itself.
-        """
-        config = self.config
-        margins, _ = ct_margins(
-            context_bags, labels, query_bags,
-            CTReadoutConfig(
-                num_tokens=config.ct_num_tokens,
-                cells_per_bag=config.ct_cells_per_bag,
-                abundance_cells_per_bag=config.ct_abundance_cells_per_bag,
-                cells_fraction=config.ct_cells_fraction,
-                cells_min=config.ct_cells_min,
-                cells_scale=config.ct_cells_scale,
-                sampling=config.ct_sampling,
-                sampling_seed=config.ct_sampling_seed,
-                distance_kernel=config.ct_distance_kernel,
-                tokenizer=config.ct_tokenizer,
-                bisect_iterations=config.ct_bisect_iterations,
-                bisect_power_iterations=config.ct_bisect_power_iterations,
-                tree_reduction=config.ct_tree_reduction,
-                hdbscan_min_cluster_size=config.ct_hdbscan_min_cluster_size,
-                hdbscan_min_cluster_fraction=config.ct_hdbscan_min_cluster_fraction,
-                hdbscan_min_samples=config.ct_hdbscan_min_samples,
-                hdbscan_cluster_selection_method=(
-                    config.ct_hdbscan_cluster_selection_method
-                ),
-                hdbscan_build_algo=config.ct_hdbscan_build_algo,
-                hdbscan_allow_single_cluster=config.ct_hdbscan_allow_single_cluster,
-                dbscan_eps=config.ct_dbscan_eps,
-                dbscan_min_samples=config.ct_dbscan_min_samples,
-                temperature=config.ct_temperature,
-                eps=config.ct_eps,
-                pca_dim=config.ct_pca_dim,
-                kmeans_iterations=config.ct_kmeans_iterations,
-                kmeans_max_iterations=config.ct_kmeans_max_iterations,
-                kmeans_tolerance=config.ct_kmeans_tolerance,
-                kmeans_seed=config.ct_kmeans_seed,
-            ),
-            mode=config.ct_readout,
-            # The SAME within-slide basis the CV branch uses, sliced to
-            # `ct_pca_dim`. Reusing it costs no extra eigh -- and is also why the
-            # gain is capped, since CT then lives inside a subspace CV already
-            # covers (SS149-4).
-            pca_basis=basis,
-        )
-        # The head consumes (q0, q1) and weighs q1 - q0, so hand back a pair whose
-        # difference IS the margin. For "extreme" this returns exactly the two
-        # standardised token abundances it always did.
-        return -0.5 * margins.query, 0.5 * margins.query
+    def _bd_features(
+        self,
+        context_cov: torch.Tensor,
+        labels: torch.Tensor,
+        query_cov: torch.Tensor,
+    ) -> torch.Tensor:
+        return bd_features(self.config, context_cov, labels, query_cov)
+
+    def _bm_features(
+        self,
+        context_bags: Sequence[torch.Tensor],
+        context_labels: torch.Tensor,
+        query_bags: Sequence[torch.Tensor],
+        basis: torch.Tensor,
+        return_loo: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        return bm_features(self.config, context_bags, context_labels, query_bags, basis, return_loo=return_loo)
+
+    def _qa_features(
+        self,
+        context_bags: Sequence[torch.Tensor],
+        context_labels: torch.Tensor,
+        query_bags: Sequence[torch.Tensor],
+        basis: torch.Tensor,
+        return_loo: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        return qa_features(self.config, context_bags, context_labels, query_bags, basis, return_loo=return_loo)
+
+    def _ds_features(
+        self,
+        context_bags: Sequence[torch.Tensor],
+        context_labels: torch.Tensor,
+        query_bags: Sequence[torch.Tensor],
+        basis: torch.Tensor,
+        return_loo: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        return ds_features(self.config, context_bags, context_labels, query_bags, basis, return_loo=return_loo)
+
+    def _lr_features(
+        self,
+        context_bags: Sequence[torch.Tensor],
+        context_labels: torch.Tensor,
+        query_bags: Sequence[torch.Tensor],
+        basis: torch.Tensor,
+    ) -> torch.Tensor:
+        return lr_features(self.config, context_bags, context_labels, query_bags, basis)
+
+    def _de_features(
+        self,
+        context_bags: Sequence[torch.Tensor],
+        context_labels: torch.Tensor,
+        query_bags: Sequence[torch.Tensor],
+        basis: torch.Tensor,
+        return_loo: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        return de_features(self.config, context_bags, context_labels, query_bags, basis, return_loo=return_loo)
+
+    def _sw_features(
+        self,
+        context_bags: Sequence[torch.Tensor],
+        context_labels: torch.Tensor,
+        query_bags: Sequence[torch.Tensor],
+        basis: torch.Tensor,
+        return_loo: bool = False,
+    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        return sw_features(self.config, context_bags, context_labels, query_bags, basis, return_loo=return_loo)
 
     # ---- 6. head ----------------------------------------------------------
     def margins(
@@ -665,13 +376,8 @@ class TrainingFreeClassifier:
                 loo_cv = None
             m_cv = cv[:, 1] - cv[:, 0]
 
-
             def to_matrices(descriptors):
-                flat = descriptors[..., : triangle.shape[1]]
-                matrices = flat.new_zeros(flat.shape[0], config.sketch_dim, config.sketch_dim)
-                matrices[..., triangle[0], triangle[1]] = flat
-                matrices[..., triangle[1], triangle[0]] = flat
-                return matrices
+                return _to_matrices_fn(descriptors, triangle, config.sketch_dim)
 
             if config.weight_dd != 0.0:
                 dd = self._dd_features(to_matrices(context), context_labels, to_matrices(query))
@@ -739,601 +445,27 @@ class TrainingFreeClassifier:
                 m_sw, loo_sw = None, None
 
             if config.aggregation == "linear":
-                total_margin = config.weight_cv * m_cv
-                if m_dd is not None:
-                    total_margin = total_margin + config.weight_dd * m_dd
-                if m_ct is not None:
-                    total_margin = total_margin + config.weight_ct * m_ct
-                if m_bm is not None:
-                    total_margin = total_margin + config.weight_bm * m_bm
-                if m_bd is not None:
-                    total_margin = total_margin + config.weight_bd * m_bd
-                if m_qa is not None:
-                    total_margin = total_margin + config.weight_qa * m_qa
-                if m_ds is not None:
-                    total_margin = total_margin + config.weight_ds * m_ds
-                if m_lr is not None:
-                    total_margin = total_margin + config.weight_lr * m_lr
-                if m_de is not None:
-                    total_margin = total_margin + config.weight_de * m_de
-                if m_sw is not None:
-                    total_margin = total_margin + config.weight_sw * m_sw
-                return total_margin
+                return linear_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw)
             elif config.aggregation == "soft_voting":
-                active_pairs = []
-                if config.weight_cv != 0.0:
-                    active_pairs.append((config.weight_cv, m_cv))
-                if m_dd is not None and config.weight_dd != 0.0:
-                    active_pairs.append((config.weight_dd, m_dd))
-                if m_ct is not None and config.weight_ct != 0.0:
-                    active_pairs.append((config.weight_ct, m_ct))
-                if m_bm is not None and config.weight_bm != 0.0:
-                    active_pairs.append((config.weight_bm, m_bm))
-                if m_bd is not None and config.weight_bd != 0.0:
-                    active_pairs.append((config.weight_bd, m_bd))
-                if m_qa is not None and config.weight_qa != 0.0:
-                    active_pairs.append((config.weight_qa, m_qa))
-                if m_ds is not None and config.weight_ds != 0.0:
-                    active_pairs.append((config.weight_ds, m_ds))
-                if m_lr is not None and config.weight_lr != 0.0:
-                    active_pairs.append((config.weight_lr, m_lr))
-                if m_de is not None and config.weight_de != 0.0:
-                    active_pairs.append((config.weight_de, m_de))
-                if m_sw is not None and config.weight_sw != 0.0:
-                    active_pairs.append((config.weight_sw, m_sw))
-
-                if not active_pairs:
-                    return torch.zeros(cv.shape[0], device=cv.device, dtype=cv.dtype)
-
-                total_weight = sum(w for w, _ in active_pairs)
-                avg_prob = sum(w * torch.sigmoid(m) for w, m in active_pairs) / total_weight
-                clamped = avg_prob.clamp(1e-7, 1.0 - 1e-7)
-                return torch.log(clamped / (1.0 - clamped))
+                return soft_voting(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw)
             elif config.aggregation.startswith("context_loo"):
-                branch_pool = []
-                if config.weight_cv != 0.0:
-                    branch_pool.append((m_cv, loo_cv))
-                if m_dd is not None and config.weight_dd != 0.0:
-                    branch_pool.append((m_dd, loo_dd))
-                if m_ct is not None and config.weight_ct != 0.0:
-                    branch_pool.append((m_ct, loo_ct))
-                if m_bm is not None and config.weight_bm != 0.0:
-                    branch_pool.append((m_bm, loo_bm))
-                if m_bd is not None and config.weight_bd != 0.0:
-                    branch_pool.append((m_bd, loo_bd))
-                if m_qa is not None and config.weight_qa != 0.0:
-                    branch_pool.append((m_qa, loo_qa))
-                if m_ds is not None and config.weight_ds != 0.0:
-                    branch_pool.append((m_ds, loo_ds))
-                if m_de is not None and config.weight_de != 0.0:
-                    branch_pool.append((m_de, loo_de))
-                if m_sw is not None and config.weight_sw != 0.0:
-                    branch_pool.append((m_sw, loo_sw))
-
-                if not branch_pool:
-                    return torch.zeros(cv.shape[0], device=cv.device, dtype=cv.dtype)
-
-                r_list = []
-                for q_m, l_m in branch_pool:
-                    if l_m is not None:
-                        r = _fast_context_auroc(l_m, context_labels)
-                    else:
-                        r = 0.50
-                    r_list.append(r)
-
-                gamma = getattr(config, "loo_gamma", 2.0)
-                floor = getattr(config, "loo_floor", 0.50)
-                q_list = [max(0.0, r - floor) ** gamma for r in r_list]
-                sum_q = sum(q_list)
-                if sum_q > 0:
-                    weights = [q / sum_q for q in q_list]
-                else:
-                    weights = [1.0 / len(branch_pool)] * len(branch_pool)
-
-                avg_prob = sum(w * torch.sigmoid(q_m) for w, (q_m, _) in zip(weights, branch_pool))
-                clamped = avg_prob.clamp(1e-7, 1.0 - 1e-7)
-                return torch.log(clamped / (1.0 - clamped))
+                return context_loo_stacking(
+                    config, cv, context_labels,
+                    m_cv, loo_cv,
+                    m_dd, loo_dd,
+                    m_ct, loo_ct,
+                    m_bm, loo_bm,
+                    m_bd, loo_bd,
+                    m_qa, loo_qa,
+                    m_ds, loo_ds,
+                    m_de, loo_de,
+                    m_sw, loo_sw,
+                )
             elif config.aggregation == "trimmed_mean":
-
-                active_probs = []
-                if config.weight_cv != 0.0:
-                    active_probs.append(torch.sigmoid(m_cv))
-                if m_dd is not None and config.weight_dd != 0.0:
-                    active_probs.append(torch.sigmoid(m_dd))
-                if m_ct is not None and config.weight_ct != 0.0:
-                    active_probs.append(torch.sigmoid(m_ct))
-                if m_bm is not None and config.weight_bm != 0.0:
-                    active_probs.append(torch.sigmoid(m_bm))
-                if m_bd is not None and config.weight_bd != 0.0:
-                    active_probs.append(torch.sigmoid(m_bd))
-                if m_qa is not None and config.weight_qa != 0.0:
-                    active_probs.append(torch.sigmoid(m_qa))
-                if m_ds is not None and config.weight_ds != 0.0:
-                    active_probs.append(torch.sigmoid(m_ds))
-                if m_lr is not None and config.weight_lr != 0.0:
-                    active_probs.append(torch.sigmoid(m_lr))
-                if m_de is not None and config.weight_de != 0.0:
-                    active_probs.append(torch.sigmoid(m_de))
-                if m_sw is not None and config.weight_sw != 0.0:
-                    active_probs.append(torch.sigmoid(m_sw))
-
-                if not active_probs:
-                    return torch.zeros(cv.shape[0], device=cv.device, dtype=cv.dtype)
-
-
-                if len(active_probs) >= 3:
-                    stacked = torch.stack(active_probs, dim=-1)
-                    sum_p = torch.sum(stacked, dim=-1)
-                    min_p = torch.min(stacked, dim=-1).values
-                    max_p = torch.max(stacked, dim=-1).values
-                    trimmed_avg = (sum_p - min_p - max_p) / float(len(active_probs) - 2)
-                    clamped = trimmed_avg.clamp(1e-7, 1.0 - 1e-7)
-                    return torch.log(clamped / (1.0 - clamped))
-                else:
-                    stacked = torch.stack(active_probs, dim=-1)
-                    avg_p = torch.mean(stacked, dim=-1)
-                    clamped = avg_p.clamp(1e-7, 1.0 - 1e-7)
-                    return torch.log(clamped / (1.0 - clamped))
+                return trimmed_mean_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw)
             else:
                 raise ValueError(f'aggregation must be "soft_voting", "trimmed_mean", or "linear", got {config.aggregation!r}')
-
-
-
-
-
-
-
-    def _bd_features(
-        self,
-        context_cov: torch.Tensor,
-        labels: torch.Tensor,
-        query_cov: torch.Tensor,
-    ) -> torch.Tensor:
-        """Bag Dispersion (BD): spectral entropy or log-trace of projected covariance."""
-        config = self.config
-        dim = min(config.bd_dim, context_cov.shape[-1])
-        ctx_sub = context_cov[:, :dim, :dim]
-        qry_sub = query_cov[:, :dim, :dim]
-
-        if config.bd_metric == "entropy":
-            ctx_eig = torch.linalg.eigvalsh(ctx_sub.float()).clamp_min(config.bd_eps)
-            qry_eig = torch.linalg.eigvalsh(qry_sub.float()).clamp_min(config.bd_eps)
-            ctx_p = ctx_eig / ctx_eig.sum(dim=-1, keepdim=True).clamp_min(config.bd_eps)
-            qry_p = qry_eig / qry_eig.sum(dim=-1, keepdim=True).clamp_min(config.bd_eps)
-
-            ctx_v = -(ctx_p * torch.log(ctx_p.clamp_min(config.bd_eps))).sum(dim=-1)
-            qry_v = -(qry_p * torch.log(qry_p.clamp_min(config.bd_eps))).sum(dim=-1)
-            if dim > 1:
-                log_dim = torch.log(torch.tensor(float(dim), device=ctx_v.device, dtype=ctx_v.dtype))
-                ctx_v = ctx_v / log_dim
-                qry_v = qry_v / log_dim
-        elif config.bd_metric == "trace":
-            ctx_trace = ctx_sub.diagonal(dim1=-2, dim2=-1).sum(dim=-1).clamp_min(config.bd_eps)
-            qry_trace = qry_sub.diagonal(dim1=-2, dim2=-1).sum(dim=-1).clamp_min(config.bd_eps)
-            ctx_v = ctx_trace.log()
-            qry_v = qry_trace.log()
-        else:
-            raise ValueError(f"Unknown bd_metric: {config.bd_metric!r}")
-
-        labels = labels.long()
-        prototypes = torch.stack([ctx_v[labels == c].mean() for c in range(2)])
-        dispersions = torch.stack([
-            (ctx_v[labels == c] - prototypes[c]).square().mean().clamp_min(config.bd_eps)
-            for c in range(2)
-        ])
-
-
-        if config.bd_readout == "ordered_typicality":
-            margin = ordered_typicality_margin(
-                qry_v,
-                prototypes,
-                dispersions,
-                config.bd_eps,
-                config.bd_separation_floor,
-            )
-            return margin
-        elif config.bd_readout == "ridge":
-            centre = ctx_v.mean()
-            scale = (ctx_v - centre).square().mean().sqrt().clamp_min(config.bd_eps)
-            std_ctx = ((ctx_v - centre) / scale).unsqueeze(-1)
-            std_qry = ((qry_v - centre) / scale).unsqueeze(-1)
-
-            targets = torch.nn.functional.one_hot(labels, 2).float()
-            counts = torch.bincount(labels, minlength=2)
-            if bool((counts == 0).any()):
-                raise ValueError("Every class must occur in the context set.")
-            weight = counts.float().reciprocal()[labels]
-            total = weight.sum().clamp_min(1e-12)
-            feat_mean = (weight[:, None] * std_ctx).sum(0, keepdim=True) / total
-            tgt_mean = (weight[:, None] * targets).sum(0, keepdim=True) / total
-            root = weight.sqrt()[:, None]
-
-            design = (std_ctx - feat_mean) * root
-            centred_targets = (targets - tgt_mean) * root
-
-            dual = _solve_ridge(design @ design.T, centred_targets, config.bd_lambda)
-            coefficients = design.T @ dual
-            intercept = tgt_mean - feat_mean @ coefficients
-            logits = std_qry @ coefficients + intercept
-            return logits[:, 1] - logits[:, 0]
-        else:
-            raise ValueError(f"Unknown bd_readout: {config.bd_readout!r}")
-
-    def _bm_features(
-        self,
-        context_bags: Sequence[torch.Tensor],
-        context_labels: torch.Tensor,
-        query_bags: Sequence[torch.Tensor],
-        basis: torch.Tensor,
-        return_loo: bool = False,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        """Projected bag-mean in leading subspace with class-balanced kernel ridge."""
-        config = self.config
-        dim = min(config.bm_dim, basis.shape[1])
-        bm_basis = basis[:, :dim].to(dtype=torch.float32)
-        ctx_means = torch.stack([b.float().mean(dim=0).to(bm_basis.device) for b in context_bags]) @ bm_basis
-        qry_means = torch.stack([b.float().mean(dim=0).to(bm_basis.device) for b in query_bags]) @ bm_basis
-
-        kernel = getattr(config, "bm_kernel", getattr(config, "krr_kernel", "linear"))
-        gamma = getattr(config, "krr_gamma", None)
-        degree = getattr(config, "krr_degree", 2)
-        coef0 = getattr(config, "krr_coef0", 1.0)
-        return _solve_kernel_ridge(
-            ctx_means, context_labels, qry_means,
-            kernel=kernel,
-            gamma=gamma,
-            degree=degree,
-            coef0=coef0,
-            reg_lambda=config.bm_lambda,
-            return_loo=return_loo,
-        )
-
-    def _qa_features(
-        self,
-        context_bags: Sequence[torch.Tensor],
-        context_labels: torch.Tensor,
-        query_bags: Sequence[torch.Tensor],
-        basis: torch.Tensor,
-        return_loo: bool = False,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        """Quantile & Extremum Evidence (QA): multi-quantile features of projected cells with class-balanced kernel ridge."""
-        config = self.config
-        dim = min(config.qa_dim, basis.shape[1])
-        qa_basis = basis[:, :dim].to(dtype=torch.float32)
-        quantiles = torch.tensor(config.qa_quantiles, device=qa_basis.device, dtype=torch.float32)
-
-        def extract_quantiles(bag: torch.Tensor) -> torch.Tensor:
-            z = bag.float().to(qa_basis.device) @ qa_basis
-            q = torch.quantile(z, quantiles, dim=0)  # (n_quantiles, dim)
-            return q.flatten()
-
-        ctx_feats = torch.stack([extract_quantiles(b) for b in context_bags])
-        qry_feats = torch.stack([extract_quantiles(b) for b in query_bags])
-
-        kernel = getattr(config, "qa_kernel", getattr(config, "krr_kernel", "linear"))
-        gamma = getattr(config, "krr_gamma", None)
-        degree = getattr(config, "krr_degree", 2)
-        coef0 = getattr(config, "krr_coef0", 1.0)
-        return _solve_kernel_ridge(
-            ctx_feats, context_labels, qry_feats,
-            kernel=kernel,
-            gamma=gamma,
-            degree=degree,
-            coef0=coef0,
-            reg_lambda=config.qa_lambda,
-            return_loo=return_loo,
-        )
-
-    def _ds_features(
-        self,
-        context_bags: Sequence[torch.Tensor],
-        context_labels: torch.Tensor,
-        query_bags: Sequence[torch.Tensor],
-        basis: torch.Tensor,
-        return_loo: bool = False,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        """In-Context Salience Denoising (DS): class-contrastive cluster salience weighting for noise patch suppression."""
-        config = self.config
-        dim = min(config.ds_dim, basis.shape[1])
-        ds_basis = basis[:, :dim].to(dtype=torch.float32)
-        device = ds_basis.device
-        labels = context_labels.long().to(device)
-
-        # 1. Project all context and query bags to PCA subspace
-        ctx_proj = [b.float().to(device) @ ds_basis for b in context_bags]
-        qry_proj = [b.float().to(device) @ ds_basis for b in query_bags]
-
-        # 2. Select K cluster centroids from sampled context cells
-        sampled_cells = []
-        for p in ctx_proj:
-            n_cells = p.shape[0]
-            if n_cells > 0:
-                idx = torch.linspace(0, n_cells - 1, min(n_cells, 64), device=device).long()
-                sampled_cells.append(p[idx])
-        all_cells = torch.cat(sampled_cells, dim=0) if sampled_cells else torch.zeros(1, dim, device=device)
-
-        K = min(config.ds_tokens, all_cells.shape[0])
-        if all_cells.shape[0] > K:
-            stride = all_cells.shape[0] / K
-            centroids = all_cells[(torch.arange(K, device=device) * stride).long()]
-        else:
-            centroids = all_cells
-
-        centroids = torch.nn.functional.normalize(centroids, dim=-1)
-
-        # 3. Soft cluster assignments and slide abundances
-        def get_assignments(proj_bags):
-            abundances = []
-            patch_assignments = []
-            for p in proj_bags:
-                p_norm = torch.nn.functional.normalize(p, dim=-1)
-                sim = p_norm @ centroids.T  # (N_i, K)
-                soft_p = torch.nn.functional.softmax(sim * 5.0, dim=-1)  # (N_i, K)
-                a = soft_p.mean(dim=0)  # (K,)
-                abundances.append(a)
-                patch_assignments.append(soft_p)
-            return torch.stack(abundances), patch_assignments
-
-        ctx_abundances, ctx_assignments = get_assignments(ctx_proj)
-        qry_abundances, qry_assignments = get_assignments(qry_proj)
-
-        # 4. In-context Class Salience Log-Odds
-        eps = 1e-5
-        mask1 = (labels == 1)
-        mask0 = (labels == 0)
-        a1 = ctx_abundances[mask1].mean(dim=0) if mask1.any() else ctx_abundances.mean(dim=0)
-        a0 = ctx_abundances[mask0].mean(dim=0) if mask0.any() else ctx_abundances.mean(dim=0)
-
-        s = torch.log((a1 + eps) / (a0 + eps))  # (K,)
-        s_abs = s.abs()  # Salience magnitude
-
-        # 5. Denoised bag mean extraction
-        def extract_denoised_mean(proj_bags, assignments):
-            feats = []
-            temp = config.ds_temperature
-            for p, soft_p in zip(proj_bags, assignments):
-                u = soft_p @ s_abs  # (N_i,)
-                u_std = u.std().clamp_min(1e-6)
-                w = torch.nn.functional.softmax(temp * (u - u.mean()) / u_std, dim=0)  # (N_i,)
-                z_denoised = (w.unsqueeze(-1) * p).sum(dim=0)  # (dim,)
-                feats.append(z_denoised)
-            return torch.stack(feats)
-
-        ctx_feats = extract_denoised_mean(ctx_proj, ctx_assignments)
-        qry_feats = extract_denoised_mean(qry_proj, qry_assignments)
-
-        # 6. Class-balanced kernel ridge
-        kernel = getattr(config, "ds_kernel", getattr(config, "krr_kernel", "linear"))
-        gamma = getattr(config, "krr_gamma", None)
-        degree = getattr(config, "krr_degree", 2)
-        coef0 = getattr(config, "krr_coef0", 1.0)
-        return _solve_kernel_ridge(
-            ctx_feats, context_labels, qry_feats,
-            kernel=kernel,
-            gamma=gamma,
-            degree=degree,
-            coef0=coef0,
-            reg_lambda=config.ds_lambda,
-            return_loo=return_loo,
-        )
-
-    def _lr_features(
-        self,
-        context_bags: Sequence[torch.Tensor],
-        context_labels: torch.Tensor,
-        query_bags: Sequence[torch.Tensor],
-        basis: torch.Tensor,
-    ) -> torch.Tensor:
-        """Direct In-Context Patch Likelihood Ratio + Top-K MIL Extreme Pooling with class-balanced ridge."""
-        config = self.config
-        dim = min(config.lr_dim, basis.shape[1])
-        lr_basis = basis[:, :dim].to(dtype=torch.float32)
-        device = lr_basis.device
-        labels = context_labels.long().to(device)
-
-        # 1. Project all context and query bags to PCA subspace
-        ctx_proj = [b.float().to(device) @ lr_basis for b in context_bags]
-        qry_proj = [b.float().to(device) @ lr_basis for b in query_bags]
-
-        # 2. Build Class 0 and Class 1 patch memory banks
-        bank_0, bank_1 = [], []
-        for p, y in zip(ctx_proj, labels):
-            n_c = p.shape[0]
-            if n_c == 0:
-                continue
-            n_sample = min(n_c, config.lr_patches_per_ctx)
-            idx = torch.linspace(0, n_c - 1, n_sample, device=device).long()
-            sampled = p[idx]
-            if y == 1:
-                bank_1.append(sampled)
-            else:
-                bank_0.append(sampled)
-
-        if not bank_0 or not bank_1:
-            return torch.zeros(len(query_bags), device=device)
-
-        P0 = torch.cat(bank_0, dim=0)
-        P1 = torch.cat(bank_1, dim=0)
-
-        P0_norm = torch.nn.functional.normalize(P0, dim=-1)
-        P1_norm = torch.nn.functional.normalize(P1, dim=-1)
-        tau = config.lr_tau
-
-        # 3. Compute Patch-level log-odds likelihood ratio and extract Top-K extreme instance features
-        def get_slide_lr_features(proj_bags):
-            feats = []
-            for bag in proj_bags:
-                n_c = bag.shape[0]
-                if n_c == 0:
-                    feats.append(torch.zeros(dim + 1, device=device))
-                    continue
-                bag_norm = torch.nn.functional.normalize(bag, dim=-1)
-                sim1 = bag_norm @ P1_norm.T  # (N_i, |P1|)
-                sim0 = bag_norm @ P0_norm.T  # (N_i, |P0|)
-
-                score1 = torch.logsumexp(sim1 * tau, dim=-1) - torch.log(torch.tensor(P1_norm.shape[0], dtype=torch.float32, device=device))
-                score0 = torch.logsumexp(sim0 * tau, dim=-1) - torch.log(torch.tensor(P0_norm.shape[0], dtype=torch.float32, device=device))
-
-                lr = score1 - score0  # (N_i,)
-
-                k = max(config.lr_topk_min, min(config.lr_topk_max, int(n_c * config.lr_topk_fraction)))
-                k = min(k, n_c)
-
-                topk_vals, topk_idx = torch.topk(lr, k=k, largest=True)
-                botk_vals, botk_idx = torch.topk(lr, k=k, largest=False)
-
-                z_plus = bag[topk_idx].mean(dim=0)
-                z_minus = bag[botk_idx].mean(dim=0)
-
-                delta_z = z_plus - z_minus
-                e_scalar = 0.5 * (topk_vals.mean() + botk_vals.mean())
-
-                v_i = torch.cat([delta_z, e_scalar.unsqueeze(0)], dim=-1)
-                feats.append(v_i)
-            return torch.stack(feats)
-
-        ctx_feats = get_slide_lr_features(ctx_proj)
-        qry_feats = get_slide_lr_features(qry_proj)
-
-        # 4. Class-balanced linear dual ridge solve
-        return _solve_kernel_ridge(
-            ctx_feats, labels, qry_feats,
-            kernel="linear",
-            reg_lambda=config.lr_lambda,
-        )
-
-    def _de_features(
-        self,
-        context_bags: Sequence[torch.Tensor],
-        context_labels: torch.Tensor,
-        query_bags: Sequence[torch.Tensor],
-        basis: torch.Tensor,
-        return_loo: bool = False,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        """In-Subspace Dual Extreme Instance MIL (DE):
-        Projects patches to 32D within-slide PCA space, scores patches along class
-        centroid contrast direction, extracts Top-K and Bottom-K extreme patches,
-        and solves Class-balanced Dual Ridge on the difference descriptor.
-        """
-        config = self.config
-        dim = min(config.de_dim, basis.shape[1])
-        de_basis = basis[:, :dim].to(dtype=torch.float32)
-        device = de_basis.device
-        labels = context_labels.long().to(device)
-
-        # 1. Project all context and query bags to 32D PCA space
-        ctx_proj = [b.float().to(device) @ de_basis for b in context_bags]
-        qry_proj = [b.float().to(device) @ de_basis for b in query_bags]
-
-        # 2. Compute Class 0 and Class 1 centroids from bag means
-        ctx_means = torch.stack([p.mean(dim=0) for p in ctx_proj])
-        if (labels == 0).sum() == 0 or (labels == 1).sum() == 0:
-            zero_q = torch.zeros(len(query_bags), device=device)
-            return (zero_q, torch.zeros(len(context_bags), device=device)) if return_loo else zero_q
-
-        mu0 = ctx_means[labels == 0].mean(dim=0)
-        mu1 = ctx_means[labels == 1].mean(dim=0)
-        w_contrast = mu1 - mu0
-        w_norm = w_contrast.norm().clamp_min(1e-12)
-        w_dir = w_contrast / w_norm
-
-        # 3. Extract Dual Extreme difference descriptor per bag
-        def extract_de_vector(p_bag):
-            n_c = p_bag.shape[0]
-            if n_c == 0:
-                return torch.zeros(dim + 1, device=device)
-            scores = p_bag @ w_dir  # (N_i,)
-            k = max(config.de_topk_min, min(config.de_topk_max, int(n_c * config.de_topk_fraction)))
-            k = min(k, n_c)
-
-            topk_vals, topk_idx = torch.topk(scores, k=k, largest=True)
-            botk_vals, botk_idx = torch.topk(scores, k=k, largest=False)
-
-            z_plus = p_bag[topk_idx].mean(dim=0)
-            z_minus = p_bag[botk_idx].mean(dim=0)
-
-            delta_z = z_plus - z_minus  # (dim,)
-            score_diff = 0.5 * (topk_vals.mean() + botk_vals.mean())  # (1,)
-
-            return torch.cat([delta_z, score_diff.unsqueeze(0)], dim=-1)
-
-        ctx_feats = torch.stack([extract_de_vector(p) for p in ctx_proj])
-        qry_feats = torch.stack([extract_de_vector(p) for p in qry_proj])
-
-        # 4. Class-balanced linear dual ridge solve
-        return _solve_kernel_ridge(
-            ctx_feats, labels, qry_feats,
-            kernel="linear",
-            reg_lambda=config.de_lambda,
-            return_loo=return_loo,
-        )
-
-    def _sw_features(
-        self,
-        context_bags: Sequence[torch.Tensor],
-        context_labels: torch.Tensor,
-        query_bags: Sequence[torch.Tensor],
-        basis: torch.Tensor,
-        return_loo: bool = False,
-    ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        """Sliced Wasserstein Distribution Matching (SW):
-        Projects patches to 32D PCA space, projects onto L deterministic orthogonal
-        spherical slice directions, computes M 1D quantiles per slice, and solves
-        Class-balanced Dual Ridge on the flattened (L * M) Sliced Wasserstein embedding.
-        """
-        config = self.config
-        dim = min(config.sw_dim, basis.shape[1])
-        sw_basis = basis[:, :dim].to(dtype=torch.float32)
-        device = sw_basis.device
-        labels = context_labels.long().to(device)
-
-        # 1. Deterministic orthogonal slice directions on S^{dim-1}
-        num_slices = config.sw_num_slices
-        g = torch.Generator(device="cpu").manual_seed(42)
-        rand_dirs = torch.randn(dim, num_slices, generator=g, dtype=torch.float32)
-        q_dirs, _ = torch.linalg.qr(rand_dirs)
-        slice_dirs = q_dirs.to(device=device)  # (dim, num_slices)
-
-        # 2. Quantile levels
-        num_quantiles = config.sw_num_quantiles
-        q_levels = torch.linspace(0.5 / num_quantiles, 1.0 - 0.5 / num_quantiles, num_quantiles, device=device)
-
-        # 3. Project each bag onto slices and extract 1D quantiles
-        def extract_sw_profile(bag):
-            proj = bag.float().to(device) @ sw_basis  # (N_i, dim)
-            n_c = proj.shape[0]
-            if n_c == 0:
-                return torch.zeros(num_slices * num_quantiles, device=device)
-
-            slices = proj @ slice_dirs  # (N_i, num_slices)
-            sorted_slices, _ = torch.sort(slices, dim=0)
-
-            indices = (q_levels * (n_c - 1)).clamp(0, n_c - 1)
-            low_idx = indices.floor().long()
-            high_idx = indices.ceil().long()
-            weights = (indices - low_idx.float())[:, None]
-
-            low_vals = sorted_slices[low_idx, :]   # (num_quantiles, num_slices)
-            high_vals = sorted_slices[high_idx, :] # (num_quantiles, num_slices)
-            quantiles = (1.0 - weights) * low_vals + weights * high_vals
-
-            return quantiles.flatten()
-
-        ctx_feats = torch.stack([extract_sw_profile(b) for b in context_bags])
-        qry_feats = torch.stack([extract_sw_profile(b) for b in query_bags])
-
-        # 4. Class-balanced linear dual ridge solve
-        return _solve_kernel_ridge(
-            ctx_feats, labels, qry_feats,
-            kernel="linear",
-            reg_lambda=config.sw_lambda,
-            return_loo=return_loo,
-        )
-
 
     def predict_proba(self, context_bags, context_labels, query_bags) -> torch.Tensor:
         """P(class 1) per query bag."""
         return torch.sigmoid(self.margins(context_bags, context_labels, query_bags))
-
-
-
