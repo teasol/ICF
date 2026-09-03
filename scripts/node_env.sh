@@ -42,7 +42,19 @@ if [ -z "${ICF_PYTHON:-}" ]; then
     [ -n "$candidate" ] && [ -x "$candidate" ] || continue
     # lightning is the import that fails on a bare python3 and silently drops 14
     # test modules while still printing a confident "Ran 158 tests" (SS141-3).
-    if "$candidate" -c "import torch, lightning" >/dev/null 2>&1; then
+    # This node's /usr/bin/python3 is exactly that trap: it HAS torch but not
+    # lightning, so both names have to be checked.
+    #
+    # find_spec, not `import`: resolving the two names costs 0.03s where
+    # importing them costs 11.1s (lightning alone is ~7s), and node_env.sh is
+    # sourced by every runner -- twice per eval, since eval_seal_tasks.sh
+    # sources it again. It was 10.6s of a 37s test-suite run (SS207).
+    # The trade-off: find_spec proves a module is installed and importable by
+    # name, not that executing it succeeds. A module present but broken at
+    # import time now gets selected and fails loudly with a real traceback at
+    # first use, instead of being skipped in favour of the next candidate --
+    # which, on this node, would fail the same way one step later.
+    if "$candidate" -c "import importlib.util as u, sys; sys.exit(0 if u.find_spec('torch') and u.find_spec('lightning') else 1)" >/dev/null 2>&1; then
       ICF_PYTHON="$candidate"; break
     fi
   done
