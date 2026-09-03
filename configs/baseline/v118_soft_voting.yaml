@@ -1,0 +1,48 @@
+name: v118_soft_voting
+description: "4-Branch Soft Voting Baseline (CV + CT + BM + BD, no DD)"
+version: "118"
+
+basis:
+  sketch_dim: 256
+  ridge_lambda: 1.0
+  ridge_scale: 2.0
+
+branches:
+  cv:
+    weight: 1.0
+    blocks: offdiag
+
+  bm:
+    weight: 1.0
+    dim: 32
+    lambda: 1.0
+
+  bd:
+    weight: 1.0
+    dim: 256
+    metric: entropy
+    readout: ordered_typicality
+    lambda: 1.0
+    separation_floor: 1.0
+    eps: 1e-6
+
+  qa:
+    weight: 0.0
+
+  ds:
+    weight: 0.0
+
+  ct:
+    weight: 1.0
+    pca_dim: 32
+    tokens: 256
+    tokenizer: hierarchical_2means
+    readout: ridge
+    temperature: 0.5
+    eps: 1e-6
+
+  dd:
+    weight: 0.0
+
+aggregation:
+  method: soft_voting
