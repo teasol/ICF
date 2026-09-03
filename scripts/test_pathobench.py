@@ -1275,14 +1275,64 @@ def evaluate_trial(
                             patch_assignments.append(soft_p)
                         return torch.stack(abundances), patch_assignments
 
-                    ctx_abundances, ctx_assignments = get_ds_assignments(ctx_proj)
-                    qry_abundances, qry_assignments = get_ds_assignments(qry_proj)
+                    # Sub-bag Data Augmentation:
+                    # mode: "none" (baseline), "context" (Method 1), "query" (Method 2)
+                    ds_aug_mode = os.environ.get("ICF_DS_AUG_MODE", "none").lower()
+                    ds_aug_s = int(os.environ.get("ICF_DS_AUG_S", "1"))
+                    ds_aug_fraction = float(os.environ.get("ICF_DS_AUG_FRACTION", "1.0"))
+                    ds_aug_seed = int(os.environ.get("ICF_DS_AUG_SEED", "42"))
+
+                    labels = episode_y[:n_context].long().to(device)
+
+                    # 1. Context Augmentation (Method 1)
+                    if ds_aug_mode == "context" and ds_aug_s > 1 and ds_aug_fraction < 1.0:
+                        ctx_proj_aug = []
+                        ctx_labels_aug = []
+                        base_seed_val = ds_aug_seed + (seed if "seed" in locals() and isinstance(seed, int) else 0) * 10000
+                        for i, p in enumerate(ctx_proj):
+                            n_p = p.shape[0]
+                            k_sub = max(1, int(n_p * ds_aug_fraction))
+                            lbl_i = labels[i]
+                            for s_idx in range(ds_aug_s):
+                                gen = torch.Generator(device="cpu").manual_seed(base_seed_val + i * 100 + s_idx)
+                                perm = torch.randperm(n_p, generator=gen)[:k_sub]
+                                ctx_proj_aug.append(p[perm])
+                                ctx_labels_aug.append(lbl_i)
+                        ctx_proj_eval = ctx_proj_aug
+                        labels_eval = torch.stack(ctx_labels_aug)
+                    else:
+                        ctx_proj_eval = ctx_proj
+                        labels_eval = labels
+
+                    # 2. Query TTA Augmentation (Method 2)
+                    if ds_aug_mode == "query" and ds_aug_s > 1 and ds_aug_fraction < 1.0:
+                        qry_proj_eval = []
+                        qry_slide_indices = []
+                        base_seed_val = ds_aug_seed + (seed if "seed" in locals() and isinstance(seed, int) else 0) * 10000 + 500000
+                        for j, q in enumerate(qry_proj):
+                            n_q = q.shape[0]
+                            k_sub = max(1, int(n_q * ds_aug_fraction))
+                            # Anchor view: full bag
+                            qry_proj_eval.append(q)
+                            qry_slide_indices.append(j)
+                            # Sub-bag views:
+                            for s_idx in range(ds_aug_s):
+                                gen = torch.Generator(device="cpu").manual_seed(base_seed_val + j * 100 + s_idx)
+                                perm = torch.randperm(n_q, generator=gen)[:k_sub]
+                                qry_proj_eval.append(q[perm])
+                                qry_slide_indices.append(j)
+                        qry_slide_indices = torch.tensor(qry_slide_indices, device=device)
+                    else:
+                        qry_proj_eval = qry_proj
+                        qry_slide_indices = None
+
+                    ctx_abundances, ctx_assignments = get_ds_assignments(ctx_proj_eval)
+                    qry_abundances, qry_assignments = get_ds_assignments(qry_proj_eval)
 
                     # 4. Salience log-odds
                     eps = 1e-5
-                    labels = episode_y[:n_context].long().to(device)
-                    mask1 = (labels == 1)
-                    mask0 = (labels == 0)
+                    mask1 = (labels_eval == 1)
+                    mask0 = (labels_eval == 0)
                     a1 = ctx_abundances[mask1].mean(dim=0) if mask1.any() else ctx_abundances.mean(dim=0)
                     a0 = ctx_abundances[mask0].mean(dim=0) if mask0.any() else ctx_abundances.mean(dim=0)
                     s = torch.log((a1 + eps) / (a0 + eps))
@@ -1299,22 +1349,35 @@ def evaluate_trial(
                             feats.append(z_denoised)
                         return torch.stack(feats)
 
-                    ctx_ds = extract_denoised_mean(ctx_proj, ctx_assignments)
-                    qry_ds = extract_denoised_mean(qry_proj, qry_assignments)
+                    ctx_ds = extract_denoised_mean(ctx_proj_eval, ctx_assignments)
+                    qry_ds = extract_denoised_mean(qry_proj_eval, qry_assignments)
 
                     # 6. Class-balanced kernel ridge
                     krr_kernel = os.environ.get("ICF_KRR_KERNEL", "linear")
                     krr_gamma = float(os.environ["ICF_KRR_GAMMA"]) if "ICF_KRR_GAMMA" in os.environ else None
                     krr_degree = int(os.environ.get("ICF_KRR_DEGREE", "2"))
                     krr_coef0 = float(os.environ.get("ICF_KRR_COEF0", "1.0"))
-                    ds_margin = _solve_kernel_ridge(
-                        ctx_ds, labels, qry_ds,
+                    raw_ds_margin = _solve_kernel_ridge(
+                        ctx_ds, labels_eval, qry_ds,
                         kernel=os.environ.get("ICF_DS_KERNEL", krr_kernel),
                         gamma=krr_gamma,
                         degree=krr_degree,
                         coef0=krr_coef0,
                         reg_lambda=ds_lambda,
                     )
+
+                    # If query TTA was used, aggregate multiple sub-bag margins per query slide
+                    if qry_slide_indices is not None:
+                        n_orig_qry = len(qry_proj)
+                        raw_probs = torch.sigmoid(raw_ds_margin)
+                        agg_probs = torch.zeros(n_orig_qry, device=device, dtype=raw_probs.dtype)
+                        counts = torch.zeros(n_orig_qry, device=device, dtype=raw_probs.dtype)
+                        agg_probs.scatter_add_(0, qry_slide_indices, raw_probs)
+                        counts.scatter_add_(0, qry_slide_indices, torch.ones_like(raw_probs))
+                        mean_probs = agg_probs / counts.clamp_min(1.0)
+                        ds_margin = torch.logit(mean_probs.clamp(1e-6, 1.0 - 1e-6))
+                    else:
+                        ds_margin = raw_ds_margin
 
                     logits = logits.clone()
                     logits[:, 0] -= 0.5 * ds_weight * ds_margin

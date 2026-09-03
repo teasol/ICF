@@ -105,9 +105,14 @@ def solve_kernel_ridge(
         design = (ctx_std - feature_mean) * root
         centred_targets = (targets - target_mean) * root
 
-        gram = design @ design.T
-        dual = solve_ridge(gram, centred_targets, reg_lambda)
-        coefficients = design.T @ dual
+        if not return_loo and design.shape[0] > design.shape[1]:
+            # Primal solve: D x D instead of N x N (exact Woodbury equivalence)
+            gram_primal = design.T @ design
+            coefficients = solve_ridge(gram_primal, design.T @ centred_targets, reg_lambda)
+        else:
+            gram = design @ design.T
+            dual = solve_ridge(gram, centred_targets, reg_lambda)
+            coefficients = design.T @ dual
         intercept = target_mean - feature_mean @ coefficients
         logits = qry_std @ coefficients + intercept
         qry_margin = logits if return_logits else (logits[:, 1] - logits[:, 0])
