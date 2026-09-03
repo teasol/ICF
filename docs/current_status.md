@@ -22,6 +22,8 @@ bash scripts/run_tests.sh
 - Streamlined `docs/agent_handoff.md` into standard 5-part permanent architectural reference.
 - Verified test suite: all 16 modules / 119 unit tests pass in 20.0s via `scripts/run_tests.sh`.
 - Established agent entrypoints: verified `AGENTS.md` and `CLAUDE.md` in repository root.
+- Configured repository-local Git credential helper using `/home/kimds/.gittoken_icf` (isolated to this repo), and successfully synchronized/pushed to `origin/main`.
+
 
 ### Code Reality vs Documentation Delta
 - **Active Architecture Baseline**: Legacy `docs/README.md` previously claimed v112 as active; confirmed and standardized that the true active baseline is **v120** (6-Branch Trimmed Mean Voting: CV + CT + BM + BD + QA + DS, with DD disabled; Primary 7 Macro `0.6265`, SEAL 10 `0.6972`, All 17 `0.6681`).
