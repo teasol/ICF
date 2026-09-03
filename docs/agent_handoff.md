@@ -43,7 +43,10 @@ CT 브랜치는 k-means 병목으로 350-fold 소요를 45분 → 12분으로 �
 
 > ⚠️ **[STRICT RULE] 모델 구조, 브랜치 로직, 수식, 하이퍼파라미터를 분석하거나 수정할 때는 반드시 [`docs/current_architecture.md`](current_architecture.md)를 먼저 정독하고 동기화할 것.**
 
-### 2.2. Six Complementary Branches
+### 2.2. Six Branches
+
+> ⚠️ **[§215 실측 정정] 이 브랜치들은 상보적(complementary)이지 않다.** 5-branch 앙상블의 유효 랭크는 **2.26 / 5 (명목의 45%)** 이며, `BM`·`QA`·`DS`는 모두 동일한 top-32 PCA 부분공간의 1차 모멘트로서 상호 상관 r = 0.57~0.93 (셋의 유효 랭크 **1.29 / 3**) — 사실상 하나의 신호다. 나머지와 직교하는 브랜치는 **`BD` 뿐**(|r| = 0.01~0.16)이다.
+> 그 결과 Trimmed Mean은 독립 신호를 나르는 `CV`(슬라이드의 83.6%)와 `BD`(62.1%)를 우선적으로 절사하고, 중복 블록의 중앙값에 수렴한다. 신규 브랜치를 추가하거나 집계 방식을 바꾸기 전에 반드시 `branch_diagnostics.py --redundancy`로 기존 브랜치와의 상관을 먼저 측정할 것.
 1. **CV (Cross-Covariance)**: Captures 2nd-order feature correlations via the upper-triangular off-diagonal elements of projected slide covariance ($32,640\text{D}$) $\to$ Class-balanced Dual Ridge ($\lambda=1.0$).
 2. **CT (Cell-Type Abundance)**: Samples $1/8$ slide tokens, projects to 32D PCA, clusters into 256 tokens via seeded k-means++, computes soft abundance $\to$ Dual Ridge ($\lambda=1.0$).
 3. **BM (Bag-Mean)**: Projects 1st-moment slide mean ($\bar{x}_i$) to the top 32 PCA dimensions $\to$ Dual Ridge ($\lambda=1.0$).

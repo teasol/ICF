@@ -3,7 +3,9 @@
 Computes, without any GPU work, from `predictions/pathobench_<task>_<tag>_official50_bf16.pt`:
   1. per-branch standalone AUROC per task,
   2. the oracle ceiling (best single branch per task) and its gap to Trimmed Mean,
-  3. optionally (--ablate) every branch-subset Trimmed Mean with sign agreement.
+  3. optionally (--ablate) every branch-subset Trimmed Mean with sign agreement,
+  4. optionally (--redundancy) the inter-branch margin correlation matrix, the
+     ensemble's effective rank, and which branches Trimmed Mean discards.
 
 Sign agreement (n/7 tasks improved over the reference) is always reported alongside
 macro AUROC, per the Reporting Integrity Contract in docs/agent_handoff.md.
@@ -67,6 +69,36 @@ def subset_macro(data: dict, subset: tuple[str, ...]) -> tuple[float, list[float
     return float(np.mean(per_task)), per_task
 
 
+def corr_matrix(folds: list, subset: list[str]) -> np.ndarray:
+    """Mean within-fold Pearson correlation between branch margins."""
+    acc = np.zeros((len(subset), len(subset)))
+    for f in folds:
+        x = np.stack([f[b].float().numpy() for b in subset])
+        x = (x - x.mean(1, keepdims=True)) / (x.std(1, keepdims=True) + 1e-9)
+        acc += x @ x.T / x.shape[1]
+    return acc / len(folds)
+
+
+def effective_rank(c: np.ndarray) -> float:
+    """Participation ratio of the correlation eigenvalues: the number of
+    genuinely independent signals the branch set carries."""
+    w = np.clip(np.linalg.eigvalsh(c), 0.0, None)
+    return float(w.sum() ** 2 / (w ** 2).sum())
+
+
+def trim_discard_rate(folds: list) -> np.ndarray:
+    """Fraction of slides on which each branch is removed by Trimmed Mean
+    (i.e. is the per-slide min or max). Uniform expectation is 2/B."""
+    counts = np.zeros(len(BRANCHES))
+    total = 0
+    for f in folds:
+        probs = torch.stack([torch.sigmoid(f[b]) for b in BRANCHES], dim=0)
+        for idx in (torch.argmin(probs, 0).numpy(), torch.argmax(probs, 0).numpy()):
+            np.add.at(counts, idx, 1)
+        total += probs.shape[1]
+    return counts / total
+
+
 def short(task: str) -> str:
     return task.replace("cptac_", "").replace("ucla_lung_", "")
 
@@ -75,6 +107,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", default="v121_baseline")
     ap.add_argument("--ablate", action="store_true", help="also sweep all branch subsets")
+    ap.add_argument("--redundancy", action="store_true",
+                    help="also report branch correlation, effective rank, and trim-discard rates")
     ap.add_argument("--top", type=int, default=8)
     args = ap.parse_args()
 
@@ -98,6 +132,34 @@ def main() -> None:
     print(f"{'MACRO':<24}{'':>40}{oracle_macro:>9.4f}{base_macro:>8.4f}{oracle_macro - base_macro:>+9.4f}")
     print(f"\noracle gap = {oracle_macro - base_macro:+.4f} "
           f"(recoverable headroom if the best branch per task were selectable)")
+
+    if args.redundancy:
+        names = [b[2:].upper() for b in BRANCHES]
+        print(f"\n[{args.tag}] effective rank of the {len(BRANCHES)}-branch ensemble")
+        print(f"{'task':<24}{'eff.rank':>10}{'BM-QA':>8}{'BM-DS':>8}{'QA-DS':>8}{'|BD-rest|':>11}")
+        ranks = []
+        for t in PRIMARY7:
+            c = corr_matrix(data[t], BRANCHES)
+            i = {n: k for k, n in enumerate(names)}
+            r = effective_rank(c)
+            ranks.append(r)
+            bd = np.mean([abs(c[i["BD"], i[x]]) for x in ("CV", "BM", "QA", "DS")])
+            print(f"{short(t):<24}{r:>10.2f}{c[i['BM'], i['QA']]:>8.3f}"
+                  f"{c[i['BM'], i['DS']]:>8.3f}{c[i['QA'], i['DS']]:>8.3f}{bd:>11.3f}")
+        print(f"{'MEAN':<24}{np.mean(ranks):>10.2f}"
+              f"   <- out of {len(BRANCHES)} nominal branches "
+              f"({100 * np.mean(ranks) / len(BRANCHES):.0f}%)")
+
+        print(f"\n[{args.tag}] share of slides on which Trimmed Mean discards each branch")
+        print(f"{'task':<24}" + "".join(f"{n:>8}" for n in names))
+        acc = np.zeros(len(BRANCHES))
+        for t in PRIMARY7:
+            rate = 100 * trim_discard_rate(data[t])
+            acc += rate
+            print(f"{short(t):<24}" + "".join(f"{v:>7.1f}%" for v in rate))
+        print(f"{'MEAN':<24}" + "".join(f"{v:>7.1f}%" for v in acc / len(PRIMARY7)))
+        print(f"\nuniform expectation = {200 / len(BRANCHES):.1f}% per branch; "
+              "anything above it is preferentially thrown away.")
 
     if not args.ablate:
         return
