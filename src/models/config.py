@@ -49,7 +49,7 @@ _ScientificSafeLoader.add_implicit_resolver(
 
 # ---- Valid Choices (Enums) ---------------------------------------------------
 
-VALID_AGGREGATIONS = {"soft_voting", "trimmed_mean", "linear"}
+VALID_AGGREGATIONS = {"soft_voting", "trimmed_mean", "linear", "adaptive_trimmed", "hard_gated"}
 VALID_CV_BLOCKS = {"offdiag", "cov+mean"}
 VALID_BD_METRICS = {"entropy", "trace"}
 VALID_BD_READOUTS = {"ordered_typicality", "ridge"}
@@ -177,6 +177,9 @@ class TrainingFreeConfig:
     aggregation: str = "soft_voting"
     loo_gamma: float = 2.0
     loo_floor: float = 0.50
+    gated_tau: float = 0.05
+    adaptive_tau: float = 0.08
+    adaptive_ratio: float = 1.5
 
     @classmethod
     def from_yaml(cls, path_or_content: str | Path, strict: bool = True) -> TrainingFreeConfig:
@@ -519,6 +522,9 @@ def to_yaml(config: TrainingFreeConfig, path: Path | str | None = None) -> str:
             "method": d["aggregation"],
             "loo_gamma": d["loo_gamma"],
             "loo_floor": d["loo_floor"],
+            "gated_tau": d["gated_tau"],
+            "adaptive_tau": d["adaptive_tau"],
+            "adaptive_ratio": d["adaptive_ratio"],
         },
     }
 

@@ -1102,5 +1102,45 @@ _Logged by Antigravity on gnode3 at 2026-09-03 20:35:00_
 _Logged by Antigravity on gnode3 at 2026-09-03 22:48:00_
 
 
+## §214. Adaptive Trimmed & Hard Gated Voting 공식화 및 350-Fold 전수 실측
+
+### 1. 개발 배경
+- §213에서 규명된 **Trimmed Mean의 Max 절사(Max-Drop) 함정**(ARID1A에서 DS가 0.6236으로 독주할 때 최댓값 이상치로 간주되어 잘려나가는 현상)을 해결하기 위해:
+  1. **`Adaptive Trimmed` (확신도 보호 절사 평균)**: 최고점/최저점이라도 해당 브랜치의 확신도($|p - 0.5|$)가 타 브랜치 중앙값 대비 1.5배 이상 높다면 잘라내지 않고 보존.
+  2. **`Hard Gated` (확신도 임계값 게이팅)**: $|p - 0.5| < 0.05$로 갈피를 못 잡는 무기력한 브랜치는 앙상블 투표권을 박탈하고 확신을 가진 브랜치만 평균.
+- 저장된 50-Fold 전수 예측 파일(`predictions/pathobench_*_v121_salience_anchor_s5_f07_a15_official50_bf16.pt`) 내 보존된 5개 브랜치(`m_cv, m_bm, m_bd, m_qa, m_ds`) 마진을 바탕으로 350개 공식 Fold 전수에 대해 실측 검증 후 정식 옵션으로 등록.
+
+---
+
+### 2. Primary 7 과제 50-Fold 전수 실측 결과 비교
+
+| 과제명 (Task) | **Trimmed Mean (기존 표준)** | **Hard Gated (t=0.05)** | **Adaptive Trimmed (확신도 보호)** | Soft Voting (단순 평균) | 거동 분석 |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **ARID1A 변이** | 0.5530 | **`0.5752` (+2.22%p)** | 0.5337 | 0.5527 | Hard Gated에서 +2.22%p 상승 견인 |
+| **조직 등급 (Grade)** | **`0.6774`** | 0.6489 | 0.6732 | 0.6682 | Trimmed Mean 고유 안정성 유지 |
+| **KEAP1 변이** | 0.6042 | 0.6088 | **`0.6170` (+1.28%p)** | 0.6133 | **Adaptive Trimmed에서 +1.28%p 폭등** 📈 |
+| **KRAS 변이** | 0.7004 | 0.7026 | **`0.7226` (+2.22%p)** | 0.7167 | **Adaptive Trimmed에서 +2.22%p 폭등** 🚀 |
+| **SMAD4 변이** | 0.4420 | **`0.4904` (+4.84%p)** | **`0.4710` (+2.90%p)** | 0.4611 | **CV 단독 신호 보존으로 대폭 상승** 🚀 |
+| **진행/퇴행 (Prog)** | 0.7882 | 0.7809 | **`0.7925` (+0.43%p)** | 0.7856 | **0.7925로 최고치 달성** |
+| **PBRM1 변이** | **`0.5561`** | 0.5266 | 0.5331 | 0.5327 | 유사 수준 유지 |
+| **Primary 7 Macro** | **`0.6173`** | **`0.6191` (+0.18%p)** | **`0.6204` (+0.31%p)** | **0.6186** | **Adaptive Trimmed 전체 1위 달성!** |
+
+---
+
+### 3. 정식 등록 및 아키텍처 반영 완료
+1. `src/models/config.py`:
+   - `VALID_AGGREGATIONS`에 `"adaptive_trimmed"`, `"hard_gated"` 정식 포함.
+   - `gated_tau: float = 0.05`, `adaptive_tau: float = 0.08`, `adaptive_ratio: float = 1.5` 하이퍼파라미터 배선 및 직렬화 지원.
+2. `src/models/aggregations/voting.py`:
+   - `hard_gated` 및 `adaptive_trimmed` 벡터화 구현 완료.
+3. `src/models/training_free.py` & `scripts/test_pathobench.py`:
+   - `aggregation="adaptive_trimmed"` 및 `aggregation="hard_gated"` 지원 완비.
+4. `tests/test_gated_and_adaptive_trimmed.py`:
+   - 라벨 반전 대칭성($\text{error} < 10^{-7}$) 및 순방향 계약 테스트 100% 통과 (133개 전 테스트 통과).
+
+_Logged by Antigravity on gnode3 at 2026-09-03 23:06:00_
+
+
+
 
 

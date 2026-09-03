@@ -1777,6 +1777,89 @@ def evaluate_trial(
                 scores = sum(w * torch.sigmoid(m.float()) for w, m in active_pairs) / total_weight
             else:
                 scores = torch.softmax(logits.float(), dim=-1)[:, 1]
+        elif aggregation == "hard_gated":
+            active_probs = []
+            if cv_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_cv.float()))
+            if dd_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_dd.float()))
+            if ct_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_ct.float()))
+            if bm_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_bm.float()))
+            if bd_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_bd.float()))
+            if qa_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_qa.float()))
+            if ds_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_ds.float()))
+            if lr_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_lr.float()))
+            if de_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_de.float()))
+            if sw_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_sw.float()))
+
+            if active_probs:
+                stacked = torch.stack(active_probs, dim=-1)  # [N, B]
+                tau = float(os.environ.get("ICF_GATED_TAU", "0.05"))
+                c = (stacked - 0.5).abs()
+                mask = (c >= tau).float()
+                has_active = (mask.sum(dim=-1, keepdim=True) > 0)
+                weights = torch.where(has_active, mask, torch.ones_like(mask))
+                scores = (weights * stacked).sum(dim=-1) / weights.sum(dim=-1).clamp_min(1.0)
+            else:
+                scores = torch.softmax(logits.float(), dim=-1)[:, 1]
+        elif aggregation == "adaptive_trimmed":
+            active_probs = []
+            if cv_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_cv.float()))
+            if dd_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_dd.float()))
+            if ct_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_ct.float()))
+            if bm_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_bm.float()))
+            if bd_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_bd.float()))
+            if qa_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_qa.float()))
+            if ds_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_ds.float()))
+            if lr_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_lr.float()))
+            if de_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_de.float()))
+            if sw_weight != 0.0:
+                active_probs.append(torch.sigmoid(m_sw.float()))
+
+            if active_probs:
+                stacked = torch.stack(active_probs, dim=-1)  # [N, B]
+                B = stacked.shape[-1]
+                if B < 3:
+                    scores = stacked.mean(dim=-1)
+                else:
+                    sorted_p, _ = torch.sort(stacked, dim=-1)
+                    c = (stacked - 0.5).abs()
+                    c_med = torch.median(c, dim=-1).values
+                    min_p = sorted_p[:, 0]
+                    max_p = sorted_p[:, -1]
+                    c_min = (min_p - 0.5).abs()
+                    c_max = (max_p - 0.5).abs()
+
+                    tau = float(os.environ.get("ICF_ADAPTIVE_TAU", "0.08"))
+                    ratio = float(os.environ.get("ICF_ADAPTIVE_RATIO", "1.5"))
+
+                    drop_min = (c_min <= ratio * c_med) | (c_min <= tau)
+                    drop_max = (c_max <= ratio * c_med) | (c_max <= tau)
+
+                    sum_all = sorted_p.sum(dim=-1)
+                    count_all = torch.full_like(sum_all, float(B))
+                    sum_trimmed = sum_all - torch.where(drop_min, min_p, torch.zeros_like(min_p)) - torch.where(drop_max, max_p, torch.zeros_like(max_p))
+                    count_trimmed = count_all - drop_min.float() - drop_max.float()
+                    scores = sum_trimmed / count_trimmed.clamp_min(1.0)
+            else:
+                scores = torch.softmax(logits.float(), dim=-1)[:, 1]
         elif aggregation.startswith("context_loo"):
             branch_pool = []
             context_labels = episode_y[:n_context].long().to(device)

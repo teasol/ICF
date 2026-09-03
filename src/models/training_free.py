@@ -90,6 +90,8 @@ from src.models.aggregations.voting import (
     linear_aggregation,
     soft_voting,
     trimmed_mean as trimmed_mean_aggregation,
+    hard_gated as hard_gated_aggregation,
+    adaptive_trimmed as adaptive_trimmed_aggregation,
     context_loo_stacking,
 )
 from src.models.config import TrainingFreeConfig
@@ -320,8 +322,12 @@ class TrainingFreeClassifier:
                 )
             elif config.aggregation == "trimmed_mean":
                 return trimmed_mean_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw)
+            elif config.aggregation == "hard_gated":
+                return hard_gated_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw)
+            elif config.aggregation == "adaptive_trimmed":
+                return adaptive_trimmed_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw)
             else:
-                raise ValueError(f'aggregation must be "soft_voting", "trimmed_mean", or "linear", got {config.aggregation!r}')
+                raise ValueError(f'aggregation must be "soft_voting", "trimmed_mean", "hard_gated", "adaptive_trimmed", or "linear", got {config.aggregation!r}')
 
     def predict_proba(self, context_bags, context_labels, query_bags) -> torch.Tensor:
         """P(class 1) per query bag."""

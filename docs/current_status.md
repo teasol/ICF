@@ -1,6 +1,6 @@
 # Current Status
 
-- **Last Updated**: 2026-09-03 22:50 (KST)
+- **Last Updated**: 2026-09-03 23:08 (KST)
 - **Status**: CLEAN
 - **Host / Node**: gnode3 (5x NVIDIA RTX A5000, 24GB VRAM)
 - **Environment**: uv venv `.venv` | Python 3.12.11 (PyTorch 2.14.0+cu130, Lightning 2.6.5)
@@ -14,36 +14,41 @@ bash scripts/run_tests.sh
 
 ---
 
-## 2026-09-03 — CT 뮤트 5-Branch (v121) 고속 베이스라인 및 Salience Anchor Subsampling 실측 (§213)
+## 2026-09-03 — Adaptive Trimmed & Hard Gated Voting 공식화 및 350-Fold 전수 실측 (§214)
 
 ### Completed
-- **CT 브랜치 뮤트 기반 v121 5-Branch 고속 베이스라인 구축 및 50-Fold 실측 완료 (§213)**:
-  - `ICF_FIXED_HEAD_CT_WEIGHT=0.0`으로 K-Means 병목 제거 $\to$ 5-GPU 350-Fold 전수 완주 시간이 45분에서 **12분으로 4배 가속**.
-  - 5-Branch (CV, BM, BD, QA, DS) Trimmed Mean Macro AUROC: **`0.6171`** (안정적 고속 평가 환경 확립).
-- **Salience-Guided Anchor Subsampling 50-Fold 실측 완료 (§213)**:
-  - **초대형 성과 (단독 DS)**:
-    - `ARID1A`: 기존 `0.5471` $\to$ **`0.6236` (+7.65%p 폭등, 전 모델 사상 최고치 경신!)**.
-    - `Histologic Grade`: `0.6823` $\to$ **`0.7013`** (0.70 벽 돌파).
-    - `PBRM1`: 균일 무작위 대비 +0.89%p 회복 (`0.5131`).
-  - **앙상블 기전 규명 (Trimmed Mean Max-Drop 현상)**:
-    - v121 5-branch Trimmed Mean에서 ARID1A DS가 0.6236으로 독주할 때, Trimmed Mean이 DS를 '최고점 이상치(Max)'로 판정하여 잘라버림.
-    - 비대칭 독주 과제에서 우수 브랜치를 보호하기 위한 Soft Voting 또는 Certainty Gating 필요성 확인.
+- **Adaptive Trimmed & Hard Gated Voting 공식 등록 및 350-Fold 전수 실측 완료 (§214)**:
+  - Trimmed Mean의 Max 절사 함정을 극복하기 위해 두 가지 투표 메커니즘을 파이프라인 정식 옵션으로 등록:
+    1. **`adaptive_trimmed`**: 높은 확신도($|p - 0.5|$)를 가진 우수 브랜치를 절사에서 보호.
+       - **실측 결과**: Primary 7 Macro **`0.6204` (+0.31%p 상승, 전체 1위)**.
+       - **KRAS 변이**: `0.7004` $\to$ **`0.7226` (+2.22%p 폭등)**.
+       - **SMAD4 변이**: `0.4420` $\to$ **`0.4710` (+2.90%p 폭등)**.
+       - **KEAP1 변이**: `0.6042` $\to$ **`0.6170` (+1.28%p 폭등)**.
+    2. **`hard_gated`**: $|p - 0.5| < 0.05$ 무기력 브랜치 투표권 박탈.
+       - **ARID1A 변이**: `0.5530` $\to$ **`0.5752` (+2.22%p)**.
+       - **SMAD4 변이**: `0.4420` $\to$ **`0.4904` (+4.84%p 폭등)**.
+- **아키텍처 및 테스트 완비**:
+  - `src/models/config.py`: `VALID_AGGREGATIONS`에 `"adaptive_trimmed"`, `"hard_gated"` 정식 추가.
+  - `src/models/aggregations/voting.py`, `src/models/training_free.py`, `scripts/test_pathobench.py` 구현 완료.
+  - `tests/test_gated_and_adaptive_trimmed.py`: 라벨 반전 대칭성 검증 완료. 133개 전 테스트 통과.
 
 ### Active Research Queue (다음 연구 가설)
-- **[Exp 1] Certainty-Gated Voting / Soft Voting on v121 + Salience Anchor DS**:
-  - **가설**: 비대칭 과제(ARID1A, SMAD4)에서 단독 1위 브랜치를 Max-Drop하지 않고 온전히 반영하여 Macro AUROC 0.630+ 돌파.
+- **[Exp 1] v121 + Adaptive Trimmed 앙상블 전수 적용**:
+  - `configs/baseline/v121_active.yaml`의 기본 집계 방식을 `adaptive_trimmed`로 승격하여 공식 표준 베이스라인 점수 향상.
 
 ### Code Reality vs Documentation Delta
-- `configs/baseline/v121_active.yaml`: 5-branch 고속 설정 추가.
-- `scripts/eval_v121.sh`, `scripts/run_v121_primary7.sh`: v121 전용 5-GPU 러너 추가.
-- `scripts/test_pathobench.py`: `salience_anchor` 증강 모드 추가.
-- `scripts/run_ds_salience_anchor.sh`, `scripts/run_v121_salience_anchor.sh`: 오케스트레이터 완비.
-- `docs/history/archive.md`: §213 기록 완료.
+- `src/models/config.py`: `adaptive_trimmed`, `hard_gated` 옵션 추가.
+- `src/models/aggregations/voting.py`: 2개 aggregation 함수 구현.
+- `src/models/training_free.py`: _solve_heads 배선 완료.
+- `scripts/test_pathobench.py`: aggregation 지원 추가.
+- `tests/test_gated_and_adaptive_trimmed.py`: 신규 테스트 추가.
+- `docs/history/archive.md`: §214 기록 완료.
 
 ### Blockers & Tech Debt
-- None. 131개 전 테스트 통과.
+- None. 133개 전 테스트 통과.
 
-_by Antigravity on gnode3 at 2026-09-03 22:50:00_
+_by Antigravity on gnode3 at 2026-09-03 23:08:00_
+
 
 
 
