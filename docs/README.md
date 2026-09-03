@@ -1,18 +1,14 @@
 # Documentation map
 
-**Last updated**: `2026-08-19`
-⚠️ **서버를 옮겼다면 `agent_handoff.md` §0을 먼저 읽을 것** — 노드 종속 설정은 `scripts/node_env.sh` 하나로 모았다.
-**Active 구성**: **v112 — 학습 파라미터 0** (§183, 사용자 결정). within-slide PCA(K=256) 사영 +
-고정 head + **CV off-diagonal 32,640** + **CT full-cell hierarchical PCA32/K256 @ weight 0.7**
-(v111과 동일) + **DD ordered-coordinate × nearest-class typicality, κ=1, weight=1**.
-정식 경로 SEAL macro **0.70432**, 홀드아웃 7 **0.60181**, 전체 17 **0.66211**, seed std 0.00000.
-실행: `bash scripts/eval_v112.sh <gpu> <tag>`. distance DD readout이던 v111은 previous baseline이며
-`bash scripts/eval_v111.sh <gpu> <tag>`로 재현하고, 예측 수치가 더 높은 v110은 historical control로
-`bash scripts/eval_v110.sh <gpu> <tag>`로 재현한다. 전체 명세는 `current_architecture.md` **§0**.
-⚠️ **결정론적이므로 t·p·CI 금지**(§151-1) — 부호 일치와 독립 집단 재현으로 판정.
-v107(0.6945)·v106(0.6864)과 직전 baseline v98(8 seed 0.6852)은 historical.
-⚠️ v98 8 seed 평균 대비 +0.0093이지만 **v98 상위 두 시드와 4-seed 앙상블(0.6951)에는 아직 진다** —
-"v98을 이겼다"고 쓰지 말 것. 실행 중: 없음.
+**Last updated**: `2026-09-03`
+⚠️ **서버를 옮겼다면 `agent_handoff.md`를 먼저 읽을 것** — 노드 종속 설정은 `scripts/node_env.sh` 하나로 모았다.
+**Active 구성**: **v120 — 학습 파라미터 0 (6-Branch Trimmed Mean Voting)**. within-slide PCA(K=256) 사영 +
+**CV(off-diag 32,640) + CT(k-means++ 256 token) + BM(PCA-32 bag-mean) + BD(spectral entropy) + QA(128D quantiles) + DS(32D salience denoised)** + Trimmed Mean (최저/최고 1개 절사 후 중앙 4개 평균, DD는 제거).
+Primary 7 macro **0.6265**, SEAL 10 macro **0.6972**, 전체 17 macro **0.6681**, seed std 0.00000.
+실행: `bash scripts/eval_v120.sh <gpu> <tag>`. 전체 명세는 `agent_handoff.md` 및 `current_architecture.md`.
+⚠️ **결정론적이므로 t·p·CI 금지**(§151-1) — Primary 7 부호 일치와 독립 집단 재현으로 판정.
+실행 중: 없음.
+
 
 > **새 세션이 먼저 알아야 할 3가지 (2026-08-15, 상세는 `current_status.md` 최상단)**
 > 1. **데이터 분포 축은 닫혔다 (§129)** — 합성 에피소드를 실제 UNI2 통계에 맞추는 것은 도움이 안 될
