@@ -46,7 +46,16 @@ CT 브랜치는 k-means 병목으로 350-fold 소요를 45분 → 12분으로 �
 ### 2.2. Six Branches
 
 > ⚠️ **[§215 실측 정정] 이 브랜치들은 상보적(complementary)이지 않다.** 5-branch 앙상블의 유효 랭크는 **2.26 / 5 (명목의 45%)** 이며, `BM`·`QA`·`DS`는 모두 동일한 top-32 PCA 부분공간의 1차 모멘트로서 상호 상관 r = 0.57~0.93 (셋의 유효 랭크 **1.29 / 3**) — 사실상 하나의 신호다. 나머지와 직교하는 브랜치는 **`BD` 뿐**(|r| = 0.01~0.16)이다.
-> 그 결과 Trimmed Mean은 독립 신호를 나르는 `CV`(슬라이드의 83.6%)와 `BD`(62.1%)를 우선적으로 절사하고, 중복 블록의 중앙값에 수렴한다. 신규 브랜치를 추가하거나 집계 방식을 바꾸기 전에 반드시 `branch_diagnostics.py --redundancy`로 기존 브랜치와의 상관을 먼저 측정할 것.
+> 그 결과 Trimmed Mean은 독립 신호를 나르는 `CV`(슬라이드의 83.6%)와 `BD`(62.1%)를 우선적으로 절사하고, 중복 블록의 중앙값에 수렴한다.
+>
+> **[§217 브랜치 분류 체계]** 전 브랜치는 두 부류뿐이다.
+> - **위치(Location) 계열**: `CV`, `BM`, `QA`, `DS` — 상호 상관 0.25~0.93. `CV`는 2차 통계임에도 이 계열에 묶인다(0.44~0.69). §217에서 시험한 `RM`(꼬리 부분공간 bag-mean)도 여기 합류해 기각되었다.
+> - **형상(Shape) 계열**: `BD` 단독 — 나머지와 |r| ≤ 0.16. **프로젝트 역사상 발견된 유일한 직교 축이다.**
+>
+> **[신규 브랜치 채택 규칙 — 필수]**
+> 1. 성능을 재기 **전에** `--redundancy`로 기존 브랜치와의 상관을 측정하고, **max |r| > 0.6이면 성능과 무관하게 기각**한다 (`ICF_RM_SCREEN_ONLY=1`처럼 앙상블에 넣지 않은 채 마진만 기록해 측정할 것).
+> 2. 랭크 **효율**(eff.rank / 브랜치 수)이 기존 구성보다 낮아지면 기각한다. 랭크 총량 증가만으로는 부족하다.
+> 3. **평균의 새로운 사영·재가중은 시도하지 않는다.** BM(사영), QA(분위수), DS(살리언스 재가중), RM(꼬리 사영)이 모두 한 계열로 수렴했다 — 위치 축은 포화 상태다. 유효 랭크를 올릴 수 있는 방향은 **형상 계열의 확장**(슬라이드 내 이질성, 모드 수, 토큰 분포 기하 등 위치와 무관한 통계)뿐이다.
 1. **CV (Cross-Covariance)**: Captures 2nd-order feature correlations via the upper-triangular off-diagonal elements of projected slide covariance ($32,640\text{D}$) $\to$ Class-balanced Dual Ridge ($\lambda=1.0$).
 2. **CT (Cell-Type Abundance)**: Samples $1/8$ slide tokens, projects to 32D PCA, clusters into 256 tokens via seeded k-means++, computes soft abundance $\to$ Dual Ridge ($\lambda=1.0$).
 3. **BM (Bag-Mean)**: Projects 1st-moment slide mean ($\bar{x}_i$) to the top 32 PCA dimensions $\to$ Dual Ridge ($\lambda=1.0$).
