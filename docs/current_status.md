@@ -23,8 +23,9 @@ bash scripts/run_tests.sh
 - Established agent entrypoints: verified `AGENTS.md` and `CLAUDE.md` in repository root.
 - Configured repository-local Git credential helper using `/home/kimds/.gittoken_icf` (isolated to this repo), and successfully synchronized/pushed to `origin/main`.
 - Absorbed `current_experiments.md` active queue into `current_status.md` and archived past summaries into `docs/history/archive.md` (§208), establishing the clean 3-document SSOT system.
-- Modularized monolithic `src/models/training_free.py` (1,340 -> 471 lines) into dedicated submodules (`src/models/common/`, `src/models/branches/`, `src/models/aggregations/`) via `/call-claude` (`model=sonnet`, `effort=low`).
-- Committed §207 test tooling (`scripts/run_tests.sh` and `scripts/node_env.sh`), verified all 16 modules / 119 unit tests pass in 22.9s.
+- Modularized monolithic `src/models/training_free.py` (1,340 -> 328 lines) into dedicated submodules (`src/models/common/`, `src/models/branches/`, `src/models/aggregations/`) via `/call-claude` (`model=sonnet`, `effort=low`).
+- Systematized YAML config architecture (`src/models/config.py`, `configs/baseline/`, `configs/experiments/`) and established 11-category anti-trap contract test suite (`tests/test_yaml_config_contract.py`). All 17 modules / 131 unit tests pass in 18.9s.
+- Committed §207 test tooling (`scripts/run_tests.sh` and `scripts/node_env.sh`).
 
 ### Active Research Queue (다음 연구 가설)
 - **[Exp 1] CT (Cell Tokenizer) 단독 브랜치 고도화 연구**:
