@@ -29,14 +29,13 @@ Primary 7 macro **0.6265**, SEAL 10 macro **0.6972**, 전체 17 macro **0.6681**
 
 ## 1. 새 세션 접속 Agent가 최우선으로 정독하는 Living 문서 (Docs Root)
 
-사용자가 매번 새 채팅 세션으로 접속할 때, 새로 시작한 Agent는 아래 `docs/` 최상위 루트의 Living md 파일 5개와 현재 `architecture_*_proposal.md` 1개를 우선 정독하고 **Git commit log/diff**를 조회하여 작업 맥락을 동기화합니다:
+사용자가 매번 새 채팅 세션으로 접속할 때, 새로 시작한 Agent는 아래 `docs/` 최상위 루트의 핵심 Living md 파일 3개와 `README.md`를 우선 정독하고 **Git commit log/diff**를 조회하여 작업 맥락을 동기화합니다:
 
-1. [`agent_handoff.md`](agent_handoff.md): 새 세션 Agent 초기화 수칙, Git 기반 워크플로우, 실행 환경, 타임아웃, 테스트 검증, Docs/Config 정리 규칙
-2. [`current_status.md`](current_status.md): 개발 현황, 최신 실증 수치, 판정 프로토콜(§107-3 게이트 + **§118 사용자 종합 판단**), 열린 과제, Next Action Plan (SSOT). §2~§97 본문은 `history.md` §20–§23으로 아카이빙되고 스텁+포인터만 남았다(§101)
-3. [`current_architecture.md`](current_architecture.md): 활성 **v83 linear head** relation 구조와 역사적 CV-only/Encoder+Ridge 비교, 데이터·학습 계약
-4. [`current_experiments.md`](current_experiments.md): 실험 전략과 검정력, 평가 프로토콜, Stage 1~3 실행 명령어 및 실증 수치
-5. [`README.md`](README.md): 문서 맵 및 갱신/아카이빙 가이드라인
-6. `architecture_*_proposal.md`: 현재 활성 개선 proposal. 완료·폐기 시 핵심 결론을 `history.md`에 기록하고 원문은 git 이력에 보존. (**2026-08-09 현재 활성 proposal 없음**)
+1. [`agent_handoff.md`](agent_handoff.md): 새 세션 Agent 초기화 및 운영/인프라 런북, Git 기반 워크플로우, 실행 환경, 타임아웃, 테스트 검증 규칙
+2. [`current_status.md`](current_status.md): 개발 현황, 최신 실증 수치, 판정 프로토콜, 활성 연구 큐(Active Research Queue), Next Action Plan (SSOT)
+3. [`current_architecture.md`](current_architecture.md): 활성 **v120 6-Branch Trimmed Mean Voting** 아키텍처 및 수학적 수식 명세
+4. [`README.md`](README.md): 문서 맵 및 갱신/아카이빙 가이드라인
+
 
 ---
 

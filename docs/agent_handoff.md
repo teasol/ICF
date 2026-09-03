@@ -31,7 +31,11 @@ The active baseline is **v120**, a completely training-free (0 learned parameter
 - `scripts/node_env.sh`: Centralized environment resolver; discovers Python interpreter (`.venv`), GPU counts, and paths.
 - `scripts/run_tests.sh`: Fast regression test suite runner with thread capping and PYTHONPATH bootstrapping.
 - `configs/`: Active root contains only `train_v98_p1_reverse_1536_1gpu.yaml` as the checkpoint shell; historical configs reside in `configs/archive/`.
-- `docs/`: Living documentation (`agent_handoff.md`, `current_status.md`, `current_architecture.md`, `current_experiments.md`) and historical archives (`docs/history/`).
+- `docs/`: Living documentation (`agent_handoff.md`, `current_status.md`, `current_architecture.md`) and historical archives (`docs/history/`).
+
+
+
+> ⚠️ **[STRICT RULE] 모델 구조, 브랜치 로직, 수식, 하이퍼파라미터를 분석하거나 수정할 때는 반드시 [`docs/current_architecture.md`](current_architecture.md)를 먼저 정독하고 동기화할 것.**
 
 ### 2.2. Six Complementary Branches
 1. **CV (Cross-Covariance)**: Captures 2nd-order feature correlations via the upper-triangular off-diagonal elements of projected slide covariance ($32,640\text{D}$) $\to$ Class-balanced Dual Ridge ($\lambda=1.0$).
@@ -42,6 +46,7 @@ The active baseline is **v120**, a completely training-free (0 learned parameter
 6. **DS (Denoised Salience Bag-Mean)**: Reweights slide mean by token class-salience to suppress uninformative stroma tokens ($32\text{D}$) $\to$ Dual Ridge ($\lambda=1.0$).
 
 ---
+
 
 ## 3. Core Invariants & Constraints
 
