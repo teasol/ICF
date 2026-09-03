@@ -44,7 +44,7 @@ class TestPrecisionContract(unittest.TestCase):
     """Every active training entry point must resolve to bf16-mixed."""
 
     def _active_train_configs(self) -> list[Path]:
-        return sorted((REPO_ROOT / "configs").glob("train_*.yaml"))
+        return sorted((REPO_ROOT / "configs" / "archive" / "v94_v102_cell_value").glob("train_v98_*.yaml"))
 
     def test_active_train_configs_exist(self) -> None:
         self.assertTrue(
@@ -71,7 +71,7 @@ class TestPrecisionContract(unittest.TestCase):
         import yaml
 
         group = yaml.safe_load(
-            (REPO_ROOT / "configs" / "trainer" / "default.yaml").read_text()
+            (REPO_ROOT / "configs" / "archive" / "legacy_groups" / "trainer" / "default.yaml").read_text()
         )
         self.assertEqual(group.get("precision"), REQUIRED_PRECISION)
 
@@ -116,7 +116,7 @@ class TestPrecisionContract(unittest.TestCase):
         """
         import yaml
 
-        groups = sorted((REPO_ROOT / "configs" / "trainer").glob("*.yaml"))
+        groups = sorted((REPO_ROOT / "configs" / "archive" / "legacy_groups" / "trainer").glob("*.yaml"))
         self.assertTrue(groups, "configs/trainer/ has no group to check.")
         for path in groups:
             with self.subTest(group=path.name):

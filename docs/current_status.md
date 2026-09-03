@@ -26,6 +26,7 @@ bash scripts/run_tests.sh
 - Modularized monolithic `src/models/training_free.py` (1,340 -> 328 lines) into dedicated submodules (`src/models/common/`, `src/models/branches/`, `src/models/aggregations/`) via `/call-claude` (`model=sonnet`, `effort=low`).
 - Systematized YAML config architecture (`src/models/config.py`, `configs/baseline/`, `configs/experiments/`) and established 11-category anti-trap contract test suite (`tests/test_yaml_config_contract.py`). All 17 modules / 131 unit tests pass in 18.9s.
 - Committed §207 test tooling (`scripts/run_tests.sh` and `scripts/node_env.sh`).
+- Completely cleaned `configs/` root to strictly 3 clean directories (`baseline/`, `experiments/`, `archive/`), moving all 7 legacy Hydra groups and `train_v98` into `configs/archive/`.
 
 ### Active Research Queue (다음 연구 가설)
 - **[Exp 1] CT (Cell Tokenizer) 단독 브랜치 고도화 연구**:
@@ -36,7 +37,7 @@ bash scripts/run_tests.sh
 - **Active Architecture Baseline**: Legacy `docs/README.md` previously claimed v112 as active; confirmed and standardized that the true active baseline is **v120** (6-Branch Trimmed Mean Voting: CV + CT + BM + BD + QA + DS, with DD disabled; Primary 7 Macro `0.6265`, SEAL 10 `0.6972`, All 17 `0.6681`).
 - **Environment Management**: Legacy docs referenced lost conda `BagPFN` environment; environment is now standardized under `uv venv` at `ICF/.venv` (Python 3.12.11).
 - **Test Discovery & Performance**: Direct `python -m unittest discover` previously suffered from OpenMP thread oversubscription (~78s) and missing repo root on `sys.path` in 12/16 test modules. `scripts/run_tests.sh` enforces `OMP_NUM_THREADS=8` and exports `PYTHONPATH`, reducing runtime to 20.0s (3x speedup).
-- **Config Lineage**: `configs/` root was cleaned in §205 leaving only `train_v98_p1_reverse_1536_1gpu.yaml` as the checkpoint shell, with branch arms injected dynamically via `scripts/lib/arms.sh`.
+- **Config Lineage**: `configs/` root is 100% clean with strictly 3 directories (`baseline/`, `experiments/`, `archive/`). All 21 legacy group files and `train_v98` reside in `configs/archive/`, with `node_env.sh` and test contracts fully synchronized.
 
 ### Blockers & Tech Debt
 - None. Working tree is clean and all 119 tests pass identically.

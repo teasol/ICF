@@ -119,7 +119,12 @@ def resolve_config_group(group: str, value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
     if isinstance(value, str):
-        return load_yaml(PROJECT_ROOT / "configs" / group / f"{value}.yaml")
+        path = PROJECT_ROOT / "configs" / group / f"{value}.yaml"
+        if not path.exists():
+            legacy_path = PROJECT_ROOT / "configs" / "archive" / "legacy_groups" / group / f"{value}.yaml"
+            if legacy_path.exists():
+                path = legacy_path
+        return load_yaml(path)
     raise TypeError(f"{group} config must be a name or mapping, got {type(value).__name__}.")
 
 

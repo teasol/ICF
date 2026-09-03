@@ -30,7 +30,7 @@ The active baseline is **v120**, a completely training-free (0 learned parameter
 - `scripts/run_v120_seal_multi_gpu.sh`: Multi-GPU evaluation runner across SEAL 10 hold-out tasks.
 - `scripts/node_env.sh`: Centralized environment resolver; discovers Python interpreter (`.venv`), GPU counts, and paths.
 - `scripts/run_tests.sh`: Fast regression test suite runner with thread capping and PYTHONPATH bootstrapping.
-- `configs/`: Active root contains only `train_v98_p1_reverse_1536_1gpu.yaml` as the checkpoint shell; historical configs reside in `configs/archive/`.
+- `configs/`: Structured into `configs/baseline/` (v120, v119, v118), `configs/experiments/` (research templates), and `configs/archive/` (historical lineage and legacy groups).
 - `docs/`: Living documentation (`agent_handoff.md`, `current_status.md`, `current_architecture.md`) and historical archives (`docs/history/`).
 
 

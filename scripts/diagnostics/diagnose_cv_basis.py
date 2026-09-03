@@ -150,7 +150,7 @@ def descriptors(slides, stats, basis, triangle):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoints", nargs="+", required=True)
-    parser.add_argument("--config", default="configs/train_v98_p1_reverse_1536_1gpu.yaml")
+    parser.add_argument("--config", default="configs/archive/v94_v102_cell_value/train_v98_p1_reverse_1536_1gpu.yaml")
     parser.add_argument("--device", default="cuda")
     args = parser.parse_args()
 

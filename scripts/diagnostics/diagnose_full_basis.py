@@ -130,7 +130,7 @@ def pca_basis(context_bags, sketch_dim):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
-    parser.add_argument("--config", default="configs/train_v98_p1_reverse_1536_1gpu.yaml")
+    parser.add_argument("--config", default="configs/archive/v94_v102_cell_value/train_v98_p1_reverse_1536_1gpu.yaml")
     parser.add_argument("--tasks", nargs="*", default=ALL_TASKS)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--seed", type=int, default=0)

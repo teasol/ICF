@@ -92,7 +92,7 @@ FEATURES="$ICF_DATA_ROOT/features"
 if [ -z "${ICF_CKPT:-}" ]; then
   ICF_CKPT="$(ls checkpoints/*/v98_p1_reverse_seed42/periodic-epoch=049*.ckpt 2>/dev/null | head -1)"
 fi
-ICF_CONFIG="${ICF_CONFIG:-configs/train_v98_p1_reverse_1536_1gpu.yaml}"
+ICF_CONFIG="${ICF_CONFIG:-configs/archive/v94_v102_cell_value/train_v98_p1_reverse_1536_1gpu.yaml}"
 
 # ---- GPUs -----------------------------------------------------------------
 if [ -z "${NGPU:-}" ]; then

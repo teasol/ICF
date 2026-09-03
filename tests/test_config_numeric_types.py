@@ -44,7 +44,7 @@ def _numeric_offenders(node, path: str = "") -> list[str]:
 
 class ConfigNumericTypeTest(unittest.TestCase):
     def test_every_training_config_parses_numbers_as_numbers(self) -> None:
-        configs = sorted((REPO_ROOT / "configs").glob("train_*.yaml"))
+        configs = sorted((REPO_ROOT / "configs" / "archive" / "v94_v102_cell_value").glob("train_v98_*.yaml"))
         self.assertTrue(configs, "no training configs found")
         for path in configs:
             with self.subTest(config=path.name):
