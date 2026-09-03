@@ -70,7 +70,11 @@ CT 브랜치는 k-means 병목으로 350-fold 소요를 45분 → 12분으로 �
      - v120 6-branch 수치(`0.6265`)와 직접 비교 금지 — 브랜치 집합이 다르므로 비교 불가능하다.
    - 승격은 **Primary 7 sign agreement $\ge 5/7$**를 요구한다. Macro AUROC 상승만으로는 승격 근거가 되지 않는다.
    - **분해능 하한 (Resolution Floor)**: Primary 7 macro 변화량이 약 $\pm 1.0\%p$ 미만인 후보는 지금까지 예외 없이 sign agreement 3~4/7에 머물렀다 (§214-V에서 집계 방식 8종 및 브랜치 부분집합 31종 전수 확인). **1%p 미만의 macro 상승은 이 벤치마크로 판별 불가능한 잡음으로 간주하며, 승리로 기록하지 않는다.**
-   - **SEAL 10-task hold-out은 사용자 결정에 따라 현재 유보(DEFERRED) 상태다 (§214-V).** hold-out 없이 내린 판정은 `current_status.md`와 `archive.md` 양쪽에 반드시 `hold-out 미검증`으로 명시한다.
+   - **평가 프로토콜 확정 (사용자 결정, §216):**
+     1. **Fold는 PathoBench가 제공하는 공식 분할 그대로 고정한다.** fold 수 증대나 재분할로 분해능을 높이는 것은 **금지**한다.
+     2. **SEAL 10-task는 최종 평가 전용 hold-out이다.** 모델 선택·하이퍼파라미터 결정에 **어떤 형태로도 사용 금지**. 현재 유보(DEFERRED) 상태이며, hold-out 없이 내린 판정은 `current_status.md`와 `archive.md` 양쪽에 `hold-out 미검증`으로 명시한다.
+     3. **모델 선택은 Primary 7만으로 수행한다.**
+   - **위 3항의 필연적 귀결 (§216)**: 분해능 하한은 완화 불가능한 **영구 제약**이다. Primary 7이 1%p 부근을 분해하지 못하는데 데이터를 늘릴 수도, hold-out을 볼 수도 없으므로, **후보 선택의 근거를 성능이 아닌 라벨 무관 구조 기준(유효 랭크, 브랜치 상관 등)에 두고 Primary 7은 사후 확인용으로만 쓴다.** 성능 순위로 후보를 고르는 절차는 §214에서 실패가 입증되었으므로 반복하지 않는다.
 4. **Closed Axes (Do NOT Retry)**:
    - Synthetic distribution alignment (§129), DD branch revival (§147, §195), CT cell count scaling (§159), Non-linear KRR (§199), LR direct patch likelihood (§200), Fisher subspace (§202), **In-Episode Context LOO 가중치 (§212, $\rho = -0.27$)**, **집계 함수 변형 탐색 (§214-V — 집계 8종·부분집합 31종 전수에서 5/7 도달 0건; 분해능 하한 아래)**.
 5. **보고 무결성 계약 (Reporting Integrity Contract)** — §214에서 실제 위반이 확인되어 §214-V에서 신설:

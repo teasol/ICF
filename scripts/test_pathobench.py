@@ -1095,6 +1095,48 @@ def evaluate_trial(
                     logits[:, 0] -= 0.5 * bm_weight * bm_margin
                     logits[:, 1] += 0.5 * bm_weight * bm_margin
 
+                # RM (Residual Bag-Mean) -- §218 screening branch.
+                # BM/QA/DS all read basis[:, :32]; RM reads the DISCARDED tail
+                # basis[:, rm_start:rm_start+rm_dim] of the same K=256 PCA basis,
+                # so it is orthogonal to them by construction of the basis.
+                rm_weight = float(os.environ.get("ICF_FIXED_HEAD_RM_WEIGHT", "0.0"))
+                if rm_weight != 0.0:
+                    rm_start = int(os.environ.get("ICF_RM_START", "32"))
+                    rm_dim = int(os.environ.get("ICF_RM_DIM", "224"))
+                    rm_lambda = float(os.environ.get("ICF_RM_LAMBDA", "1.0"))
+                    basis = inner._effective_covariance_projection()
+                    lo = min(rm_start, basis.shape[1])
+                    hi = min(lo + rm_dim, basis.shape[1])
+                    if hi > lo:
+                        rm_basis = basis[:, lo:hi].float()
+
+                        def get_bag_mean_rm(b):
+                            if bag_stats_cache is not None and id(b) in bag_stats_cache:
+                                stats = bag_stats_cache[id(b)]
+                                return (stats.mean if hasattr(stats, 'mean') else stats[1]).to(device).float()
+                            return b.float().mean(dim=0).to(device)
+
+                        ctx_rm = torch.stack([get_bag_mean_rm(b) for b in episode_bags[:n_context]]) @ rm_basis
+                        qry_rm = torch.stack([get_bag_mean_rm(episode_bags[i]) for i in query_index.tolist()]) @ rm_basis
+
+                        rm_res = _solve_kernel_ridge(
+                            ctx_rm, episode_y[:n_context].long().to(device), qry_rm,
+                            kernel=os.environ.get("ICF_RM_KERNEL", os.environ.get("ICF_KRR_KERNEL", "linear")),
+                            gamma=float(os.environ["ICF_KRR_GAMMA"]) if "ICF_KRR_GAMMA" in os.environ else None,
+                            degree=int(os.environ.get("ICF_KRR_DEGREE", "2")),
+                            coef0=float(os.environ.get("ICF_KRR_COEF0", "1.0")),
+                            reg_lambda=rm_lambda,
+                            return_loo=do_context_loo,
+                        )
+                        rm_margin, loo_rm = (rm_res[0], rm_res[1]) if do_context_loo else (rm_res, None)
+
+                        # ICF_RM_SCREEN_ONLY=1 records the margin without letting it
+                        # touch the ensemble, so correlation screening stays honest.
+                        if os.environ.get("ICF_RM_SCREEN_ONLY", "0") != "1":
+                            logits = logits.clone()
+                            logits[:, 0] -= 0.5 * rm_weight * rm_margin
+                            logits[:, 1] += 0.5 * rm_weight * rm_margin
+
                 bd_weight = float(os.environ.get("ICF_FIXED_HEAD_BD_WEIGHT", "0.0"))
                 if bd_weight != 0.0:
                     bd_dim = int(os.environ.get("ICF_BD_DIM", "256"))
@@ -1709,6 +1751,7 @@ def evaluate_trial(
         m_dd = (-branch_margins.get("dd", torch.zeros(len(test_ids)))).to(device)
         m_ct = (-branch_margins.get("ct", torch.zeros(len(test_ids)))).to(device)
         m_bm = bm_margin.detach() if ("bm_margin" in locals() and bm_margin is not None) else torch.zeros(len(test_ids), device=device)
+        m_rm = rm_margin.detach() if ("rm_margin" in locals() and rm_margin is not None) else None
         m_bd = bd_margin.detach() if ("bd_margin" in locals() and bd_margin is not None) else torch.zeros(len(test_ids), device=device)
         m_qa = qa_margin.detach() if ("qa_margin" in locals() and qa_margin is not None) else torch.zeros(len(test_ids), device=device)
         m_ds = ds_margin.detach() if ("ds_margin" in locals() and ds_margin is not None) else torch.zeros(len(test_ids), device=device)
@@ -1913,6 +1956,8 @@ def evaluate_trial(
         m_dd = m_dd.cpu()
         m_ct = m_ct.cpu()
         m_bm = m_bm.cpu()
+        if "m_rm" in locals() and isinstance(m_rm, torch.Tensor):
+            m_rm = m_rm.cpu()
         m_bd = m_bd.cpu()
         m_qa = m_qa.cpu()
         m_ds = m_ds.cpu()
@@ -2057,6 +2102,7 @@ def evaluate_trial(
         "m_dd": m_dd[valid] if ("m_dd" in locals() and isinstance(m_dd, torch.Tensor)) else None,
         "m_ct": m_ct[valid] if ("m_ct" in locals() and isinstance(m_ct, torch.Tensor)) else None,
         "m_bm": m_bm[valid] if ("m_bm" in locals() and isinstance(m_bm, torch.Tensor)) else None,
+        "m_rm": m_rm[valid] if ("m_rm" in locals() and isinstance(m_rm, torch.Tensor)) else None,
         "m_bd": m_bd[valid] if ("m_bd" in locals() and isinstance(m_bd, torch.Tensor)) else None,
         "m_qa": m_qa[valid] if ("m_qa" in locals() and isinstance(m_qa, torch.Tensor)) else None,
         "m_ds": m_ds[valid] if ("m_ds" in locals() and isinstance(m_ds, torch.Tensor)) else None,
@@ -2309,6 +2355,7 @@ def evaluate_official_folds(
             "m_dd": result.get("m_dd"),
             "m_ct": result.get("m_ct"),
             "m_bm": result.get("m_bm"),
+            "m_rm": result.get("m_rm"),
             "m_bd": result.get("m_bd"),
             "m_qa": result.get("m_qa"),
             "m_ds": result.get("m_ds"),
