@@ -30,9 +30,9 @@ primary7 = [
 
 arms = {
     "Baseline (S=1, f=1.0)": "ds_w1_primary7",
-    "Case A (S=5, f=0.7)": "ds_aug_s5_f07",
-    "Case B (S=10, f=0.5)": "ds_aug_s10_f05",
+    "Sub Alone (S=5, f=0.7)": "ds_aug_s5_f07",
     "Query TTA (S=5, f=0.7)": "ds_query_tta_s5_f07",
+    "LOO Dual (S=5, f=0.7)": "ds_auto_loo_s5_f07",
 }
 
 results = {arm: {} for arm in arms}
