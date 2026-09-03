@@ -94,14 +94,21 @@ class TestPrecisionContract(unittest.TestCase):
         the same checkpoint scored three different ways.
         """
         scripts = REPO_ROOT / "scripts"
-        for name in ("test_pathobench.py", "test_musk.py", "probe_slot_headroom.py"):
-            with self.subTest(script=name):
-                source = (scripts / name).read_text()
+        for path in (
+            scripts / "test_pathobench.py",
+            scripts / "archive" / "legacy_evals" / "test_musk.py",
+            scripts / "analysis" / "probe_slot_headroom.py",
+        ):
+            with self.subTest(script=path.name):
+                source = path.read_text()
                 self.assertIn("add_eval_precision_argument", source)
                 self.assertIn("eval_autocast", source)
-        for name in ("test.py", "run_official_folds_parallel.py"):
-            with self.subTest(script=name):
-                source = (scripts / name).read_text()
+        for path in (
+            scripts / "archive" / "legacy_evals" / "test.py",
+            scripts / "archive" / "legacy_evals" / "run_official_folds_parallel.py",
+        ):
+            with self.subTest(script=path.name):
+                source = path.read_text()
                 self.assertIn(f'"{REQUIRED_PRECISION}"', source)
                 self.assertNotIn('default="16-mixed"', source)
 

@@ -27,6 +27,7 @@ bash scripts/run_tests.sh
 - Systematized YAML config architecture (`src/models/config.py`, `configs/baseline/`, `configs/experiments/`) and established 11-category anti-trap contract test suite (`tests/test_yaml_config_contract.py`). All 17 modules / 131 unit tests pass in 18.9s.
 - Committed §207 test tooling (`scripts/run_tests.sh` and `scripts/node_env.sh`).
 - Completely cleaned `configs/` root to strictly 3 clean directories (`baseline/`, `experiments/`, `archive/`), moving all 7 legacy Hydra groups and `train_v98` into `configs/archive/`.
+- Systematically cleaned `scripts/` root (reduced 67 files to 7 core runners), reorganizing utilities into `scripts/data/`, `scripts/analysis/`, and `scripts/archive/`. All 17 modules / 131 unit tests pass in 18.5s.
 
 ### Active Research Queue (다음 연구 가설)
 - **[Exp 1] CT (Cell Tokenizer) 단독 브랜치 고도화 연구**:
