@@ -1,7 +1,7 @@
 # Current Status
 
-- **Last Updated**: 2026-09-03 11:00 (KST)
-- **Status**: WIP (Uncommitted test runner scripts/run_tests.sh and optimization in scripts/node_env.sh from §207)
+- **Last Updated**: 2026-09-03 11:42 (KST)
+- **Status**: CLEAN
 - **Host / Node**: gnode3 (5x NVIDIA RTX A5000, 24GB VRAM)
 - **Environment**: uv venv `.venv` | Python 3.12.11 (PyTorch 2.14.0+cu130, Lightning 2.6.5)
 - **Active Session / Job**: None
@@ -14,16 +14,17 @@ bash scripts/run_tests.sh
 
 ---
 
-## 2026-09-03 — Initial Baseline Migration
+## 2026-09-03 — Initial Baseline Migration & Model Modularization
 
 ### Completed
 - Successfully migrated repository to Universal Handoff Protocol.
 - Archived accumulated historical logs (§0 through §207, 857 lines) into [`docs/history/archive.md`](history/archive.md).
 - Streamlined `docs/agent_handoff.md` into standard 5-part permanent architectural reference.
-- Verified test suite: all 16 modules / 119 unit tests pass in 20.0s via `scripts/run_tests.sh`.
 - Established agent entrypoints: verified `AGENTS.md` and `CLAUDE.md` in repository root.
 - Configured repository-local Git credential helper using `/home/kimds/.gittoken_icf` (isolated to this repo), and successfully synchronized/pushed to `origin/main`.
 - Absorbed `current_experiments.md` active queue into `current_status.md` and archived past summaries into `docs/history/archive.md` (§208), establishing the clean 3-document SSOT system.
+- Modularized monolithic `src/models/training_free.py` (1,340 -> 471 lines) into dedicated submodules (`src/models/common/`, `src/models/branches/`, `src/models/aggregations/`) via `/call-claude` (`model=sonnet`, `effort=low`).
+- Committed §207 test tooling (`scripts/run_tests.sh` and `scripts/node_env.sh`), verified all 16 modules / 119 unit tests pass in 22.9s.
 
 ### Active Research Queue (다음 연구 가설)
 - **[Exp 1] CT (Cell Tokenizer) 단독 브랜치 고도화 연구**:
@@ -37,12 +38,12 @@ bash scripts/run_tests.sh
 - **Config Lineage**: `configs/` root was cleaned in §205 leaving only `train_v98_p1_reverse_1536_1gpu.yaml` as the checkpoint shell, with branch arms injected dynamically via `scripts/lib/arms.sh`.
 
 ### Blockers & Tech Debt
-- Working tree contains uncommitted test tooling improvements from §207: `scripts/node_env.sh` (56x faster interpreter detection using `find_spec`) and `scripts/run_tests.sh` (fast regression runner).
-- Legacy `docs/README.md` header was updated to reference v120 instead of v112.
+- None. Working tree is clean and all 119 tests pass identically.
 
 ### Immediate Next Steps
 - Execute regression test suite (`bash scripts/run_tests.sh`) to verify system stability.
 - Run baseline verification on Primary 7 benchmark: `bash scripts/eval_v120.sh 0 baseline_check`.
+
 - Commence [Exp 1] CT Refinement research once baseline verification is confirmed.
 
 _by Antigravity on gnode3 at 2026-09-03 11:00:00_
