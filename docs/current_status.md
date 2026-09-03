@@ -1,6 +1,6 @@
 # Current Status
 
-- **Last Updated**: 2026-09-03 20:35 (KST)
+- **Last Updated**: 2026-09-03 22:50 (KST)
 - **Status**: CLEAN
 - **Host / Node**: gnode3 (5x NVIDIA RTX A5000, 24GB VRAM)
 - **Environment**: uv venv `.venv` | Python 3.12.11 (PyTorch 2.14.0+cu130, Lightning 2.6.5)
@@ -14,31 +14,37 @@ bash scripts/run_tests.sh
 
 ---
 
-## 2026-09-03 — Subsampling 배제 순수 Context LOO Stacking 실측 및 LOO 영구 폐기 판정 (§212)
+## 2026-09-03 — CT 뮤트 5-Branch (v121) 고속 베이스라인 및 Salience Anchor Subsampling 실측 (§213)
 
 ### Completed
-- **Subsampling 배제 순수 Context LOO Stacking 50-Fold 전수 실측 완료 (§212)**:
-  - 사용자 지침("subsampling 없이 LOO만 추가해서 LOO를 살릴지 말지 결정하자")에 따라, 깨끗한 풀백($S=1, f=1.0$) 환경에서 Context LOO 가중치 기반 앙상블 공식 50-Fold 측정.
-  - **실측 결과**: v120 Active Baseline (`0.6265`) 대비 **`0.6125`로 -1.40%p 대폭 하락**.
-  - **7개 중 5개 과제 침몰**: ARID1A (-2.72%p), KRAS (-2.44%p), SMAD4 (-3.00%p), KEAP1 (-2.07%p), Prog (-1.77%p).
-  - **원인 규명**: Context LOO 점수와 실제 Test AUROC 간 스피어만 순위 상관계수가 **음수 ($\rho = -0.2679$)**로 측정됨. 단순 선형 모델(BM)이 Context 노이즈를 암기하여 가짜 높은 LOO를 얻고, 정작 테스트셋에서 강력하게 일반화되는 비선형 브랜치(DS)의 가중치를 깎아내려 앙상블이 붕괴됨.
-- **최종 결정 (Definitive Decision)**:
-  - **LOO는 영구 폐기(Discard)**.
-  - 슬라이드 단위 극단치를 절사하는 **Trimmed Mean Voting (`0.6265`)**을 공식 앙상블 표준으로 확정.
+- **CT 브랜치 뮤트 기반 v121 5-Branch 고속 베이스라인 구축 및 50-Fold 실측 완료 (§213)**:
+  - `ICF_FIXED_HEAD_CT_WEIGHT=0.0`으로 K-Means 병목 제거 $\to$ 5-GPU 350-Fold 전수 완주 시간이 45분에서 **12분으로 4배 가속**.
+  - 5-Branch (CV, BM, BD, QA, DS) Trimmed Mean Macro AUROC: **`0.6171`** (안정적 고속 평가 환경 확립).
+- **Salience-Guided Anchor Subsampling 50-Fold 실측 완료 (§213)**:
+  - **초대형 성과 (단독 DS)**:
+    - `ARID1A`: 기존 `0.5471` $\to$ **`0.6236` (+7.65%p 폭등, 전 모델 사상 최고치 경신!)**.
+    - `Histologic Grade`: `0.6823` $\to$ **`0.7013`** (0.70 벽 돌파).
+    - `PBRM1`: 균일 무작위 대비 +0.89%p 회복 (`0.5131`).
+  - **앙상블 기전 규명 (Trimmed Mean Max-Drop 현상)**:
+    - v121 5-branch Trimmed Mean에서 ARID1A DS가 0.6236으로 독주할 때, Trimmed Mean이 DS를 '최고점 이상치(Max)'로 판정하여 잘라버림.
+    - 비대칭 독주 과제에서 우수 브랜치를 보호하기 위한 Soft Voting 또는 Certainty Gating 필요성 확인.
 
 ### Active Research Queue (다음 연구 가설)
-- **[Exp 1] Salience-Guided Selective Subsampling (국소 변이 앵커 보존)**:
-  - **가설**: 살리언스 상위 패치를 앵커로 100% 보존하고 기질 패치만 서브샘플링하여, KRAS/KEAP1/PBRM1 하락을 원천 방어하면서 ARID1A(+7.2%p)와 Grade(+2.0%p)의 이점을 동시 획득.
+- **[Exp 1] Certainty-Gated Voting / Soft Voting on v121 + Salience Anchor DS**:
+  - **가설**: 비대칭 과제(ARID1A, SMAD4)에서 단독 1위 브랜치를 Max-Drop하지 않고 온전히 반영하여 Macro AUROC 0.630+ 돌파.
 
 ### Code Reality vs Documentation Delta
-- `scripts/test_pathobench.py`: `context_loo` aggregation 구현 및 실측 완료.
-- `scripts/run_v120_clean_loo_experiments.sh`: 5-GPU 50-fold 오케스트레이터 완비.
-- `docs/history/archive.md`: §212 기록 완료.
+- `configs/baseline/v121_active.yaml`: 5-branch 고속 설정 추가.
+- `scripts/eval_v121.sh`, `scripts/run_v121_primary7.sh`: v121 전용 5-GPU 러너 추가.
+- `scripts/test_pathobench.py`: `salience_anchor` 증강 모드 추가.
+- `scripts/run_ds_salience_anchor.sh`, `scripts/run_v121_salience_anchor.sh`: 오케스트레이터 완비.
+- `docs/history/archive.md`: §213 기록 완료.
 
 ### Blockers & Tech Debt
 - None. 131개 전 테스트 통과.
 
-_by Antigravity on gnode3 at 2026-09-03 20:35:00_
+_by Antigravity on gnode3 at 2026-09-03 22:50:00_
+
 
 
 

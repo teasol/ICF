@@ -1424,8 +1424,48 @@ def evaluate_trial(
                                 feats.append(z_denoised)
                             return torch.stack(feats)
 
-                        ctx_ds = extract_denoised_mean(ctx_proj_eval, ctx_assignments)
-                        qry_ds = extract_denoised_mean(qry_proj_eval, qry_assignments)
+                        ds_anchor_fraction = float(os.environ.get("ICF_DS_ANCHOR_FRACTION", "0.15"))
+                        if ds_aug_mode == "salience_anchor" and ds_aug_s > 1 and ds_aug_fraction < 1.0:
+                            base_seed_val = ds_aug_seed + (seed if "seed" in locals() and isinstance(seed, int) else 0) * 10000
+
+                            def extract_anchor_sub_mean(proj_bags, assignments, seed_offset):
+                                feats = []
+                                for i, (p, soft_p) in enumerate(zip(proj_bags, assignments)):
+                                    n_p = p.shape[0]
+                                    k_anchor = max(1, min(n_p, int(n_p * ds_anchor_fraction)))
+                                    k_bg = n_p - k_anchor
+                                    u = soft_p @ s_abs
+                                    anchor_idx = torch.topk(u, k=k_anchor, largest=True).indices
+                                    if k_bg > 0:
+                                        bg_idx = torch.topk(u, k=k_bg, largest=False).indices
+                                        k_bg_sub = max(1, int(k_bg * ds_aug_fraction))
+                                    else:
+                                        bg_idx = None
+                                        k_bg_sub = 0
+
+                                    s_feats = []
+                                    for s_idx in range(ds_aug_s):
+                                        if k_bg_sub > 0:
+                                            gen = torch.Generator(device="cpu").manual_seed(seed_offset + i * 100 + s_idx)
+                                            perm = torch.randperm(k_bg, generator=gen)[:k_bg_sub]
+                                            sub_idx = torch.cat([anchor_idx, bg_idx[perm]])
+                                        else:
+                                            sub_idx = anchor_idx
+                                        sub_p = p[sub_idx]
+                                        p_norm = torch.nn.functional.normalize(sub_p, dim=-1)
+                                        sub_soft = torch.nn.functional.softmax((p_norm @ centroids.T) * 5.0, dim=-1)
+                                        sub_u = sub_soft @ s_abs
+                                        u_std = sub_u.std().clamp_min(1e-6)
+                                        w = torch.nn.functional.softmax(ds_temperature * (sub_u - sub_u.mean()) / u_std, dim=0)
+                                        s_feats.append((w.unsqueeze(-1) * sub_p).sum(dim=0))
+                                    feats.append(torch.stack(s_feats).mean(dim=0))
+                                return torch.stack(feats)
+
+                            ctx_ds = extract_anchor_sub_mean(ctx_proj_eval, ctx_assignments, base_seed_val)
+                            qry_ds = extract_anchor_sub_mean(qry_proj_eval, qry_assignments, base_seed_val + 500000)
+                        else:
+                            ctx_ds = extract_denoised_mean(ctx_proj_eval, ctx_assignments)
+                            qry_ds = extract_denoised_mean(qry_proj_eval, qry_assignments)
 
                         # 6. Class-balanced kernel ridge
                         raw_ds_res = _solve_kernel_ridge(

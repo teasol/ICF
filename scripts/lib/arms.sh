@@ -225,3 +225,9 @@ export ICF_DS_TOKENS=256
 export ICF_AGGREGATION=trimmed_mean
 }
 
+icf_arm_v121() {
+  icf_arm_v120
+  export ICF_FIXED_HEAD_CT_WEIGHT=0.0
+}
+
+
