@@ -1137,6 +1137,74 @@ def evaluate_trial(
                             logits[:, 0] -= 0.5 * rm_weight * rm_margin
                             logits[:, 1] += 0.5 * rm_weight * rm_margin
 
+                # ---- §218 shape-family screening candidates -------------------
+                # BD's entropy path normalises the eigenvalues (p = eig / eig.sum()),
+                # discarding total variance; and every Location-family branch is a
+                # projection or reweighting of the slide MEAN. These two candidates
+                # occupy what is left:
+                #   BS  = log total variance      -> pure scale (what BD normalises away)
+                #   SH  = per-dim skew + kurtosis -> location- AND scale-invariant by
+                #         construction, so it cannot restate BM/QA/DS or BS.
+                bs_weight = float(os.environ.get("ICF_FIXED_HEAD_BS_WEIGHT", "0.0"))
+                sh_weight = float(os.environ.get("ICF_FIXED_HEAD_SH_WEIGHT", "0.0"))
+                if bs_weight != 0.0 or sh_weight != 0.0:
+                    shp_eps = 1e-6
+                    basis = inner._effective_covariance_projection()
+                    labels_shp = episode_y[:n_context].long().to(device)
+                    shp_idx = list(range(n_context)) + query_index.tolist()
+
+                    if bs_weight != 0.0:
+                        bs_dim = min(int(os.environ.get("ICF_BS_DIM", "256")), basis.shape[1])
+                        bs_basis = basis[:, :bs_dim].float()
+
+                        def bs_feat(b):
+                            if bag_stats_cache is not None and id(b) in bag_stats_cache:
+                                n_i, _, scatter = bag_stats_cache[id(b)]
+                                tr = ((scatter.to(device).float() @ bs_basis) * bs_basis).sum() / float(n_i)
+                            else:
+                                v = b.to(device).float()
+                                pr = (v - v.mean(dim=0, keepdim=True)) @ bs_basis
+                                tr = pr.square().sum() / float(v.shape[0])
+                            return tr.clamp_min(shp_eps).log().reshape(1)
+
+                        f_bs = torch.stack([bs_feat(episode_bags[i]) for i in shp_idx])
+                        bs_margin = _solve_kernel_ridge(
+                            f_bs[:n_context], labels_shp, f_bs[n_context:],
+                            kernel="linear", gamma=None, degree=2, coef0=1.0,
+                            reg_lambda=float(os.environ.get("ICF_BS_LAMBDA", "1.0")),
+                            return_loo=False,
+                        )
+
+                    if sh_weight != 0.0:
+                        sh_dim = min(int(os.environ.get("ICF_SH_DIM", "32")), basis.shape[1])
+                        sh_basis = basis[:, :sh_dim].float()
+
+                        def sh_feat(b):
+                            v = b.to(device).float()
+                            pr = v @ sh_basis
+                            mu = pr.mean(dim=0, keepdim=True)
+                            sd = pr.std(dim=0, keepdim=True).clamp_min(shp_eps)
+                            z = (pr - mu) / sd
+                            skew = z.pow(3).mean(dim=0)
+                            kurt = z.pow(4).mean(dim=0) - 3.0
+                            return torch.cat([skew, kurt])
+
+                        f_sh = torch.stack([sh_feat(episode_bags[i]) for i in shp_idx])
+                        sh_margin = _solve_kernel_ridge(
+                            f_sh[:n_context], labels_shp, f_sh[n_context:],
+                            kernel="linear", gamma=None, degree=2, coef0=1.0,
+                            reg_lambda=float(os.environ.get("ICF_SH_LAMBDA", "1.0")),
+                            return_loo=False,
+                        )
+
+                    if os.environ.get("ICF_SHAPE_SCREEN_ONLY", "1") != "1":
+                        logits = logits.clone()
+                        for _w, _m in ((bs_weight, locals().get("bs_margin")),
+                                       (sh_weight, locals().get("sh_margin"))):
+                            if _w != 0.0 and _m is not None:
+                                logits[:, 0] -= 0.5 * _w * _m
+                                logits[:, 1] += 0.5 * _w * _m
+
                 bd_weight = float(os.environ.get("ICF_FIXED_HEAD_BD_WEIGHT", "0.0"))
                 if bd_weight != 0.0:
                     bd_dim = int(os.environ.get("ICF_BD_DIM", "256"))
@@ -1752,6 +1820,8 @@ def evaluate_trial(
         m_ct = (-branch_margins.get("ct", torch.zeros(len(test_ids)))).to(device)
         m_bm = bm_margin.detach() if ("bm_margin" in locals() and bm_margin is not None) else torch.zeros(len(test_ids), device=device)
         m_rm = rm_margin.detach() if ("rm_margin" in locals() and rm_margin is not None) else None
+        m_bs = bs_margin.detach() if ("bs_margin" in locals() and bs_margin is not None) else None
+        m_sh = sh_margin.detach() if ("sh_margin" in locals() and sh_margin is not None) else None
         m_bd = bd_margin.detach() if ("bd_margin" in locals() and bd_margin is not None) else torch.zeros(len(test_ids), device=device)
         m_qa = qa_margin.detach() if ("qa_margin" in locals() and qa_margin is not None) else torch.zeros(len(test_ids), device=device)
         m_ds = ds_margin.detach() if ("ds_margin" in locals() and ds_margin is not None) else torch.zeros(len(test_ids), device=device)
@@ -1958,6 +2028,10 @@ def evaluate_trial(
         m_bm = m_bm.cpu()
         if "m_rm" in locals() and isinstance(m_rm, torch.Tensor):
             m_rm = m_rm.cpu()
+        if isinstance(m_bs, torch.Tensor):
+            m_bs = m_bs.cpu()
+        if isinstance(m_sh, torch.Tensor):
+            m_sh = m_sh.cpu()
         m_bd = m_bd.cpu()
         m_qa = m_qa.cpu()
         m_ds = m_ds.cpu()
@@ -2103,6 +2177,8 @@ def evaluate_trial(
         "m_ct": m_ct[valid] if ("m_ct" in locals() and isinstance(m_ct, torch.Tensor)) else None,
         "m_bm": m_bm[valid] if ("m_bm" in locals() and isinstance(m_bm, torch.Tensor)) else None,
         "m_rm": m_rm[valid] if ("m_rm" in locals() and isinstance(m_rm, torch.Tensor)) else None,
+        "m_bs": m_bs[valid] if ("m_bs" in locals() and isinstance(m_bs, torch.Tensor)) else None,
+        "m_sh": m_sh[valid] if ("m_sh" in locals() and isinstance(m_sh, torch.Tensor)) else None,
         "m_bd": m_bd[valid] if ("m_bd" in locals() and isinstance(m_bd, torch.Tensor)) else None,
         "m_qa": m_qa[valid] if ("m_qa" in locals() and isinstance(m_qa, torch.Tensor)) else None,
         "m_ds": m_ds[valid] if ("m_ds" in locals() and isinstance(m_ds, torch.Tensor)) else None,
@@ -2356,6 +2432,8 @@ def evaluate_official_folds(
             "m_ct": result.get("m_ct"),
             "m_bm": result.get("m_bm"),
             "m_rm": result.get("m_rm"),
+            "m_bs": result.get("m_bs"),
+            "m_sh": result.get("m_sh"),
             "m_bd": result.get("m_bd"),
             "m_qa": result.get("m_qa"),
             "m_ds": result.get("m_ds"),
