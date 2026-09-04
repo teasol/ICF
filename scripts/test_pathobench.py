@@ -1593,7 +1593,7 @@ def evaluate_trial(
                         if ds_aug_mode == "salience_anchor" and ds_aug_s > 1 and ds_aug_fraction < 1.0:
                             base_seed_val = ds_aug_seed + (seed if "seed" in locals() and isinstance(seed, int) else 0) * 10000
 
-                            def extract_anchor_sub_mean(proj_bags, assignments, seed_offset, return_draws=False):
+                            def extract_anchor_sub_mean(proj_bags, assignments, seed_offset, return_draws=False, frac=None):
                                 feats = []
                                 for i, (p, soft_p) in enumerate(zip(proj_bags, assignments)):
                                     n_p = p.shape[0]
@@ -1601,10 +1601,13 @@ def evaluate_trial(
                                     k_bg = n_p - k_anchor
                                     u = soft_p @ s_abs
                                     anchor_idx = torch.topk(u, k=k_anchor, largest=True).indices
-                                    if k_bg > 0:
+                                    _frac = ds_aug_fraction if frac is None else frac
+                                    if k_bg > 0 and _frac > 0.0:
                                         bg_idx = torch.topk(u, k=k_bg, largest=False).indices
-                                        k_bg_sub = max(1, int(k_bg * ds_aug_fraction))
+                                        k_bg_sub = max(1, int(k_bg * _frac))
                                     else:
+                                        # frac == 0 keeps the anchors alone, with no
+                                        # randomness left, so every draw is identical.
                                         bg_idx = None
                                         k_bg_sub = 0
 
@@ -1638,6 +1641,34 @@ def evaluate_trial(
                             qry_draws = extract_anchor_sub_mean(
                                 qry_proj_eval, qry_assignments, base_seed_val + 500000, return_draws=True)
                             ctx_ds, qry_ds = ctx_draws.mean(dim=0), qry_draws.mean(dim=0)
+                            # §225 strength sweep. §223 showed the shipped setting
+                            # (a=0.15, f=0.7) keeps 74.5% of patches and is inert. This
+                            # measures whether ANY strength produces an effect above the
+                            # benchmark's resolution floor -- it does not pick a winner.
+                            ds_sweep = os.environ.get("ICF_DS_SUBSAMPLE_SWEEP", "")
+                            if ds_sweep:
+                                ds_sweep_margins, ds_sweep_icc = {}, {}
+                                for _f in [float(x) for x in ds_sweep.split(",") if x.strip()]:
+                                    _cd = extract_anchor_sub_mean(
+                                        ctx_proj_eval, ctx_assignments, base_seed_val,
+                                        return_draws=True, frac=_f)
+                                    _qd = extract_anchor_sub_mean(
+                                        qry_proj_eval, qry_assignments, base_seed_val + 500000,
+                                        return_draws=True, frac=_f)
+                                    _key = f"f{int(round(_f * 100)):03d}"
+                                    ds_sweep_margins[_key] = _solve_kernel_ridge(
+                                        _cd.mean(dim=0), labels_eval, _qd.mean(dim=0),
+                                        kernel=os.environ.get("ICF_DS_KERNEL", krr_kernel),
+                                        gamma=krr_gamma, degree=krr_degree, coef0=krr_coef0,
+                                        reg_lambda=ds_lambda, return_loo=False).detach()
+                                    _per_draw = torch.stack([_solve_kernel_ridge(
+                                        _cd[_s], labels_eval, _qd[_s],
+                                        kernel=os.environ.get("ICF_DS_KERNEL", krr_kernel),
+                                        gamma=krr_gamma, degree=krr_degree, coef0=krr_coef0,
+                                        reg_lambda=ds_lambda, return_loo=False).detach()
+                                        for _s in range(_qd.shape[0])])
+                                    ds_sweep_icc[_key] = _per_draw
+
                             if ds_compare:
                                 ds_sub_draw_margins = []
                                 for _s in range(qry_draws.shape[0]):
@@ -2269,6 +2300,10 @@ def evaluate_trial(
                       and isinstance(ds_full_margin, torch.Tensor)) else None),
         "m_ds_draws": (ds_sub_draw_margins[:, valid] if ("ds_sub_draw_margins" in locals()
                        and isinstance(ds_sub_draw_margins, torch.Tensor)) else None),
+        **{f"m_ds_{_k}": _v.cpu()[valid] for _k, _v in
+           (ds_sweep_margins.items() if "ds_sweep_margins" in locals() else [])},
+        **{f"draws_ds_{_k}": _v.cpu()[:, valid] for _k, _v in
+           (ds_sweep_icc.items() if "ds_sweep_icc" in locals() else [])},
         # §221 diagnosis: context-side LOO margins + the context labels needed to
         # score them. Query-side `valid` must NOT be applied -- these live on the
         # context axis, whose length is n_context, not the query count.
@@ -2541,6 +2576,8 @@ def evaluate_official_folds(
             "m_sh": result.get("m_sh"),
             "m_ds_full": result.get("m_ds_full"),
             "m_ds_draws": result.get("m_ds_draws"),
+            **{k: v for k, v in result.items()
+               if k.startswith("m_ds_f") or k.startswith("draws_ds_f")},
             "context_label": result.get("context_label"),
             **{f"loo_{_n}": result.get(f"loo_{_n}")
                for _n in ("bm", "bd", "qa", "ds", "sh", "shj")},
