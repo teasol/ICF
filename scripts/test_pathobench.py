@@ -1176,26 +1176,85 @@ def evaluate_trial(
                         )
 
                     if sh_weight != 0.0:
-                        sh_dim = min(int(os.environ.get("ICF_SH_DIM", "32")), basis.shape[1])
-                        sh_basis = basis[:, :sh_dim].float()
+                        # §219 SH variants. Tokens are projected ONCE at the widest
+                        # dim; every variant is a cheap derivation of that projection.
+                        sh_wide = min(int(os.environ.get("ICF_SH_WIDE", "256")), basis.shape[1])
+                        sh_narrow = min(int(os.environ.get("ICF_SH_DIM", "32")), sh_wide)
+                        sh_lam = float(os.environ.get("ICF_SH_LAMBDA", "1.0"))
+                        wide_basis = basis[:, :sh_wide].float()
 
-                        def sh_feat(b):
+                        def _q(sorted_p, frac):
+                            n = sorted_p.shape[0]
+                            pos = frac * (n - 1)
+                            lo = int(math.floor(pos)); hi = min(lo + 1, n - 1)
+                            w = pos - lo
+                            return sorted_p[lo] * (1.0 - w) + sorted_p[hi] * w
+
+                        def sh_all(b):
                             v = b.to(device).float()
-                            pr = v @ sh_basis
+                            pr = v @ wide_basis                      # [N, wide]
                             mu = pr.mean(dim=0, keepdim=True)
                             sd = pr.std(dim=0, keepdim=True).clamp_min(shp_eps)
                             z = (pr - mu) / sd
-                            skew = z.pow(3).mean(dim=0)
-                            kurt = z.pow(4).mean(dim=0) - 3.0
-                            return torch.cat([skew, kurt])
+                            skew = z.pow(3).mean(dim=0)              # [wide]
+                            kurt = z.pow(4).mean(dim=0) - 3.0        # [wide]
 
-                        f_sh = torch.stack([sh_feat(episode_bags[i]) for i in shp_idx])
-                        sh_margin = _solve_kernel_ridge(
-                            f_sh[:n_context], labels_shp, f_sh[n_context:],
-                            kernel="linear", gamma=None, degree=2, coef0=1.0,
-                            reg_lambda=float(os.environ.get("ICF_SH_LAMBDA", "1.0")),
-                            return_loo=False,
-                        )
+                            sp, _ = torch.sort(pr, dim=0)
+                            q125, q250, q375 = _q(sp, .125), _q(sp, .25), _q(sp, .375)
+                            q500 = _q(sp, .50)
+                            q625, q750, q875 = _q(sp, .625), _q(sp, .75), _q(sp, .875)
+                            iqr = (q750 - q250).clamp_min(shp_eps)
+                            bowley = (q750 + q250 - 2.0 * q500) / iqr          # robust skew
+                            moors = (q875 - q625 + q375 - q125) / iqr          # robust tail weight
+
+                            # Joint shape: whiten tokens in the slide's OWN top-k basis,
+                            # then describe the radius distribution. Location- and
+                            # scale-invariant, and multivariate rather than marginal.
+                            zc = pr[:, :sh_narrow] - mu[:, :sh_narrow]
+                            cov = (zc.T @ zc) / float(zc.shape[0])
+                            cov = 0.5 * (cov + cov.T)
+                            ev, evec = torch.linalg.eigh(cov.double())
+                            inv = (ev.clamp_min(1e-8).rsqrt())
+                            wz = (zc.double() @ evec) * inv
+                            r = wz.norm(dim=1).float()
+                            rs, _ = torch.sort(r)
+                            rmed = _q(rs, .50).clamp_min(shp_eps)
+                            rz = (r - r.mean()) / r.std().clamp_min(shp_eps)
+                            r_iqr = (_q(rs, .75) - _q(rs, .25)).clamp_min(shp_eps)
+                            joint = torch.stack([
+                                rz.pow(3).mean(), rz.pow(4).mean() - 3.0,
+                                (_q(rs, .75) + _q(rs, .25) - 2.0 * _q(rs, .50)) / r_iqr,
+                                (_q(rs, .875) - _q(rs, .625) + _q(rs, .375) - _q(rs, .125)) / r_iqr,
+                                _q(rs, .10) / rmed, _q(rs, .90) / rmed, _q(rs, .99) / rmed,
+                                r_iqr / rmed,
+                            ])
+                            n_ = sh_narrow
+                            return {
+                                "sh":   torch.cat([skew[:n_], kurt[:n_]]),
+                                "shs":  skew[:n_],
+                                "shk":  kurt[:n_],
+                                "sh2":  torch.cat([skew, kurt]),
+                                "shr":  torch.cat([bowley[:n_], moors[:n_]]),
+                                "shr2": torch.cat([bowley, moors]),
+                                "shj":  joint,
+                            }
+
+                        _feats = [sh_all(episode_bags[i]) for i in shp_idx]
+                        _keys = ("sh", "shs", "shk", "sh2", "shr", "shr2", "shj")
+                        _want = os.environ.get("ICF_SH_VARIANTS", ",".join(_keys)).split(",")
+                        _out = {}
+                        for _k in _keys:
+                            if _k not in _want:
+                                continue
+                            _F = torch.stack([d[_k] for d in _feats])
+                            _F = torch.nan_to_num(_F, nan=0.0, posinf=0.0, neginf=0.0)
+                            _out[_k] = _solve_kernel_ridge(
+                                _F[:n_context], labels_shp, _F[n_context:],
+                                kernel="linear", gamma=None, degree=2, coef0=1.0,
+                                reg_lambda=sh_lam, return_loo=False,
+                            )
+                        sh_margin = _out.get("sh")
+                        sh_variant_margins = _out
 
                     if os.environ.get("ICF_SHAPE_SCREEN_ONLY", "1") != "1":
                         logits = logits.clone()
@@ -2179,6 +2238,11 @@ def evaluate_trial(
         "m_rm": m_rm[valid] if ("m_rm" in locals() and isinstance(m_rm, torch.Tensor)) else None,
         "m_bs": m_bs[valid] if ("m_bs" in locals() and isinstance(m_bs, torch.Tensor)) else None,
         "m_sh": m_sh[valid] if ("m_sh" in locals() and isinstance(m_sh, torch.Tensor)) else None,
+        **{
+            f"m_{_k}": (_v.detach().cpu()[valid] if isinstance(_v, torch.Tensor) else None)
+            for _k, _v in (sh_variant_margins.items() if "sh_variant_margins" in locals() else [])
+            if _k != "sh"
+        },
         "m_bd": m_bd[valid] if ("m_bd" in locals() and isinstance(m_bd, torch.Tensor)) else None,
         "m_qa": m_qa[valid] if ("m_qa" in locals() and isinstance(m_qa, torch.Tensor)) else None,
         "m_ds": m_ds[valid] if ("m_ds" in locals() and isinstance(m_ds, torch.Tensor)) else None,
@@ -2434,6 +2498,8 @@ def evaluate_official_folds(
             "m_rm": result.get("m_rm"),
             "m_bs": result.get("m_bs"),
             "m_sh": result.get("m_sh"),
+            **{f"m_{_k}": result.get(f"m_{_k}")
+               for _k in ("shs", "shk", "sh2", "shr", "shr2", "shj")},
             "m_bd": result.get("m_bd"),
             "m_qa": result.get("m_qa"),
             "m_ds": result.get("m_ds"),
