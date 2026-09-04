@@ -1056,7 +1056,10 @@ def evaluate_trial(
                 logits = stream_lineage_forward(
                     model.model, episode_bags, episode_y, query_index, device
                 )
-                do_context_loo = os.environ.get("ICF_AGGREGATION", "").startswith("context_loo")
+                # ICF_SAVE_CONTEXT_LOO=1 computes context LOO margins for diagnosis
+                # WITHOUT switching the aggregation, so the ensemble stays untouched.
+                do_context_loo = (os.environ.get("ICF_AGGREGATION", "").startswith("context_loo")
+                                  or os.environ.get("ICF_SAVE_CONTEXT_LOO", "0") == "1")
                 bm_weight = float(os.environ.get("ICF_FIXED_HEAD_BM_WEIGHT", "0.0"))
                 if bm_weight != 0.0:
                     bm_dim = int(os.environ.get("ICF_BM_DIM", "32"))
@@ -1242,19 +1245,24 @@ def evaluate_trial(
                         _feats = [sh_all(episode_bags[i]) for i in shp_idx]
                         _keys = ("sh", "shs", "shk", "sh2", "shr", "shr2", "shj")
                         _want = os.environ.get("ICF_SH_VARIANTS", ",".join(_keys)).split(",")
-                        _out = {}
+                        _out, _loo_out = {}, {}
                         for _k in _keys:
                             if _k not in _want:
                                 continue
                             _F = torch.stack([d[_k] for d in _feats])
                             _F = torch.nan_to_num(_F, nan=0.0, posinf=0.0, neginf=0.0)
-                            _out[_k] = _solve_kernel_ridge(
+                            _r = _solve_kernel_ridge(
                                 _F[:n_context], labels_shp, _F[n_context:],
                                 kernel="linear", gamma=None, degree=2, coef0=1.0,
-                                reg_lambda=sh_lam, return_loo=False,
+                                reg_lambda=sh_lam, return_loo=do_context_loo,
                             )
+                            if do_context_loo:
+                                _out[_k], _loo_out[_k] = _r[0], _r[1]
+                            else:
+                                _out[_k] = _r
                         sh_margin = _out.get("sh")
                         sh_variant_margins = _out
+                        sh_variant_loo = _loo_out
 
                     if os.environ.get("ICF_SHAPE_SCREEN_ONLY", "1") != "1":
                         logits = logits.clone()
@@ -2238,6 +2246,16 @@ def evaluate_trial(
         "m_rm": m_rm[valid] if ("m_rm" in locals() and isinstance(m_rm, torch.Tensor)) else None,
         "m_bs": m_bs[valid] if ("m_bs" in locals() and isinstance(m_bs, torch.Tensor)) else None,
         "m_sh": m_sh[valid] if ("m_sh" in locals() and isinstance(m_sh, torch.Tensor)) else None,
+        # §221 diagnosis: context-side LOO margins + the context labels needed to
+        # score them. Query-side `valid` must NOT be applied -- these live on the
+        # context axis, whose length is n_context, not the query count.
+        "context_label": (episode_y[:n_context].detach().cpu()
+                          if "episode_y" in locals() and "n_context" in locals() else None),
+        **{f"loo_{_n}": (_v.detach().cpu() if isinstance(_v, torch.Tensor) else None)
+           for _n, _v in (("bm", locals().get("loo_bm")), ("bd", locals().get("loo_bd")),
+                          ("qa", locals().get("loo_qa")), ("ds", locals().get("loo_ds")))},
+        **{f"loo_{_k}": (_v.detach().cpu() if isinstance(_v, torch.Tensor) else None)
+           for _k, _v in (sh_variant_loo.items() if "sh_variant_loo" in locals() else [])},
         **{
             f"m_{_k}": (_v.detach().cpu()[valid] if isinstance(_v, torch.Tensor) else None)
             for _k, _v in (sh_variant_margins.items() if "sh_variant_margins" in locals() else [])
@@ -2498,6 +2516,9 @@ def evaluate_official_folds(
             "m_rm": result.get("m_rm"),
             "m_bs": result.get("m_bs"),
             "m_sh": result.get("m_sh"),
+            "context_label": result.get("context_label"),
+            **{f"loo_{_n}": result.get(f"loo_{_n}")
+               for _n in ("bm", "bd", "qa", "ds", "sh", "shj")},
             **{f"m_{_k}": result.get(f"m_{_k}")
                for _k in ("shs", "shk", "sh2", "shr", "shr2", "shj")},
             "m_bd": result.get("m_bd"),
