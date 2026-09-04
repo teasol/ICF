@@ -128,8 +128,22 @@ bash scripts/eval_v121.sh <gpu_id> <tag>
 # 5. 브랜치 진단 / 집계·부분집합 절제 (저장 마진 오프라인 재집계, GPU 불필요)
 $PYTHON scripts/analysis/branch_diagnostics.py --tag v121_baseline
 
-# 6. SEAL 10-Task Multi-GPU Hold-out Evaluation (현재 유보 상태)
+# 6. GPU 실행 대기 (에이전트 폴링 금지 -- 아래 참조)
+bash scripts/run_and_wait.sh <runner.sh> <tag> "<분석 명령>"
+
+# 7. SEAL 10-Task Multi-GPU Hold-out Evaluation (현재 유보 상태)
 bash scripts/run_v120_seal_multi_gpu.sh <tag>
+```
+
+> ⚠️ **[에이전트 작업 규칙] GPU 실행을 폴링으로 기다리지 말 것.**
+> 진행 상황을 반복 확인하면 확인 1회당 도구 호출 1회와 토큰이 소모된다 (§218에서 5시간 사용량 +7%p의 대부분이 여기서 발생).
+> 대신 `scripts/run_and_wait.sh`를 **`run_in_background`로 단 한 번** 실행한다. 이 스크립트가 완주까지 블로킹한 뒤 완료 요약(과제별 fold-mean AUROC, 오염 검사, 분석 결과)을 한 번에 출력하므로, 완료 알림 자체에 답이 담긴다.
+> 중간 확인이 꼭 필요하면 최소 10분 간격으로 제한한다.
+
+```bash
+# (참고) 위 6번의 실제 사용 예
+bash scripts/run_and_wait.sh scripts/run_v121_shape_screen.sh v121_sh_v2 \
+  "PYTHONPATH=$PWD $PYTHON scripts/analysis/branch_screen.py --tag v121_sh_v2 --candidate m_sh"
 ```
 
 _by Antigravity on gnode3 at 2026-09-03 10:40:00_
