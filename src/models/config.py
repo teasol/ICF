@@ -131,6 +131,10 @@ class TrainingFreeConfig:
     weight_ds: float = 0.0
     ds_dim: int = 32
     ds_lambda: float = 1.0
+    # SHJ: joint whitened-radius shape (§220). Task specialist, off by default.
+    weight_shj: float = 0.0
+    shj_dim: int = 32
+    shj_lambda: float = 1.0
     ds_temperature: float = 1.0
     ds_tokens: int = 256
 
@@ -390,9 +394,11 @@ def _validate_config_domain(cfg: TrainingFreeConfig) -> None:
         raise ValueError(f"qa_dim must be positive, got {cfg.qa_dim}")
     if cfg.ds_dim <= 0:
         raise ValueError(f"ds_dim must be positive, got {cfg.ds_dim}")
+    if cfg.shj_dim <= 0:
+        raise ValueError(f"shj_dim must be positive, got {cfg.shj_dim}")
 
     # Weights >= 0
-    for w_name in ("weight_cv", "weight_ct", "weight_bm", "weight_bd", "weight_qa", "weight_ds", "weight_dd"):
+    for w_name in ("weight_cv", "weight_ct", "weight_bm", "weight_bd", "weight_qa", "weight_ds", "weight_dd", "weight_shj"):
         w = getattr(cfg, w_name)
         if w < 0.0:
             raise ValueError(f"{w_name} must be non-negative, got {w}")

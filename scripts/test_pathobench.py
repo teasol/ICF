@@ -1213,24 +1213,12 @@ def evaluate_trial(
                             # Joint shape: whiten tokens in the slide's OWN top-k basis,
                             # then describe the radius distribution. Location- and
                             # scale-invariant, and multivariate rather than marginal.
-                            zc = pr[:, :sh_narrow] - mu[:, :sh_narrow]
-                            cov = (zc.T @ zc) / float(zc.shape[0])
-                            cov = 0.5 * (cov + cov.T)
-                            ev, evec = torch.linalg.eigh(cov.double())
-                            inv = (ev.clamp_min(1e-8).rsqrt())
-                            wz = (zc.double() @ evec) * inv
-                            r = wz.norm(dim=1).float()
-                            rs, _ = torch.sort(r)
-                            rmed = _q(rs, .50).clamp_min(shp_eps)
-                            rz = (r - r.mean()) / r.std().clamp_min(shp_eps)
-                            r_iqr = (_q(rs, .75) - _q(rs, .25)).clamp_min(shp_eps)
-                            joint = torch.stack([
-                                rz.pow(3).mean(), rz.pow(4).mean() - 3.0,
-                                (_q(rs, .75) + _q(rs, .25) - 2.0 * _q(rs, .50)) / r_iqr,
-                                (_q(rs, .875) - _q(rs, .625) + _q(rs, .375) - _q(rs, .125)) / r_iqr,
-                                _q(rs, .10) / rmed, _q(rs, .90) / rmed, _q(rs, .99) / rmed,
-                                r_iqr / rmed,
-                            ])
+                            # Single source of truth with src/models/branches/shj.py,
+                            # so the eval path and the pipeline cannot drift apart.
+                            # Imported here, not at module scope: sys.path is only
+                            # bootstrapped once this script starts running.
+                            from src.models.branches.shj import shj_slide_features  # noqa: PLC0415
+                            joint = shj_slide_features(v, wide_basis, sh_narrow)
                             n_ = sh_narrow
                             return {
                                 "sh":   torch.cat([skew[:n_], kurt[:n_]]),
@@ -1605,7 +1593,7 @@ def evaluate_trial(
                         if ds_aug_mode == "salience_anchor" and ds_aug_s > 1 and ds_aug_fraction < 1.0:
                             base_seed_val = ds_aug_seed + (seed if "seed" in locals() and isinstance(seed, int) else 0) * 10000
 
-                            def extract_anchor_sub_mean(proj_bags, assignments, seed_offset):
+                            def extract_anchor_sub_mean(proj_bags, assignments, seed_offset, return_draws=False):
                                 feats = []
                                 for i, (p, soft_p) in enumerate(zip(proj_bags, assignments)):
                                     n_p = p.shape[0]
@@ -1635,11 +1623,39 @@ def evaluate_trial(
                                         u_std = sub_u.std().clamp_min(1e-6)
                                         w = torch.nn.functional.softmax(ds_temperature * (sub_u - sub_u.mean()) / u_std, dim=0)
                                         s_feats.append((w.unsqueeze(-1) * sub_p).sum(dim=0))
-                                    feats.append(torch.stack(s_feats).mean(dim=0))
-                                return torch.stack(feats)
+                                    feats.append(torch.stack(s_feats))       # [S, dim]
+                                stacked = torch.stack(feats, dim=1)          # [S, n_slides, dim]
+                                return stacked if return_draws else stacked.mean(dim=0)
 
-                            ctx_ds = extract_anchor_sub_mean(ctx_proj_eval, ctx_assignments, base_seed_val)
-                            qry_ds = extract_anchor_sub_mean(qry_proj_eval, qry_assignments, base_seed_val + 500000)
+                            # §222 signal B: draw-to-draw stability, fully label-free.
+                            # Subsampling averages S views of a slide. If those views
+                            # agree, the background it drops was redundant; if they
+                            # disagree, the signal is carried by rare patches that
+                            # individual draws miss -- which is when subsampling hurts.
+                            ds_compare = os.environ.get("ICF_DS_SUBSAMPLE_COMPARE", "0") == "1"
+                            ctx_draws = extract_anchor_sub_mean(
+                                ctx_proj_eval, ctx_assignments, base_seed_val, return_draws=True)
+                            qry_draws = extract_anchor_sub_mean(
+                                qry_proj_eval, qry_assignments, base_seed_val + 500000, return_draws=True)
+                            ctx_ds, qry_ds = ctx_draws.mean(dim=0), qry_draws.mean(dim=0)
+                            if ds_compare:
+                                ds_sub_draw_margins = []
+                                for _s in range(qry_draws.shape[0]):
+                                    ds_sub_draw_margins.append(_solve_kernel_ridge(
+                                        ctx_draws[_s], labels_eval, qry_draws[_s],
+                                        kernel=os.environ.get("ICF_DS_KERNEL", krr_kernel), gamma=krr_gamma,
+                                        degree=krr_degree, coef0=krr_coef0,
+                                        reg_lambda=ds_lambda, return_loo=False,
+                                    ).detach())
+                                ds_sub_draw_margins = torch.stack(ds_sub_draw_margins)  # [S, n_query]
+                                ds_full_ctx = extract_denoised_mean(ctx_proj_eval, ctx_assignments)
+                                ds_full_qry = extract_denoised_mean(qry_proj_eval, qry_assignments)
+                                ds_full_margin = _solve_kernel_ridge(
+                                    ds_full_ctx, labels_eval, ds_full_qry,
+                                    kernel=os.environ.get("ICF_DS_KERNEL", krr_kernel), gamma=krr_gamma,
+                                    degree=krr_degree, coef0=krr_coef0,
+                                    reg_lambda=ds_lambda, return_loo=False,
+                                ).detach()
                         else:
                             ctx_ds = extract_denoised_mean(ctx_proj_eval, ctx_assignments)
                             qry_ds = extract_denoised_mean(qry_proj_eval, qry_assignments)
@@ -2246,6 +2262,13 @@ def evaluate_trial(
         "m_rm": m_rm[valid] if ("m_rm" in locals() and isinstance(m_rm, torch.Tensor)) else None,
         "m_bs": m_bs[valid] if ("m_bs" in locals() and isinstance(m_bs, torch.Tensor)) else None,
         "m_sh": m_sh[valid] if ("m_sh" in locals() and isinstance(m_sh, torch.Tensor)) else None,
+        # §222: DS full-bag arm and the per-draw subsampled margins, for the
+        # label-free draw-stability selector. m_ds itself stays the subsampled
+        # margin, so the ensemble under test is unchanged.
+        "m_ds_full": (ds_full_margin[valid] if ("ds_full_margin" in locals()
+                      and isinstance(ds_full_margin, torch.Tensor)) else None),
+        "m_ds_draws": (ds_sub_draw_margins[:, valid] if ("ds_sub_draw_margins" in locals()
+                       and isinstance(ds_sub_draw_margins, torch.Tensor)) else None),
         # §221 diagnosis: context-side LOO margins + the context labels needed to
         # score them. Query-side `valid` must NOT be applied -- these live on the
         # context axis, whose length is n_context, not the query count.
@@ -2516,6 +2539,8 @@ def evaluate_official_folds(
             "m_rm": result.get("m_rm"),
             "m_bs": result.get("m_bs"),
             "m_sh": result.get("m_sh"),
+            "m_ds_full": result.get("m_ds_full"),
+            "m_ds_draws": result.get("m_ds_draws"),
             "context_label": result.get("context_label"),
             **{f"loo_{_n}": result.get(f"loo_{_n}")
                for _n in ("bm", "bd", "qa", "ds", "sh", "shj")},
