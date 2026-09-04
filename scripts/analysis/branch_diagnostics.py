@@ -2,7 +2,9 @@
 
 Computes, without any GPU work, from `predictions/pathobench_<task>_<tag>_official50_bf16.pt`:
   1. per-branch standalone AUROC per task,
-  2. the oracle ceiling (best single branch per task) and its gap to Trimmed Mean,
+  2. per-task best single branch, printed FOR REFERENCE ONLY -- §224 bars it from
+     any verdict: it is chosen on the data it is scored on (winner's curse) and is
+     not a ceiling, since the ensemble beats it on Prog,
   3. optionally (--ablate) every branch-subset Trimmed Mean with sign agreement,
   4. optionally (--redundancy) the inter-branch margin correlation matrix, the
      ensemble's effective rank, and which branches Trimmed Mean discards.
@@ -118,7 +120,7 @@ def main() -> None:
     # --- per-branch standalone + oracle ceiling ---
     print(f"\n[{args.tag}] per-branch standalone AUROC (50-fold mean)")
     header = f"{'task':<24}" + "".join(f"{b[2:].upper():>8}" for b in BRANCHES)
-    print(header + f"{'ORACLE':>9}{'TRIM':>8}{'gap':>9}")
+    print(header + f"{'BEST-SINGLE':>13}{'TRIM':>8}")
     oracles = []
     for t, trim_score in zip(PRIMARY7, base_per_task):
         means = {}
@@ -127,11 +129,11 @@ def main() -> None:
         best = max(means.values())
         oracles.append(best)
         row = f"{short(t):<24}" + "".join(f"{means[b]:>8.4f}" for b in BRANCHES)
-        print(row + f"{best:>9.4f}{trim_score:>8.4f}{best - trim_score:>+9.4f}")
+        print(row + f"{best:>13.4f}{trim_score:>8.4f}")
     oracle_macro = float(np.mean(oracles))
-    print(f"{'MACRO':<24}{'':>40}{oracle_macro:>9.4f}{base_macro:>8.4f}{oracle_macro - base_macro:>+9.4f}")
-    print(f"\noracle gap = {oracle_macro - base_macro:+.4f} "
-          f"(recoverable headroom if the best branch per task were selectable)")
+    print(f"{'MACRO':<24}{'':>40}{oracle_macro:>13.4f}{base_macro:>8.4f}")
+    print("\nBEST-SINGLE is reference only: it is selected on the same folds it is scored\n"
+          "on, and the ensemble can exceed it (see Prog). §224 bars it from any verdict.")
 
     if args.redundancy:
         names = [b[2:].upper() for b in BRANCHES]
