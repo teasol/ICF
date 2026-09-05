@@ -19,15 +19,24 @@ from scripts.analysis.branch_diagnostics import (
 
 REJECT_ABOVE = 0.6
 
+# Adopted but not promoted into the default ensemble: SH (§218), SHJ (§220).
+# Gate 1 screens candidates against these too - they are real branches - while
+# BRANCHES stays the official 5-branch comparison basis (invariant 3).
+ADOPTED = ["m_sh", "m_shj"]
+
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--tag", default="v121_rm_screen")
     ap.add_argument("--candidate", default="m_rm",
                     help="comma-separated candidate margin keys, e.g. m_bs,m_sh")
+    ap.add_argument("--adopted", default=",".join(ADOPTED),
+                    help="comma-separated already-adopted branches to screen against in "
+                         "addition to BRANCHES (gate 1 must see SH/SHJ). Pass '' to disable.")
     args = ap.parse_args()
 
     cands = [c.strip() for c in args.candidate.split(",") if c.strip()]
+    wanted = [a.strip() for a in args.adopted.split(",") if a.strip()]
     data = {}
     for t in PRIMARY7:
         folds = torch.load(f"predictions/pathobench_{t}_{args.tag}_official50_bf16.pt",
@@ -37,7 +46,18 @@ def main() -> None:
                 raise SystemExit(f"{c} missing for {t} - was the screening run enabled?")
         data[t] = folds
 
-    admitted = [screen_one(data, c, cands) for c in cands]
+    # Adopted-but-unpromoted branches (SH §218, SHJ §220) are part of the gate-1
+    # reference set but NOT of BRANCHES, which stays the official 5-branch
+    # comparison basis (agent_handoff.md invariant 3). Report presence explicitly:
+    # a silently dropped reference would let a candidate pass a screen it never faced.
+    adopted = [a for a in wanted if all(data[t][0].get(a) is not None for t in PRIMARY7)]
+    missing = [a for a in wanted if a not in adopted]
+    print(f"gate-1 reference = BRANCHES({len(BRANCHES)}) + adopted{adopted}")
+    if missing:
+        print(f"  WARNING: {missing} absent from tag '{args.tag}' - NOT screened against. "
+              f"Gate 1 is incomplete for these; re-run with a tag that emits them.")
+
+    admitted = [screen_one(data, c, cands, adopted) for c in cands]
     admitted = [c for c in admitted if c]
     if len(cands) > 1 and len(admitted) > 1:
         print(f"\nJOINT: admitted candidates {admitted} together")
@@ -48,10 +68,11 @@ def main() -> None:
               f"| efficiency {100 * r_base / n:.0f}% -> {100 * r_joint / (n + len(admitted)):.0f}%")
 
 
-def screen_one(data: dict, cand: str, siblings: list[str]) -> str | None:
+def screen_one(data: dict, cand: str, siblings: list[str],
+               adopted: list[str] | None = None) -> str | None:
     names = [b[2:].upper() for b in BRANCHES]
     tag_c = cand[2:].upper()
-    others = [c for c in siblings if c != cand]
+    others = [c for c in siblings if c != cand] + [a for a in (adopted or []) if a != cand]
     ref = BRANCHES + others
     ref_names = names + [c[2:].upper() for c in others]
 
