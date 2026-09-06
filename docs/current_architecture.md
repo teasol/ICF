@@ -1,6 +1,13 @@
-# Current Architecture Specification (v120 Active Baseline)
+# Current Architecture Specification
 
-**Last updated**: `2026-08-23 09:30:00`
+**Last updated**: `2026-09-06`
+
+> **정본 분리.** 이 문서는 **브랜치 정의와 수식**의 정본이다. 성능 수치·비교 기준·승격 기준은
+> 여기서 선언하지 않는다 — [`PROJECT.md`](PROJECT.md)를 본다.
+>
+> ⚠️ **아래 §1~§3은 6-branch 구성(CV·CT·BM·BD·QA·DS)을 기술한다.**
+> **공식 비교 기준은 CT를 제외한 5-branch**이며([`PROJECT.md` §3.2](PROJECT.md)), CT의 수식은
+> 계보 참조용으로 남겨 둔다. 채택됐으나 공식 구성에 들어가지 않은 형상 브랜치는 §2.8에 있다.
 
 ---
 
@@ -101,7 +108,49 @@ Dual Ridge (λ=1) Dual Ridge (λ=1) Dual Ridge (λ=1) Bounded Margin   Dual Ridg
 
 ---
 
-## 3. Head 마진 결합: Trimmed Mean Voting (v120)
+### 2.8. 형상(Shape) 계열 — 채택됐으나 공식 구성 밖
+
+§217의 브랜치 분류 체계는 전 브랜치를 두 부류로 나눈다. **위치(Location) 계열**
+(`CV`·`BM`·`QA`·`DS`, 상호 상관 0.25~0.93)은 표현이 *어디에 놓이는가*를 읽고,
+**형상(Shape) 계열**은 분포의 *퍼짐과 이질성*을 읽는다. 위치 축은 포화 상태이며, 유효 랭크를
+올릴 수 있는 방향은 형상 계열의 확장뿐이다 ([`closed_axes.md` `CA-09`](closed_axes.md)).
+
+현 형상 계열은 **`BD`·`SH`·`SHJ` 3개**다. `BD`는 §2.5의 정식 브랜치이고, 나머지 둘은
+게이트를 통과해 **채택(adopted)** 됐으나 공식 구성 승격은 별개 요건으로 남아 있다
+([`PROJECT.md` §5](PROJECT.md), [`decisions.md`](decisions.md) `D-009`).
+
+#### SHJ — 백색화 반경 분포의 결합 형상
+
+각 슬라이드를 **자기 자신의 평균과 공분산으로 백색화**한 뒤 토큰 구름의 반경 분포에서 8개
+형상 기술자를 뽑는다. 구성상 위치·척도 불변이므로 평균을 다시 진술할 수 없다.
+
+$$\text{proj} = X_i B_{:,:d},\quad C = \text{cov}(\text{proj}),\quad
+W = (\text{proj} - \bar{\cdot}) V \Lambda^{-1/2},\quad r = \lVert W \rVert_2$$
+
+$r$의 정렬된 분위수로부터 **왜도 · 초과첨도 · Bowley 왜도 · Moors 꼬리무게 ·
+$q_{10}/q_{50}$ · $q_{90}/q_{50}$ · $q_{99}/q_{50}$ · $\text{IQR}/q_{50}$** 8차원을 만들고
+클래스 균형 kernel ridge(선형)로 마진을 얻는다.
+
+- **구현**: `src/models/branches/shj.py` (§222에서 정식 통합).
+  기본 가중치 `weight_shj = 0.0` — 채택 상태이나 활성 앙상블에는 들어가지 않는다.
+- ⚠️ **fp32 강제 필수.** 평가 파이프라인이 bf16 autocast 안에서 돌면 투영이 bf16(상대오차
+  ~1e-3)으로 계산되고, 백색화의 `eigvals.clamp_min(1e-8).rsqrt()`가 이를 **약 100배 증폭**한다.
+  `shj_slide_features()` 내부에서 `torch.autocast(enabled=False)`로 float32를 강제한다.
+
+#### SH — 차원별 모멘트 형상 *(미통합)*
+
+차원별 왜도·첨도를 슬라이드 자체 평균·표준편차로 표준화해 위치·척도 불변을 만든다
+(§218에서 채택, max |r| = 0.418).
+
+> ⚠️ **기술 부채: `SH`는 `src/models/`에 통합되어 있지 않다.** 구현은
+> `scripts/test_pathobench.py` 안에만 있고 `ICF_SHAPE_SCREEN_ONLY`가 기본값 `1`이라 앙상블
+> 경로에 들어가지 않는다. `SHJ`만 §222에서 `src/models/branches/`로 이관됐다.
+> 따라서 `branch_screen.py --adopted m_sh,m_shj`는 **SH 마진이 산출된 태그에서만** 완전한
+> 심사를 수행하며, 없으면 경고를 출력한다 ([`decisions.md`](decisions.md) `D-013`).
+
+---
+
+## 3. Head 마진 결합: Trimmed Mean Voting
 
 v120 베이스라인은 6개 활성 브랜치의 독립 확률을 정렬 후 상/하단 극단치를 1개씩 절사하고 중앙 4개를 평균하는 **Trimmed Mean Voting** 방식을 사용한다:
 
@@ -115,56 +164,33 @@ $$P(y=1) = \frac{1}{4} \sum_{k=2}^5 p_{(k)}$$
 
 ---
 
-## 4. 코드베이스 모듈 구조 및 개발자 가이드
+## 4. 코드베이스 배치
 
-### 4.1. 계층별 패키지 구성
+브랜치 구현은 `src/models/branches/` 아래 한 브랜치당 한 파일이다.
+
 ```
-ICF/
-├── src/
-│   ├── models/
-│   │   ├── base.py                # InContextClassifierProtocol & BaseInContextClassifier
-│   │   ├── registry.py            # @register_model 데코레이터 및 build_model 팩토리
-│   │   ├── training_free.py       # v120 활성 baseline (Trimmed Mean: CV+CT+BM+BD+QA+DS)
-│   │   ├── stream_eval.py         # 고속 스트리밍 평가 및 통계 캐싱
-│   │   ├── ct/                    # CT Readout 서브패키지 (config, tokenizers, abundance, readout)
-│   │   ├── ct_readout.py          # src.models.ct Re-export Facade (100% 하위 호환)
-│   │   └── dd_adaptive_rank.py    # DD & BD ordered-typicality margin
-│   ├── datasets/
-│   │   ├── synthetic/             # 합성 데이터 서브패키지 (types, generator, dataset)
-│   │   └── synthetic_data.py      # src.datasets.synthetic Facade
-│   └── modules/                   # Lightning 학습 인터페이스 (losses, diagnostics, guards)
-├── scripts/
-│   ├── node_env.sh                # 실행 노드별 Conda / Python 경로 자동 탐색 SSOT
-│   ├── eval_v118.sh               # v118 활성 baseline 평가 스크립트 (Soft Voting, Primary 7 tasks)
-│   ├── eval_v117.sh               # v117 baseline 평가 스크립트 (No-DD Linear, Primary 7 tasks)
-│   ├── eval_v116.sh               # v116 baseline 평가 스크립트 (5-Branch Linear)
-│   ├── analyze_voting.py          # 저장된 5-Branch Logit 오프라인 앙상블 분석기
-│   ├── eval_seal_tasks.sh         # 태스크별 평가 러너
-│   └── diagnostics/               # diagnose_*.py (14개 분석/진단 스크립트)
-└── tests/                         # 핵심 회귀 테스트 스위트 (107개 핵심 계약 검증)
-    ├── test_soft_voting.py        # v118 Soft Voting 앙상블 불변식 및 계약 검증
-    ├── test_bd_branch.py          # BD 브랜치 8대 불변식 계약 검증
-    ├── test_bm_branch.py          # BM 브랜치 6대 불변식 계약 검증
-    └── ...
+src/models/
+├── training_free.py          # 활성 파이프라인 — 기저 구축, 브랜치 호출, 집계 분기
+├── config.py                 # 브랜치 가중치·차원·λ 기본값 (weight_shj 기본 0.0)
+├── registry.py               # @register_model 데코레이터 및 build_model 팩토리
+├── stream_eval.py            # 고속 스트리밍 평가 및 통계 캐싱
+├── common/solvers.py         # Dual Ridge / kernel ridge 해법
+├── branches/
+│   ├── cv.py  bm.py  bd.py  qa.py  ds.py      # 공식 5-branch
+│   ├── ct.py                                   # 계보 — 공식 비교 기준에서 제외
+│   ├── shj.py                                  # 채택된 형상 브랜치 (§2.8)
+│   ├── dd.py                                   # DD 는 CA-02 로 닫힘; BD 마진 제공
+│   └── experimental/  de.py  lr.py  sw.py      # 기각·미판정 후보
+├── ct/                       # CT 사전 구축 및 soft-token 할당
+└── dd_adaptive_rank.py       # BD ordered-typicality 마진
 ```
 
-### 4.2. 실행 가이드
-```bash
-# 1. 환경 로드
-. scripts/node_env.sh
+- 디렉토리 전반의 역할표는 [`agent_handoff.md` §2.1](agent_handoff.md)에 있다.
+- **실행 명령은 [`agent_handoff.md` §6](agent_handoff.md)이 정본이다.** 이 문서에 명령을
+  중복해 적지 않는다 (과거 판이 존재하지 않는 `eval_v118.sh`·`eval_v117.sh`·`eval_v116.sh`를
+  안내하고 있었다).
+- 회귀 스위트는 브랜치별 불변식 계약을 검사한다 — `tests/test_bd_branch.py`,
+  `test_bm_branch.py`, `test_qa_branch.py`, `test_shj_branch.py`, `test_soft_voting.py`,
+  `test_core_contracts.py` 등.
 
-# 2. 회귀 테스트 실행
-$PYTHON -m unittest discover -s tests -p "test_*.py"
-
-# 3. v118 Baseline Primary 7-Task 평가 (기본)
-bash scripts/eval_v118.sh <gpu_id> <tag>
-
-# 4. v118 Hold-out 10-Task (SEAL) 검증
-bash scripts/eval_v118.sh <gpu_id> <tag> \
-  bc_therapy/er_status bc_therapy/grade bc_therapy/her2_status \
-  cptac_brca/PIK3CA_mutation cptac_brca/TP53_mutation \
-  cptac_luad/EGFR_mutation cptac_luad/STK11_mutation cptac_luad/TP53_mutation \
-  cptac_ccrcc/BAP1_mutation cptac_ccrcc/VHL_mutation
-```
-
-_by Gemini 3.7 Flash (High) on gnode3 at 2026-08-22 18:15:00_
+_by Claude Opus 5 on nexgem-s1 at 2026-09-06_

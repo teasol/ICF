@@ -1,0 +1,19 @@
+{
+  "id": "RU-79",
+  "title": "문서 체계 전면 재구성 및 RU 프로세스 도입",
+  "type": "research_infrastructure",
+  "start_date": "2026-09-06T11:28:36+09:00",
+  "start_sha": "f3f0b201f85d2bb7eafe1e63561e2bbda2b277c1",
+  "question": "진행이 반복 작업이 아니라 방향성 있는 축적이 되도록, 문서·진행 체계를 어떻게 바꿔야 하는가?",
+  "hypothesis": "정본 분산·닫힌 축 경계 부재·정정의 주석 누적 세 가지가 반복의 구조적 원인이며, 정본 분리 + 경계 레지스트리 + RU 카드 + 정합성 테스트로 차단할 수 있다.",
+  "criteria": "① 기준 수치가 PROJECT.md 밖에서 선언되면 테스트가 실패할 것. ② closed_axes.md의 모든 닫힌 축이 기각 기전·경계 안·경계 밖·재개 조건 네 필드를 갖출 것. ③ current_status.md가 80줄 이하일 것. ④ 137개 기존 회귀 테스트가 그대로 통과할 것.",
+  "budget": "GPU 0h. 1개 세션.",
+  "kill": "기존 137개 회귀 테스트가 문서 변경으로 깨지면 즉시 중단하고 원인을 먼저 해소한다.",
+  "next_actions": "pass: 사용자가 다음 연구 방향(현재 목표)을 설정하고 그 RU 카드를 연다. fail: 실패한 정합성 항목만 좁혀서 재작업하고, 연구 방향 설정은 그대로 진행한다.",
+  "experiment": "",
+  "observations": "",
+  "decision": "",
+  "evidence": [],
+  "relations": "",
+  "uncertainties": ""
+}
