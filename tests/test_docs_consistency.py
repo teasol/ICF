@@ -217,9 +217,15 @@ class TestResearchUnitsLedger(unittest.TestCase):
         ids = [u["id"] for u in self._units()]
         self.assertEqual(len(ids), len(set(ids)), "RU ID 가 중복된다.")
         nums = sorted(int(i.split("-")[1]) for i in ids)
+        # 아직 열려 있는 카드(docs/ru/RU-NN.json)는 총람에 없는 것이 정상이다 --
+        # ru.py 는 close 시점에 append 하므로 종료 순서가 번호 순서와 다를 수 있다.
+        # 그 번호만 빼고 1..max 가 빠짐없이 채워졌는지 검사한다.
+        open_ids = {int(f.stem.split("-")[1]) for f in (DOCS / "ru").glob("RU-*.json")}
+        expected = [n for n in range(1, max(nums) + 1) if n not in open_ids]
         self.assertEqual(
-            nums, list(range(1, len(nums) + 1)),
-            "RU 번호가 연속이 아니다. ru.py 를 거치지 않고 편집했을 가능성이 있다.",
+            nums, expected,
+            "RU 번호가 연속이 아니다 (열린 카드 제외). "
+            "ru.py 를 거치지 않고 편집했을 가능성이 있다.",
         )
 
     def test_units_carry_a_decision(self):

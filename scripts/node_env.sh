@@ -114,7 +114,7 @@ ICF_CONFIG="${ICF_CONFIG:-configs/archive/v94_v102_cell_value/train_v98_p1_rever
 #
 # Falls back to 1 where no GPU is visible (the login node), so CPU-only paths
 # keep working. GPU work does not belong on the login node -- see
-# /home/kimds/slurm_rules.md and docs/agent_handoff.md SS5.
+# /home/kimds/agent_rules/slurm_rules.md and docs/agent_handoff.md SS5.
 if [ -z "${NGPU:-}" ]; then
   if [ -n "${SLURM_GPUS_ON_NODE:-}" ]; then
     NGPU="$SLURM_GPUS_ON_NODE"
