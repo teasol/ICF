@@ -30,21 +30,20 @@
 |:---|:---|:---|
 | `RU-79` | 문서 체계 전면 재구성 및 RU 프로세스 도입 | 진행 중 |
 
-착수 전 RU 카드 등록은 필수다 — 절차는 [`agent_handoff.md` §1](agent_handoff.md)에 있다.
+착수 전 RU 카드 등록은 필수다 — 절차는 [`agent_handoff.md` §1](agent_handoff.md).
+`RU-80`(판정 설계 정밀도)은 종료했다 — 승격 기준이 바뀌었다(`D-018`, [`PROJECT.md` §4](PROJECT.md)).
 
 
 ## 실행 환경 — Slurm 클러스터 (2026-09-06 실측으로 정정)
 
 `nexgem`은 **로그인 노드**이고 GPU가 없다. 모든 계산은 `batch` 파티션에 `sbatch`로 제출하며,
-제출 전 사용자 승인을 받는다. 노드 스펙·선택 우선순위·로그 규약은 `/home/kimds/slurm_rules.md`가 정본이다.
+제출 전 사용자 승인을 받는다. 노드 스펙·선택 우선순위·로그 규약은 [`/home/kimds/agent_rules/slurm_rules.md`](/home/kimds/agent_rules/slurm_rules.md)가 정본이다.
 
 - **GPU 차단 해소.** `.venv`의 `torch 2.14.0+cu130`이 `gnode6`(H100 80GB · 드라이버 595.71.05 ·
   CUDA 13.2)에서 재설치 없이 동작한다 — `cuda_available=True`, 4096² matmul 성공(job 131263).
   이전 기록의 "드라이버 550"은 로그인 노드 값이라 계산 노드에 해당하지 않았다.
 - **`gnode1`~`gnode5`는 미확인.** cu130은 드라이버 ≥580을 요구한다. 처음 쓰기 전에 점검 job으로
   `torch.cuda.is_available()`를 실측한다 — `device_count()`만 보고 판단하지 않는다.
-- **낮은 등급부터 쓴다.** GPU 불필요 작업은 `node1`~`node5`(GPU 없음)로 보내고, GPU가 필요하면
-  A5000(`gnode1-4`) → A6000(`gnode5`) → H100(`gnode6`) 순으로 올라간다.
 
 ### Immediate Next Command
 
@@ -64,10 +63,12 @@ sinfo -N -o "%N %C %m %G %t" -n node1,node2,node3,node4,node5,gnode1,gnode2,gnod
 - **다음 연구 방향 설정** — 위 "현재 목표" 참조.
 
 **연구상의 교착**
-- **과제 특화 이득을 활용할 선택 신호가 없다.** §221(SHJ)과 §225(subsampling)가 같은 벽에
-  막혔다 — 이득은 실재하나 라벨 없이 과제를 판별할 수단이 없다.
-  ([`closed_axes.md` `CA-R1`](closed_axes.md))
+- **과제 특화 이득을 활용할 선택 신호가 없다.** §221(SHJ)·§225(subsampling)가 같은 벽에 막혔다 —
+  이득은 실재하나 라벨 없이 과제를 판별할 수단이 없다 ([`closed_axes.md` `CA-R1`](closed_axes.md)).
 - **모든 판정이 `hold-out 미검증`** 이다 ([`PROJECT.md` §3.1](PROJECT.md)).
+- **v115~v120 6브랜치 조합이 미검증이다.** 소급 재판정은 안 하되(`D-016`) 새 규칙(`D-018`)으로
+  현행 조합을 검증하는 것은 남은 과제다. **절대 macro는 과제 모집단 성능으로 주장 불가**
+  (군집 SE `4.34%p`, [`PROJECT.md` §4.1](PROJECT.md)) — 대응 비교만 정밀하다.
 
 **기술 부채**
 - §226 Tier 1 3건(`AKS`·`MDX`·`LID`)이 **동일 에이전트 한 배치 산출**이며 독립 비교군이 없다.

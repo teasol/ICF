@@ -35,7 +35,7 @@
 | 브랜치 정의와 수식 · 집계 규칙 | [`current_architecture.md`](current_architecture.md) |
 | 연구 이력 전수 (RU-01~) | [`history/research_units_all.md`](history/research_units_all.md) |
 | 현행 연구 방향 후보 큐 | [`research_directions.md`](research_directions.md) |
-| Slurm 노드 스펙 · 선택 우선순위 · job 로그 경로 | `/home/kimds/slurm_rules.md` (저장소 밖) |
+| Slurm 노드 스펙 · 선택 우선순위 · job 로그 경로 | [`/home/kimds/agent_rules/slurm_rules.md`](/home/kimds/agent_rules/slurm_rules.md) (저장소 밖) |
 | 노드 종속 설정 (인터프리터 · GPU 수 · 경로) | [`../scripts/node_env.sh`](../scripts/node_env.sh) |
 | arm 구성과 환경변수 주입 | [`../scripts/lib/arms.sh`](../scripts/lib/arms.sh) |
 
@@ -48,6 +48,7 @@
 | [`history/research_units_all.md`](history/research_units_all.md) | **450커밋 전수 연구 단위 총람** (RU-01~78, 6대 시대, 113건 인용 검증). 앞으로 `ru.py close`가 여기에 append한다 |
 | [`history/research_units_all.json`](history/research_units_all.json) | 위의 기계 판독 DB |
 | [`history/research_units_all_manifest.json`](history/research_units_all_manifest.json) | 0..449 전체 커밋 매니페스트 (SHA · 날짜 · 메시지 · 변경 파일) |
+| [`history/era_review_notes.md`](history/era_review_notes.md) | **시대별 검토 메모 (발표 자료용)** — 시대마다 "얻은 것 / 닫은 것"과 검토 지적. 정본 아님, 해석 메모 |
 | [`history/archive.md`](history/archive.md) | 세션 절 아카이브 (§190~§226) |
 | [`history.md`](history.md) | v18~v184 시대의 설계·딥다이브 통합본. §19는 "다시 열면 안 되는 결론" 요약이나, **경계 정의를 갖춘 정본은 [`closed_axes.md`](closed_axes.md)다** |
 

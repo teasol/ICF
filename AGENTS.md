@@ -2,9 +2,23 @@
 
 이 저장소는 멀티 에이전트(Antigravity, Claude Code, GPT Codex, OpenCode)와 멀티 디바이스 환경 간 작업 인수인계를 위해 **Universal Handoff Protocol**을 따릅니다.
 
-## 0. 목표 중심 연구 원칙
+## 0. 먼저 읽는 것 — 보편 연구 규범
 
-모든 작업에 앞서 [`docs/agent_handoff.md` §0 목표 중심 연구 원칙](docs/agent_handoff.md#0-목표-중심-연구-원칙)을 읽고 따릅니다. 원칙의 정본은 해당 문서이며, 현재 목표·완료 조건·후속 행동은 `docs/current_status.md`에 기록합니다.
+**연구·실험·분석에 착수하기 전에
+[`/home/kimds/agent_rules/research_protocol.md`](/home/kimds/agent_rules/research_protocol.md)(v3.0)를
+읽습니다.** 모든 프로젝트 공용 정본이며, 이 저장소의 규범은 그것을 **상속하고 좁힌 것**입니다.
+
+그다음 [`docs/agent_handoff.md`](docs/agent_handoff.md)의 **맨 위 절(이 저장소의 적용 규칙
+R1~R7)** 과 [§0 목표 중심 연구 원칙](docs/agent_handoff.md#0-목표-중심-연구-원칙)을 읽습니다.
+
+요지 세 가지:
+- **RU 유형을 먼저 정합니다** (탐색 / 진단 / 확증 / 재현·계측). **탐색은 허용되며**,
+  실패는 탐색을 한 것이 아니라 **탐색을 확증이라고 부른 것**입니다.
+- **성능 관측을 기전의 입증으로 바꾸어 쓰지 않습니다.** 기전이 불명확하면 `기전 미확인`을 적습니다.
+- **증거 판정**(지지/반박/판별 불가/실행 무효)과 **운영 결정**(채택/추가 진단/보류/종료)을
+  분리해 적습니다.
+
+원칙의 정본은 위 두 문서이며, 현재 목표·완료 조건·후속 행동은 `docs/current_status.md`에 기록합니다.
 
 ## 1. 세션 시작 (Resume Handoff)
 사용자가 "이어서 시작하자", "핸드오프 받아줘", "resume", "어디까지 했지" 등으로 작업을 시작할 때:
