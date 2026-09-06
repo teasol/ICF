@@ -6,6 +6,8 @@
   - README.md 는 "Active v120 6-branch, Primary 7 macro 0.6265" 라고 적고 있었으나
     공식 비교 기준은 v121 5-branch 0.6171 이었다. 정본 세 곳이 서로 다른 값을 말했다.
   - agent_handoff.md 는 회귀 스위트를 "119 tests" 로 적고 있었으나 실제는 137개였다.
+    (그 뒤 이 파일이 추가되며 146개가 됐고 문서는 다시 137에 머물렀다 — 그래서
+    TestDocumentedTestCount 로 사람의 주의력 대신 테스트가 지키게 했다.)
   - current_status.md 는 190줄까지 자라 상태·결정·정정·환경이 뒤섞였다.
   - §226 에서 낡은 서술 2건이 브리핑 팩을 통해 7개 에이전트 전부에 전파됐다.
 
@@ -26,6 +28,7 @@ PROJECT_MD = DOCS / "PROJECT.md"
 CLOSED_AXES_MD = DOCS / "closed_axes.md"
 DECISIONS_MD = DOCS / "decisions.md"
 STATUS_MD = DOCS / "current_status.md"
+AGENT_HANDOFF_MD = DOCS / "agent_handoff.md"
 
 #: PROJECT.md 만 선언할 수 있는 수치. 다른 Living 문서에 나타나면 drift다.
 GUARDED_NUMBERS = (
@@ -51,7 +54,7 @@ GUARDED_FILES = (
 STATUS_MAX_LINES = 80
 
 #: 닫힌 축 상세 항목이 반드시 갖춰야 하는 필드.
-AXIS_REQUIRED_FIELDS = ("기각 기전", "경계 안", "경계 밖")
+AXIS_REQUIRED_FIELDS = ("기각 기전", "경계 안", "경계 밖", "재개 조건")
 
 
 def _read(path: Path) -> str:
@@ -172,6 +175,34 @@ class TestStatusDocStaysShort(unittest.TestCase):
             f"current_status.md 가 {n}줄이다 (상한 {STATUS_MAX_LINES}). "
             f"종료된 절은 docs/history/archive.md 로, 결정은 docs/decisions.md 로 옮긴다.",
         )
+
+
+class TestDocumentedTestCount(unittest.TestCase):
+    """문서에 적힌 회귀 스위트 규모가 실제 수집 개수와 같아야 한다."""
+
+    #: "146 tests" 형태를 찾는다. 두 Living 문서가 같은 수를 말해야 한다.
+    _PATTERN = re.compile(r"(\d+) tests")
+
+    @staticmethod
+    def _discovered() -> int:
+        # run_tests.sh 와 같은 방식으로 수집한다: `unittest discover -s tests -p 'test_*.py'`.
+        # 실행하지 않고 개수만 센다. 모듈은 이 스위트가 이미 임포트한 것이라 sys.modules 에 있다.
+        suite = unittest.TestLoader().discover(str(REPO / "tests"), pattern="test_*.py")
+        return suite.countTestCases()
+
+    def test_docs_state_the_real_count(self):
+        actual = self._discovered()
+        for path in (STATUS_MD, AGENT_HANDOFF_MD):
+            found = self._PATTERN.findall(_read(path))
+            self.assertTrue(
+                found, f"{path.name} 에 '<n> tests' 표기가 없다. 스위트 규모를 명시한다.",
+            )
+            for n in found:
+                self.assertEqual(
+                    int(n), actual,
+                    f"{path.name} 는 회귀 스위트를 {n} tests 로 적었으나 실제는 {actual}개다. "
+                    f"테스트를 추가·삭제했으면 두 문서의 수치를 함께 고친다.",
+                )
 
 
 class TestResearchUnitsLedger(unittest.TestCase):

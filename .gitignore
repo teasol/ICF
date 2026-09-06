@@ -51,6 +51,7 @@ predictions/
 
 # Cluster and local runtime artifacts
 slurmlog/
+slurm_outputs/
 slurm-*.out
 slurm-*.err
 *.pid

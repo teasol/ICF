@@ -20,9 +20,9 @@
 #   NGPU           how many GPUs this run may use
 #   GPU_OFFSET     index of the first GPU it may use
 #
-# ⚠️ NGPU/GPU_OFFSET are a COURTESY setting, not a capability one. On the node this
-# was written for, GPUs 4-7 carried another user's training, so the default is
-# 0-3. On a node you have to yourself, export NGPU to the real count.
+# ⚠️ NGPU/GPU_OFFSET describe what THIS process may open, not what the box carries.
+# Under Slurm they come from the allocation (see the GPUs section below), so a job
+# holding `--gres=gpu:1` fans out over exactly one device. Export NGPU to override.
 
 # ---- interpreter ----------------------------------------------------------
 # ICF_ROOT is derived from this file's own location, so the venv is found no
@@ -95,9 +95,36 @@ fi
 ICF_CONFIG="${ICF_CONFIG:-configs/archive/v94_v102_cell_value/train_v98_p1_reverse_1536_1gpu.yaml}"
 
 # ---- GPUs -----------------------------------------------------------------
+# NGPU is the device count the fan-out scripts index into as
+# `$(((i % NGPU) + GPU_OFFSET))`, so it has to match what this process may
+# actually open -- not what the box carries.
+#
+# This used to answer "did nvidia-smi see anything?" with a hardcoded 4, a
+# courtesy default for a node where GPUs 4-7 belonged to another user. That
+# number is wrong under Slurm: a job holding `--gres=gpu:1` would still fan out
+# over 4 devices and fail on the second one. Ask the allocation instead, in
+# order of authority:
+#
+#   1. NGPU already exported  -- an explicit override always wins.
+#   2. SLURM_GPUS_ON_NODE     -- the allocation, stated by the scheduler.
+#   3. CUDA_VISIBLE_DEVICES   -- set by Slurm (and by hand outside it); the
+#                                driver renumbers the listed devices to 0..N-1,
+#                                which is why GPU_OFFSET stays 0 under Slurm.
+#   4. nvidia-smi -L          -- the real count on an unmanaged node.
+#
+# Falls back to 1 where no GPU is visible (the login node), so CPU-only paths
+# keep working. GPU work does not belong on the login node -- see
+# /home/kimds/slurm_rules.md and docs/agent_handoff.md SS5.
 if [ -z "${NGPU:-}" ]; then
-  detected="$(nvidia-smi -L 2>/dev/null | wc -l)"
-  NGPU="$([ "${detected:-0}" -gt 0 ] && echo 4 || echo 1)"
+  if [ -n "${SLURM_GPUS_ON_NODE:-}" ]; then
+    NGPU="$SLURM_GPUS_ON_NODE"
+  elif [ -n "${CUDA_VISIBLE_DEVICES:-}" ]; then
+    # "0,2,3" -> 3. A bare "" means "no GPU", which the -n guard already excluded.
+    NGPU="$(printf '%s' "$CUDA_VISIBLE_DEVICES" | tr ',' '\n' | grep -c .)"
+  else
+    NGPU="$(nvidia-smi -L 2>/dev/null | wc -l)"
+  fi
+  [ "${NGPU:-0}" -gt 0 ] 2>/dev/null || NGPU=1
 fi
 GPU_OFFSET="${GPU_OFFSET:-0}"
 
