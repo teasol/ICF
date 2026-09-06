@@ -1,0 +1,602 @@
+[
+  {
+    "index": 0,
+    "sha": "aac69013e4d3def23977cff98e13f5a0c1c58ddc",
+    "date": "2026-08-17T22:16:23+09:00",
+    "subject": "§150: PCA x readout together — §148's \"readout is not the bottleneck\" held only at raw 1536"
+  },
+  {
+    "index": 1,
+    "sha": "ebcdb8358dc8c9979915a249cfcf0d54f81b0ae3",
+    "date": "2026-08-17T22:36:12+09:00",
+    "subject": "§151-152: retract the t statistics for deterministic arms; promote v108 (CT = 32-d PCA + ridge)"
+  },
+  {
+    "index": 2,
+    "sha": "bd7647bb162f5a4874aef8970a3662818bd85e8a",
+    "date": "2026-08-17T23:05:04+09:00",
+    "subject": "§153: DD weight swept down — DD's contribution changes SIGN between task groups"
+  },
+  {
+    "index": 3,
+    "sha": "c61a4100c48416e56c510e262e055ca058829420",
+    "date": "2026-08-17T23:39:57+09:00",
+    "subject": "§154: DD's missing LLR log-determinant term — correct, large, and structurally invisible to fold-mean AUROC"
+  },
+  {
+    "index": 4,
+    "sha": "c85156b8be3cd2bf09a79b5039f901813a062a65",
+    "date": "2026-08-18T00:41:54+09:00",
+    "subject": "§155: relative DD margin (D0-D1)/(D0+D1+eps) — premise holds, effect rejected"
+  },
+  {
+    "index": 5,
+    "sha": "80e7045cb2d4d9e96819ab1c225c3e2247734bce",
+    "date": "2026-08-18T01:36:36+09:00",
+    "subject": "§156: dissect the CV descriptor — the raw bag mean is dead weight and the 256 diagonal entries are harmful"
+  },
+  {
+    "index": 6,
+    "sha": "7ddb525a64d82f468bf8c80fcfe1b25a1f7247a5",
+    "date": "2026-08-18T02:14:39+09:00",
+    "subject": "§157: k-means tokens — farthest-point was using ~2 of its 16 tokens"
+  },
+  {
+    "index": 7,
+    "sha": "7456a22c0845bd086f1447062f98fdf8b832b354",
+    "date": "2026-08-18T02:27:44+09:00",
+    "subject": "§158: promote v109 — CV off-diagonal only + k-means CT tokens at weight 0.7"
+  },
+  {
+    "index": 8,
+    "sha": "f2f29cccf94a353ad0c6fd759068441d5ef50b02",
+    "date": "2026-08-18T03:27:29+09:00",
+    "subject": "§159: remove CT's 64-cell cap — rejected, sampling was never the bottleneck"
+  },
+  {
+    "index": 9,
+    "sha": "a04f0cf26e406873f6056301095f4beac0e1b67e",
+    "date": "2026-08-18T05:55:13+09:00",
+    "subject": "§160: sweep the token count — 32 is the peak, and full cells lose at every count"
+  },
+  {
+    "index": 10,
+    "sha": "131c95a869d05a3122e3c0a288d3d4bb71660cc0",
+    "date": "2026-08-18T09:20:39+09:00",
+    "subject": "§161: promote v110 (CT clusters 16 -> 32) and rewrite the architecture doc for a training-free model"
+  },
+  {
+    "index": 11,
+    "sha": "9c1889d2f8b56409ad529f05f13f5ce16daa8380",
+    "date": "2026-08-18T11:36:35+09:00",
+    "subject": "§162: idea 1 (CV on the correlation matrix) — rejected; the covariance magnitude was information"
+  },
+  {
+    "index": 12,
+    "sha": "fb91a0691c801b3ec1933e25bee6ba47340e6b55",
+    "date": "2026-08-18T12:23:26+09:00",
+    "subject": "§163: CT ridge lambda sweep — lambda=1 is already optimal, and ~30% of §160's token gain was a lambda effect"
+  },
+  {
+    "index": 13,
+    "sha": "69360766f48cb06b0333446b9817c88209b5620f",
+    "date": "2026-08-18T13:47:07+09:00",
+    "subject": "§164: prepare for a server move — node config in one file, agent_handoff rewritten"
+  },
+  {
+    "index": 14,
+    "sha": "b7d2f784e9fd09be58c7d9c1bb6b0e044cc5c53d",
+    "date": "2026-08-18T14:38:22+09:00",
+    "subject": "§165: test random-512 CT dictionary with full abundance"
+  },
+  {
+    "index": 15,
+    "sha": "21be1036bdae0c1d62fb708a39e0d045659d49b9",
+    "date": "2026-08-18T14:49:13+09:00",
+    "subject": "§166: isolate CT abundance size at random-512"
+  },
+  {
+    "index": 16,
+    "sha": "f9e6e1afe97801d8379a2054f7c9a90eb047674a",
+    "date": "2026-08-18T15:00:36+09:00",
+    "subject": "§167: test random-64 CT dictionary with full abundance"
+  },
+  {
+    "index": 17,
+    "sha": "767e504ce25169971b6ee129b32b05c2390e343a",
+    "date": "2026-08-18T16:22:03+09:00",
+    "subject": "§168: evaluate full-cell hierarchical CT resolution"
+  },
+  {
+    "index": 18,
+    "sha": "91f2ad039274b9acd34de1cf8de6467657f56bdf",
+    "date": "2026-08-18T17:12:33+09:00",
+    "subject": "§169: evaluate dynamic full-cell HDBSCAN tokens"
+  },
+  {
+    "index": 19,
+    "sha": "1d5dbc372ab224cf903656a0eff45f89e2f622b1",
+    "date": "2026-08-18T17:29:22+09:00",
+    "subject": "§170: evaluate adaptive DBSCAN on random-64 cells"
+  },
+  {
+    "index": 20,
+    "sha": "582386470c76b67097f16ad446691a979015d70c",
+    "date": "2026-08-18T18:37:09+09:00",
+    "subject": "§171: correct random-64 density test to HDBSCAN"
+  },
+  {
+    "index": 21,
+    "sha": "4f3f362af6ea31dfeec1f0ef65318ca78614503f",
+    "date": "2026-08-18T19:24:18+09:00",
+    "subject": "§172: checkpoint session handoff"
+  },
+  {
+    "index": 22,
+    "sha": "c34dfe2da2bea7dd7c3a33c42e2d62a6dc246a07",
+    "date": "2026-08-19T09:05:03+09:00",
+    "subject": "feat: finalize CT tokenizer and hierarchical evaluations"
+  },
+  {
+    "index": 23,
+    "sha": "3bee7a2a3556e51e7f379747e9da3a80c1ba76d4",
+    "date": "2026-08-19T09:20:23+09:00",
+    "subject": "feat: evaluate raw spherical CT clustering"
+  },
+  {
+    "index": 24,
+    "sha": "65a20d9c6d11f4b8551392a0e55638c963411ae6",
+    "date": "2026-08-19T09:36:13+09:00",
+    "subject": "feat: promote full-cell hierarchical CT as v111"
+  },
+  {
+    "index": 25,
+    "sha": "80f17db7d79d3aa7d179664de4bd039b0d4a43fe",
+    "date": "2026-08-19T10:09:32+09:00",
+    "subject": "feat: add bounded ordered DD readout"
+  },
+  {
+    "index": 26,
+    "sha": "aa31bed2f7819945943a1e42bf51c574dc9d87c6",
+    "date": "2026-08-19T10:11:39+09:00",
+    "subject": "chore: add full DD evaluation runner"
+  },
+  {
+    "index": 27,
+    "sha": "d8f5e9ee3309ef07648975504fd7fa226e805fbc",
+    "date": "2026-08-19T10:12:36+09:00",
+    "subject": "docs: record ordered DD evaluation launch"
+  },
+  {
+    "index": 28,
+    "sha": "88641c1b77de766f0b4dcd4fa4a2c7b18a8ed81f",
+    "date": "2026-08-19T10:13:49+09:00",
+    "subject": "fix: isolate DD selector state in evaluation"
+  },
+  {
+    "index": 29,
+    "sha": "cec1a15491cd2afc19c7628467a15080c930e563",
+    "date": "2026-08-19T10:14:40+09:00",
+    "subject": "docs: record corrected DD evaluation launch"
+  },
+  {
+    "index": 30,
+    "sha": "fc814a3c4078812bf7b03927e3afcb8e7bab1577",
+    "date": "2026-08-19T11:35:05+09:00",
+    "subject": "feat: promote DD ordered x typicality (kappa=1, weight=1) as v112"
+  },
+  {
+    "index": 31,
+    "sha": "c727e103b60f2509ebc6852f0d9abdb641c296da",
+    "date": "2026-08-20T01:15:15+09:00",
+    "subject": "feat: promote v113 (CT fraction sampling) as active baseline"
+  },
+  {
+    "index": 32,
+    "sha": "7acfd24e388daedda6966c8360ffe10709a3e8f9",
+    "date": "2026-08-20T09:18:50+09:00",
+    "subject": "docs: update handoff status — unit-weight fixed-head experiment (§186)"
+  },
+  {
+    "index": 33,
+    "sha": "a495a18c7e5459c65b6928ee800639ed89086267",
+    "date": "2026-08-20T09:23:38+09:00",
+    "subject": "feat: promote v114 (unified fixed-head weights) as active baseline"
+  },
+  {
+    "index": 34,
+    "sha": "eee4650c781dfeed988a5ad26135e5f319dd6009",
+    "date": "2026-08-20T22:23:12+09:00",
+    "subject": "reject CT kernel-ridge (§188) and top-k/mean+topk pooling (§189); keep reproduction code"
+  },
+  {
+    "index": 35,
+    "sha": "af004748490daf81aa817ff17c7133274dd47355",
+    "date": "2026-08-21T14:46:57+09:00",
+    "subject": "Refactor: Decompose monolithic modules, streamline test suite (335->86 tests), and update documentation"
+  },
+  {
+    "index": 36,
+    "sha": "0fc24152fad0076c4c856971d91df42a3bf20a38",
+    "date": "2026-08-21T14:50:48+09:00",
+    "subject": "Docs: Add author and node stamps per SSOT guidelines"
+  },
+  {
+    "index": 37,
+    "sha": "bf787d7a18a5212decffc89a3df598516b9b086b",
+    "date": "2026-08-21T14:51:47+09:00",
+    "subject": "Docs: Update stamp author to Gemini 3.7 Flash (High)"
+  },
+  {
+    "index": 38,
+    "sha": "31ea065d8981c75097b787163338934daff796e1",
+    "date": "2026-08-21T15:02:23+09:00",
+    "subject": "Feat: Implement Plan A Projected Bag-Mean (BM) branch with unit tests"
+  },
+  {
+    "index": 39,
+    "sha": "24b7a20d7e8492d393fe46bf87cde75e631f7466",
+    "date": "2026-08-21T15:08:33+09:00",
+    "subject": "Docs: Consolidate decision rules into current_status.md Section 0 SSOT and archive historical rules"
+  },
+  {
+    "index": 40,
+    "sha": "05c47c5c6629e788dfb2f42fa7d5ef800e70660c",
+    "date": "2026-08-21T15:18:04+09:00",
+    "subject": "Docs: Complete overhaul & streamlining across all docs, archive historical sections to history.md, update experiments queue with Plan A/B/C"
+  },
+  {
+    "index": 41,
+    "sha": "43b00aede77bc6e392374f55418be5adedea10d7",
+    "date": "2026-08-21T15:43:55+09:00",
+    "subject": "Docs: Update agent_handoff.md according to user review"
+  },
+  {
+    "index": 42,
+    "sha": "5fbcb3cc575dd7f74af506ddc2bb6ce896bd6c58",
+    "date": "2026-08-21T15:45:59+09:00",
+    "subject": "Docs: Keep only confirmed v114 3-branch model in current_architecture.md"
+  },
+  {
+    "index": 43,
+    "sha": "ad9b13cc01e04a1e2a12373396a20ef6897cb47e",
+    "date": "2026-08-21T15:46:58+09:00",
+    "subject": "Docs: Remove open research directions from current_architecture.md"
+  },
+  {
+    "index": 44,
+    "sha": "41aff6e5b88a9f50d4c5315186cc362cd06d2846",
+    "date": "2026-08-21T15:47:35+09:00",
+    "subject": "Docs: Remove closed axes from current_architecture.md to keep it pure architecture spec"
+  },
+  {
+    "index": 45,
+    "sha": "b60a8a0309326c701309b166f95a702b7f69a6ce",
+    "date": "2026-08-21T17:58:56+09:00",
+    "subject": "Docs: Revise evaluation protocol to Primary 7-task and Holdout 10-task (SEAL)"
+  },
+  {
+    "index": 46,
+    "sha": "4207821715b7b387c1d4a2f222e2a786eb417010",
+    "date": "2026-08-22T15:00:18+09:00",
+    "subject": "feat: promote v115 baseline with BM branch (4-branch model) and update docs/tests"
+  },
+  {
+    "index": 47,
+    "sha": "dfcc1c00d565ce8a8a762e25cfad23f39ab79b6c",
+    "date": "2026-08-22T17:11:38+09:00",
+    "subject": "feat: promote v116 baseline with BD branch (Spectral Entropy, 5-branch model) and update docs/tests"
+  },
+  {
+    "index": 48,
+    "sha": "3987dcc9edb61d7df76acfef342910b722fd9d72",
+    "date": "2026-08-22T18:19:01+09:00",
+    "subject": "feat: promote v118 baseline (4-branch Soft Voting) and preserve v117 (No-DD Linear)"
+  },
+  {
+    "index": 49,
+    "sha": "8455cb4cef19983fcb503e84a702c0434f514229",
+    "date": "2026-08-22T19:06:34+09:00",
+    "subject": "docs: record v118 SEAL 10-task holdout validation results (Macro 0.7011)"
+  },
+  {
+    "index": 50,
+    "sha": "6deb53ecf949fa5358a2d0a0b2d74772e4eb89f7",
+    "date": "2026-08-22T19:10:29+09:00",
+    "subject": "docs: add direct comparison against Supervised ABMIL/MeanMIL for SEAL 10"
+  },
+  {
+    "index": 51,
+    "sha": "9dce8c5e54b9d3f2b84babac4b3558b50e6dbbce",
+    "date": "2026-08-22T21:33:01+09:00",
+    "subject": "feat(v119): QA Branch + Trimmed Mean Voting promotion & SEAL 10 evaluation"
+  },
+  {
+    "index": 52,
+    "sha": "b0ae85b4c1ccd2d9ef1f240add40831e9f8666ef",
+    "date": "2026-08-22T22:27:04+09:00",
+    "subject": "feat(v119): retain CV branch in 5-Branch Trimmed Mean Voting architecture"
+  },
+  {
+    "index": 53,
+    "sha": "a42a0be0a8f47f903682ee4e8a53c918d0590380",
+    "date": "2026-08-23T00:22:16+09:00",
+    "subject": "Promote v120 (6-Branch + Trimmed Mean Voting with DS Salience Denoising)"
+  },
+  {
+    "index": 54,
+    "sha": "6faa1c3b52a26d7fb62e70f2bc53e2271d8e6b1b",
+    "date": "2026-08-23T11:46:20+09:00",
+    "subject": "docs: establish v120 6-branch baseline and record KRR, LR, Trimming, and Fisher subspace post-mortems (§199-§203)"
+  },
+  {
+    "index": 55,
+    "sha": "7f883f10e8ae164e2f5c6bae09f290e462d454d0",
+    "date": "2026-08-24T18:17:18+09:00",
+    "subject": "docs: record standalone branch benchmarks and CT-only comparison (§204)"
+  },
+  {
+    "index": 56,
+    "sha": "1b17863da99398962425743eebe118c0a513ed86",
+    "date": "2026-08-24T18:20:05+09:00",
+    "subject": "docs: add detailed per-task tables for CT alone vs v120 vs MeanMIL vs ABMIL (§204)"
+  },
+  {
+    "index": 57,
+    "sha": "d858deea5742920094fae66e4a46b4356129e29c",
+    "date": "2026-08-30T23:23:07+09:00",
+    "subject": "chore: unify Research Harness ignore rules (union of main-worktree and experiment-branch edits, merge prep)"
+  },
+  {
+    "index": 58,
+    "sha": "2c08102d41829fde12e297c01ffcd5b37a229096",
+    "date": "2026-08-30T23:23:15+09:00",
+    "subject": "Merge exp/baseline: v120 Primary-7 harness-verified reference (researcher-approved; determinism caveat documented — 4/350-fold bf16 drift, both runs in band)"
+  },
+  {
+    "index": 59,
+    "sha": "6ae016b120df31a1476b563f90499d7fb48878dc",
+    "date": "2026-08-30T23:23:27+09:00",
+    "subject": "Merge exp/modularize-arms: arm definitions de-forked into scripts/lib/arms.sh (researcher-approved; env/argv parity 7/7, Primary-7 macro 0.621614 in 0.6265±0.005 band)"
+  },
+  {
+    "index": 60,
+    "sha": "8d8181feb3de394a1c14b5e16a98c6e399b145ed",
+    "date": "2026-08-30T23:28:00+09:00",
+    "subject": "feat: DE/SW fixed-head branches, in-episode LOO and combination-search tooling with tests"
+  },
+  {
+    "index": 61,
+    "sha": "d08d2676c9ed35f5db2fa1a1b0c5c8a2026cf457",
+    "date": "2026-08-30T23:28:00+09:00",
+    "subject": "docs: add Research Harness agent ground rules (AGENTS.md)"
+  },
+  {
+    "index": 62,
+    "sha": "dd06c931084fe26c0b2590c574f8da7a7e3ccf7d",
+    "date": "2026-08-30T23:28:48+09:00",
+    "subject": "Merge exp/baseline: final determinism-gate report record"
+  },
+  {
+    "index": 63,
+    "sha": "83c5664eab88aee5851e00b68b484ba7ece44825",
+    "date": "2026-09-02T15:35:15+09:00",
+    "subject": "Remove obsolete tasks: arms-lib, metrics-extractor, and primary7-runner"
+  },
+  {
+    "index": 64,
+    "sha": "10484d9aafa10873c55b91a7c9bb7a08408082bc",
+    "date": "2026-09-02T15:55:28+09:00",
+    "subject": "chore(configs): archive the learned-parameter lineage, drop unreferenced configs"
+  },
+  {
+    "index": 65,
+    "sha": "fd1095a6955c8736382dbf21cb992a7b53e27c7b",
+    "date": "2026-09-02T16:38:49+09:00",
+    "subject": "chore(env): replace the lost conda env with a uv venv; split non-tests out of tests/"
+  },
+  {
+    "index": 66,
+    "sha": "1fc9dc2b594df18b71a47d0ebc685792d3efedf0",
+    "date": "2026-09-03T10:39:32+09:00",
+    "subject": "docs: initialize universal handoff protocol and baseline status"
+  },
+  {
+    "index": 67,
+    "sha": "a6509b9bf009e49ce02490784023849df9d96723",
+    "date": "2026-09-03T10:45:47+09:00",
+    "subject": "docs: record git token configuration and remote sync"
+  },
+  {
+    "index": 68,
+    "sha": "e7f3ea5ceb632d3d06496267277794912bfa6d11",
+    "date": "2026-09-03T11:00:57+09:00",
+    "subject": "docs: consolidate current_experiments into current_status and archive"
+  },
+  {
+    "index": 69,
+    "sha": "1d136766d5ecdbdcf7d9eb0d0ab328b37b1bfcdb",
+    "date": "2026-09-03T11:41:14+09:00",
+    "subject": "refactor(models): modularize training-free branches into dedicated submodules"
+  },
+  {
+    "index": 70,
+    "sha": "6c0683064a210ee6735047db7a746312a683685d",
+    "date": "2026-09-03T11:41:17+09:00",
+    "subject": "feat(tooling): add fast regression test runner and optimize interpreter resolution"
+  },
+  {
+    "index": 71,
+    "sha": "8aee2bdf785226cf3ac63c7c8127a782cb7c8c3a",
+    "date": "2026-09-03T11:41:21+09:00",
+    "subject": "docs: update current status to clean following modularization and tooling commit"
+  },
+  {
+    "index": 72,
+    "sha": "dac77b74bfd38e01dc9f59dbb0d86ad306f1b9bc",
+    "date": "2026-09-03T11:56:01+09:00",
+    "subject": "feat(config): establish typed YAML config architecture with 11-category anti-trap tests"
+  },
+  {
+    "index": 73,
+    "sha": "1319aa052e86d64f5c58ecf71ef804db78168b4c",
+    "date": "2026-09-03T11:56:05+09:00",
+    "subject": "docs: update current_status with config systematization milestone"
+  },
+  {
+    "index": 74,
+    "sha": "15ac697c71a952ec37eba0682444498106966afa",
+    "date": "2026-09-03T12:05:33+09:00",
+    "subject": "chore(configs): archive legacy hydra groups and train_v98, cleaning root to baseline, experiments, and archive"
+  },
+  {
+    "index": 75,
+    "sha": "03d4e412f57484bde242516a57233de8877d9da9",
+    "date": "2026-09-03T12:34:34+09:00",
+    "subject": "refactor(scripts): reorganize scripts into data, analysis, and archive categories"
+  },
+  {
+    "index": 76,
+    "sha": "d74bb0c71114f951027f174ab09f7c2c986052bd",
+    "date": "2026-09-03T14:30:37+09:00",
+    "subject": "docs: record 8-branch standalone metrics and 50-fold runtime benchmarks (§209)"
+  },
+  {
+    "index": 77,
+    "sha": "976fd5abbabb55140c783a104d1f4dc34c50bbda",
+    "date": "2026-09-03T17:39:19+09:00",
+    "subject": "feat(ds): implement and benchmark MIL sub-bag data augmentation and query TTA (§210)"
+  },
+  {
+    "index": 78,
+    "sha": "401305b1c20c6bba284ee92f5c5328606776beb7",
+    "date": "2026-09-03T19:50:25+09:00",
+    "subject": "feat(mil-dual): 50-fold benchmark of In-Episode LOO Dual Selection and curse of dimensionality analysis (§211)"
+  },
+  {
+    "index": 79,
+    "sha": "6a87a5d109b75908c32c170912a7695445d4c938",
+    "date": "2026-09-03T20:35:22+09:00",
+    "subject": "feat(eval): 50-fold benchmark of clean Context LOO stacking and LOO retirement decision (§212)"
+  },
+  {
+    "index": 80,
+    "sha": "c3dd5352408ec47eb921a46594d23c44fa440137",
+    "date": "2026-09-03T22:49:19+09:00",
+    "subject": "feat(eval): fast 5-branch baseline (mute CT) & salience anchor subsampling 50-fold benchmarks (§213)"
+  },
+  {
+    "index": 81,
+    "sha": "73601f4415052d5743688dac7ef73095cb77b090",
+    "date": "2026-09-03T23:07:25+09:00",
+    "subject": "feat(voting): officially register adaptive_trimmed and hard_gated aggregations with 350-fold benchmarks (§214)"
+  },
+  {
+    "index": 82,
+    "sha": "143690a38478e6d279e3932d705b8946a87f55a6",
+    "date": "2026-09-03T23:33:52+09:00",
+    "subject": "docs: correct §214 verdict, add reporting integrity contract, reset research direction (§214-V)"
+  },
+  {
+    "index": 83,
+    "sha": "a2f0dc6db9d7271678c8a6a8804bce239d4718eb",
+    "date": "2026-09-03T23:44:20+09:00",
+    "subject": "feat(analysis): trace SMAD4 inversion to branch rank deficiency (§215)"
+  },
+  {
+    "index": 84,
+    "sha": "468eb6d0543a825bb5445a0d6fe1e0d7cf775864",
+    "date": "2026-09-03T23:59:31+09:00",
+    "subject": "feat(rm): label-free subset selection (§216) and RM branch screening harness (§218)"
+  },
+  {
+    "index": 85,
+    "sha": "e1bb3009c72c0bb2c0955ff6bb2566645a5b0183",
+    "date": "2026-09-04T00:11:27+09:00",
+    "subject": "feat(rm): reject RM branch on correlation screen, establish branch taxonomy (§217)"
+  },
+  {
+    "index": 86,
+    "sha": "5c2881b5ea62e119db2814c01bed375853da9cd2",
+    "date": "2026-09-04T11:47:33+09:00",
+    "subject": "feat(screen): generalise branch admission screen, add BS/SH shape candidates (§218)"
+  },
+  {
+    "index": 87,
+    "sha": "0b6e56115eee14be0de3057f1ba79865c30041c7",
+    "date": "2026-09-04T12:07:16+09:00",
+    "subject": "feat(sh): admit SH shape branch, reject BS, correct the rank hypothesis (§218)"
+  },
+  {
+    "index": 88,
+    "sha": "c3476dabfa460f603e8a6f0a2e12ef26da65de51",
+    "date": "2026-09-04T12:14:17+09:00",
+    "subject": "chore(infra): single-call blocking runner to stop polling GPU runs"
+  },
+  {
+    "index": 89,
+    "sha": "2b5677a1adf4977a512e0620060164ef381d5b2c",
+    "date": "2026-09-04T12:21:50+09:00",
+    "subject": "feat(sh): seven SH variants in one pass, oracle-shift as the research metric (§219)"
+  },
+  {
+    "index": 90,
+    "sha": "ba9f6a43f8a3cf8b093555d3d64b4b006ac83af3",
+    "date": "2026-09-04T12:40:47+09:00",
+    "subject": "feat(sh): SH variants falsify three hypotheses; SHJ moves the oracle but fails gate 2 (§219)"
+  },
+  {
+    "index": 91,
+    "sha": "749cbff47b33c93f898701f190642d6b24e5e909",
+    "date": "2026-09-04T14:05:05+09:00",
+    "subject": "feat(gate): add task-specialist route to gate 2, admit SHJ (§220)"
+  },
+  {
+    "index": 92,
+    "sha": "a21c227a0433b6f353a4c3c69120b3ea7f5efd8a",
+    "date": "2026-09-04T14:29:31+09:00",
+    "subject": "feat(loo): §212's capacity diagnosis confirmed, its repair falsified (§221)"
+  },
+  {
+    "index": 93,
+    "sha": "d6b0a9ce518e3d06b091cf1fc229645f8ed76f57",
+    "date": "2026-09-04T15:24:20+09:00",
+    "subject": "feat(shj): integrate SHJ into src/models, fix a bf16 numerical fragility (§222)"
+  },
+  {
+    "index": 94,
+    "sha": "cab8248cd77a05aaedfdf32c8945476ef1989dc4",
+    "date": "2026-09-04T15:36:58+09:00",
+    "subject": "fix(docs): §213's subsampling gain was a mislabelled baseline; close the axis (§223)"
+  },
+  {
+    "index": 95,
+    "sha": "8c8bfc5d65cdf244889f8335a6f14f34ab40923e",
+    "date": "2026-09-04T18:39:41+09:00",
+    "subject": "fix: drop the oracle as a criterion; gate 2b now rests on fold reproducibility (§224)"
+  },
+  {
+    "index": 96,
+    "sha": "0e774f05cdd217ca527979426b5c8416faf47e51",
+    "date": "2026-09-04T19:18:00+09:00",
+    "subject": "feat(subsample): strength sweep finds a real dose-response; retract §223's closure (§225)"
+  },
+  {
+    "index": 97,
+    "sha": "5d2fa04e383f68794a98a2f6c660ac3947152d08",
+    "date": "2026-09-05T11:22:59+09:00",
+    "subject": "fix(screen): gate 1 now screens candidates against adopted SH/SHJ (§226)"
+  },
+  {
+    "index": 98,
+    "sha": "5e95a019b7991a9943cca1d7e5e8705a8bdcf405",
+    "date": "2026-09-05T11:22:59+09:00",
+    "subject": "docs: correct stale orthogonality claims, record node change, add direction candidates (§226)"
+  },
+  {
+    "index": 99,
+    "sha": "f3f0b201f85d2bb7eafe1e63561e2bbda2b277c1",
+    "date": "2026-09-05T11:42:32+09:00",
+    "subject": "docs: update handoff — multi-agent direction round, gnode4 plan, GPU blocker (§226)"
+  }
+]

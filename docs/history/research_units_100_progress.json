@@ -1,0 +1,26 @@
+{
+  "status": "completed",
+  "fixed_head": "f3f0b201f85d2bb7eafe1e63561e2bbda2b277c1",
+  "start_sha": "aac69013e4d3def23977cff98e13f5a0c1c58ddc",
+  "manifest": "docs/history/research_units_100_manifest.json",
+  "packet_directory": "/tmp/icf-research-audit",
+  "goal": "최근100커밋의 가설/조건/관측/당시판단/정정관계를 출처와 연결한 연구단위 기록 완성",
+  "completed": [
+    "100 first-parent SHAs 고정 (Index 0 aac69013 ~ Index 99 f3f0b201)",
+    "100개 문서 diff 패킷 생성 및 전수 분석 완료",
+    "38개 연구 단위(RU-01~RU-38) 구조화 및 질문·가설 기준 경계 통합",
+    "73건 원문 인용 라인 및 텍스트 100% 매칭 검증 완료 (validate_terra.py 오류 0건)",
+    "최종 한국어 종합 보고서(research_units_100.md) 및 구조화 JSON(research_units_100.json) 동기화 완료"
+  ],
+  "not_completed": [],
+  "known_failures": [],
+  "quality_status": "passed",
+  "summary": {
+    "total_commits": 100,
+    "total_units": 38,
+    "verified_evidence_count": 73,
+    "validation_errors": 0
+  },
+  "next_action": "감사 결과 브리핑 및 후속 세션 연계",
+  "completed_at": "2026-09-05T19:05:30+09:00"
+}

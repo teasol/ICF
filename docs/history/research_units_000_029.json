@@ -1,0 +1,346 @@
+{
+  "scope": {
+    "indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29
+    ],
+    "next_cursor": 30,
+    "written_at": "2026-09-05"
+  },
+  "units": [
+    {
+      "id": "E01",
+      "title": "CT 부분공간과 ridge readout의 결합",
+      "type": "과거 진행 연구",
+      "commit_indices": [
+        0,
+        1
+      ],
+      "question": "CT의 거리 표현과 readout은 독립적으로 판단할 수 있는가?",
+      "hypothesis": "raw 1536차원에서 보이지 않았던 ridge 이득이 PCA 공간에서는 나타날 수 있다.",
+      "experiment": "CT-only/full model에서 raw/PCA와 extreme/ridge를 교차 비교하고 CT weight도 0.286~1.442로 점검했다.",
+      "observations": "PCA32+ridge는 v107 대비 SEAL +0.0022, 홀드아웃 +0.0057, 전체 +0.0037(11/17)이었다. weight 0.5는 양 집단 평균을 높였지만 부호 일치는 11/17에서 10/17로 낮아졌다. 결정론적 arm의 task t/p/CI는 근거에서 제외됐다.",
+      "decision": "raw 조건에 한정됐던 readout 결론을 정정하고 PCA32+ridge를 v108로 채택하되 CT weight 0.286은 유지했다.",
+      "evidence": [
+        {
+          "sha": "ebcdb8358dc8c9979915a249cfcf0d54f81b0ae3",
+          "path": "docs/current_status.md",
+          "line": 5287,
+          "quote": "⚠️ **§142~§150의 t 값은 모두 무시할 것.** Δ와 부호 수는 유효하다(실측이므로). 결론이 바뀌는"
+        },
+        {
+          "sha": "ebcdb8358dc8c9979915a249cfcf0d54f81b0ae3",
+          "path": "docs/current_status.md",
+          "line": 5352,
+          "quote": "**둘은 반드시 함께 간다** — 단독은 +0.0019(PCA)와 +0.0008(ridge)인데 조합이 +0.0037이고,"
+        },
+        {
+          "sha": "ebcdb8358dc8c9979915a249cfcf0d54f81b0ae3",
+          "path": "docs/current_status.md",
+          "line": 5333,
+          "quote": "w=0.5는 SEAL +0.0009 / 홀드아웃 +0.0024(v108 대비)로 **양쪽 다 개선**이지만 **부호가 11/17 →"
+        }
+      ],
+      "relations": "E05의 token 생성 개선 이전의 CT 기준선이며 CV와 기저를 공유하는 한계가 다음 탐색을 이끌었다.",
+      "uncertainties": "PCA16/32의 최적 차원은 노이즈로 취급됐고 독립 CT 기저는 검증되지 않았다."
+    },
+    {
+      "id": "E02",
+      "title": "DD의 가중치와 코호트 의존성",
+      "type": "가설 검증",
+      "commit_indices": [
+        2
+      ],
+      "question": "DD를 전역적으로 약화하거나 제거하면 v108이 개선되는가?",
+      "hypothesis": "약한 코호트에서 DD를 줄이면 노이즈 적합을 피할 수 있다.",
+      "experiment": "v108 DD weight를 0.343에서 0까지 낮추고 SEAL 10과 홀드아웃 7의 macro·task 부호를 비교했다.",
+      "observations": "DD 제거 시 SEAL은 0.6967→0.6895로 단조 하락하고 홀드아웃은 0.5893→0.6030으로 단조 상승했다. 전체 평균의 평탄함은 상쇄의 결과였다.",
+      "decision": "전역 weight는 고르지 않고 0.343을 유지했다. context 분할 기반 episode별 선택은 후속 가설로 남겼다.",
+      "evidence": [
+        {
+          "sha": "bd7647bb162f5a4874aef8970a3662818bd85e8a",
+          "path": "docs/current_status.md",
+          "line": 5424,
+          "quote": "**SEAL은 단조 감소(0.6967 → 0.6895), 홀드아웃은 단조 증가(0.5893 → 0.6030).** 7개 지점 전부"
+        },
+        {
+          "sha": "bd7647bb162f5a4874aef8970a3662818bd85e8a",
+          "path": "docs/current_status.md",
+          "line": 5466,
+          "quote": "**DD weight는 이 데이터로 고를 수 없다.** 어느 쪽으로 옮겨도 한 집단을 다른 집단과 맞바꾼다:"
+        }
+      ],
+      "relations": "E03~E09의 DD readout 탐색으로 이어진다.",
+      "uncertainties": "집단 차이가 신호 강도인지 코호트 차이인지는 분리되지 않았다."
+    },
+    {
+      "id": "E03",
+      "title": "DD LLR 보정과 상대 거리의 판정 가능성",
+      "type": "가설 검증",
+      "commit_indices": [
+        3,
+        4
+      ],
+      "question": "DD 거리의 확률적 보정 또는 상대화가 fold-mean AUROC를 개선하는가?",
+      "hypothesis": "누락된 log-det LLR 항과 거리 비율이 더 적절한 DD evidence를 만들 수 있다.",
+      "experiment": "log(σ₀²/σ₁²)를 더하고 상대 margin을 DD-only/full model에서 비교했다.",
+      "observations": "LLR 항은 fold context에만 의존하는 상수라 fold 내 AUROC 순위를 바꾸지 않았다. 상대화는 query별 순위를 바꾸지만 DD-only AUROC는 SEAL 0.6354→0.6074, 홀드아웃 0.4937→0.4797로 낮아졌다.",
+      "decision": "LLR 훅은 보정·pooled 평가용으로만 남기고 승격하지 않았으며 상대 거리 readout은 기각했다.",
+      "evidence": [
+        {
+          "sha": "c61a4100c48416e56c510e262e055ca058829420",
+          "path": "docs/current_status.md",
+          "line": 5526,
+          "quote": "σ₀², σ₁²는 **context에서만** 나온다. 정식 프로토콜에서 한 fold의 context는 그 fold의 모든 query에"
+        },
+        {
+          "sha": "c61a4100c48416e56c510e262e055ca058829420",
+          "path": "docs/current_status.md",
+          "line": 5544,
+          "quote": "- **다만 우리가 판정하는 지표로는 측정 자체가 불가능하다.** 이득도 손해도 아니라 **불가시**다."
+        },
+        {
+          "sha": "c85156b8be3cd2bf09a79b5039f901813a062a65",
+          "path": "docs/current_status.md",
+          "line": 5584,
+          "quote": "| SEAL 10 DD-only AUROC | **0.6354** | 0.6074 |"
+        }
+      ],
+      "relations": "E02의 DD 문제를 전역 가중 대신 margin 정의로 해결하려 한 시도다.",
+      "uncertainties": "확률 보정·임계값 결정에서 LLR 상수의 효과는 검증되지 않았다."
+    },
+    {
+      "id": "E04",
+      "title": "CV descriptor의 정보 분해",
+      "type": "가설 검증",
+      "commit_indices": [
+        5,
+        11
+      ],
+      "question": "CV에서 bag mean·대각 및 공분산 스케일 중 무엇이 정보를 담는가?",
+      "hypothesis": "중복 raw mean과 대각 feature는 제거할 수 있고 상관행렬 정규화는 개선을 줄 수 있다.",
+      "experiment": "raw mean·대각을 제거한 뒤 off-diagonal 공분산을 bag별 상관행렬로 정규화해 full model/CV-only를 비교했다.",
+      "observations": "대각 256 feature 제거는 +0.0052(13/17)이었지만 상관화는 full model −0.0024(8/17)이었다.",
+      "decision": "v109에서 off-diagonal CV만 유지하고 √λᵢλⱼ가 주는 공분산 크기 가중은 보존했다.",
+      "evidence": [
+        {
+          "sha": "9c1889d2f8b56409ad529f05f13f5ce16daa8380",
+          "path": "docs/current_status.md",
+          "line": 6192,
+          "quote": "| 대각 256차원을 feature로 사용 (§156) | **유해.** 빼면 +0.0052 (13/17) |"
+        },
+        {
+          "sha": "9c1889d2f8b56409ad529f05f13f5ce16daa8380",
+          "path": "docs/current_status.md",
+          "line": 6193,
+          "quote": "| 대각이 off-diagonal 크기에 주는 영향 (§162) | **정보였다.** 빼면 −0.0024 (8/17) |"
+        }
+      ],
+      "relations": "E05의 v109 승격과 E01의 CV-CT 공유 기저 제약에 연결된다.",
+      "uncertainties": "상관 CV가 다른 branch와 겹친다는 해석은 가능성으로만 기록됐다."
+    },
+    {
+      "id": "E05",
+      "title": "CT token 생성 개선과 v109",
+      "type": "승격 결정",
+      "commit_indices": [
+        6,
+        7
+      ],
+      "question": "CT abundance의 병목은 token 생성인가?",
+      "hypothesis": "FPS token이 밀도 높은 세포 집단을 충분히 대표하지 못하므로 k-means token이 개선한다.",
+      "experiment": "FPS와 k-means token을 비교하고 CT weight를 포함해 CV off-diagonal 변경과 결합한 17-task 평가를 수행했다.",
+      "observations": "FPS는 16개 token 중 약 2개만 실사용됐고 k-means가 CT-only를 +0.037 회복한 것으로 기록됐다.",
+      "decision": "CV off-diagonal과 k-means CT weight 0.7 조합을 v109로 채택했다.",
+      "evidence": [
+        {
+          "sha": "f2f29cccf94a353ad0c6fd759068441d5ef50b02",
+          "path": "docs/current_status.md",
+          "line": 5981,
+          "quote": "| **token 생성** (farthest-point) | **이것이었다.** 16개 중 1.9개만 사용 → k-means로 CT-only +0.037 (§157) |"
+        },
+        {
+          "sha": "7456a22c0845bd086f1447062f98fdf8b832b354",
+          "path": "docs/current_status.md",
+          "line": 5826,
+          "quote": "## 158. 2026-08-18 — **v109 승격 확정 (사용자 결정): CV = off-diagonal only, CT = k-means token @ w=0.7**"
+        }
+      ],
+      "relations": "E04의 CV 정리와 E06의 cells/tokens 격자로 이어진다.",
+      "uncertainties": "k-means 이득에는 후속 λ 확인 전까지 λ 영향이 섞여 있었다."
+    },
+    {
+      "id": "E06",
+      "title": "CT 표본 수·token 수·ridge λ의 분리",
+      "type": "승격 결정",
+      "commit_indices": [
+        8,
+        9,
+        10,
+        12
+      ],
+      "question": "CT 개선은 더 많은 cells, 더 많은 tokens, 또는 ridge λ 때문인가?",
+      "hypothesis": "64-cell 상한을 풀거나 token 수를 늘리면 abundance 해상도가 높아질 수 있다.",
+      "experiment": "64/256/1024/전체 cells 및 16/32/64/128 tokens 격자를 비교하고 CT ridge λ를 16·32 token에서 재점검했다.",
+      "observations": "전체 cell은 모든 token 수에서 64 cell보다 낮았다. 32 tokens·64 cells는 v109 대비 +0.0051, 15/17이었다. λ 최적화를 반영하면 token 이득은 +0.0051에서 +0.0036으로 줄었다.",
+      "decision": "cells_per_bag=64와 CT tokens=32를 v110으로 채택하고 λ=1을 유지했다.",
+      "evidence": [
+        {
+          "sha": "a04f0cf26e406873f6056301095f4beac0e1b67e",
+          "path": "docs/current_status.md",
+          "line": 6037,
+          "quote": "**`32 tok, 64 cell`이 +0.0051에 부호 15/17** — 이 세션 전체에서 가장 높은 부호 일치다(v109 승격"
+        },
+        {
+          "sha": "131c95a869d05a3122e3c0a288d3d4bb71660cc0",
+          "path": "docs/current_status.md",
+          "line": 6100,
+          "quote": "⚠️ **전체 cell은 포함하지 않는다.** §160이 16·32·64·128 token 전부에서 전체 cell이 64 cell보다"
+        },
+        {
+          "sha": "fb91a0691c801b3ec1933e25bee6ba47340e6b55",
+          "path": "docs/current_status.md",
+          "line": 6265,
+          "quote": "**이득의 약 30%는 λ 효과였다.** 그러나 사라지지 않는다 — 32 token은 어떤 λ에서도 같은 λ의"
+        }
+      ],
+      "relations": "E05를 확정하고 E08의 full-cell tokenizer 재평가로 이어진다.",
+      "uncertainties": "32와 64 tokens의 차이는 노이즈 가능성으로 남았다."
+    },
+    {
+      "id": "E07",
+      "title": "서버 이동용 실행 환경 정비",
+      "type": "인프라 기록",
+      "commit_indices": [
+        13
+      ],
+      "question": "서버 이동 중에도 평가 설정과 아키텍처 기록을 재현 가능하게 유지할 수 있는가?",
+      "hypothesis": "node 설정을 한 곳에 두고 handoff·architecture를 갱신하면 설정 드리프트를 줄인다.",
+      "experiment": "node 환경 설정을 중앙화하고 handoff와 architecture 문서를 당시 v110 계보에 맞게 갱신했다.",
+      "observations": "모델 비교가 아니라 재개 가능한 실행 경로를 위한 문서·설정 정비였다.",
+      "decision": "후속 CT/DD 실험은 중앙 node 설정과 갱신된 handoff를 기준으로 계속했다.",
+      "evidence": [
+        {
+          "sha": "69360766f48cb06b0333446b9817c88209b5620f",
+          "path": "docs/current_status.md",
+          "line": 6300,
+          "quote": "모든 runner가 source 한다. **이미 설정된 환경변수는 덮어쓰지 않고**, 자동 탐지가 실패하면"
+        }
+      ],
+      "relations": "E08의 CT 평가와 E09의 GPU worker 실행의 운영 전제다.",
+      "uncertainties": "성능 주장이나 모델 승격은 이 커밋에 없다."
+    },
+    {
+      "id": "E08",
+      "title": "대체 CT dictionary와 full-cell hierarchical v111",
+      "type": "탐색 및 운영 선택",
+      "commit_indices": [
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24
+      ],
+      "question": "sampling 편향을 없앤 full-cell CT dictionary가 예측 성능과 운영 불변성을 함께 줄 수 있는가?",
+      "hypothesis": "random·density·hierarchical·spherical tokenizer와 full abundance를 비교하면 representation 병목을 가를 수 있다.",
+      "experiment": "random 512/64, hierarchical, HDBSCAN/DBSCAN, PCA 차원 및 spherical clustering을 단계적으로 평가하고 full-cell hierarchical PCA32/K256을 확정했다.",
+      "observations": "여러 random·density arm은 v110 유지로 기각됐다. v111은 SEAL 0.70453, 홀드아웃 0.59809, 전체 0.66070으로 v110보다 낮았지만 모든 context/query cell을 썼다.",
+      "decision": "사용자 결정으로 v111을 공식 baseline으로 채택하고 CT 분기를 종료했다. 성능 우월이 아닌 sampling 불변성의 운영 선택이었다.",
+      "evidence": [
+        {
+          "sha": "65a20d9c6d11f4b8551392a0e55638c963411ae6",
+          "path": "docs/current_status.md",
+          "line": 7056,
+          "quote": "사용자 결정으로 예측 macro가 가장 높은 v110 대신, **cell selection bias가 없고 random sampling의"
+        },
+        {
+          "sha": "65a20d9c6d11f4b8551392a0e55638c963411ae6",
+          "path": "docs/current_status.md",
+          "line": 7072,
+          "quote": "| **v111 (활성)** | **0.70453** | **0.59809** | **0.66070** | **0.00000** |"
+        },
+        {
+          "sha": "65a20d9c6d11f4b8551392a0e55638c963411ae6",
+          "path": "docs/current_status.md",
+          "line": 7076,
+          "quote": "이 승격은 성능 우월성 주장이 아니라 **운영 불변성에 대한 사용자 선택**이다. 전체 cell을 사용하므로"
+        }
+      ],
+      "relations": "E06의 v110은 historical predictive best로 남고 E09가 v111을 기준선으로 사용한다.",
+      "uncertainties": "CT 독립 부분공간 등 추가 탐색은 당시 종료 결정으로 제외됐다."
+    },
+    {
+      "id": "E09",
+      "title": "DD ordered×typicality 후보의 구현과 수정 재실행",
+      "type": "실행 중인 가설",
+      "commit_indices": [
+        25,
+        26,
+        27,
+        28,
+        29
+      ],
+      "question": "bounded ordered coordinate와 nearest-class typicality를 결합한 DD readout이 v111보다 일관된 evidence를 제공하는가?",
+      "hypothesis": "prototype 순서의 방향성을 bounded하게 쓰고 OOD typicality로 감쇠하면 DD의 과신을 줄일 수 있다.",
+      "experiment": "κ=1 ordered×typicality margin을 구현해 17 deterministic task 평가 runner를 만들고 selector state 충돌을 고친 뒤 GPU 0..7에서 corrected relaunch했다.",
+      "observations": "이 범위의 마지막 기록에는 macro 결과가 없다. 첫 launch는 fold 전 selector 변수 충돌로 실패했고 수정 후 17 task가 재실행됐다.",
+      "decision": "v111 distance readout을 유지하고 결과 집계 전에는 승격하지 않았다. index 30의 결과와 연결해야 한다.",
+      "evidence": [
+        {
+          "sha": "80f17db7d79d3aa7d179664de4bd039b0d4a43fe",
+          "path": "docs/current_status.md",
+          "line": 7127,
+          "quote": "**318 tests, OK (72.356s)**. **아직 macro를 측정하지 않았으므로 승격하지 않았고 v111 기본"
+        },
+        {
+          "sha": "cec1a15491cd2afc19c7628467a15080c930e563",
+          "path": "docs/current_status.md",
+          "line": 7145,
+          "quote": "첫 실행(PID 1981165)은 fold 진입 전 전부 실패했다. 원인은 `scripts/test_pathobench.py`에서 DD"
+        },
+        {
+          "sha": "cec1a15491cd2afc19c7628467a15080c930e563",
+          "path": "docs/current_status.md",
+          "line": 7151,
+          "quote": "재실행 직후 부모와 8 worker가 살아 있고 첫 8 task가 `START`된 것을 확인했다. 다음 Action은 launcher의"
+        }
+      ],
+      "relations": "결과는 다음 감사 범위 index 30에서 보고되므로 이 단위는 실행 상태에서 끝난다.",
+      "uncertainties": "0..29에는 17-task macro·task별 delta·승격 판정이 없다."
+    }
+  ]
+}

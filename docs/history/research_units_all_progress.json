@@ -1,0 +1,14 @@
+{
+  "status": "completed",
+  "total_commits": 450,
+  "covered_commits": 450,
+  "total_units": 78,
+  "date_range": "2026-07-22 ~ 2026-09-05",
+  "verified_citations": 113,
+  "verification_errors": 0,
+  "target_files": [
+    "docs/history/research_units_all.json",
+    "docs/history/research_units_all.md"
+  ],
+  "completed_at": "2026-09-05T19:51:00+09:00"
+}

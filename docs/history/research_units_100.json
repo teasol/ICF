@@ -1,0 +1,1264 @@
+{
+  "scope": {
+    "fixed_head": "f3f0b201f85d2bb7eafe1e63561e2bbda2b277c1",
+    "start_sha": "aac69013e4d3def23977cff98e13f5a0c1c58ddc",
+    "total_commits": 100,
+    "indices": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42,
+      43,
+      44,
+      45,
+      46,
+      47,
+      48,
+      49,
+      50,
+      51,
+      52,
+      53,
+      54,
+      55,
+      56,
+      57,
+      58,
+      59,
+      60,
+      61,
+      62,
+      63,
+      64,
+      65,
+      66,
+      67,
+      68,
+      69,
+      70,
+      71,
+      72,
+      73,
+      74,
+      75,
+      76,
+      77,
+      78,
+      79,
+      80,
+      81,
+      82,
+      83,
+      84,
+      85,
+      86,
+      87,
+      88,
+      89,
+      90,
+      91,
+      92,
+      93,
+      94,
+      95,
+      96,
+      97,
+      98,
+      99
+    ],
+    "order": "first-parent",
+    "written_at": "2026-09-05"
+  },
+  "summary": {
+    "total_units": 38,
+    "covered_commits": 100,
+    "total_evidence": 73
+  },
+  "units": [
+    {
+      "id": "RU-01",
+      "title": "CT 부분공간과 ridge readout의 결합",
+      "type": "시작 경계 밖에서 착수된 연구",
+      "commit_indices": [
+        0,
+        1
+      ],
+      "question": "CT의 거리 표현과 readout은 독립적으로 판단할 수 있는가?",
+      "hypothesis": "raw 1536차원에서 보이지 않았던 ridge 이득이 PCA 공간에서는 나타날 수 있다.",
+      "experiment": "CT-only/full model에서 raw/PCA와 extreme/ridge를 교차 비교하고 CT weight도 0.286~1.442로 점검했다.",
+      "observations": "PCA32+ridge는 v107 대비 SEAL +0.0022, 홀드아웃 +0.0057, 전체 +0.0037(11/17)이었다. weight 0.5는 양 집단 평균을 높였지만 부호 일치는 11/17에서 10/17로 낮아졌다. 결정론적 arm의 task t/p/CI는 근거에서 제외됐다.",
+      "decision": "raw 조건에 한정됐던 readout 결론을 정정하고 PCA32+ridge를 v108로 채택하되 CT weight 0.286은 유지했다.",
+      "evidence": [
+        {
+          "sha": "ebcdb8358dc8c9979915a249cfcf0d54f81b0ae3",
+          "path": "docs/current_status.md",
+          "line": 5287,
+          "quote": "⚠️ **§142~§150의 t 값은 모두 무시할 것.** Δ와 부호 수는 유효하다(실측이므로). 결론이 바뀌는"
+        },
+        {
+          "sha": "ebcdb8358dc8c9979915a249cfcf0d54f81b0ae3",
+          "path": "docs/current_status.md",
+          "line": 5352,
+          "quote": "**둘은 반드시 함께 간다** — 단독은 +0.0019(PCA)와 +0.0008(ridge)인데 조합이 +0.0037이고,"
+        },
+        {
+          "sha": "ebcdb8358dc8c9979915a249cfcf0d54f81b0ae3",
+          "path": "docs/current_status.md",
+          "line": 5333,
+          "quote": "w=0.5는 SEAL +0.0009 / 홀드아웃 +0.0024(v108 대비)로 **양쪽 다 개선**이지만 **부호가 11/17 →"
+        }
+      ],
+      "relations": "E05의 token 생성 개선 이전의 CT 기준선이며 CV와 기저를 공유하는 한계가 다음 탐색을 이끌었다.",
+      "uncertainties": "PCA16/32의 최적 차원은 노이즈로 취급됐고 독립 CT 기저는 검증되지 않았다."
+    },
+    {
+      "id": "RU-02",
+      "title": "DD의 가중치와 코호트 의존성",
+      "type": "가설 검증",
+      "commit_indices": [
+        2
+      ],
+      "question": "DD를 전역적으로 약화하거나 제거하면 v108이 개선되는가?",
+      "hypothesis": "약한 코호트에서 DD를 줄이면 노이즈 적합을 피할 수 있다.",
+      "experiment": "v108 DD weight를 0.343에서 0까지 낮추고 SEAL 10과 홀드아웃 7의 macro·task 부호를 비교했다.",
+      "observations": "DD 제거 시 SEAL은 0.6967→0.6895로 단조 하락하고 홀드아웃은 0.5893→0.6030으로 단조 상승했다. 전체 평균의 평탄함은 상쇄의 결과였다.",
+      "decision": "전역 weight는 고르지 않고 0.343을 유지했다. context 분할 기반 episode별 선택은 후속 가설로 남겼다.",
+      "evidence": [
+        {
+          "sha": "bd7647bb162f5a4874aef8970a3662818bd85e8a",
+          "path": "docs/current_status.md",
+          "line": 5424,
+          "quote": "**SEAL은 단조 감소(0.6967 → 0.6895), 홀드아웃은 단조 증가(0.5893 → 0.6030).** 7개 지점 전부"
+        },
+        {
+          "sha": "bd7647bb162f5a4874aef8970a3662818bd85e8a",
+          "path": "docs/current_status.md",
+          "line": 5466,
+          "quote": "**DD weight는 이 데이터로 고를 수 없다.** 어느 쪽으로 옮겨도 한 집단을 다른 집단과 맞바꾼다:"
+        }
+      ],
+      "relations": "RU-03~E09의 DD readout 탐색으로 이어진다.",
+      "uncertainties": "집단 차이가 신호 강도인지 코호트 차이인지는 분리되지 않았다."
+    },
+    {
+      "id": "RU-03",
+      "title": "DD LLR 보정과 상대 거리의 판정 가능성",
+      "type": "가설 검증",
+      "commit_indices": [
+        3,
+        4
+      ],
+      "question": "DD 거리의 확률적 보정 또는 상대화가 fold-mean AUROC를 개선하는가?",
+      "hypothesis": "누락된 log-det LLR 항과 거리 비율이 더 적절한 DD evidence를 만들 수 있다.",
+      "experiment": "log(σ₀²/σ₁²)를 더하고 상대 margin을 DD-only/full model에서 비교했다.",
+      "observations": "LLR 항은 fold context에만 의존하는 상수라 fold 내 AUROC 순위를 바꾸지 않았다. 상대화는 query별 순위를 바꾸지만 DD-only AUROC는 SEAL 0.6354→0.6074, 홀드아웃 0.4937→0.4797로 낮아졌다.",
+      "decision": "LLR 훅은 보정·pooled 평가용으로만 남기고 승격하지 않았으며 상대 거리 readout은 기각했다.",
+      "evidence": [
+        {
+          "sha": "c61a4100c48416e56c510e262e055ca058829420",
+          "path": "docs/current_status.md",
+          "line": 5526,
+          "quote": "σ₀², σ₁²는 **context에서만** 나온다. 정식 프로토콜에서 한 fold의 context는 그 fold의 모든 query에"
+        },
+        {
+          "sha": "c61a4100c48416e56c510e262e055ca058829420",
+          "path": "docs/current_status.md",
+          "line": 5544,
+          "quote": "- **다만 우리가 판정하는 지표로는 측정 자체가 불가능하다.** 이득도 손해도 아니라 **불가시**다."
+        },
+        {
+          "sha": "c85156b8be3cd2bf09a79b5039f901813a062a65",
+          "path": "docs/current_status.md",
+          "line": 5584,
+          "quote": "| SEAL 10 DD-only AUROC | **0.6354** | 0.6074 |"
+        }
+      ],
+      "relations": "E02의 DD 문제를 전역 가중 대신 margin 정의로 해결하려 한 시도다.",
+      "uncertainties": "확률 보정·임계값 결정에서 LLR 상수의 효과는 검증되지 않았다."
+    },
+    {
+      "id": "RU-04",
+      "title": "CV descriptor의 정보 분해",
+      "type": "가설 검증",
+      "commit_indices": [
+        5,
+        11
+      ],
+      "question": "CV에서 bag mean·대각 및 공분산 스케일 중 무엇이 정보를 담는가?",
+      "hypothesis": "중복 raw mean과 대각 feature는 제거할 수 있고 상관행렬 정규화는 개선을 줄 수 있다.",
+      "experiment": "raw mean·대각을 제거한 뒤 off-diagonal 공분산을 bag별 상관행렬로 정규화해 full model/CV-only를 비교했다.",
+      "observations": "대각 256 feature 제거는 +0.0052(13/17)이었지만 상관화는 full model −0.0024(8/17)이었다.",
+      "decision": "v109에서 off-diagonal CV만 유지하고 √λᵢλⱼ가 주는 공분산 크기 가중은 보존했다.",
+      "evidence": [
+        {
+          "sha": "9c1889d2f8b56409ad529f05f13f5ce16daa8380",
+          "path": "docs/current_status.md",
+          "line": 6192,
+          "quote": "| 대각 256차원을 feature로 사용 (§156) | **유해.** 빼면 +0.0052 (13/17) |"
+        },
+        {
+          "sha": "9c1889d2f8b56409ad529f05f13f5ce16daa8380",
+          "path": "docs/current_status.md",
+          "line": 6193,
+          "quote": "| 대각이 off-diagonal 크기에 주는 영향 (§162) | **정보였다.** 빼면 −0.0024 (8/17) |"
+        }
+      ],
+      "relations": "E05의 v109 승격과 E01의 CV-CT 공유 기저 제약에 연결된다.",
+      "uncertainties": "상관 CV가 다른 branch와 겹친다는 해석은 가능성으로만 기록됐다."
+    },
+    {
+      "id": "RU-05",
+      "title": "CT token 생성 개선과 v109",
+      "type": "승격 결정",
+      "commit_indices": [
+        6,
+        7
+      ],
+      "question": "CT abundance의 병목은 token 생성인가?",
+      "hypothesis": "FPS token이 밀도 높은 세포 집단을 충분히 대표하지 못하므로 k-means token이 개선한다.",
+      "experiment": "FPS와 k-means token을 비교하고 CT weight를 포함해 CV off-diagonal 변경과 결합한 17-task 평가를 수행했다.",
+      "observations": "FPS는 16개 token 중 약 2개만 실사용됐고 k-means가 CT-only를 +0.037 회복한 것으로 기록됐다.",
+      "decision": "CV off-diagonal과 k-means CT weight 0.7 조합을 v109로 채택했다.",
+      "evidence": [
+        {
+          "sha": "f2f29cccf94a353ad0c6fd759068441d5ef50b02",
+          "path": "docs/current_status.md",
+          "line": 5981,
+          "quote": "| **token 생성** (farthest-point) | **이것이었다.** 16개 중 1.9개만 사용 → k-means로 CT-only +0.037 (§157) |"
+        },
+        {
+          "sha": "7456a22c0845bd086f1447062f98fdf8b832b354",
+          "path": "docs/current_status.md",
+          "line": 5826,
+          "quote": "## 158. 2026-08-18 — **v109 승격 확정 (사용자 결정): CV = off-diagonal only, CT = k-means token @ w=0.7**"
+        }
+      ],
+      "relations": "E04의 CV 정리와 E06의 cells/tokens 격자로 이어진다.",
+      "uncertainties": "k-means 이득에는 후속 λ 확인 전까지 λ 영향이 섞여 있었다."
+    },
+    {
+      "id": "RU-06",
+      "title": "CT 표본 수·token 수·ridge λ의 분리",
+      "type": "승격 결정",
+      "commit_indices": [
+        8,
+        9,
+        10,
+        12
+      ],
+      "question": "CT 개선은 더 많은 cells, 더 많은 tokens, 또는 ridge λ 때문인가?",
+      "hypothesis": "64-cell 상한을 풀거나 token 수를 늘리면 abundance 해상도가 높아질 수 있다.",
+      "experiment": "64/256/1024/전체 cells 및 16/32/64/128 tokens 격자를 비교하고 CT ridge λ를 16·32 token에서 재점검했다.",
+      "observations": "전체 cell은 모든 token 수에서 64 cell보다 낮았다. 32 tokens·64 cells는 v109 대비 +0.0051, 15/17이었다. λ 최적화를 반영하면 token 이득은 +0.0051에서 +0.0036으로 줄었다.",
+      "decision": "cells_per_bag=64와 CT tokens=32를 v110으로 채택하고 λ=1을 유지했다.",
+      "evidence": [
+        {
+          "sha": "a04f0cf26e406873f6056301095f4beac0e1b67e",
+          "path": "docs/current_status.md",
+          "line": 6037,
+          "quote": "**`32 tok, 64 cell`이 +0.0051에 부호 15/17** — 이 세션 전체에서 가장 높은 부호 일치다(v109 승격"
+        },
+        {
+          "sha": "131c95a869d05a3122e3c0a288d3d4bb71660cc0",
+          "path": "docs/current_status.md",
+          "line": 6100,
+          "quote": "⚠️ **전체 cell은 포함하지 않는다.** §160이 16·32·64·128 token 전부에서 전체 cell이 64 cell보다"
+        },
+        {
+          "sha": "fb91a0691c801b3ec1933e25bee6ba47340e6b55",
+          "path": "docs/current_status.md",
+          "line": 6265,
+          "quote": "**이득의 약 30%는 λ 효과였다.** 그러나 사라지지 않는다 — 32 token은 어떤 λ에서도 같은 λ의"
+        }
+      ],
+      "relations": "E05를 확정하고 E08의 full-cell tokenizer 재평가로 이어진다.",
+      "uncertainties": "32와 64 tokens의 차이는 노이즈 가능성으로 남았다."
+    },
+    {
+      "id": "RU-07",
+      "title": "서버 이동용 실행 환경 정비",
+      "type": "인프라 기록",
+      "commit_indices": [
+        13
+      ],
+      "question": "서버 이동 중에도 평가 설정과 아키텍처 기록을 재현 가능하게 유지할 수 있는가?",
+      "hypothesis": "node 설정을 한 곳에 두고 handoff·architecture를 갱신하면 설정 드리프트를 줄인다.",
+      "experiment": "node 환경 설정을 중앙화하고 handoff와 architecture 문서를 당시 v110 계보에 맞게 갱신했다.",
+      "observations": "모델 비교가 아니라 재개 가능한 실행 경로를 위한 문서·설정 정비였다.",
+      "decision": "후속 CT/DD 실험은 중앙 node 설정과 갱신된 handoff를 기준으로 계속했다.",
+      "evidence": [
+        {
+          "sha": "69360766f48cb06b0333446b9817c88209b5620f",
+          "path": "docs/current_status.md",
+          "line": 6300,
+          "quote": "모든 runner가 source 한다. **이미 설정된 환경변수는 덮어쓰지 않고**, 자동 탐지가 실패하면"
+        }
+      ],
+      "relations": "E08의 CT 평가와 E09의 GPU worker 실행의 운영 전제다.",
+      "uncertainties": "성능 주장이나 모델 승격은 이 커밋에 없다."
+    },
+    {
+      "id": "RU-08",
+      "title": "대체 CT dictionary와 full-cell hierarchical v111",
+      "type": "탐색 및 운영 선택",
+      "commit_indices": [
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24
+      ],
+      "question": "sampling 편향을 없앤 full-cell CT dictionary가 예측 성능과 운영 불변성을 함께 줄 수 있는가?",
+      "hypothesis": "random·density·hierarchical·spherical tokenizer와 full abundance를 비교하면 representation 병목을 가를 수 있다.",
+      "experiment": "random 512/64, hierarchical, HDBSCAN/DBSCAN, PCA 차원 및 spherical clustering을 단계적으로 평가하고 full-cell hierarchical PCA32/K256을 확정했다.",
+      "observations": "여러 random·density arm은 v110 유지로 기각됐다. v111은 SEAL 0.70453, 홀드아웃 0.59809, 전체 0.66070으로 v110보다 낮았지만 모든 context/query cell을 썼다.",
+      "decision": "사용자 결정으로 v111을 공식 baseline으로 채택하고 CT 분기를 종료했다. 성능 우월이 아닌 sampling 불변성의 운영 선택이었다.",
+      "evidence": [
+        {
+          "sha": "65a20d9c6d11f4b8551392a0e55638c963411ae6",
+          "path": "docs/current_status.md",
+          "line": 7056,
+          "quote": "사용자 결정으로 예측 macro가 가장 높은 v110 대신, **cell selection bias가 없고 random sampling의"
+        },
+        {
+          "sha": "65a20d9c6d11f4b8551392a0e55638c963411ae6",
+          "path": "docs/current_status.md",
+          "line": 7072,
+          "quote": "| **v111 (활성)** | **0.70453** | **0.59809** | **0.66070** | **0.00000** |"
+        },
+        {
+          "sha": "65a20d9c6d11f4b8551392a0e55638c963411ae6",
+          "path": "docs/current_status.md",
+          "line": 7076,
+          "quote": "이 승격은 성능 우월성 주장이 아니라 **운영 불변성에 대한 사용자 선택**이다. 전체 cell을 사용하므로"
+        }
+      ],
+      "relations": "E06의 v110은 historical predictive best로 남고 E09가 v111을 기준선으로 사용한다.",
+      "uncertainties": "CT 독립 부분공간 등 추가 탐색은 당시 종료 결정으로 제외됐다."
+    },
+    {
+      "id": "RU-09",
+      "title": "DD ordered×typicality 후보의 구현·수정 및 v112 승격",
+      "type": "가설 검증 및 승격 채택",
+      "commit_indices": [
+        25,
+        26,
+        27,
+        28,
+        29,
+        30
+      ],
+      "question": "DD의 코호트 역전을 bounded ordered coordinate와 nearest-class typicality 결합으로 해결하고 일반화를 개선할 수 있는가?",
+      "hypothesis": "κ=1, weight 1의 bounded evidence가 기존 거리 기반 margin보다 극단치에 안정적이며 양 집단 모두에서 DD 신호를 살릴 수 있다.",
+      "experiment": "src/models/dd_ordered_typicality.py를 구현하고 충돌 가드 및 런처 오류를 수정한 뒤 17-task 공식 50-fold 평가를 완주했다.",
+      "observations": "v112 전체 macro 0.66211(v111 대비 +0.00141), SEAL 10 0.70432(−0.00021, flat), 홀드아웃 7 0.60181(+0.00372)로 측정됐다.",
+      "decision": "사용자 결정으로 v112를 활성 baseline으로 승격하고 기존 distance runner는 재현용으로 보존했다.",
+      "evidence": [
+        {
+          "sha": "80f17db7d79d3aa7d179664de4bd039b0d4a43fe",
+          "path": "docs/current_status.md",
+          "line": 7127,
+          "quote": "**318 tests, OK (72.356s)**. **아직 macro를 측정하지 않았으므로 승격하지 않았고 v111 기본"
+        },
+        {
+          "sha": "cec1a15491cd2afc19c7628467a15080c930e563",
+          "path": "docs/current_status.md",
+          "line": 7145,
+          "quote": "첫 실행(PID 1981165)은 fold 진입 전 전부 실패했다. 원인은 `scripts/test_pathobench.py`에서 DD"
+        },
+        {
+          "sha": "cec1a15491cd2afc19c7628467a15080c930e563",
+          "path": "docs/current_status.md",
+          "line": 7151,
+          "quote": "재실행 직후 부모와 8 worker가 살아 있고 첫 8 task가 `START`된 것을 확인했다. 다음 Action은 launcher의"
+        },
+        {
+          "sha": "fc814a3c4078812bf7b03927e3afcb8e7bab1577",
+          "path": "docs/current_status.md",
+          "line": 7199,
+          "quote": "| **v112 (dd weight=1)** | **0.70432** | **0.60181** | **0.66211** |"
+        },
+        {
+          "sha": "fc814a3c4078812bf7b03927e3afcb8e7bab1577",
+          "path": "docs/current_status.md",
+          "line": 7236,
+          "quote": "- 활성 runner `scripts/eval_v112.sh` 추가 (v111과 CV/CT 설정 동일, DD만 다름)."
+        }
+      ],
+      "relations": "E03의 LLR/상대거리 기각 후속 대안이며, M02의 CT fraction sampling 및 M07의 DD 제거 판정으로 이어진다.",
+      "uncertainties": "SEAL 10에서의 미세 하락과 홀드아웃 상승의 트레이드오프가 완전히 해소된 것은 아니었다."
+    },
+    {
+      "id": "RU-10",
+      "title": "CT fraction sampling feasibility",
+      "type": "feasibility_decision",
+      "commit_indices": [
+        31
+      ],
+      "question": "22GB GPU에서 full-cell CT가 완주 불가할 때 cell budget을 어떻게 정할 것인가?",
+      "hypothesis": "bag 크기의 1/8, floor 64이면 OOM을 없애고 성능은 거의 보존한다.",
+      "experiment": "v112와 DD/CV를 고정하고 CT만 full-cell에서 own-bag 1/8 fraction으로 바꾸어 SEAL 10을 재실행했다.",
+      "observations": "fraction arm은 10 task를 완료했고 macro는 0.70432에서 0.70394로 −0.00038이었다.",
+      "decision": "예측 개선이 아니라 평가 가능성을 이유로 v113을 승격했다.",
+      "evidence": [
+        {
+          "sha": "c727e103b60f2509ebc6852f0d9abdb641c296da",
+          "path": "docs/current_status.md",
+          "line": 7277,
+          "quote": "skipped, 회귀 없음. 이 노드에서 SEAL 10-task 전체를 `eval_v113.sh`로 재실행 — **10개 전부 `rc=0`,"
+        },
+        {
+          "sha": "c727e103b60f2509ebc6852f0d9abdb641c296da",
+          "path": "docs/current_status.md",
+          "line": 7292,
+          "quote": "| **SEAL 10 macro** | **0.70432** | **0.70394** | **−0.00038** |"
+        }
+      ],
+      "relations": "RU-09, RU-11",
+      "uncertainties": "v113 전체 17-task와 hold-out 7은 당시 재측정되지 않았다."
+    },
+    {
+      "id": "RU-11",
+      "title": "unit fixed-head weight 통일",
+      "type": "controlled_evaluation",
+      "commit_indices": [
+        32,
+        33
+      ],
+      "question": "v113의 CV/DD/CT 비대칭 head weight를 모두 1.0으로 통일하면 개선되는가?",
+      "hypothesis": "같은 fraction CT·동일 평가에서 unit weight가 저신호 과제를 안정화할 수 있다.",
+      "experiment": "v113의 CT fraction(1/8, floor 64)과 SEAL 10을 고정하고 CV 1.442→1.0, CT 0.7→1.0만 토글했다.",
+      "observations": "기록값은 SEAL macro 0.70394→0.70509(+0.00115), 7/10 task 우세였으며 당시 문서는 개선이 저신호 task에 집중됐다고 적었다.",
+      "decision": "사용자 결정으로 v114를 승격했다. Primary 7·hold-out 7은 당시 미측정으로 남겼다.",
+      "evidence": [
+        {
+          "sha": "7acfd24e388daedda6966c8360ffe10709a3e8f9",
+          "path": "docs/current_status.md",
+          "line": 7393,
+          "quote": "| **SEAL 10 macro (fold-mean)** | **0.70394** | **0.70509** | **+0.00115** |"
+        },
+        {
+          "sha": "a495a18c7e5459c65b6928ee800639ed89086267",
+          "path": "docs/current_status.md",
+          "line": 3,
+          "quote": "**Last updated**: `2026-08-20` — §187 사용자 결정으로 **v114 = v113 + fixed-head 세 branch weight(CV/DD/CT)를 전부 1.0으로 통일**을 활성 baseline으로 승격했다(§186 실측). SEAL 10 macro **0.70509**, v113(0.70394) 대비 **+0.00115** — 개선분 대부분이 저신호 task(ccrcc BAP1/VHL)에서 나왔다(§118 기준). 활성 runner `scripts/eval_v114.sh`. `scripts/eval_v113.sh`(weight 비대칭)는 historical 재현 전용으로 유지한다. 다음 세션은 `agent_handoff.md` 맨 위의 **새 세션 60초 재개 절차**에서 시작한다. Python은 `/NHNHOME/WORKSPACE/26msit005_C/kimds/miniconda3/envs/BagPFN/bin/python`을 직접 사용한다. 전체 아키텍처 명세는 `current_architecture.md` **§0**. ⚠️ **결정론적 arm에는 t/p/CI를 쓰지 말 것**(§151-1) — 부호 일치와 독립 집단 재현으로 판정한다."
+        }
+      ],
+      "relations": "RU-10, RU-15",
+      "uncertainties": "unit-weight의 Primary 7·hold-out 7은 당시 미측정이다."
+    },
+    {
+      "id": "RU-12",
+      "title": "CT kernel ridge와 top-k pooling 기각",
+      "type": "rejection",
+      "commit_indices": [
+        34
+      ],
+      "question": "CT abundance의 비선형 ridge 또는 extreme pooling이 unit fixed-head CT를 개선하는가?",
+      "hypothesis": "label-abundance 곡률 또는 소수 cell의 극값 신호가 linear mean ridge보다 유효할 수 있다.",
+      "experiment": "v114 SEAL 10 control에 RBF/poly KRR, top-k 대체, mean+top-k concatenate를 각각 비교했다.",
+      "observations": "RBF/poly macro는 0.69500/0.69475, top-k VHL은 0.5076, concatenate macro는 0.70067로 v114 0.70509보다 낮았다.",
+      "decision": "세 변형을 모두 기각하고 재현 코드만 보존했다.",
+      "evidence": [
+        {
+          "sha": "eee4650c781dfeed988a5ad26135e5f319dd6009",
+          "path": "docs/current_status.md",
+          "line": 7473,
+          "quote": "| **SEAL 10 macro (fold-mean)** | **0.70509** | **0.69500** (−0.0101) | **0.69475** (−0.0103) |"
+        },
+        {
+          "sha": "eee4650c781dfeed988a5ad26135e5f319dd6009",
+          "path": "docs/current_status.md",
+          "line": 7514,
+          "quote": "| **SEAL 10 macro (fold-mean)** | **0.70509** | **0.70067** | **−0.00442** |"
+        }
+      ],
+      "relations": "RU-11",
+      "uncertainties": "당시 SEAL 10 기반의 기각이며 현행 CT 제외 기준에는 쓰지 않는다."
+    },
+    {
+      "id": "RU-13",
+      "title": "모듈 분해와 BM 구현·문서 SSOT",
+      "type": "research_infrastructure",
+      "commit_indices": [
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44
+      ],
+      "question": "후속 branch 실험을 위한 구현·문서·평가 역할을 재현 가능하게 분리할 수 있는가?",
+      "hypothesis": "projected BM 구현과 current_status SSOT가 후속 비교의 혼선을 줄인다.",
+      "experiment": "모듈 분해, projected BM 코드·테스트, 문서 통합/archiving을 수행했다.",
+      "observations": "이 묶음은 성능 실험이 아니라 기반 정리다. BM 구현은 leading subspace class-balanced ridge로 명시됐고 current_status가 개발 현황 SSOT로 지정됐다.",
+      "decision": "M05 이후 BM 성능 비교는 이 구현·문서 기반을 전제로 한다.",
+      "evidence": [
+        {
+          "sha": "31ea065d8981c75097b787163338934daff796e1",
+          "path": "src/models/training_free.py",
+          "line": 205,
+          "quote": "    # BM branch: projected bag-mean in leading subspace with class-balanced ridge."
+        },
+        {
+          "sha": "af004748490daf81aa817ff17c7133274dd47355",
+          "path": "README.md",
+          "line": 28,
+          "quote": "| [`docs/current_status.md`](docs/current_status.md) | 개발 현황 **SSOT** — 최신 수치·커밋·Action Plan |"
+        }
+      ],
+      "relations": "RU-15, RU-21",
+      "uncertainties": "35–45에는 문서/리팩터링이 포함되므로 이를 독립 성능 주장으로 쓰지 않는다."
+    },
+    {
+      "id": "RU-14",
+      "title": "Primary 7과 SEAL hold-out 역할 전환",
+      "type": "evaluation_protocol",
+      "commit_indices": [
+        45
+      ],
+      "question": "모델 선택과 독립 재현을 어떤 task 집합에 분리할 것인가?",
+      "hypothesis": "SEAL 밖 7개를 primary로, 기존 SEAL 10을 hold-out으로 두면 선택 편향을 줄일 수 있다.",
+      "experiment": "문서의 판정 프로토콜을 Primary 7, Hold-out 10, sign agreement와 task별 delta 보고로 재정의했다.",
+      "observations": "원문은 SEAL에 없던 7개를 primary benchmark로 정하고 기존 SEAL 10을 독립 hold-out validation으로 전환했다고 기록한다.",
+      "decision": "후속 branch 평가는 Primary 7로 선택하고 SEAL 10은 독립 검증 역할로 기록했다.",
+      "evidence": [
+        {
+          "sha": "b60a8a0309326c701309b166f95a702b7f69a6ce",
+          "path": "docs/current_status.md",
+          "line": 4,
+          "quote": "- **판정 프로토콜 개정**: SEAL에 없던 7개 과제를 **새로운 Primary Benchmark**로 확립, 기존 SEAL 10-task를 **독립 Hold-out Validation**으로 전환."
+        },
+        {
+          "sha": "b60a8a0309326c701309b166f95a702b7f69a6ce",
+          "path": "docs/current_status.md",
+          "line": 23,
+          "quote": "  1. **Primary 7-task 부호 일치 수 (Sign Agreement)**: 7개 과제 중 몇 개에서 승리했는가? (예: $\\ge 5/7$)"
+        }
+      ],
+      "relations": "RU-13, RU-15",
+      "uncertainties": "현재 규칙은 이 당시 protocol을 후속 정정해 SEAL을 선택에 쓰지 않으며 CT도 제외한다."
+    },
+    {
+      "id": "RU-15",
+      "title": "Projected Bag-Mean(BM) 채택",
+      "type": "branch_promotion",
+      "commit_indices": [
+        46
+      ],
+      "question": "상위 32D PCA bag mean ridge가 v114에 추가 신호를 주는가?",
+      "hypothesis": "1차 bag mean이 기존 branch와 결합돼 Primary 7을 개선한다.",
+      "experiment": "BM weight 1.0 v115와 v114를 Primary 7 50-fold로 비교했다.",
+      "observations": "v114 0.6051→v115 0.6094(+0.0043), 5/7 승으로 기록됐다.",
+      "decision": "사용자 승인으로 BM 포함 v115를 승격했다.",
+      "evidence": [
+        {
+          "sha": "4207821715b7b387c1d4a2f222e2a786eb417010",
+          "path": "docs/current_status.md",
+          "line": 448,
+          "quote": "| **Macro** | **Primary 7-Task Mean** | **0.6051** | **0.6094** | **+0.0043** | **+0.0037** | **v115 승 ($\\mathbf{5 / 7}$)** |"
+        },
+        {
+          "sha": "4207821715b7b387c1d4a2f222e2a786eb417010",
+          "path": "docs/current_status.md",
+          "line": 4,
+          "quote": "- **v115 승격**: **BM-branch (Bag-Mean leading 32D subspace Class-balanced Dual Ridge, $w_{BM}=1.0$)**가 Primary 7-Task에서 **5/7 과제 승리 및 Macro $\\Delta = +0.0043$**을 달성하여 공식 baseline으로 승격 (사용자 최종 승인)."
+        }
+      ],
+      "relations": "RU-13, RU-16",
+      "uncertainties": "현재 승격 규칙은 이 시점의 규칙과 다르다."
+    },
+    {
+      "id": "RU-16",
+      "title": "Bag-dispersion spectral entropy(BD) 채택",
+      "type": "branch_promotion",
+      "commit_indices": [
+        47
+      ],
+      "question": "spectral entropy가 bag dispersion 신호를 제공하는가?",
+      "hypothesis": "log-trace보다 scale-invariant spectral entropy가 유효한 ordered-typicality evidence다.",
+      "experiment": "후보 A log-trace와 후보 B spectral entropy를 v114/v115 control에 대해 Primary 7에서 평가했다.",
+      "observations": "후보 A 0.6071, 후보 B 0.6119로 v115보다 +0.0025, 4/7 승으로 기록됐다.",
+      "decision": "당시 사용자 승인으로 BD 포함 v116으로 승격했다.",
+      "evidence": [
+        {
+          "sha": "dfcc1c00d565ce8a8a762e25cfad23f39ab79b6c",
+          "path": "docs/current_status.md",
+          "line": 151,
+          "quote": "  - Macro AUROC = **0.6071** (v115 0.6094 대비 $\\Delta = -0.0023$, 3/7 과제 승리)."
+        },
+        {
+          "sha": "dfcc1c00d565ce8a8a762e25cfad23f39ab79b6c",
+          "path": "docs/current_status.md",
+          "line": 4,
+          "quote": "- **v116 승격**: **BD-branch (Bag Dispersion / Spectral Entropy with Ordered-Typicality Evidence, $w_{BD}=1.0$)**가 Primary 7-Task에서 **Macro 0.6119 (+0.0025 vs v115, +0.0068 vs v114, 4/7 과제 승리)**를 달성하여 공식 baseline으로 승격 (사용자 최종 승인)."
+        }
+      ],
+      "relations": "RU-15, RU-17",
+      "uncertainties": "4/7은 현재 5/7 요건을 못 채우며 당시 사용자 결정으로만 기록한다."
+    },
+    {
+      "id": "RU-17",
+      "title": "DD 제거와 soft-vote v118",
+      "type": "aggregation_promotion",
+      "commit_indices": [
+        48,
+        49,
+        50
+      ],
+      "question": "DD를 제거하고 4-branch soft voting하면 개선되는가?",
+      "hypothesis": "DD의 약한 단독 신호를 빼고 soft vote를 쓰면 안정화된다.",
+      "experiment": "DD=0 선형 v117과 CV+CT+BM+BD soft-vote v118을 Primary 7에서 비교하고 SEAL/지도학습 표를 기록했다.",
+      "observations": "v117은 0.6191(5/7), v118은 0.6205로 v116보다 +0.0086, 6/7이었다.",
+      "decision": "v118을 활성으로 승격하고 SEAL/지도학습 표는 hold-out 기록으로 보관했다.",
+      "evidence": [
+        {
+          "sha": "3987dcc9edb61d7df76acfef342910b722fd9d72",
+          "path": "docs/current_status.md",
+          "line": 4,
+          "quote": "- **v118 승격**: **4-Branch Soft Voting (CV + CT + BM + BD, $w_{DD}=0.0$)**이 Primary 7-Task에서 **Macro 0.6205 (+0.0086 vs v116, +0.0154 vs v114, 6/7 과제 승리)**를 달성하여 공식 baseline으로 승격 (사용자 최종 확정 지시)."
+        },
+        {
+          "sha": "3987dcc9edb61d7df76acfef342910b722fd9d72",
+          "path": "docs/current_status.md",
+          "line": 5,
+          "quote": "- **v117 보존**: **DD 제거 4-Branch 선형합 (CV + CT + BM + BD)**은 **Macro 0.6191 (+0.0072 vs v116, 5/7 과제 승리)**로 v117 식별자로 영구 보존."
+        }
+      ],
+      "relations": "RU-16, RU-18",
+      "uncertainties": "SEAL은 현행 선택에 쓰지 않는 hold-out이다."
+    },
+    {
+      "id": "RU-18",
+      "title": "QA branch와 trimmed-mean v119",
+      "type": "branch_and_aggregation_promotion",
+      "commit_indices": [
+        51,
+        52
+      ],
+      "question": "QA를 추가하고 QA 포함 branch logits를 어떻게 집계할 것인가?",
+      "hypothesis": "PCA-32 quantile/extremum ridge가 추가 신호를 내며 symmetric trimmed mean이 이를 안정적으로 통합한다.",
+      "experiment": "QA standalone 및 CV를 유지한 5-branch logits을 9개 voting 방식으로 오프라인 비교하고 v119로 평가했다.",
+      "observations": "QA standalone Primary 7 macro는 0.6117이었고, 5-branch trimmed mean v119는 0.6247로 v118 0.6205보다 +0.0042였다. 별도 no-CV 4-branch 탐색의 0.6275는 후보 구성을 고른 오프라인 최대값이다.",
+      "decision": "CV를 유지한 QA 5-branch trimmed-mean v119를 당시 기준선으로 선택했다.",
+      "evidence": [
+        {
+          "sha": "9dce8c5e54b9d3f2b84babac4b3558b50e6dbbce",
+          "path": "docs/current_status.md",
+          "line": 304,
+          "quote": "- **QA Standalone Primary 7 Macro**: **`0.6117`**"
+        },
+        {
+          "sha": "b0ae85b4c1ccd2d9ef1f240add40831e9f8666ef",
+          "path": "docs/current_status.md",
+          "line": 352,
+          "quote": "| **Macro** | **Primary 7-Task Mean** | **0.6205** | **`0.6247`** | **`+0.0042`** |"
+        }
+      ],
+      "relations": "RU-17, RU-20, RU-21",
+      "uncertainties": "v119와 v120은 branch set이 달라 단순 우열 근거가 아니다. 현재 공식 비교 기준은 CT 제외 v121이다."
+    },
+    {
+      "id": "RU-19",
+      "title": "DS salience-denoising과 v120",
+      "type": "branch_promotion",
+      "commit_indices": [
+        53
+      ],
+      "question": "class-salience로 denoised bag mean을 만들면 v119 trimmed mean을 개선하는가?",
+      "hypothesis": "salience reweighting이 비정보 patch를 줄여 독립 branch 신호를 준다.",
+      "experiment": "DS standalone과 DS를 더한 6-branch trimmed mean을 v118/v119 controls와 Primary 7에서 비교했다.",
+      "observations": "DS 단독 Primary 7 macro는 0.6073이며 v120 6-branch는 v119 0.6247 대비 0.6265(+0.0018)로 기록됐다.",
+      "decision": "사용자 결정으로 DS 포함 v120을 당시 baseline으로 승격했다.",
+      "evidence": [
+        {
+          "sha": "a42a0be0a8f47f903682ee4e8a53c918d0590380",
+          "path": "docs/current_status.md",
+          "line": 402,
+          "quote": "| **PRIMARY 7 MACRO** | **`0.6073`** | **0.6205** | **0.6247** | **`0.6265`** | **`+0.0018`** |"
+        },
+        {
+          "sha": "a42a0be0a8f47f903682ee4e8a53c918d0590380",
+          "path": "docs/current_status.md",
+          "line": 434,
+          "quote": "- **Aggregation Head**: 6-Branch Trimmed Mean Voting (최고/최저 2개 절사, 중앙 4개 평균)"
+        }
+      ],
+      "relations": "RU-18, RU-20",
+      "uncertainties": "현재 CT 제외 기준과 직접 비교하지 않는다."
+    },
+    {
+      "id": "RU-20",
+      "title": "v120 사후 실패 축과 CT 단독",
+      "type": "postmortem_and_benchmark",
+      "commit_indices": [
+        54,
+        55,
+        56
+      ],
+      "question": "KRR·patch LR·다른 trimming·Fisher가 개선을 주며 CT 단독은 어느 정도인가?",
+      "hypothesis": "비선형 readout/patch likelihood/Fisher basis가 추가 신호를 주고 CT 단독은 앙상블 해석 기준이 된다.",
+      "experiment": "KRR, LR+top-k, trimming 변형, Fisher를 Primary 7에서 사후 평가하고 단독 branch 및 CT/v120 표를 기록했다.",
+      "observations": "KRR 0.6125, LR 0.5874·7-branch 0.6195, Fisher 0.5709로 기각됐다. CT 단독은 Primary 7 0.6147이다.",
+      "decision": "네 축을 기각하고 CT는 단독 기준으로 보되 앙상블 대체로 판정하지 않았다.",
+      "evidence": [
+        {
+          "sha": "6faa1c3b52a26d7fb62e70f2bc53e2271d8e6b1b",
+          "path": "docs/current_status.md",
+          "line": 10,
+          "quote": "  1. **Non-Linear KRR (§199)**: Primary 7 0.6125 (기각, Few-shot $N_{ctx}=40$ 과적합으로 SMAD4 0.4290 붕괴)."
+        },
+        {
+          "sha": "1b17863da99398962425743eebe118c0a513ed86",
+          "path": "docs/current_status.md",
+          "line": 583,
+          "quote": "| **Primary 7 Macro AUROC** | — | **`0.6147`** | **`0.6265`** | **`+0.0118`** | — | **8개 단독 브랜치 중 CT 단독 1위** (앙상블 시 +0.0118 추가 도약) |"
+        }
+      ],
+      "relations": "RU-18, RU-21",
+      "uncertainties": "초기 CT SEAL 0.7197과 후속 상세표 0.6882는 불일치해 이 단위에 SEAL CT 수치를 채택하지 않았다. 현재 CT는 공식 기준선에서 제외된다."
+    },
+    {
+      "id": "RU-21",
+      "title": "v120 harness·arm 모듈화와 결정성 경계",
+      "type": "reproducibility",
+      "commit_indices": [
+        57,
+        58,
+        59,
+        60,
+        61,
+        62
+      ],
+      "question": "v120을 harness에서 허용 범위로 재현하고 arm export를 모듈화해도 동등성을 보장할 수 있는가?",
+      "hypothesis": "0.6265±0.005와 env parity를 acceptance condition으로 두면 리팩터링을 검증할 수 있다.",
+      "experiment": "baseline harness, arms.sh, DE/SW·LOO tooling, AGENTS 규칙과 determinism gate report를 추가했다.",
+      "observations": "baseline 0.621643, modularized arm 0.621614는 tolerance 안이지만 나중 report는 metrics hash 불일치를 기록했다.",
+      "decision": "tolerance 통과는 engineering check로만 인정하고 bf16 drift를 새 성능·결정성 주장으로 쓰지 않았다.",
+      "evidence": [
+        {
+          "sha": "2c08102d41829fde12e297c01ffcd5b37a229096",
+          "path": "experiments/baseline/report.md",
+          "line": 31,
+          "quote": "| primary7_macro_fold_mean_auroc | 0.621643 | `${HARNESS_RESULTS_DIR}/metrics.json`: `primary7.macro_fold_mean_auroc` |"
+        },
+        {
+          "sha": "6ae016b120df31a1476b563f90499d7fb48878dc",
+          "path": "experiments/modularize-arms/report.md",
+          "line": 32,
+          "quote": "| env_parity_all_arms | 1 | `${HARNESS_RESULTS_DIR}/parity.json`: `parity.all_identical` |"
+        },
+        {
+          "sha": "dd06c931084fe26c0b2590c574f8da7a7e3ccf7d",
+          "path": "experiments/baseline/report.md",
+          "line": 53,
+          "quote": "- nondeterministic: metrics.json: run 1 81b5c66251d0… != run 2 06f9da2d3809…"
+        }
+      ],
+      "relations": "RU-18, RU-22",
+      "uncertainties": "DE/SW/LOO는 tooling 추가이며 결과 연구단위로 합치지 않았다."
+    },
+    {
+      "id": "RU-22",
+      "title": "obsolete harness 제거와 학습 config 아카이브",
+      "type": "configuration_cleanup",
+      "commit_indices": [
+        63,
+        64
+      ],
+      "question": "0-parameter v120에서 남은 harness·학습 config가 활성 entry point를 혼동시키는가?",
+      "hypothesis": "미참조 도구와 학습 계보를 archive로 옮기면 활성 경로가 명료해진다.",
+      "experiment": "obsolete harness task를 제거하고 v77–v105 config를 archive로 이관, 미참조 group을 삭제하고 정적 검증했다.",
+      "observations": "v120은 train_v98 config 하나를 로드한다고 기록되며 26개 config 이관, 23개 group·5개 harness yaml 삭제, dangling 참조 0건이 기록됐다.",
+      "decision": "학습 계보는 archive/git history에 보존하고 활성 v120과 분리했다.",
+      "evidence": [
+        {
+          "sha": "10484d9aafa10873c55b91a7c9bb7a08408082bc",
+          "path": "docs/current_status.md",
+          "line": 641,
+          "quote": "| v120 활성 경로가 로드하는 yaml | **`configs/train_v98_p1_reverse_1536_1gpu.yaml` 단 1개** ([`scripts/node_env.sh`](../scripts/node_env.sh) `ICF_CONFIG` 기본값) |"
+        },
+        {
+          "sha": "10484d9aafa10873c55b91a7c9bb7a08408082bc",
+          "path": "docs/current_status.md",
+          "line": 670,
+          "quote": "- **dangling 참조**: 코드/Living 문서에서 존재하지 않는 config 경로 참조 0건"
+        }
+      ],
+      "relations": "RU-21",
+      "uncertainties": "당시 BagPFN env 소실로 regression suite는 정적 검증으로 대체됐다."
+    },
+    {
+      "id": "RU-23",
+      "title": "재현 기반 정비",
+      "type": "infrastructure",
+      "commit_indices": [
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72,
+        73,
+        74,
+        75
+      ],
+      "question": "잃어버린 환경과 단일 파일 구현 아래에서 비교를 재현할 수 있는가?",
+      "hypothesis": "venv·SSOT·모듈·계약 테스트가 기준선 비교를 반복 가능하게 한다.",
+      "experiment": "환경·handoff·archive를 정리하고 branch/common/aggregation 분리, YAML 계약 테스트와 회귀 실행기를 추가했다.",
+      "observations": "17 모듈/131 테스트가 18.9초에 통과했다.",
+      "decision": "성능 승격이 아닌 이후 비교의 재현 기반으로 채택했다.",
+      "evidence": [
+        {
+          "sha": "1319aa052e86d64f5c58ecf71ef804db78168b4c",
+          "path": "docs/current_status.md",
+          "line": 27,
+          "quote": "All 17 modules / 131 unit tests pass in 18.9s."
+        }
+      ],
+      "relations": "RU-24 이후 비교의 기반",
+      "uncertainties": "과거 CT 수치는 R02에서 정정"
+    },
+    {
+      "id": "RU-24",
+      "title": "§209 CT 전사 오류와 단독 기준선",
+      "type": "benchmark/correction",
+      "commit_indices": [
+        76
+      ],
+      "question": "CT가 단독 최상이며 SEAL 0.7197이라는 기록은 맞는가?",
+      "hypothesis": "8개 단독 50-fold가 순위와 CT 병목을 확정한다.",
+      "experiment": "8개 branch Primary 7과 시간을 대조했다.",
+      "observations": "DS .6265, QA .6209, CT .6147이고 CT SEAL은 .6882였다.",
+      "decision": "CT를 단독 챔피언으로 취급하지 않고 비용을 기준 설정에 반영했다.",
+      "evidence": [
+        {
+          "sha": "d74bb0c71114f951027f174ab09f7c2c986052bd",
+          "path": "docs/current_status.md",
+          "line": 40,
+          "quote": "- **CT Standalone Metric**: 과거 요약표의 `SEAL 10 0.7197`은 허위/오기록이며 실측치는 `0.6882`임. Primary 7 단독 1위는 CT(`0.6147`)가 아닌 DS(`0.6265`)임."
+        }
+      ],
+      "relations": "RU-28 CT-제외 공식 비교",
+      "uncertainties": "SEAL은 선택 근거가 아닌 hold-out"
+    },
+    {
+      "id": "RU-25",
+      "title": "§210 sub-bag/TTA의 과제별 상충",
+      "type": "experiment",
+      "commit_indices": [
+        77
+      ],
+      "question": "sub-bag 증강이 형태학적 변이와 국소 변이를 함께 개선하는가?",
+      "hypothesis": "context 증강 또는 query TTA가 ARID1A·Grade를 개선한다.",
+      "experiment": "두 증강 방식을 Primary 7에서 비교했다.",
+      "observations": "ARID1A .5471→.6179, Grade .6823→.7024였지만 KRAS .7295→.6395였다.",
+      "decision": "국소 변이를 보존한다는 anchor 가설을 이월했다.",
+      "evidence": [
+        {
+          "sha": "976fd5abbabb55140c783a104d1f4dc34c50bbda",
+          "path": "docs/current_status.md",
+          "line": 24,
+          "quote": "  - **발견 2 (병리학적 한계 규명)**: 2~5% 면적의 국소 변이 세포에 의존하는 `KRAS` (0.7295 $\\to$ 0.6395), `KEAP1`, `PBRM1`은 무작위 균일 샘플링 시 변이 패치가 누락되는 False-Negative Sub-bag 현상으로 양성 신호가 희석됨."
+        }
+      ],
+      "relations": "RU-28/RU-36/RU-37 anchor 계보",
+      "uncertainties": "국소 변이 누락은 당시 기전 가설"
+    },
+    {
+      "id": "RU-26",
+      "title": "§211 LOO 차원 편향",
+      "type": "experiment/diagnosis",
+      "commit_indices": [
+        78
+      ],
+      "question": "LOO가 서로 다른 branch/subsample 신뢰도를 고르는가?",
+      "hypothesis": "LOO가 episode 내 좋은 branch를 선택한다.",
+      "experiment": "16-branch dual pool과 PRESS LOO를 50-fold로 평가했다.",
+      "observations": "CV 32640D는 DOF/N 88.1%에서 ctx LOO .94~1.000으로 팽창했다.",
+      "decision": "서로 다른 차원의 raw LOO를 신뢰도 비교에 쓰지 않는다.",
+      "evidence": [
+        {
+          "sha": "401305b1c20c6bba284ee92f5c5328606776beb7",
+          "path": "docs/current_status.md",
+          "line": 25,
+          "quote": "    - 서로 다른 차원을 가진 브랜치(CV: $32,640\\text{D}$ vs DS: $32\\text{D}$)를 raw LOO로 비교 시, 고차원 브랜치는 $DOF/N = 88.1\\%$의 극단적 암기(Overfitting)로 인해 Context LOO가 $0.94\\sim 1.000$의 '가짜 천재' 점수를 얻음."
+        }
+      ],
+      "relations": "RU-27/RU-34 LOO 폐기",
+      "uncertainties": "같은 차원 LOO도 일반화 실패"
+    },
+    {
+      "id": "RU-27",
+      "title": "§212 깨끗한 Context LOO 폐기",
+      "type": "experiment/decision",
+      "commit_indices": [
+        79
+      ],
+      "question": "subsampling 없이 LOO 가중치만 더하면 성능이 개선되는가?",
+      "hypothesis": "S=1, f=1.0에서 LOO 가중치가 query AUROC를 높인다.",
+      "experiment": "v120 6-branch 50-fold에서 LOO 가중치만 변경했다.",
+      "observations": ".6265→.6125, 7개 중 5개 하락, ctx LOO/test rho=-.2679였다.",
+      "decision": "Context LOO를 영구 폐기하고 trimmed mean을 유지했다.",
+      "evidence": [
+        {
+          "sha": "6a87a5d109b75908c32c170912a7695445d4c938",
+          "path": "docs/current_status.md",
+          "line": 24,
+          "quote": "  - **원인 규명**: Context LOO 점수와 실제 Test AUROC 간 스피어만 순위 상관계수가 **음수 ($\\rho = -0.2679$)**로 측정됨."
+        }
+      ],
+      "relations": "R12가 용량 보정 뒤에도 확정",
+      "uncertainties": "v120은 v121 기준과 직접 비교하지 않음"
+    },
+    {
+      "id": "RU-28",
+      "title": "§213 v121 기준선과 anchor 초기 측정",
+      "type": "benchmark/experiment",
+      "commit_indices": [
+        80
+      ],
+      "question": "CT를 빼면 빠른 기준선을 만들고 anchor가 DS를 개선하는가?",
+      "hypothesis": "CT mute는 비용을 줄이고 anchor가 국소 변이를 보존한다.",
+      "experiment": "CT weight=0 5-branch 50-fold와 salience-anchor DS를 실행했다.",
+      "observations": "v121 macro .6171, 45분→12분. 당시 +7.65%p는 R14에서 +.43%p로 정정됐다.",
+      "decision": ".6171 5-branch를 공식 비교 기준으로 삼고 anchor 판정은 보류했다.",
+      "evidence": [
+        {
+          "sha": "c3dd5352408ec47eb921a46594d23c44fa440137",
+          "path": "docs/current_status.md",
+          "line": 22,
+          "quote": "  - 5-Branch (CV, BM, BD, QA, DS) Trimmed Mean Macro AUROC: **`0.6171`** (안정적 고속 평가 환경 확립)."
+        },
+        {
+          "sha": "cab8248cd77a05aaedfdf32c8945476ef1989dc4",
+          "path": "docs/history/archive.md",
+          "line": 1058,
+          "quote": "> ⚠️ **[§223 정정] 아래 \"DS Standalone Full\" 열은 DS 단독 성능이 아니라 §212의 v120 6-branch Trimmed Mean 값이 잘못 들어간 것입니다** (7개 과제·macro 전부 §212 표와 동일). 이 열을 기준으로 계산된 \"+7.65%p 폭등\", \"−9.67%p\" 등 **모든 증감 수치가 무효**입니다. 통제 비교 실측은 [§223](#§223-salience-anchor-subsampling-효과-정정-및-신호-b-판정)을 보십시오 — 실제 효과는 ARID1A +0.43%p, macro +0.03%p입니다."
+        }
+      ],
+      "relations": "RU-36 정정, RU-37 종료 철회",
+      "uncertainties": "SEAL은 기준선 선택에 미사용"
+    },
+    {
+      "id": "RU-29",
+      "title": "§214–214-V 집계 탐색 정정",
+      "type": "experiment/correction",
+      "commit_indices": [
+        81,
+        82
+      ],
+      "question": "adaptive 집계가 max-drop을 해결하고 승격되는가?",
+      "hypothesis": "저장 5-branch 마진의 재집계가 개선한다.",
+      "experiment": "§213 저장 예측 350 fold를 오프라인 재집계하고 sign agreement를 감사했다.",
+      "observations": "수치는 재현됐으나 두 방식 4/7, 집계 8종·부분집합 31종에서 5/7은 없었다.",
+      "decision": "trimmed mean 유지, 집계 축 종료, 보고 무결성 규칙 추가.",
+      "evidence": [
+        {
+          "sha": "143690a38478e6d279e3932d705b8946a87f55a6",
+          "path": "docs/current_status.md",
+          "line": 25,
+          "quote": "- **그러나 승격 기준에 미달합니다.** 두 방식 모두 **sign agreement 4/7** (승격 요건 ≥5/7)."
+        },
+        {
+          "sha": "143690a38478e6d279e3932d705b8946a87f55a6",
+          "path": "docs/current_status.md",
+          "line": 67,
+          "quote": "→ 이는 개별 후보의 실패가 아니라 **Primary 7 벤치마크가 1%p 부근 차이를 분해하지 못한다**는 뜻입니다. `agent_handoff.md` 불변식 3에 **분해능 하한** 조항으로 등록했고, **집계 함수 변형 탐색은 Closed Axis로 종료**했습니다."
+        }
+      ],
+      "relations": "R08부터 구조/게이트 우선",
+      "uncertainties": "당시 Oracle은 R15에서 판정 기준 폐기"
+    },
+    {
+      "id": "RU-30",
+      "title": "§215–217 중복성·RM 기각",
+      "type": "diagnosis/admission",
+      "commit_indices": [
+        83,
+        84,
+        85
+      ],
+      "question": "5개 branch가 독립 신호이고 RM은 새 축인가?",
+      "hypothesis": "rank와 상관으로 라벨 없이 중복·RM 직교성을 선별한다.",
+      "experiment": "세 실행 rank와 RM SCREEN_ONLY 350-fold를 대조했다.",
+      "observations": "rank 2.26/5 반복, RM–CV max |r|=.690, 효율 45→43%.",
+      "decision": "성능 미조회로 RM을 기각하고 형상 축만 탐색한다.",
+      "evidence": [
+        {
+          "sha": "e1bb3009c72c0bb2c0955ff6bb2566645a5b0183",
+          "path": "docs/current_status.md",
+          "line": 121,
+          "quote": "- **결과: 기각.** max |r| = **0.690 (RM–CV)** > 0.6. 규칙에 따라 **성능은 조회하지 않았습니다**(`rm_screen.py`가 절차적으로 차단). 랭크 효율도 45% → 43%로 하락합니다."
+        }
+      ],
+      "relations": "RU-31 게이트 선례; BD 하나뿐은 R16에서 시점 한정 정정",
+      "uncertainties": "rank는 R09에서 필터로 축소"
+    },
+    {
+      "id": "RU-31",
+      "title": "§218 SH 채택·BS 기각",
+      "type": "admission/decision",
+      "commit_indices": [
+        86,
+        87
+      ],
+      "question": "형상 통계가 새 정보를 제공하는가?",
+      "hypothesis": "SH/BS가 위치 계열과 직교해 rank와 앙상블을 개선한다.",
+      "experiment": "SH·BS 상관/효율, 단독 정보량, 5-branch 확장을 평가했다.",
+      "observations": "SH max |r|=.418, 7/7>.5; BS 4/7. rank 45→50%여도 macro/oracle 개선 없음.",
+      "decision": "SH 채택·승격 보류, 직교성+정보량 2단계 게이트 확정.",
+      "evidence": [
+        {
+          "sha": "0b6e56115eee14be0de3057f1ba79865c30041c7",
+          "path": "docs/current_status.md",
+          "line": 154,
+          "quote": "**직교성은 필요조건이지 충분조건이 아니며, 랭크 효율은 성능의 예측자가 아니라 필터입니다.**"
+        }
+      ],
+      "relations": "RU-32 SH 변형, RU-38 gate 보완",
+      "uncertainties": "hold-out 미검증"
+    },
+    {
+      "id": "RU-32",
+      "title": "§219 SH 변형 반증과 SHJ 당시 보류",
+      "type": "experiment",
+      "commit_indices": [
+        88,
+        89,
+        90
+      ],
+      "question": "SH 차원·로버스트화·모멘트 분리 또는 SHJ가 정보량을 높이는가?",
+      "hypothesis": "강화 SH가 미회수 정보를 회수한다.",
+      "experiment": "7개 변형을 한 실행(949초)에 별도 마진으로 기록했다.",
+      "observations": "세 가설 반증; SHJ ARID1A .6363, 48/50, max |r|≤.227이나 4/7.",
+      "decision": "변형 축을 닫고 SHJ 정보는 게이트 개정 판단으로 이월했다.",
+      "evidence": [
+        {
+          "sha": "ba9f6a43f8a3cf8b093555d3d64b4b006ac83af3",
+          "path": "docs/current_status.md",
+          "line": 154,
+          "quote": "SHJ는 KRAS `0.4823`, Prog `0.4889`, PBRM1 `0.4797`로 **3개 과제에서 우연 이하**(단독>0.5가 4/7)이며, §218에서 사전 선언한 게이트 ②를 통과하지 못합니다."
+        }
+      ],
+      "relations": "RU-33 과제 특화 채택, RU-37 oracle 폐기",
+      "uncertainties": "oracle 이동은 이후 판정 기준 아님"
+    },
+    {
+      "id": "RU-33",
+      "title": "§220 과제 특화 gate②b와 SHJ 채택",
+      "type": "policy/admission",
+      "commit_indices": [
+        91
+      ],
+      "question": "전 과제 >.5 규칙이 과제 특화 직교 신호를 부당 배제하는가?",
+      "hypothesis": "기존 branch 대칭성이 과제 특화 통로를 정당화한다.",
+      "experiment": "②a를 기존 5개에 소급하고 SHJ 재현성과 상관을 대조했다.",
+      "observations": "기존 5개도 ②a 전부 불통과; SHJ는 48/50, |r|≤.132.",
+      "decision": "②b로 SHJ 채택, 3/7이라 공식 구성 승격은 안 했다.",
+      "evidence": [
+        {
+          "sha": "749cbff47b33c93f898701f190642d6b24e5e909",
+          "path": "docs/history/archive.md",
+          "line": 1542,
+          "quote": "**현행 모델의 5개 브랜치 전부가 ②a를 통과하지 못한다.**"
+        },
+        {
+          "sha": "749cbff47b33c93f898701f190642d6b24e5e909",
+          "path": "docs/agent_handoff.md",
+          "line": 66,
+          "quote": "> ②b로 통과한 후보는 archive에 `과제 특화 채택`으로 명시하고, 승격(≥5/7)은 별개 요건으로 남는다."
+        }
+      ],
+      "relations": "R15가 oracle 조건을 fold 재현성으로 교체",
+      "uncertainties": "활용 임계값 미검증"
+    },
+    {
+      "id": "RU-34",
+      "title": "§221 용량 보정 뒤 LOO 활용 반증",
+      "type": "experiment/decision",
+      "commit_indices": [
+        92
+      ],
+      "question": "LOO 차원 팽창을 없애면 context 점수가 query 성능을 예측하는가?",
+      "hypothesis": "무편향 8D SHJ에서는 context LOO가 예측한다.",
+      "experiment": "context LOO 마진을 저장하고 상관을 검사했다.",
+      "observations": "팽창 rho=.667은 확인됐지만 SHJ fold rho=-.091, 차원-ctx/qry rho=.154.",
+      "decision": "context→query 분포 이동 문제이므로 §212 폐기 확정.",
+      "evidence": [
+        {
+          "sha": "a21c227a0433b6f353a4c3c69120b3ea7f5efd8a",
+          "path": "docs/current_status.md",
+          "line": 161,
+          "quote": "**편향을 없애도 예측력이 돌아오지 않습니다.** 즉 문제는 낙관 편향이 아니라 **context↔query 분포 이동**입니다(§215 SMAD4 역전과 같은 축). §212 폐기는 용량과 무관하게 확정됩니다."
+        }
+      ],
+      "relations": "RU-27 강화, RU-37 선택 신호 부재와 같은 교착",
+      "uncertainties": "임계값을 평가셋에서 고를 수 없음"
+    },
+    {
+      "id": "RU-35",
+      "title": "§222 SHJ 통합과 bf16 수정",
+      "type": "implementation/verification",
+      "commit_indices": [
+        93
+      ],
+      "question": "SHJ를 안전하게 정식 통합할 수 있는가?",
+      "hypothesis": "fp32 백색화가 bf16 오차 증폭 없이 §220을 보존한다.",
+      "experiment": "shj.py·config·집계·테스트를 연결하고 autocast를 대조했다.",
+      "observations": "bf16 오차 약 100배, fp32 ARID1A .6403(48/50).",
+      "decision": "fp32 백색화를 강제하고 채택을 유지했다.",
+      "evidence": [
+        {
+          "sha": "d6b0a9ce518e3d06b091cf1fc229645f8ed76f57",
+          "path": "docs/history/archive.md",
+          "line": 1648,
+          "quote": "- 원인은 평가 파이프라인이 **bf16 autocast** 안에서 실행된다는 점이다. 투영 행렬곱이 bf16(상대오차 ~1e-3)으로 계산되고, **백색화의 `eigvals.clamp_min(1e-8).rsqrt()`가 이를 약 100배 증폭**한다."
+        },
+        {
+          "sha": "d6b0a9ce518e3d06b091cf1fc229645f8ed76f57",
+          "path": "docs/history/archive.md",
+          "line": 1651,
+          "quote": "**수정**: `shj_slide_features()` 내부에서 `torch.autocast(enabled=False)`로 float32를 강제한다. 주변 autocast 상태와 무관하게 재현된다."
+        }
+      ],
+      "relations": "RU-33 채택 구현",
+      "uncertainties": "초기 SHJ 수치는 bf16 경로"
+    },
+    {
+      "id": "RU-36",
+      "title": "§223 §213 baseline 오류와 당시 축 종료",
+      "type": "correction/decision",
+      "commit_indices": [
+        94
+      ],
+      "question": "§213 anchor +7.65%p가 동일 조건 DS full 비교인가?",
+      "hypothesis": "통제 baseline을 바로잡으면 효과와 축 지속 여부를 판정할 수 있다.",
+      "experiment": "§213 DS Standalone Full 열 계보를 감사했다.",
+      "observations": "그 열은 §212 v120 6-branch, 실제 효과 +.43%p.",
+      "decision": "당시 anchor 축 종료와 통제 비교 의무를 기록했다.",
+      "evidence": [
+        {
+          "sha": "cab8248cd77a05aaedfdf32c8945476ef1989dc4",
+          "path": "docs/history/archive.md",
+          "line": 1058,
+          "quote": "> ⚠️ **[§223 정정] 아래 \"DS Standalone Full\" 열은 DS 단독 성능이 아니라 §212의 v120 6-branch Trimmed Mean 값이 잘못 들어간 것입니다**"
+        }
+      ],
+      "relations": "R15가 종료 철회",
+      "uncertainties": "종료는 R15에서 뒤집힘"
+    },
+    {
+      "id": "RU-37",
+      "title": "§224 Oracle 폐기와 §225 dose-response",
+      "type": "policy/experiment",
+      "commit_indices": [
+        95,
+        96
+      ],
+      "question": "oracle 비교를 쓰며 anchor 강도에 전역 이득이 있는가?",
+      "hypothesis": "oracle은 건전한 기준이고 §213 강도가 효과를 대표한다.",
+      "experiment": "split-half oracle 편향 및 full/74.5/40.5/15% 강도를 대조했다.",
+      "observations": "oracle +.0063 선택 편향; ARID1A +2.97%p와 PBRM1 -6.64%p 단조 상충.",
+      "decision": "§223 종료는 철회하지만 전역 이득 없고 draw 안정성은 기각.",
+      "evidence": [
+        {
+          "sha": "8c8bfc5d65cdf244889f8335a6f14f34ab40923e",
+          "path": "docs/agent_handoff.md",
+          "line": 61,
+          "quote": "이 비교는 **평가에 쓰는 데이터로 브랜치를 고르므로 승자의 저주로 상향 편향**되며(split-half 측정 결과 편향 +0.0063, 브랜치 성능이 근접한 ARID1A에서는 +0.0144), 애초에 상한도 아니다"
+        },
+        {
+          "sha": "0e774f05cdd217ca527979426b5c8416faf47e51",
+          "path": "docs/current_status.md",
+          "line": 161,
+          "quote": "**4개 과제에서 완벽한 단조 용량반응**(|ρ|=1.000): ARID1A는 강할수록 상승(+2.97%p), KEAP1·KRAS·Prog는 단조 하락, PBRM1이 최대 손실(−6.64%p)."
+        }
+      ],
+      "relations": "RU-28/RU-36 anchor 해석 정정",
+      "uncertainties": "과제별 선택 신호 없음"
+    },
+    {
+      "id": "RU-38",
+      "title": "§226 gate① 결함 수정과 진행 중 방향 라운드",
+      "type": "도구 수정 및 진행 중 연구방향 라운드 (진행 중)",
+      "commit_indices": [
+        97,
+        98,
+        99
+      ],
+      "question": "후보가 채택 SH/SHJ와 상관 심사를 받고 다음 후보를 정할 수 있는가?",
+      "hypothesis": "adopted를 기준 집합에 넣고 형상 후보를 교차 검토하면 무단 통과를 막는다.",
+      "experiment": "branch_screen에 adopted 기본값을 추가하고 20개 제안을 교차 채점했다; 모델 실험은 하지 않았다.",
+      "observations": "기존 gate①은 SH/SHJ를 재지 않았다. AKS·MDX·LID는 권고이나 동일 배치·독립 비교 부족 및 GPU 차단.",
+      "decision": "gate①은 SH·SHJ 포함. 제안은 실험 결과가 아닌 진행 중 목록이며 규범/적대 검증 뒤에만 실행 판단.",
+      "evidence": [
+        {
+          "sha": "f3f0b201f85d2bb7eafe1e63561e2bbda2b277c1",
+          "path": "docs/current_status.md",
+          "line": 34,
+          "quote": "- **게이트 ① 도구 결함 수정** (`scripts/analysis/branch_screen.py`). STEP 1의 기준 집합이 `BRANCHES`(공식 5-branch) + 형제 후보뿐이라, **이미 채택된 `SH`(§218)·`SHJ`(§220)와의 상관을 한 번도 재지 않았다.**"
+        },
+        {
+          "sha": "f3f0b201f85d2bb7eafe1e63561e2bbda2b277c1",
+          "path": "docs/current_status.md",
+          "line": 40,
+          "quote": "- **단, 세 건 모두 동일 에이전트(claude_shape) 한 배치 산출이고 자사 채점 제외 구조상 Claude 평가를 받지 않았다.** 제안 품질이 아니라 한 에이전트의 문서 작성 규약 숙련도가 점수에 반영됐을 가능성은 배제되지 않았다. 독립 비교군이 필요하다."
+        }
+      ],
+      "relations": "RU-30 screen 선례와 RU-31/RU-33 채택 형상 계열 연결",
+      "uncertainties": "AKS·MDX·LID 미실험; GPU blocker와 fatal 판정 충돌"
+    }
+  ]
+}
