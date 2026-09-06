@@ -27,7 +27,7 @@
 
 | 사실 | 정본 |
 |:---|:---|
-| 기준선 AUROC · 승격 기준 · 게이트 조건 · 분해능 하한 · 오염 검사 상수 | [`PROJECT.md`](PROJECT.md) |
+| 기준선 AUROC · 승격 기준 · 게이트 조건 · 판정 설계와 정밀도 · 오염 검사 상수 | [`PROJECT.md`](PROJECT.md) |
 | 현재 목표 · 진행 중 RU · 블로커 · 다음 명령 · 환경 실측값 | [`current_status.md`](current_status.md) |
 | 닫힌 축과 경계 정의 · 경계 미확정 목록 | [`closed_axes.md`](closed_axes.md) |
 | 결정의 근거 · 정정 · 철회 이력 (append-only) | [`decisions.md`](decisions.md) |
@@ -45,7 +45,7 @@
 
 | 파일 | 내용 |
 |:---|:---|
-| [`history/research_units_all.md`](history/research_units_all.md) | **450커밋 전수 연구 단위 총람** (RU-01~78, 6대 시대, 113건 인용 검증). 앞으로 `ru.py close`가 여기에 append한다 |
+| [`history/research_units_all.md`](history/research_units_all.md) | **450커밋 전수 연구 단위 총람** (RU-01~78 역사 복원 및 이후 완료 RU append, 6대 시대, 113건 인용 검증). 앞으로 `ru.py close`가 여기에 append한다 |
 | [`history/research_units_all.json`](history/research_units_all.json) | 위의 기계 판독 DB |
 | [`history/research_units_all_manifest.json`](history/research_units_all_manifest.json) | 0..449 전체 커밋 매니페스트 (SHA · 날짜 · 메시지 · 변경 파일) |
 | [`history/era_review_notes.md`](history/era_review_notes.md) | **시대별 검토 메모 (발표 자료용)** — 시대마다 "얻은 것 / 닫은 것"과 검토 지적. 정본 아님, 해석 메모 |

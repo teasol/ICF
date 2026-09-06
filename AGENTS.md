@@ -18,7 +18,7 @@ R1~R7)** 과 [§0 목표 중심 연구 원칙](docs/agent_handoff.md#0-목표-�
 - **증거 판정**(지지/반박/판별 불가/실행 무효)과 **운영 결정**(채택/추가 진단/보류/종료)을
   분리해 적습니다.
 
-원칙의 정본은 위 두 문서이며, 현재 목표·완료 조건·후속 행동은 `docs/current_status.md`에 기록합니다.
+원칙의 정본은 위 두 문서이며, 현재 목표의 완료 조건은 `docs/PROJECT.md`, 진행 상태·후속 행동은 `docs/current_status.md`에 기록합니다.
 
 ## 1. 세션 시작 (Resume Handoff)
 사용자가 "이어서 시작하자", "핸드오프 받아줘", "resume", "어디까지 했지" 등으로 작업을 시작할 때:
@@ -34,11 +34,13 @@ R1~R7)** 과 [§0 목표 중심 연구 원칙](docs/agent_handoff.md#0-목표-�
 ## 2. 작업 진행 (RU 단위)
 진행 단위는 커밋이 아니라 **연구 단위(RU)**입니다. 절차의 정본은
 [`docs/agent_handoff.md` §1](docs/agent_handoff.md)입니다.
-1. **착수 전** `python3 scripts/docs/ru.py open --title "<제목>"`으로 카드를 만들고
+1. **연구 실험인지 먼저 판별해 밝힙니다.** 문서 편집·환경 점검 등 면제와 카드 초안 절차는
+   `docs/agent_handoff.md` §1.0을 따릅니다. 연구 실험은 **착수 전** `python3 scripts/docs/ru.py open --title "<제목>"`으로 카드를 만들고
    질문·가설·판정 기준·예산·**중단 조건**·결과별 후속 행동 여섯 필드를 채웁니다.
    하나라도 비어 있으면 착수하지 않습니다.
 2. 제안이나 후보를 심사하기 전에 [`docs/closed_axes.md`](docs/closed_axes.md)의 **경계**를
-   확인합니다. 경계 판단이 갈리면 임의로 한쪽을 채택하지 않고 같은 문서 §3에 올립니다.
+   확인합니다. PSW·TGW / FC / P3-LIMIT-CURVE / LSAK는 비저촉으로 확정됐습니다(`D-022`).
+   새로운 경계 판단이 갈리면 임의로 한쪽을 채택하지 않고 같은 문서 §3에 올립니다.
 3. **종료 시** `python3 scripts/docs/ru.py close --id RU-xx`로 총람에 append하고,
    규범·기준·구성이 바뀌었다면 [`docs/decisions.md`](docs/decisions.md)에 결정 레코드를,
    축을 닫거나 열었다면 `closed_axes.md`에 반영합니다.

@@ -1,5 +1,9 @@
 # Current development status & multi-location sync SSOT
 
+> **역사 기록의 적용 범위**: 아래 과거 판정·인용은 당시 기록이다. 현행 승격·정밀도는
+> [`PROJECT.md`](../PROJECT.md), 경계는 [`closed_axes.md`](../closed_axes.md)를 따른다.
+> 옛 컷오프·통계 금지·경계 미확정의 정정은 [`decisions.md`](../decisions.md)의 `D-021`·`D-022`에 있다.
+
 **Last updated**: `2026-08-24 18:16:00` — **v120 Baseline 확립 (6-Branch Trimmed Mean) 및 단독 브랜치 전수 실측 / CT 단독 심층 비교 분석 (§204)**:
 - **활성 baseline**: **v120 (6-Branch Trimmed Mean: CV + CT + BM + BD + QA + DS, $w_{DD}=0.0$)** (학습 파라미터 0, Deterministic). 활성 runner `scripts/eval_v120.sh` / `scripts/run_v120_seal_multi_gpu.sh`.
 - **벤치마크 실측치**: 

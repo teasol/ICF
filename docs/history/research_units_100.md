@@ -1,5 +1,9 @@
 # 최근 100개 커밋 연구 단위 감사 및 이력 정리 보고서 (Research Units 000–099)
 
+> **역사 기록의 적용 범위**: 아래 과거 판정·인용은 당시 기록이다. 현행 승격·정밀도는
+> [`PROJECT.md`](../PROJECT.md), 경계는 [`closed_axes.md`](../closed_axes.md)를 따른다.
+> 옛 컷오프·통계 금지·경계 미확정의 정정은 [`decisions.md`](../decisions.md)의 `D-021`·`D-022`에 있다.
+
 > **감사 기준선 및 개요**  
 > - **고정 HEAD**: `f3f0b201f85d2bb7eafe1e63561e2bbda2b277c1` (Index 99)  
 > - **시작 커밋**: `aac69013e4d3def23977cff98e13f5a0c1c58ddc` (Index 0)  

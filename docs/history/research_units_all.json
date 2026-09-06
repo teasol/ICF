@@ -3495,6 +3495,35 @@
       "end_sha": "fed616f20dc9a568595abe79f259a1563dd324fb",
       "date_range": "2026-09-06 ~ 2026-09-06",
       "commit_count": 0
+    },
+    {
+      "id": "RU-79",
+      "title": "문서 체계 전면 재구성 및 RU 프로세스 도입",
+      "type": "research_infrastructure",
+      "start_date": "2026-09-06T11:28:36+09:00",
+      "start_sha": "f3f0b201f85d2bb7eafe1e63561e2bbda2b277c1",
+      "question": "진행이 반복 작업이 아니라 방향성 있는 축적이 되도록, 문서·진행 체계를 어떻게 바꿔야 하는가?",
+      "hypothesis": "정본 분산·닫힌 축 경계 부재·정정의 주석 누적 세 가지가 반복의 구조적 원인이며, 정본 분리 + 경계 레지스트리 + RU 카드 + 정합성 테스트로 차단할 수 있다.",
+      "criteria": "① 기준 수치가 PROJECT.md 밖에서 선언되면 테스트가 실패할 것. ② closed_axes.md의 모든 닫힌 축이 기각 기전·경계 안·경계 밖·재개 조건 네 필드를 갖출 것. ③ current_status.md가 80줄 이하일 것. ④ 137개 기존 회귀 테스트가 그대로 통과할 것.",
+      "budget": "GPU 0h. 1개 세션.",
+      "kill": "기존 137개 회귀 테스트가 문서 변경으로 깨지면 즉시 중단하고 원인을 먼저 해소한다.",
+      "next_actions": "pass: 사용자가 다음 연구 방향(현재 목표)을 설정하고 그 RU 카드를 연다. fail: 실패한 정합성 항목만 좁혀서 재작업하고, 연구 방향 설정은 그대로 진행한다.",
+      "experiment": "정본 문서 체계·닫힌 축 경계·RU 프로세스·문서 정합성 검사를 정비했다. 최종 단계에서 사용자 결정 D-021·D-022를 PROJECT.md, closed_axes.md, 연구 방향, 인수인계, 발표 메모에 반영하고 역사 원문에는 현행 기준 안내를 추가했다. GPU 실험 없이 nexgem-s1에서 CPU 회귀 테스트를 실행했다.",
+      "observations": "CUDA_VISIBLE_DEVICES 빈 값으로 bash scripts/run_tests.sh 실행: 147 tests, 23.348s, OK. 원래 137개 회귀에 문서 정합성 등이 포함된 현행 스위트 통과. closed_axes.md의 모든 CLOSED 축에 필수 경계 필드가 존재하며 경계 미확정 4건은 모두 비저촉으로 확정. current_status.md 80줄 이하. git diff --check 통과. 신규 성능 수치 산출 없음.",
+      "decision": "검증 범위의 증거 판정: 지지 — 문서·프로세스 완료 조건 충족. 운영 결정: 정비 체계 채택, RU-79 종료. 반복 실패를 실제로 감소시키는 장기 효과와 기전은 미확인. 다음 연구 방향은 사용자가 설정한다.",
+      "evidence": [
+        "docs/decisions.md D-015·D-018·D-019·D-020·D-021·D-022",
+        "docs/PROJECT.md §2~§5",
+        "docs/closed_axes.md §2~§3",
+        "tests/test_docs_consistency.py",
+        "logs/ru79/docs_alignment_tests.log (nexgem-s1, CPU, 2026-09-06; 로컬 로그, git 비추적)"
+      ],
+      "relations": "RU-80의 판정 설계 정정을 반영. 후속 연구 RU는 사용자 방향 설정 후 등록.",
+      "uncertainties": "문서 정합성 통과는 연구 성능·기전의 입증이 아니다. 후보 성능과 hold-out은 미검증. 사전 카드의 research_infrastructure 유형·137 tests 기준·1개 세션 예산은 원문 보존: 문서 인프라 작업으로 여러 세션에 걸쳐 종료했고 GPU 사용은 0h였다. 종료 시 HEAD ca2c0a8 위 미커밋 문서 변경 포함; 원문 사전 기준을 소급 수정하지 않았다. 현재 호스트는 nexgem-s1이며 원격 Slurm 상태는 미확인.",
+      "end_date": "2026-09-06T22:46:20+09:00",
+      "end_sha": "ca2c0a859df868ea7cb8adaf6d16b46377eb28bb",
+      "date_range": "2026-09-06 ~ 2026-09-06",
+      "commit_count": 8
     }
   ]
 }
