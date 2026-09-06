@@ -9,10 +9,10 @@
 |:---|:---|
 | **Last Updated** | 2026-09-06 (KST) |
 | **Status** | WIP — 문서 체계 재구성 진행 중 |
-| **Host / Node** | `nexgem-s1` · 8× RTX A5000 23GB · driver **550.127.08** (2026-09-06 실측) |
+| **Host / Node** | 로그인 노드 `nexgem` (GPU 없음) · 계산은 Slurm `batch` 파티션에 `sbatch` 제출 |
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · Lightning 2.6.5 |
 | **Active Job** | 없음 |
-| **회귀 테스트** | 137 tests · `OK` (2026-09-06 CPU 경로 재확인) |
+| **회귀 테스트** | 147 tests · `OK` (2026-09-06 node2, 22.2s) |
 
 ---
 
@@ -33,26 +33,26 @@
 착수 전 RU 카드 등록은 필수다 — 절차는 [`agent_handoff.md` §1](agent_handoff.md)에 있다.
 
 
-## 🛑 BLOCKER — 이 노드에서 GPU를 쓸 수 없다 (2026-09-06 실측)
+## 실행 환경 — Slurm 클러스터 (2026-09-06 실측으로 정정)
 
-`.venv`의 `torch 2.14.0+cu130`은 CUDA 13.0 런타임(드라이버 ≥ 580)을 요구하는데 `nexgem-s1`의
-드라이버는 **550.127.08 (CUDA 12.4)** 이다. `torch.cuda.is_available()`가 **False**이고
-(`found version 12040`), `device_count()`는 8을 반환하나 실제 할당에서 실패한다. 이 머신의 다른
-인터프리터도 전부 불가하다 — `BagPFN`·`TabPFN` 2.12.1+cu132, `TIRANOS`·`VFI` 2.13.0+cu132.
+`nexgem`은 **로그인 노드**이고 GPU가 없다. 모든 계산은 `batch` 파티션에 `sbatch`로 제출하며,
+제출 전 사용자 승인을 받는다. 노드 스펙·선택 우선순위·로그 규약은 `/home/kimds/slurm_rules.md`가 정본이다.
 
-해소 경로: (a) gnode4 이동, (b) 드라이버 550에 맞춘 torch 재설치, (c) 드라이버 상향. 셋 중 하나
-전까지 **350-fold 스윕·`SCREEN_ONLY` 실행은 집행 불가**하다. 오프라인 재집계와 회귀 테스트는 정상이다.
-`NGPU`는 `scripts/node_env.sh`가 보고하는 값을 쓰고 문서의 과거 값을 신뢰하지 않는다.
+- **GPU 차단 해소.** `.venv`의 `torch 2.14.0+cu130`이 `gnode6`(H100 80GB · 드라이버 595.71.05 ·
+  CUDA 13.2)에서 재설치 없이 동작한다 — `cuda_available=True`, 4096² matmul 성공(job 131263).
+  이전 기록의 "드라이버 550"은 로그인 노드 값이라 계산 노드에 해당하지 않았다.
+- **`gnode1`~`gnode5`는 미확인.** cu130은 드라이버 ≥580을 요구한다. 처음 쓰기 전에 점검 job으로
+  `torch.cuda.is_available()`를 실측한다 — `device_count()`만 보고 판단하지 않는다.
+- **낮은 등급부터 쓴다.** GPU 불필요 작업은 `node1`~`node5`(GPU 없음)로 보내고, GPU가 필요하면
+  A5000(`gnode1-4`) → A6000(`gnode5`) → H100(`gnode6`) 순으로 올라간다.
 
 ### Immediate Next Command
 
 ```bash
-# GPU 트랙에 진입하기 전 매번 1회 — 차단이 풀렸는지부터 확인한다
-nvidia-smi --query-gpu=name,driver_version --format=csv,noheader | head -1 && \
-  .venv/bin/python -c "import torch;print('cuda',torch.cuda.is_available(),'| build',torch.version.cuda)"
+# 작업에 충분한 가장 낮은 등급의, 가장 한산한 노드를 고른다.
+# GPU 트랙이면 그 노드에서 cuda_available=True를 먼저 확인한다.
+sinfo -N -o "%N %C %m %G %t" -n node1,node2,node3,node4,node5,gnode1,gnode2,gnode3,gnode4,gnode5,gnode6
 ```
-
-`cuda True`가 나와야 GPU 트랙 진입이 가능하다. 현재 목표(문서 정비)는 GPU를 쓰지 않는다.
 
 ---
 
@@ -74,7 +74,6 @@ nvidia-smi --query-gpu=name,driver_version --format=csv,noheader | head -1 && \
 - §226 적대적 검증 2건 미실행 (`research_directions.md`에 `미검증` 명시).
 - §217~§221의 SHJ 수치는 **bf16 경로 산출값**으로 fp32와 최대 0.5%p 차이날 수 있다.
 - `adaptive_trimmed`의 `adaptive_tau`는 무효 인자(죽은 코드).
-- `history/archive.md`에 **§199·§200 절 번호가 각각 중복**된다
-  ([`closed_axes.md` §4](closed_axes.md)).
+- `history/archive.md`에 **§199·§200 절 번호가 각각 중복** ([`closed_axes.md` §4](closed_axes.md)).
 
-_by Claude Opus 5 on nexgem-s1 at 2026-09-06_
+_by Claude Opus 5 on nexgem at 2026-09-06_

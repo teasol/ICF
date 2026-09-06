@@ -159,23 +159,38 @@ Context 슬라이드만으로 within-slide PCA 기저(K=256)를 만들고, 상�
 
 ## 5. 실행 환경
 
-- **노드 종속 설정은 `scripts/node_env.sh` 하나로 모았다.** GPU 수·인터프리터·경로는 이
-  스크립트가 보고하는 값을 쓰고, 문서에 적힌 과거 값을 신뢰하지 않는다.
+- **`nexgem`은 로그인 노드다.** GPU가 없고 `nvidia-smi`도 설치되어 있지 않다. 학습·추론·스윕·
+  대규모 전처리는 Slurm `batch` 파티션에 `sbatch`로 제출한다. 로그인 노드에서는 편집·`git`·
+  문서 작업과 가벼운 문법 검사만 한다.
+- **노드 스펙·선택 우선순위·로그 규약의 정본은 `/home/kimds/slurm_rules.md`다.** 요지: GPU가
+  필요 없으면 `node1`~`node5`로 보내고, 필요하면 A5000(`gnode1-4`) → A6000(`gnode5`) →
+  H100(`gnode6`) 순으로 **충분한 최저 등급**을 쓴다. 같은 등급에서는 한산한 노드를 고른다.
+  Slurm에 GPU 타입이 등록돼 있지 않아 `--gres=gpu:<type>:N`은 동작하지 않는다 — `--nodelist`로 지정한다.
+- **job 로그**는 `slurm_outputs/YYYY-MM-DD/HHMM/%x-%j.{out,err}`에 남긴다. 경로는 절대경로로 적고
+  제출 전에 `mkdir -p`한다 (Slurm은 디렉토리를 만들지 않는다). **제출 전 사용자 승인을 받는다.**
+- **노드 종속 설정은 `scripts/node_env.sh` 하나로 모았다.** 인터프리터·경로는 이 스크립트가
+  보고하는 값을 쓰고, 문서에 적힌 과거 값을 신뢰하지 않는다. `NGPU`는 Slurm 할당
+  (`SLURM_GPUS_ON_NODE` → `CUDA_VISIBLE_DEVICES` → `nvidia-smi -L` 순)에서 유도된다.
 - **Python**: `uv`로 관리하는 `ICF/.venv` (Python 3.12.11).
   재구축은 `uv venv --python 3.12 .venv && uv pip install -r requirements.txt`.
 - **스레드 상한**: 다중 코어 노드에서 OpenMP 과다구독을 막기 위해 `OMP_NUM_THREADS=8`로 제한한다.
 - **드라이버 호환성**: `.venv`의 torch 빌드가 요구하는 CUDA 런타임과 노드 드라이버가 맞아야 한다.
-  현재 차단 상태와 실측값은 [`current_status.md`](current_status.md)에 있다.
+  cu130 빌드는 드라이버 **≥ 580**을 요구한다. 노드별 확인 현황은
+  [`current_status.md`](current_status.md)에 있다. 새 노드를 처음 쓸 때는 점검 job으로
+  `torch.cuda.is_available()`를 실측한다 — `device_count()`는 드라이버가 맞지 않아도 값을 반환한다.
 
 ---
 
 ## 6. 표준 검증 명령
 
+> 4·6·7번은 GPU를 쓴다. **로그인 노드에서 직접 실행하지 않고** `sbatch` 스크립트 안에서
+> 호출한다. 노드 선택과 로그 경로는 §5를 따른다.
+
 ```bash
 # 1. 환경 로드
 source scripts/node_env.sh && echo "$PYTHON / NGPU=$NGPU"
 
-# 2. 회귀 스위트 (137 tests, ~22s, CPU)
+# 2. 회귀 스위트 (147 tests, ~22s, CPU) — sbatch로 node1~5에 제출한다
 bash scripts/run_tests.sh
 
 # 3. 단일 모듈
@@ -207,4 +222,4 @@ bash scripts/run_and_wait.sh scripts/run_v121_shape_screen.sh v121_sh_v2 \
   "PYTHONPATH=$PWD $PYTHON scripts/analysis/branch_screen.py --tag v121_sh_v2 --candidate m_sh"
 ```
 
-_by Claude Opus 5 on nexgem-s1 at 2026-09-06_
+_by Claude Opus 5 on nexgem at 2026-09-06_

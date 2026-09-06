@@ -35,6 +35,7 @@
 | 브랜치 정의와 수식 · 집계 규칙 | [`current_architecture.md`](current_architecture.md) |
 | 연구 이력 전수 (RU-01~) | [`history/research_units_all.md`](history/research_units_all.md) |
 | 현행 연구 방향 후보 큐 | [`research_directions.md`](research_directions.md) |
+| Slurm 노드 스펙 · 선택 우선순위 · job 로그 경로 | `/home/kimds/slurm_rules.md` (저장소 밖) |
 | 노드 종속 설정 (인터프리터 · GPU 수 · 경로) | [`../scripts/node_env.sh`](../scripts/node_env.sh) |
 | arm 구성과 환경변수 주입 | [`../scripts/lib/arms.sh`](../scripts/lib/arms.sh) |
 
