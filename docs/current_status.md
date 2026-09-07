@@ -7,28 +7,32 @@
 
 | 항목 | 값 |
 |:---|:---|
-| **Last Updated** | 2026-09-07 10:54 (KST) |
-| **Status** | CLEAN — RU-81 종료 · 독립 검산 및 회귀 테스트 통과 |
+| **Last Updated** | 2026-09-07 15:10 (KST) |
+| **Status** | CLEAN — RU-82 종료 · λ 앙상블 4구성 전부 판별 불가 |
 | **Host / Node** | `nexgem-s1` · RTX A5000 8장 · driver 580.126.09 · Slurm 명령 없음 |
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · Lightning 2.6.5 |
-| **Active Job** | 없음 · `ru81_reg_20260907_r1` 완료 (350 folds, 14 shards) |
-| **회귀 테스트** | 150 tests · `OK` (2026-09-07, 22.554s) |
+| **Active Job** | 없음 · RU-82는 GPU 0의 오프라인 재집계로 완료 (wall 2.79s) |
+| **회귀 테스트** | 150 tests · `OK` (2026-09-07, 20.336s) |
 
 ---
 
-## 2026-09-07 — RU-81 종료 인수인계
+## 2026-09-07 — RU-82 종료 인수인계
 
-**RU-81 정규화 진단 완료.** [종료 보고](reports/RU-81_regularization_diagnosis.md)와
-[RU 총람](history/research_units_all.md)에 결과·독립 검산·한계를 기록했다.
-기준선 유지, λ 처방 보류. 다음 후보는 마진 순위·크기 효과 분리 진단(`D-024`).
-실행 블로커 없음. 다음 단계는 후속 질문·대조·예산을 확정하고 별도 RU를 여는 것이다.
-원시 예측·manifest·검산 결과·로그는 s1 로컬 `predictions/ru81_reg_20260907_r1/`와
-`logs/`에 보관하며 git 비추적이다. 이식 가능한 전체 집계는 종료 보고서에 있다.
+**RU-82 λ 앙상블 재집계 완료.** 사용자 제안(여러 λ의 로짓을 결합)을 RU-81 저장 마진으로
+GPU 0에 재집계했다. 사전 선언 4구성(브랜치 내부 평균/풀 통합 × 현행 sigmoid/마진 표준화)
+**전부 `판별 불가`** — 평균 Δ −0.1341 ~ +0.2083%p, 4구성 모두 구간이 0을 포함한다.
+무결성 게이트 오차 0.0. 상세·가설 처리·한계는 [종료 보고](reports/RU-82_lambda_ensemble.md),
+결정은 `D-025`. 경계는 `CA-08` 밖으로 확인했고 `closed_axes.md`는 변경하지 않았다.
+
+**다음 후보는 여전히 마진 순위·크기 효과 분리 진단(`D-024`)이며, RU-82가 그 필요성을 높였다.**
+A2×B1은 평균이 0에 가까운데 과제별 진폭이 4구성 중 최대였고, 원인이 순위 재배열인지
+크기 재가중인지 현재 자료로 구별되지 않는다. 실행 블로커 없음.
+
+RU-81·RU-82의 원시 예측·집계 JSON·로그는 s1 로컬 `predictions/`와 `logs/`에 있고 git 비추적이다.
 
 ## 진행 중 RU
 
-없음. RU-81은 종료했고 다음 연구 방향·예산은 사용자와 결정한다.
-후속 진단은 아직 실행하지 않았다.
+없음. RU-82는 종료했고 다음 RU의 질문·대조·예산은 사용자와 확정한다.
 
 ## 실행 환경 — 현재 접속 호스트
 
@@ -41,7 +45,7 @@ GPU 0~7 모두 CUDA matmul 정상 동작을 2026-09-07 확인했다.
 ### Immediate Next Command
 
 ```bash
-cat docs/reports/RU-81_regularization_diagnosis.md
+cat docs/reports/RU-82_lambda_ensemble.md
 ```
 
 ---
@@ -49,7 +53,7 @@ cat docs/reports/RU-81_regularization_diagnosis.md
 ## 미해결 (Open Issues)
 
 **사용자 판단 대기**
-- 후속 방향 선택: 마진 순위·크기 분리 진단 등 (`D-024`).
+- 후속 방향 선택: 마진 순위·크기 분리 진단의 대조 정의·예산 (`D-024`·`D-025`).
 
 경계 4건은 모두 비저촉으로 확정했다(`D-022`, [`closed_axes.md` §3](closed_axes.md)).
 후보 성능·기전은 미검증이며 별도 RU에서 다룬다.
@@ -69,4 +73,4 @@ cat docs/reports/RU-81_regularization_diagnosis.md
 - `adaptive_trimmed`의 `adaptive_tau`는 무효 인자(죽은 코드).
 - `history/archive.md`에 **§199·§200 절 번호가 각각 중복** ([`closed_axes.md` §4](closed_axes.md)).
 
-_by Codex on nexgem-s1 at 2026-09-07_
+_by Claude Code on nexgem-s1 at 2026-09-07_
