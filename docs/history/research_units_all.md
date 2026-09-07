@@ -1654,3 +1654,30 @@ ICF 프로젝트 450개 커밋의 역사적 궤적은 기계학습 모델 개발
 - **확인 필요 사항 및 한계 (Uncertainties)**: 문서 정합성 통과는 연구 성능·기전의 입증이 아니다. 후보 성능과 hold-out은 미검증. 사전 카드의 research_infrastructure 유형·137 tests 기준·1개 세션 예산은 원문 보존: 문서 인프라 작업으로 여러 세션에 걸쳐 종료했고 GPU 사용은 0h였다. 종료 시 HEAD ca2c0a8 위 미커밋 문서 변경 포함; 원문 사전 기준을 소급 수정하지 않았다. 현재 호스트는 nexgem-s1이며 원격 Slurm 상태는 미확인.
 
 ---
+
+### RU-81. 기존 Ridge 브랜치의 정규화 강도와 예측 민감도 진단
+
+- **일자 (Date)**: `2026-09-06` ~ `2026-09-07`
+- **커밋 범위**: - (`489dc7f7` ... `489dc7f7`)
+- **작업 유형**: `diagnostic`
+- **질문 (Question)**: 고정 λ=1이 CV/BM/QA/DS에 서로 다른 수축을 만들어 예측 순위 또는 마진 결합을 제한하는가? readout 개선과 특징 연구의 우선순위를 정한다.
+- **가설 (Hypothesis)**: H1: 정규화 변화가 단독 예측 순위와 앙상블을 함께 바꾼다. H2: 단독 순위는 거의 그대로지만 마진 크기 변화가 앙상블을 바꾼다. H3: 정규화 변화에도 출력·성능이 둔감하다. 성능 효과와 기전은 별도로 판정한다.
+- **판정 기준 (Criteria, 사전 고정)**: Primary 7 공식 50-fold 전량, 같은 특징·기저·fold·집계에서 Ridge 브랜치 하나만 교체. 각 branch의 weighted centered Gram 양의 고유값 평균을 s로 정의하고 λ=clip(s*[0.1,1,10],1e-4,1e4) 3점과 λ=1 기준을 성능 조회 전 고정. 기준 λ replay max margin abs error<=1e-5, baseline ensemble replay<=1e-6 및 slide/label/fold 일치 필수. branch별 spectrum, effective df, margin RMS, 순위 상관, 단독 AUROC 및 앙상블 대응 Δ·과제 군집 95% t 구간·sign agreement·모든 회귀 보고. 강도별 추세와 순위/크기 반응으로 경쟁 설명을 진단하며 12개 비교의 최댓값을 확증·승격으로 판정하지 않는다. CI는 기술적 진단용이다.
+- **예산 / 중단 조건**: 구현·검증 작업 2시간 이내, GPU 합산 최대 2h. 사용자 승인: nexgem-s1에서 Slurm 없이 GPU 0~7 직접 사용. 8-worker 실행 wall time 최대 900초(2 GPU-h 예약 상한), 초과 시 중단. / 기준 λ replay 불일치, 누수·fold/label 불일치, NaN/Inf, GPU 오류 또는 예산 소진 시 중단하고 실행 무효/미완료를 기록한다. 점수를 보고 강도를 추가하지 않는다.
+- **실험 및 변경 (Experiment)**: 공식 Primary7의 350 folds를 14 shards로 나눠 s1 GPU0~7에서 직접 실행했다. 각 fold에서 기존 특징을 공유하고 CV/BM/QA/DS 중 하나의 λ만 Context Gram 규모 기반 3점으로 변경했다. 같은 λ replay·원래 경로·merged 산출물 대응을 검증하고, 저장 예측을 독립 pairwise AUROC로 재집계했다. 상세: docs/reports/RU-81_regularization_diagnosis.md.
+- **관측 결과 (Observations)**: 350 folds·12개 비교 완료. 680.58s wall, worker 합산 1.2934 GPU-h. 기준 λ=1의 df/rank 평균 CV 0.982 / BM 0.493 / QA 0.294 / DS 0.464. CV 중간 강도: 단독 Δ+1.1972%p·5/7, 앙상블 Δ+0.1304%p·3/7, 군집95%CI[-0.2489,+0.5096]%p. 앙상블 회귀 ARID1A·KEAP1·SMAD4·Progression; 단독 회귀 KEAP1·SMAD4. 12개 앙상블 구간 전부0 포함. 전량 결과·모든 회귀는 보고서 §3. replay/path margin error0, 독립 집계 확률오차1.7882e-7, 원시 재계산 Δ/구간 최대오차3.47e-18. manifest 코드·카드·fold hash 검증 통과.
+- **결정 (Decision)**: 증거 판정: 서로 다른 상대적 수축과 정규화에 따른 순위·마진 반응은 지지. 일관된 앙상블 성능 개선은 판별 불가. 순위·크기 변화의 개별 기전 귀속은 미확인. 운영 결정: 기준선 유지, 이3점 진단 종료, λ 처방 보류, 마진 순위·크기 분리 진단을 후속 후보로 제안(D-024). 연구 축은 닫지 않음. hold-out 미검증.
+- **결과별 후속 행동**: H1 단서: 고정한 정규화 처방과 별도 검증 계획 제안. H2 단서: 마진 스케일/집계 상호작용 추가 진단. H3 또는 판별 불가: 이 제한된 정규화 경로 보류하고 Context→Query 전이/특징 진단 검토. 실행 무효: 원인을 좁혀 수정하고 예산 내 재실행; 초과 시 사용자에게 보고.
+- **원문 근거 (Evidence)**:
+  - docs/reports/RU-81_regularization_diagnosis.md
+  - docs/decisions.md D-023·D-024
+  - predictions/ru81_reg_20260907_r1/manifest.json
+  - predictions/ru81_reg_20260907_r1/plan.json (실행 전 카드 원문)
+  - predictions/ru81_reg_20260907_r1/summary.json
+  - predictions/ru81_reg_20260907_r1/audit.json
+  - logs/ru81_regression.log
+  - logs/ru81_audit.log
+- **선행·후속 관계 (Relations)**: RU-80은 정밀도 기준의 선행. D-022의 P3-LIMIT-CURVE 경로를 좁힌 진단. 후속은 저장 마진에서 순위·크기 효과 분리 진단 초안이며 아직 착수하지 않음.
+- **확인 필요 사항 및 한계 (Uncertainties)**: 초기 shell rc2 실패 후 새 tag r1로 재실행; 실패시 GPU 평가/점수 조회 없음. 한도 중단으로 날짜가 바뀌었고 활동 작업시간2h 준수는 미계측; GPU2h 상한은 충족. 순위/크기 개입이 분리되지 않아 H1/H2의 독점적 귀속 불가. 12개 구간은 다중비교 보정 없는 기술적 구간; Primary7 사전 접근과 이번 결과 선택 이력이 있어 승격 확증으로 사용하지 않음. bf16경로·3점 범위·공식fold 조건 한정, hold-out 미검증. 종료시 HEAD489dc7f 위 미커밋 진단 코드·문서 변경 포함; 실행 원본 해시는 manifest에 보존.
+
+---

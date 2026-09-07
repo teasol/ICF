@@ -198,9 +198,8 @@ Era 5(RU-33→RU-38)는 **미확인 사항에 적어둔 질문을 실제로 추�
 
 보편 규범 §1-1은 "어떤 결정에 쓰이는가"를 요구하고 통상 그 답은
 [`current_status.md`](current_status.md)의 현재 목표에 연결된다.
-**현재 목표 슬롯은 이 규범·절차가 완성될 때까지 비워 둔다**(사용자 결정, `D-020`).
-그동안 **"현재 목표에 기여하는가" 검사는 유예**하되, `question`의 *"무엇을 알게 되는가"* 는
-그대로 요구한다. 목표가 설정되면 이 유예는 자동으로 끝난다.
+목표 연결 검사를 적용한다(`D-023`). 진행 상태·후속 행동은
+`current_status.md`를 따른다. 새 연구 방향이 미정이면 카드 초안과 함께 명시한다.
 
 ### 1.1 착수 전 — RU 카드를 먼저 등록한다
 
@@ -382,7 +381,7 @@ Context 슬라이드만으로 within-slide PCA 기저(K=256)를 만들고, 상�
 # 1. 환경 로드
 source scripts/node_env.sh && echo "$PYTHON / NGPU=$NGPU"
 
-# 2. 회귀 스위트 (147 tests, ~22s, CPU) — sbatch로 node1~5에 제출한다
+# 2. 회귀 스위트 (150 tests, ~22s, CPU) — sbatch로 node1~5에 제출한다
 bash scripts/run_tests.sh
 
 # 3. 단일 모듈
