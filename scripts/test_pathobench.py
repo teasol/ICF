@@ -1185,6 +1185,8 @@ def evaluate_trial(
                         sh_narrow = min(int(os.environ.get("ICF_SH_DIM", "32")), sh_wide)
                         sh_lam = float(os.environ.get("ICF_SH_LAMBDA", "1.0"))
                         wide_basis = basis[:, :sh_wide].float()
+                        tier1_want = [t for t in os.environ.get("ICF_TIER1", "").split(",")
+                                      if t.strip()]
 
                         def _q(sorted_p, frac):
                             n = sorted_p.shape[0]
@@ -1220,7 +1222,7 @@ def evaluate_trial(
                             from src.models.branches.shj import shj_slide_features  # noqa: PLC0415
                             joint = shj_slide_features(v, wide_basis, sh_narrow)
                             n_ = sh_narrow
-                            return {
+                            out = {
                                 "sh":   torch.cat([skew[:n_], kurt[:n_]]),
                                 "shs":  skew[:n_],
                                 "shk":  kurt[:n_],
@@ -1229,9 +1231,38 @@ def evaluate_trial(
                                 "shr2": torch.cat([bowley, moors]),
                                 "shj":  joint,
                             }
+                            # RU-85 Tier 1 candidates. Off unless ICF_TIER1 asks for
+                            # them, so an ordinary run is bit-identical to before.
+                            if tier1_want:
+                                from src.models.branches.aks import aks_slide_features  # noqa: PLC0415
+                                from src.models.branches.lid import lid_slide_features  # noqa: PLC0415
+                                from src.models.branches.mdx import mdx_slide_features  # noqa: PLC0415
+                                if "aks" in tier1_want:
+                                    f_aks, d_aks = aks_slide_features(v, wide_basis, sh_narrow)
+                                    out["aks"] = f_aks
+                                    out["akd"] = f_aks[:4]      # angular half only
+                                    out["akf"] = f_aks[4:]      # fourth-moment half only
+                                    out["_diag_aks"] = d_aks
+                                if "mdx" in tier1_want:
+                                    f_mdx, d_mdx = mdx_slide_features(v, wide_basis, sh_narrow)
+                                    out["mdx"] = f_mdx
+                                    # Grid control arm: the falsifier is |r| < 0.9 against it.
+                                    out["mdx129"] = mdx_slide_features(v, wide_basis, sh_narrow,
+                                                                       grid=129)[0]
+                                    out["_diag_mdx"] = d_mdx
+                                if "lid" in tier1_want:
+                                    f_lid, d_lid = lid_slide_features(v, wide_basis, sh_narrow)
+                                    out["lid"] = f_lid
+                                    # Subsample control arm: falsifier is |r| < 0.8.
+                                    out["lid1024"] = lid_slide_features(v, wide_basis, sh_narrow,
+                                                                        subsample=1024)[0]
+                                    out["_diag_lid"] = d_lid
+                            return out
 
                         _feats = [sh_all(episode_bags[i]) for i in shp_idx]
-                        _keys = ("sh", "shs", "shk", "sh2", "shr", "shr2", "shj")
+                        _keys = ("sh", "shs", "shk", "sh2", "shr", "shr2", "shj") + tuple(
+                            k for k in ("aks", "akd", "akf", "mdx", "mdx129", "lid", "lid1024")
+                            if k in _feats[0])
                         _want = os.environ.get("ICF_SH_VARIANTS", ",".join(_keys)).split(",")
                         _out, _loo_out = {}, {}
                         for _k in _keys:
@@ -1251,6 +1282,13 @@ def evaluate_trial(
                         sh_margin = _out.get("sh")
                         sh_variant_margins = _out
                         sh_variant_loo = _loo_out
+                        # RU-85: per-slide diagnostics for the label-free kill
+                        # conditions. Query side only, aligned with the margins.
+                        tier1_diag = {
+                            f"d_{_n}": torch.stack([d[f"_diag_{_n}"] for d in _feats[n_context:]])
+                            for _n in ("aks", "mdx", "lid")
+                            if f"_diag_{_n}" in _feats[0]
+                        }
 
                     if os.environ.get("ICF_SHAPE_SCREEN_ONLY", "1") != "1":
                         logits = logits.clone()
@@ -2317,8 +2355,10 @@ def evaluate_trial(
         **{
             f"m_{_k}": (_v.detach().cpu()[valid] if isinstance(_v, torch.Tensor) else None)
             for _k, _v in (sh_variant_margins.items() if "sh_variant_margins" in locals() else [])
-            if _k != "sh"
+            if _k != "sh" and not _k.startswith("_diag")
         },
+        **{_k: (_v.detach().cpu()[valid] if isinstance(_v, torch.Tensor) else None)
+           for _k, _v in (tier1_diag.items() if "tier1_diag" in locals() else [])},
         "m_bd": m_bd[valid] if ("m_bd" in locals() and isinstance(m_bd, torch.Tensor)) else None,
         "m_qa": m_qa[valid] if ("m_qa" in locals() and isinstance(m_qa, torch.Tensor)) else None,
         "m_ds": m_ds[valid] if ("m_ds" in locals() and isinstance(m_ds, torch.Tensor)) else None,
@@ -2582,7 +2622,9 @@ def evaluate_official_folds(
             **{f"loo_{_n}": result.get(f"loo_{_n}")
                for _n in ("bm", "bd", "qa", "ds", "sh", "shj")},
             **{f"m_{_k}": result.get(f"m_{_k}")
-               for _k in ("shs", "shk", "sh2", "shr", "shr2", "shj")},
+               for _k in ("shs", "shk", "sh2", "shr", "shr2", "shj",
+                          "aks", "akd", "akf", "mdx", "mdx129", "lid", "lid1024")},
+            **{_k: result.get(_k) for _k in ("d_aks", "d_mdx", "d_lid")},
             "m_bd": result.get("m_bd"),
             "m_qa": result.get("m_qa"),
             "m_ds": result.get("m_ds"),
