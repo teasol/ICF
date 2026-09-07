@@ -7,12 +7,12 @@
 
 | 항목 | 값 |
 |:---|:---|
-| **Last Updated** | 2026-09-07 15:10 (KST) |
-| **Status** | CLEAN — RU-82 종료 · λ 앙상블 4구성 전부 판별 불가 |
+| **Last Updated** | 2026-09-07 16:05 (KST) |
+| **Status** | CLEAN — RU-82 종료 · `N_ctx` 전제 정정(`D-026`) |
 | **Host / Node** | `nexgem-s1` · RTX A5000 8장 · driver 580.126.09 · Slurm 명령 없음 |
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · Lightning 2.6.5 |
 | **Active Job** | 없음 · RU-82는 GPU 0의 오프라인 재집계로 완료 (wall 2.79s) |
-| **회귀 테스트** | 150 tests · `OK` (2026-09-07, 20.336s) |
+| **회귀 테스트** | 150 tests · `OK` (2026-09-07, 24.961s) |
 
 ---
 
@@ -53,7 +53,11 @@ cat docs/reports/RU-82_lambda_ensemble.md
 ## 미해결 (Open Issues)
 
 **사용자 판단 대기**
+- `CA-04`·`CA-06`의 **재개 조건 재작성** — `N_ctx ≈ 40`이 과거 합성 데이터셋 시절 값으로 확인돼
+  두 축의 재개 조건이 닫은 시점에 이미 충족돼 있었다. 축은 닫힌 상태이며 실증 기각도 유지된다.
+  양쪽 근거와 판정 재료는 [`closed_axes.md` §3-E·§3-F](closed_axes.md), 경위는 `D-026`.
 - 후속 방향 선택: 마진 순위·크기 분리 진단의 대조 정의·예산 (`D-024`·`D-025`).
+  대기 중인 GPU 0 작업은 [`research_directions.md`](research_directions.md) Phase 0의 `0-7`·`0-8`.
 
 경계 4건은 모두 비저촉으로 확정했다(`D-022`, [`closed_axes.md` §3](closed_axes.md)).
 후보 성능·기전은 미검증이며 별도 RU에서 다룬다.
