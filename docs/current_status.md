@@ -7,8 +7,8 @@
 
 | 항목 | 값 |
 |:---|:---|
-| **Last Updated** | 2026-09-07 19:00 (KST) |
-| **Status** | CLEAN — 결정 기록을 archive로 통합 · 문서 자기완결성 강제 |
+| **Last Updated** | 2026-09-07 19:40 (KST) |
+| **Status** | CLEAN — 문서 정리 완료 · 후보 큐 23건 우선순위 확정 |
 | **Host / Node** | `nexgem-s1` · RTX A5000 8장 · driver 580.126.09 · Slurm 명령 없음 |
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · Lightning 2.6.5 |
 | **Active Job** | 없음 · RU-82·83·84 모두 GPU 0 오프라인 (wall 2.8s / 15.1s / 0.5s) |
@@ -58,8 +58,8 @@ cat docs/reports/RU-84_gram_diagonal_dominance.md
 ## 미해결 (Open Issues)
 
 **사용자 판단 대기**
-- **다음 연구 방향** — 자원을 신규 브랜치로 돌리기로 했다. Tier 1 3건(`AKS`·`MDX`·`LID`)의
-  착수 순서·예산이 미결이며, 라벨 무관 게이트 ① 직교성 점검부터 시작한다.
+- **다음 연구 방향** — 후보 23건을 P1~P5로 정리했다([`research_directions.md` §0](research_directions.md)).
+  **P1은 `AKS`·`MDX`·`LID`의 라벨 무관 게이트 ① 점검**이고 착수 순서·예산이 미결이다.
 - **재개 축 활용 여부** — `CA-04`(해소 항목 ②·③ 남음)·`CA-02`(재현 선행). 착수 시점 미결이다.
 
 **연구상의 교착**

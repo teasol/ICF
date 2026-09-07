@@ -1,10 +1,10 @@
 # Project History — Design Decisions, Trade-offs & Lessons Learned
 
 > **역사 기록의 적용 범위**: 아래 과거 판정·인용은 당시 기록이다. 현행 승격·정밀도는
-> [`PROJECT.md`](./PROJECT.md), 경계는 [`closed_axes.md`](./closed_axes.md)를 따른다.
+> [`PROJECT.md`](../PROJECT.md), 경계는 [`closed_axes.md`](../closed_axes.md)를 따른다.
 > 옛 컷오프·통계 금지·경계 미확정 판단은 이미 정정됐다 — 현행 승격은 대응 per-fold Δ의
 > 과제 군집 구간으로 판정하고, 통계 도구 사용 금지는 폐지됐으며, 경계 미확정 항목은 없다.
-> 정정 경위는 [결정 이력](history/archive.md)에 있다.
+> 정정 경위는 [결정 이력](archive.md)에 있다.
 
 **Last updated**: `2026-08-09` (CV-only 전환, SEAL 10개 task 판정 기준)
 
