@@ -346,9 +346,20 @@ Context 슬라이드만으로 within-slide PCA 기저(K=256)를 만들고, 상�
 
 ## 5. 실행 환경
 
-현재 접속 호스트의 실측값은 `current_status.md`를 따른다. 아래 Slurm 규칙은
-`nexgem` 로그인 노드를 통해 클러스터에 제출할 때 적용한다. 다른 호스트를
-로그인 노드나 특정 Slurm 노드와 동일시하지 않는다.
+현재 접속 호스트의 실측값은 `current_status.md`를 따른다.
+
+> **실행 방식은 호스트에 종속된다** (`D-030`). 세션 시작 시 `hostname`·GPU·`sinfo` 유무를
+> **실측해** 아래 둘 중 어디에 해당하는지 정하고, 문서에 적힌 과거 호스트를 그대로 신뢰하지 않는다.
+>
+> | 호스트 유형 | 실행 방식 |
+> |:---|:---|
+> | **`nexgem`** — GPU 없음, Slurm 제출 가능 | 계산은 전부 `sbatch`로 제출한다. 아래 Slurm 규칙 전체가 적용되며 **제출 전 사용자 승인**을 받는다. |
+> | **`nexgem-s1`** — GPU 8장, `sinfo`·`squeue` 없음 | Slurm을 쓰지 않고 **직접 실행**한다. `sbatch` 의무·노드 등급 우선순위·job 로그 규약은 **적용되지 않는다**. GPU 예산은 RU 카드에 적는다. |
+>
+> 다른 호스트를 로그인 노드나 특정 Slurm 노드와 동일시하지 않는다. 새 호스트를 만나면
+> 실측 결과를 `current_status.md` 헤더에 적고 어느 유형인지 밝힌다.
+
+아래 Slurm 규칙은 **`nexgem`을 통해 클러스터에 제출할 때만** 적용한다.
 
 - **`nexgem`은 로그인 노드다.** GPU가 없고 `nvidia-smi`도 설치되어 있지 않다. 학습·추론·스윕·
   대규모 전처리는 Slurm `batch` 파티션에 `sbatch`로 제출한다. 로그인 노드에서는 편집·`git`·
@@ -374,14 +385,15 @@ Context 슬라이드만으로 within-slide PCA 기저(K=256)를 만들고, 상�
 
 ## 6. 표준 검증 명령
 
-> 4·6·7번은 GPU를 쓴다. **로그인 노드에서 직접 실행하지 않고** `sbatch` 스크립트 안에서
-> 호출한다. 노드 선택과 로그 경로는 §5를 따른다.
+> 4·6·7번은 GPU를 쓴다. **`nexgem`에서는 직접 실행하지 않고** `sbatch` 스크립트 안에서
+> 호출한다(노드 선택·로그 경로는 §5). **`nexgem-s1`에서는 직접 실행한다** — 이 호스트에는
+> Slurm이 없다(`D-030`).
 
 ```bash
 # 1. 환경 로드
 source scripts/node_env.sh && echo "$PYTHON / NGPU=$NGPU"
 
-# 2. 회귀 스위트 (150 tests, ~22s, CPU) — sbatch로 node1~5에 제출한다
+# 2. 회귀 스위트 (150 tests, ~24s, CPU) — nexgem에서는 sbatch로 node1~5에, s1에서는 직접
 bash scripts/run_tests.sh
 
 # 3. 단일 모듈
