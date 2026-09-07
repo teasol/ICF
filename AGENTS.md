@@ -42,7 +42,8 @@ R1~R7)** 과 [§0 목표 중심 연구 원칙](docs/agent_handoff.md#0-목표-�
    확인합니다. PSW·TGW / FC / P3-LIMIT-CURVE / LSAK는 비저촉으로 확정됐습니다(`D-022`).
    새로운 경계 판단이 갈리면 임의로 한쪽을 채택하지 않고 같은 문서 §3에 올립니다.
 3. **종료 시** `python3 scripts/docs/ru.py close --id RU-xx`로 총람에 append하고,
-   규범·기준·구성이 바뀌었다면 [`docs/decisions.md`](docs/decisions.md)에 결정 레코드를,
+   규범·기준·구성이 바뀌었다면 [`docs/history/archive.md`](docs/history/archive.md)의
+   **결정 이력** 절에 레코드를, RU 종료만으로는 레코드를 만들지 않고,
    축을 닫거나 열었다면 `closed_axes.md`에 반영합니다.
 4. 커밋 메시지 본문에 RU ID를 적습니다 (`feat(sh): ... (RU-79)`).
 
@@ -52,9 +53,11 @@ R1~R7)** 과 [§0 목표 중심 연구 원칙](docs/agent_handoff.md#0-목표-�
 2. `docs/current_status.md`의 헤더(호스트·환경·Status)를 **실측값으로** 갱신하고,
    `Immediate Next Command`에 다음 세션에서 바로 실행할 명령어를 명시합니다.
 3. **`current_status.md`는 80줄을 넘기지 않습니다.** 종료된 절은
-   `docs/history/archive.md`로, 결정은 `docs/decisions.md`로 옮깁니다.
+   `docs/history/archive.md`로 옮깁니다 (결정 이력도 같은 파일 말미에 있습니다).
 4. **정정은 본문을 덮어씁니다.** 낡은 서술에 주석을 덧붙여 누적하지 않고, 시점 한정 사실과
-   번복 이력은 `docs/decisions.md`에만 남깁니다.
+   번복 이력은 `docs/history/archive.md`의 결정 이력에만 남깁니다.
+   **living 문서의 각 항목은 자기완결적이어야 합니다** — 링크를 타고 들어가지 않아도
+   무엇을 어떻게 할지 알 수 있게 씁니다. 이력 ID는 출처 표기로만 씁니다.
 5. `bash scripts/run_tests.sh`로 회귀 스위트(문서 정합성 테스트 포함)를 통과시킨 뒤 커밋합니다.
 6. 대용량 가중치(`*.pt`, `*.ckpt` 등)나 비밀키(`.env`)가 스테이징되지 않도록 주의하며,
    코드 커밋과 문서 커밋을 분리하여 원격 저장소에 `push`합니다.

@@ -30,7 +30,7 @@
 | 기준선 AUROC · 승격 기준 · 게이트 조건 · 판정 설계와 정밀도 · 오염 검사 상수 | [`PROJECT.md`](PROJECT.md) |
 | 현재 목표 · 진행 중 RU · 블로커 · 다음 명령 · 환경 실측값 | [`current_status.md`](current_status.md) |
 | 닫힌 축과 경계 정의 · 경계 미확정 목록 | [`closed_axes.md`](closed_axes.md) |
-| 결정의 근거 · 정정 · 철회 이력 (append-only) | [`decisions.md`](decisions.md) |
+| 결정의 근거 · 정정 · 철회 이력 (append-only) | [`history/archive.md`](history/archive.md) §결정 이력 |
 | 작업 규범 · RU 프로세스 · 불변식 · 보고 무결성 계약 | [`agent_handoff.md`](agent_handoff.md) |
 | 브랜치 정의와 수식 · 집계 규칙 | [`current_architecture.md`](current_architecture.md) |
 | 연구 이력 전수 (RU-01~) | [`history/research_units_all.md`](history/research_units_all.md) |
@@ -60,9 +60,9 @@
 
 - **단일 선언**: §2의 정본 표를 지킨다. 수치를 두 곳에 적지 않는다.
 - **정정은 덮어쓴다**: 본문은 현행 사실만 담는다. 낡은 서술을 주석으로 누적하지 않고,
-  시점 한정 사실과 번복 이력은 [`decisions.md`](decisions.md)에만 남긴다.
+  시점 한정 사실과 번복 이력은 [`history/archive.md`](history/archive.md)의 결정 이력에만 남긴다.
 - **`current_status.md`는 80줄을 넘기지 않는다.** 종료된 절은 `history/archive.md`로,
-  결정은 `decisions.md`로 옮긴다. 테스트가 강제한다.
+  결정 이력도 같은 파일 말미에 있다. 테스트가 강제한다.
 - **RU 단위로 진행한다**: 착수 전 `scripts/docs/ru.py open`, 종료 시 `close`.
   절차는 [`agent_handoff.md` §1](agent_handoff.md).
 - **축을 닫을 때는 경계를 함께 적는다**: `기각 기전`·`경계 안`·`경계 밖`·`재개 조건`

@@ -7,7 +7,7 @@
 
 배경: 450커밋 총람이 측정한 바 Era 6은 RU당 커밋이 2.6개로 떨어졌고
 (Era 3은 14.1개) 78개 중 17개가 단일 커밋이다. 자세한 근거는
-docs/decisions.md D-015 참조.
+docs/history/archive.md 의 결정 이력 D-015 참조.
 
 사용법:
     python3 scripts/docs/ru.py open --title "형상 후보 조기 사망 조건 검사"
@@ -212,7 +212,8 @@ def cmd_close(args: argparse.Namespace) -> int:
 
     path.unlink()
     print(f"[+] {card['id']} 종료. 총람에 append했다 (커밋 {card['commit_count']}개).")
-    print("    규범·기준·구성이 바뀌었다면 docs/decisions.md에 결정 레코드를 추가한다.")
+    print("    규범·기준·구성이 바뀌었다면 docs/history/archive.md 결정 이력에 레코드를 추가한다.")
+    print("    RU 종료 자체로는 레코드를 만들지 않는다 — 규범이 바뀔 때만 쓴다.")
     print("    축을 닫거나 열었다면 docs/closed_axes.md에 반영한다.")
     return 0
 

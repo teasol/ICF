@@ -118,7 +118,7 @@ Dual Ridge (λ=1) Dual Ridge (λ=1) Dual Ridge (λ=1) Bounded Margin   Dual Ridg
 
 현 형상 계열은 **`BD`·`SH`·`SHJ` 3개**다. `BD`는 §2.5의 정식 브랜치이고, 나머지 둘은
 게이트를 통과해 **채택(adopted)** 됐으나 공식 구성 승격은 별개 요건으로 남아 있다
-([`PROJECT.md` §5](PROJECT.md), [`decisions.md`](decisions.md) `D-009`).
+([`PROJECT.md` §5](PROJECT.md), [결정 이력](history/archive.md) `D-009`).
 
 #### SHJ — 백색화 반경 분포의 결합 형상
 
@@ -147,7 +147,7 @@ $q_{10}/q_{50}$ · $q_{90}/q_{50}$ · $q_{99}/q_{50}$ · $\text{IQR}/q_{50}$** 8
 > `scripts/test_pathobench.py` 안에만 있고 `ICF_SHAPE_SCREEN_ONLY`가 기본값 `1`이라 앙상블
 > 경로에 들어가지 않는다. `SHJ`만 §222에서 `src/models/branches/`로 이관됐다.
 > 따라서 `branch_screen.py --adopted m_sh,m_shj`는 **SH 마진이 산출된 태그에서만** 완전한
-> 심사를 수행하며, 없으면 경고를 출력한다 ([`decisions.md`](decisions.md) `D-013`).
+> 심사를 수행하며, 없으면 경고를 출력한다 ([결정 이력](history/archive.md) `D-013`).
 
 ---
 

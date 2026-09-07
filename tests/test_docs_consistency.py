@@ -11,7 +11,7 @@
   - current_status.md 는 190줄까지 자라 상태·결정·정정·환경이 뒤섞였다.
   - §226 에서 낡은 서술 2건이 브리핑 팩을 통해 7개 에이전트 전부에 전파됐다.
 
-자세한 배경은 docs/decisions.md D-015 참조.
+자세한 배경은 docs/history/archive.md 의 결정 이력 D-015 참조.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ DOCS = REPO / "docs"
 
 PROJECT_MD = DOCS / "PROJECT.md"
 CLOSED_AXES_MD = DOCS / "closed_axes.md"
-DECISIONS_MD = DOCS / "decisions.md"
+DECISIONS_MD = DOCS / "history" / "archive.md"   # 결정 이력은 archive 말미로 통합됐다
 STATUS_MD = DOCS / "current_status.md"
 AGENT_HANDOFF_MD = DOCS / "agent_handoff.md"
 
@@ -41,8 +41,8 @@ GUARDED_NUMBERS = (
 )
 
 #: 위 수치를 담아서는 안 되는 Living 문서.
-#: decisions.md / closed_axes.md 는 과거 측정값을 근거로 인용하므로 면제한다
-#: (append-only 기록이며 현행 기준을 선언하지 않는다).
+#: closed_axes.md 는 과거 측정값을 근거로 인용하므로 면제한다
+#: (현행 기준을 선언하지 않는다). 결정 이력은 history/archive.md 로 통합됐다.
 GUARDED_FILES = (
     "README.md",
     "agent_handoff.md",
@@ -114,7 +114,7 @@ class TestReferentialIntegrity(unittest.TestCase):
 
     def test_referenced_decision_ids_exist(self):
         defined = self._defined_decision_ids()
-        self.assertTrue(defined, "decisions.md 에 결정 레코드가 하나도 없다.")
+        self.assertTrue(defined, "archive.md 에 결정 레코드가 하나도 없다.")
         for path in sorted(DOCS.glob("*.md")):
             for ref in set(re.findall(r"`(D-\d{3})`", _read(path))):
                 self.assertIn(
@@ -165,6 +165,43 @@ class TestClosedAxesRegistry(unittest.TestCase):
         )
 
 
+class TestLivingDocsAreSelfContained(unittest.TestCase):
+    """living 문서는 이력을 열지 않아도 읽히도록 쓴다.
+
+    결정 이력(`D-xxx`)은 **출처 표기**로만 쓴다. 규칙의 내용을 이력 ID에 위임하면
+    ("자세한 것은 D-021에 있다") 독자가 링크를 타야 현행 규칙을 알 수 있고, 그것이
+    §226에서 낡은 사실이 전파된 경로였다. 아래 형태를 금지한다.
+    """
+
+    #: 규칙 내용을 이력 ID에 위임하는 서술 형태.
+    DELEGATING = (
+        r"`D-\d{3}`[을를] 따른다",
+        r"`D-\d{3}`에 (있다|적혀 있다|기록돼 있다)",
+        r"`D-\d{3}`[을를] (참조|참고)",
+        r"`D-\d{3}` (참조|참고)",
+        r"(자세한|상세(한)?|구체적(인)?)[^.\n]{0,20}`D-\d{3}`",
+    )
+
+    #: 현행 사실을 선언하는 living 문서. history/ 와 reports/ 는 기록물이므로 제외한다.
+    LIVING = ("PROJECT.md", "current_status.md", "agent_handoff.md", "closed_axes.md",
+              "README.md", "current_architecture.md", "research_directions.md")
+
+    def test_no_rule_content_delegated_to_decision_ids(self):
+        for name in self.LIVING:
+            path = DOCS / name
+            if not path.exists():
+                continue
+            for pattern in self.DELEGATING:
+                hit = re.search(pattern, _read(path))
+                self.assertIsNone(
+                    hit,
+                    f"{name} 이 규칙 내용을 결정 이력 ID에 위임하고 있다: "
+                    f"{hit.group(0) if hit else ''!r}. living 문서의 각 항목은 "
+                    f"이력을 열지 않아도 무엇을 어떻게 할지 알 수 있게 쓴다. "
+                    f"ID 는 출처 표기로만 남긴다.",
+                )
+
+
 class TestStatusDocStaysShort(unittest.TestCase):
     """current_status.md 가 다시 190줄로 자라지 않게 한다."""
 
@@ -173,7 +210,7 @@ class TestStatusDocStaysShort(unittest.TestCase):
         self.assertLessEqual(
             n, STATUS_MAX_LINES,
             f"current_status.md 가 {n}줄이다 (상한 {STATUS_MAX_LINES}). "
-            f"종료된 절은 docs/history/archive.md 로, 결정은 docs/decisions.md 로 옮긴다.",
+            f"종료된 절과 결정 이력은 docs/history/archive.md 로 옮긴다.",
         )
 
 

@@ -4,7 +4,7 @@
 
 > **정본 분리 원칙.** 이 문서는 수치를 선언하지 않는다.
 > 기준선·판정 기준은 [`PROJECT.md`](PROJECT.md), 닫힌 축은 [`closed_axes.md`](closed_axes.md),
-> 결정 이력은 [`decisions.md`](decisions.md), 현재 상태는 [`current_status.md`](current_status.md),
+> 결정 이력은 [결정 이력](history/archive.md), 현재 상태는 [`current_status.md`](current_status.md),
 > 브랜치 수식은 [`current_architecture.md`](current_architecture.md)가 정본이다.
 
 ---
@@ -133,7 +133,7 @@ Era 5(RU-33→RU-38)는 **미확인 사항에 적어둔 질문을 실제로 추�
 > 떨어졌고(Era 3은 14.1개) 78개 중 17개가 단일 커밋이다. "하나의 연구 질문"이 아니라
 > "한 번의 시도"가 단위가 되면서, 2026-08-23 이후 **19 RU / 46커밋 / 13일간 공식 승격 0건**,
 > 그리고 총람이 기록한 정정·철회 6건이 전부 이 구간에 몰렸다.
-> 진행 단위를 커밋이 아니라 **연구 단위(RU)** 로 되돌린다. ([`decisions.md`](decisions.md) `D-015`)
+> 진행 단위를 커밋이 아니라 **연구 단위(RU)** 로 되돌린다. ([결정 이력](history/archive.md) `D-015`)
 
 ### 1.0 착수 절차 — 사용자와 에이전트가 **함께** 따른다
 
@@ -245,7 +245,7 @@ $PYTHON scripts/docs/ru.py close --id RU-79     # 관측·결정을 채운 뒤 �
 - **기전은 `확인 범위 / 잠정 설명 / 미확인`으로 구분해 적는다.** 원인을 모를 때는 모른다고
   쓴다 — 원인 미상도 정직하게 기록하면 유효한 종료다. 꾸며낸 기전이 더 나쁘다.
 - **계획 이탈, 실패·악화·누락 실행**을 함께 남긴다.
-- **규범·기준·구성이 바뀌었다면** [`decisions.md`](decisions.md)에 결정 레코드를 추가한다.
+- **규범·기준·구성이 바뀌었다면** [결정 이력](history/archive.md)에 결정 레코드를 추가한다.
 - **축을 닫거나 열었다면** [`closed_axes.md`](closed_axes.md)에 반영한다. 축을 닫을 때
   `기각 기전`·`경계 안`·`경계 밖`·`재개 조건` 네 필드가 모두 필요하다.
 - 커밋 메시지 본문에 RU ID를 적는다 (`feat(sh): ... (RU-79)`).
@@ -253,7 +253,13 @@ $PYTHON scripts/docs/ru.py close --id RU-79     # 관측·결정을 채운 뒤 �
 ### 1.3 정정은 본문을 덮어쓴다
 
 낡은 서술을 주석으로 덧붙이지 않는다. **본문은 항상 현행 사실만 담고**, 시점 한정 사실과
-번복 이력은 [`decisions.md`](decisions.md)에만 남긴다.
+번복 이력은 [결정 이력](history/archive.md)에만 남긴다.
+
+**living 문서의 각 항목은 자기완결적이어야 한다.** 독자가 이력 링크를 타고 들어가지 않아도
+무엇을 어떻게 할지 전부 알 수 있게 쓴다. 결정 ID(`D-xxx`)와 절 번호(`§xxx`)는 **출처 표기**로만
+쓰고, 규칙의 내용을 그 ID에 위임하지 않는다 — *"자세한 것은 `D-xxx`에 있다"* 형태를 금지하며
+`tests/test_docs_consistency.py`가 이를 검사한다. **RU 종료만으로는 결정 레코드를 만들지 않는다**
+(RU 총람과 종료 보고서가 정본이고, 규범·기준·구성이 바뀔 때만 레코드를 쓴다).
 §226에서 낡은 사실 2건이 브리핑 팩을 통해 7개 에이전트 전부에 전파된 사고가 이 규칙의 근거다
 (`D-014`).
 
@@ -314,7 +320,7 @@ Context 슬라이드만으로 within-slide PCA 기저(K=256)를 만들고, 상�
    seed std는 `0.00000`이어야 한다. **같은 실행을 반복해 얻은 동일 점수는 새로운 독립 증거가
    아니므로 시드 반복을 표본 수로 세지 않는다.** 이는 표본 단위에 대한 제약이지 통계 도구의
    금지가 아니다 — **fold는 데이터 표집 단위이므로 구간 추정을 쓴다**
-   (`decisions.md` `D-018`·`D-019`. `D-003`은 폐지됐다).
+   (결정 이력 `D-018`·`D-019`. `D-003`은 폐지됐다).
    비교 기준·승격 기준·판정 설계의 **수치는 [`PROJECT.md` §3~§4](PROJECT.md)가 정본**이다.
 4. **닫힌 축 준수**
    `D-022`의 PSW·TGW / FC / P3-LIMIT-CURVE / LSAK는 비저촉으로 확정했다.
@@ -327,7 +333,7 @@ Context 슬라이드만으로 within-slide PCA 기저(K=256)를 만들고, 상�
 
 ## 4. 보고 무결성 계약 (Reporting Integrity Contract)
 
-§214에서 실제 위반이 확인되어 신설됐다 (`decisions.md` `D-006`·`D-010`·`D-011`).
+§214에서 실제 위반이 확인되어 신설됐다 (결정 이력 `D-006`·`D-010`·`D-011`).
 
 - **회귀 전량 명시 의무**: 성능이 하락한 과제를 생략할 수 없다. 상승 과제만 나열한 요약은 금지한다.
 - **Sign agreement 병기 의무**: macro AUROC를 제시할 때 `n/7`을 같은 줄에 병기한다.
@@ -393,7 +399,7 @@ Context 슬라이드만으로 within-slide PCA 기저(K=256)를 만들고, 상�
 # 1. 환경 로드
 source scripts/node_env.sh && echo "$PYTHON / NGPU=$NGPU"
 
-# 2. 회귀 스위트 (150 tests, ~24s, CPU) — nexgem에서는 sbatch로 node1~5에, s1에서는 직접
+# 2. 회귀 스위트 (151 tests, ~25s, CPU) — nexgem에서는 sbatch로 node1~5에, s1에서는 직접
 bash scripts/run_tests.sh
 
 # 3. 단일 모듈
