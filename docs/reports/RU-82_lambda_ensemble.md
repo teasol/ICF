@@ -84,7 +84,7 @@ D-024가 지정한 **저장 마진 기반 순위 변화 / 크기 변화 분리 �
 나왔고, 그 원인이 순위 재배열인지 크기 재가중인지 현재 자료로는 구별되지 않기 때문이다.
 
 - 사전 카드와 종료 기록: [RU 총람](../history/research_units_all.md) · `docs/ru/RU-82.json`
-- 운영 결정: [D-025](../decisions.md)
+- 운영 결정: [D-025](../history/archive.md#d-025)
 - 재집계 코드: [`scripts/analysis/ru82_lambda_ensemble.py`](../../scripts/analysis/ru82_lambda_ensemble.py)
 - 기계 판독 결과: `predictions/ru82_lambda_ens/summary.json` (git 비추적)
 - 선행: [RU-81 종료 보고](RU-81_regularization_diagnosis.md)

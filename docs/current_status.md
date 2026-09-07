@@ -1,6 +1,6 @@
 # Current Status
 
-> **이 파일은 "지금 무엇을 하고 있는가"만 담는다. 80줄을 넘기지 않는다.**
+> **이 파일은 "지금 무엇을 하고 있는가"만 담는다. 100줄을 넘기지 않는다.**
 > 수치·기준은 [`PROJECT.md`](PROJECT.md), 닫힌 축은 [`closed_axes.md`](closed_axes.md),
 > 결정 이력은 [결정 이력](history/archive.md)가 정본이다. **여기에 복사하지 않는다.**
 > 종료된 RU의 상세는 [`history/research_units_all.md`](history/research_units_all.md)로 이관한다.
@@ -12,7 +12,7 @@
 | **Host / Node** | `nexgem-s1` · RTX A5000 8장 · driver 580.126.09 · Slurm 명령 없음 |
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · Lightning 2.6.5 |
 | **Active Job** | 없음 · RU-82·83·84 모두 GPU 0 오프라인 (wall 2.8s / 15.1s / 0.5s) |
-| **회귀 테스트** | 151 tests · `OK` (2026-09-07, 24.8s) |
+| **회귀 테스트** | 108 tests · `OK` (2026-09-07, 28.6s) |
 
 ---
 

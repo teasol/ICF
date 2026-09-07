@@ -103,7 +103,7 @@ CV에는 동값이 없고 BM·QA·DS에 분포한다. 원인은 규명하지 않
   다를 수 있으나 이 RU는 그것을 조사하지 않았다.
 
 - 사전 카드와 종료 기록: [RU 총람](../history/research_units_all.md) · `docs/ru/RU-83.json`
-- 운영 결정: [D-028](../decisions.md)
+- 운영 결정: [D-028](../history/archive.md#d-028)
 - 재집계 코드: [`scripts/analysis/ru83_rank_size.py`](../../scripts/analysis/ru83_rank_size.py)
 - 기계 판독 결과: `predictions/ru83_rank_size/summary.json` (git 비추적)
 - 선행: [RU-81](RU-81_regularization_diagnosis.md) · [RU-82](RU-82_lambda_ensemble.md) · `D-024`·`D-025`

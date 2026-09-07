@@ -414,7 +414,7 @@ Context 슬라이드만으로 within-slide PCA 기저(K=256)를 만들고, 상�
 # 1. 환경 로드
 source scripts/node_env.sh && echo "$PYTHON / NGPU=$NGPU"
 
-# 2. 회귀 스위트 (151 tests, ~25s, CPU) — nexgem에서는 sbatch로 node1~5에, s1에서는 직접
+# 2. 회귀 스위트 (108 tests, ~28s, CPU) — nexgem에서는 sbatch로 node1~5에, s1에서는 직접
 bash scripts/run_tests.sh
 
 # 3. 단일 모듈

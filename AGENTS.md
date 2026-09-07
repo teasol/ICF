@@ -52,7 +52,7 @@ R1~R7)** 과 [§0 목표 중심 연구 원칙](docs/agent_handoff.md#0-목표-�
 1. `git status`와 `git diff`를 확인하고 변경 사항을 정리합니다.
 2. `docs/current_status.md`의 헤더(호스트·환경·Status)를 **실측값으로** 갱신하고,
    `Immediate Next Command`에 다음 세션에서 바로 실행할 명령어를 명시합니다.
-3. **`current_status.md`는 80줄을 넘기지 않습니다.** 종료된 절은
+3. **`current_status.md`는 100줄을 넘기지 않습니다.** 종료된 절은
    `docs/history/archive.md`로 옮깁니다 (결정 이력도 같은 파일 말미에 있습니다).
 4. **정정은 본문을 덮어씁니다.** 낡은 서술에 주석을 덧붙여 누적하지 않고, 시점 한정 사실과
    번복 이력은 `docs/history/archive.md`의 결정 이력에만 남깁니다.

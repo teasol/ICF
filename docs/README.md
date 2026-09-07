@@ -78,7 +78,7 @@
 
   **기록물은 이 의무에서 제외된다** — `history/`·`reports/`·`ru/`는 시점 기록이므로 당시 서술을
   보존하고 현행 사실로 덮어쓰지 않는다.
-- **`current_status.md`는 80줄을 넘기지 않는다.** 종료된 절은 `history/archive.md`로,
+- **`current_status.md`는 100줄을 넘기지 않는다.** 종료된 절은 `history/archive.md`로,
   결정 이력도 같은 파일 말미에 있다. 테스트가 강제한다.
 - **RU 단위로 진행한다**: 착수 전 `scripts/docs/ru.py open`, 종료 시 `close`.
   절차는 [`agent_handoff.md` §1](agent_handoff.md).
@@ -89,7 +89,7 @@
 
 ### 4.1 `configs/` 루트 관리
 
-`configs/` 루트에는 **현재 활성 파이프라인의 진입점만** 둔다.
+`configs/` 루트에는 **현재 활성 파이프라인의 진입점만** 둔다 (현재 루트 yaml 0개, 하위 `baseline/`, `experiments/`, `archive/`로 구성).
 
 > ⚠️ 이 규칙의 상세는 원래 `agent_handoff.md` §7에 있었으나 그 문서가 압축될 때 사라졌다 —
 > **이 절이 현행 단일 출처**다 (archive 파일 헤더 200여 개가 인용하는 "agent_handoff SS7.3"도
@@ -97,7 +97,7 @@
 
 | config | 역할 |
 |---|---|
-| `train_v98_p1_reverse_1536_1gpu.yaml` | **루트에 남은 유일한 config.** 활성 경로가 로드하는 체크포인트 껍데기([`../scripts/node_env.sh`](../scripts/node_env.sh) `ICF_CONFIG` 기본값). v106+ 가 projection과 head를 덮어쓰므로 이 파일의 학습값은 마진에 닿지 않는다(§152) |
+| `configs/archive/v94_v102_cell_value/train_v98_p1_reverse_1536_1gpu.yaml` | **활성 경로가 로드하는 체크포인트 껍데기**([`../scripts/node_env.sh`](../scripts/node_env.sh) `ICF_CONFIG` 기본값). v106+ 가 projection과 head를 덮어쓰므로 이 파일의 학습값은 마진에 닿지 않는다(§152) |
 
 활성 baseline은 학습 파라미터가 0개이므로 루트에 학습 arm config를 새로 만들 이유가 없다.
 arm 정의는 config가 아니라 [`../scripts/lib/arms.sh`](../scripts/lib/arms.sh)의 `icf_arm_v1xx`

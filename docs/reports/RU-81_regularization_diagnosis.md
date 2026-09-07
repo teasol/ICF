@@ -101,7 +101,7 @@
 다음 질문은 **“단독 순위의 변화와 마진 크기의 변화 중 무엇이 앙상블 효과를 설명하는가?”**다. 저장 마진을 이용해 순위만 바꾸는 대조와 크기만 바꾸는 대조의 정의·불변식·부작용을 먼저 고정하는 별도 진단을 권한다. 이 RU에서는 추가 재집계 실험이나 새 강도 탐색을 실행하지 않았다. 결과를 본 뒤 새 대조를 도입하므로 후속도 탐색적 진단으로 표시한다.
 
 - 사전 카드와 종료 기록: [RU 총람](../history/research_units_all.md)
-- 운영 결정: [D-024](../decisions.md)
+- 운영 결정: [D-024](../history/archive.md#d-024)
 - 원시 실행: `predictions/ru81_reg_20260907_r1/manifest.json`, `*_diag.pt`, `*_base.pt`
 - 전체 기계 판독 결과: [summary.json](../../predictions/ru81_reg_20260907_r1/summary.json)
 - 독립 검산: [audit.json](../../predictions/ru81_reg_20260907_r1/audit.json), [검산 코드](../../scripts/analysis/ru81_audit.py)
