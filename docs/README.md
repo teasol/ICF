@@ -1,6 +1,6 @@
 # Documentation Map
 
-**Last updated**: `2026-09-06`
+**Last updated**: `2026-09-07`
 
 > 이 파일은 **어느 사실이 어느 문서의 정본인지**만 말한다. 수치·상태·결정을 여기에 적지 않는다.
 
@@ -61,6 +61,23 @@
 - **단일 선언**: §2의 정본 표를 지킨다. 수치를 두 곳에 적지 않는다.
 - **정정은 덮어쓴다**: 본문은 현행 사실만 담는다. 낡은 서술을 주석으로 누적하지 않고,
   시점 한정 사실과 번복 이력은 [`history/archive.md`](history/archive.md)의 결정 이력에만 남긴다.
+- **entry는 자기완결적이다**: living 문서의 각 항목은 **이력 링크를 타고 들어가지 않아도**
+  무엇을 어떻게 할지 전부 알 수 있게 쓴다. 결정 ID(`D-xxx`)와 절 번호(`§xxx`)는 **출처 표기**로만
+  쓰고 규칙의 내용을 그 ID에 위임하지 않는다. 테스트가 위임 서술 형태를 검사한다.
+  자기완결 단위(entry)는 파일마다 다르다.
+
+| 파일 | entry 하나 = |
+|:---|:---|
+| [`PROJECT.md`](PROJECT.md) | 절(§1~§5) 하나, 그리고 현재 목표·승격 기준·게이트 표의 각 **행** |
+| [`closed_axes.md`](closed_axes.md) | **축 하나(`CA-xx`)**. `기각 기전`·`경계 안`·`경계 밖`·`재개 조건`이 그 안에서 완결된다 |
+| [`agent_handoff.md`](agent_handoff.md) | 규칙 하나 (적용 규칙 `R1`~`R7`, 보고 무결성 계약 항목, 호스트 유형, 표준 명령) |
+| [`current_status.md`](current_status.md) | 헤더 표의 **행** 하나, 그리고 각 절의 **불릿** 하나 |
+| [`current_architecture.md`](current_architecture.md) | 브랜치 하나 |
+| [`research_directions.md`](research_directions.md) | 후보 하나, Phase 표의 **행** 하나 |
+| 이 파일 | 정본 표의 **행** 하나, 유지 규칙 하나 |
+
+  **기록물은 이 의무에서 제외된다** — `history/`·`reports/`·`ru/`는 시점 기록이므로 당시 서술을
+  보존하고 현행 사실로 덮어쓰지 않는다.
 - **`current_status.md`는 80줄을 넘기지 않는다.** 종료된 절은 `history/archive.md`로,
   결정 이력도 같은 파일 말미에 있다. 테스트가 강제한다.
 - **RU 단위로 진행한다**: 착수 전 `scripts/docs/ru.py open`, 종료 시 `close`.
