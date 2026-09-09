@@ -2760,3 +2760,72 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
   - `docs/current_architecture.md`, `docs/PROJECT.md`, `docs/closed_axes.md`, `docs/current_status.md`.
   - 단위 테스트 `tests/test_sj_branch.py` 추가 및 전체 회귀 테스트(113 tests) `OK`.
 - **재검토 조건**: 없음 (영구 적용).
+
+## D-039 · 2026-09-09 · SH 브랜치의 src 정식 통합 및 집계 계층 리팩터링 *(사용자 지시)*
+
+- **결정 주체·출처**: 사용자 지시 — "SH branch와 SJ branch를 model에 정식으로 합친다" 및
+  src/ 정리. §222(SJ 이관, 당시 SH 제외)의 후속 작업.
+- **결정**:
+  1. **SH 정식 통합**: 공식 SH 변형(차원별 왜도·초과첨도, `sh_dim`/`sh_wide` 계약)을
+     `src/models/branches/sh.py`로 이관한다. `sh_slide_features`는 §219 스크리닝 폐쇄 함수와
+     비트 동일(fp32 강제 계약 포함)이며, `test_pathobench.py`의 `sh` 키는 src 구현을
+     재사용해 단일 출처로 고정한다. 스크린 전용 변형(`shs`/`shk`/`sh2`/`shr`/`shr2`)은
+     §219에서 실질 기각 상태이므로 스크립트에 그대로 둔다.
+  2. **설정 승격**: `TrainingFreeConfig`에 `weight_sh`(기본 0.0)·`sh_dim`·`sh_wide`·
+     `sh_lambda` 필드를 신설하고 도메인 검증에 포함한다. SJ가 config 안에 있던 것과 달리
+     SH는 환경변수(`ICF_SH_*`)로만 조작 가능했는데, 이제 파이프라인 기본 진입 경로에
+     놓인다. 기본값 0.0이므로 기존 구성은 비트 단위로 불변이다.
+  3. **결함 수정 — context_loo 누락**: `context_loo_stacking`의 branch_pool에 SJ가 아예
+     전달되지 않아 `aggregation = "context_loo_*"` 구성에서는 `weight_sj`를 켜도 SJ가
+     조용히 앙상블에서 빠졌다. SJ·SH를 pool에 연결해 수정한다 (회귀 핀 테스트 포함).
+  4. **집계 계층 중복 제거**: voting.py의 5개 집계 함수에 수동 반복되던 SJ 이중 인자
+     fallback(`m_sj if m_sj is not None else m_shj`)과 브랜치별 on/off 분기를
+     `_fixed_branch_pairs`·`_shape_branch_pairs` 헬퍼로 통일한다. `m_shj`는 하위 호환
+     키워드로만 남기고 파이프라인 호출부에서는 폐기한다. 집계 순서와 수치는 불변이다.
+  5. **SHJ alias는 유지한다**: `shj.py` re-export·`weight_shj` 필드·`shj_slide_features`
+     alias는 `D-038`의 영구 적용 결정에 따라 건드리지 않는다.
+- **근거**:
+  - `docs/current_architecture.md` §2.8이 SH 미통합을 기술 부채로 명시하고 있었고,
+    브랜치 1개 = 파일 1개 규약상 SH만 스크립트 모놀리스(3,000줄+) 안에 있었다.
+  - context_loo 누락은 §221(SJ의 에피소드별 신뢰도 가중)과 직결되는 기능 결함이며,
+    통합 작업과 같은 패치에서 해소하는 것이 회귀 위험을 최소화한다.
+- **영향 범위**:
+  - `src/models/branches/sh.py` 신설, `src/models/branches/__init__.py` 등록.
+  - `src/models/config.py`(필드·검증·형상 계열 섹션 분리), `src/models/training_free.py`,
+    `src/models/aggregations/voting.py`, `scripts/test_pathobench.py`.
+  - `tests/test_sh_branch.py` 신설(불변식·스크리닝 공식 비트 동일·기본 0 무영향·
+    context_loo 회귀 핀 8건) 및 전체 회귀 테스트(121 tests) `OK`.
+  - `docs/current_architecture.md`(§2.8·§4 기술 부채 해소), `docs/current_status.md`.
+- **재검토 조건**: 없음 (영구 적용). 다만 SH의 공식 구성 승격은 별개 요건으로 남는다
+  ([`PROJECT.md` §5](../../PROJECT.md)).
+
+_by GLM-5.3-Flash on nexgem-s1 at 2026-09-09_
+
+## 2026-09-08 — RU-86·87·88 종료 인수인계 (current_status.md에서 이관)
+
+
+**세 RU를 종료했다. 셋 다 사전 등록한 기준을 결과 전에 고정하고 그대로 적용했다.**
+
+- **RU-86** MDX 게이트 ② — **반박·종료.** 사전 등재 과제 `Grade`에서 단독 AUROC > 0.5인 fold가
+  50 중 **10개**(단측 `p = 0.99999720`). 게이트 ①을 통과한 유일한 Tier 1 후보를 종료했고
+  §226 Tier 1 3건이 전부 종료됐다 ([보고](reports/RU-86_mdx_gate2.md)).
+  2차 탐색에서 **부호 반전**을 관측했다 — `Grade`는 50 중 40 fold가 0.5 **미만**, `KRAS`는 41 fold가
+  초과이며 `|중앙값−0.5|`가 `0.0821` 대 `0.0861`로 크기가 같고 방향이 반대다. 무정보가 아니라
+  **부호가 과제에 따라 뒤집히는 정보**일 수 있다(기전 미확인). 부호를 알려면 라벨이 필요하므로
+  `CA-R1`과 같은 벽이며, 사후 부호 선택으로 후보를 되살리지 않았다.
+- **RU-87** bf16 대 fp32 — **상쇄·종료.** 정밀도 차는 절대 AUROC fold-mean 최대 `0.0837%p`,
+  대응 Δ fold-mean `0.0674%p`로 **짝지은 Δ에서 상쇄된다**. 폐기한 `최대 0.5%p` 표기의 경위는
+  결정 이력 `D-037` ([보고](reports/RU-87_precision_bf16_fp32.md)).
+- **RU-88** CA-R1 fold 수준 지문 패널 — **반박 5 / 판별 불가 3, 보류.** 진입 기준 충족 0/8.
+  새 지문 F1(이상치 근접도)·F2(context↔query MMD)는 두 표적 모두에 대해 구간이 관심 크기
+  `|ρ| = 0.3`을 배제했다. 대조군 F3(Task-Geometry 계열)에 판별 불가가 몰렸다
+  ([보고](reports/RU-88_car1_fingerprint_panel.md)). **`CA-R1`은 닫지 않았다** — 과제 군집 7로는
+  부재를 입증할 검정력이 없다.
+
+**후보 큐에 `CA-R1` 계열 5건을 등재했다**([`research_directions.md` §0 P1-B](research_directions.md)
+행 `B1`~`B5`). 출처는 Idea Agent 산출 제안서 6건이다
+([제안서](proposals/2026-09-08_car1-label-free-task-identification.md)).
+
+**경계 판정 2건을 사용자 판단 대기로 올렸다** ([`closed_axes.md` §3](closed_axes.md)) —
+`§3-I` 컨텍스트 라벨만 쓰는 판별 통계가 `CA-06` 경계인가, `§3-J` 다중 강도 브랜치 동시 투입이
+`P2-SELECTOR-CEILING`·`CA-09` 경계인가. 판단이 갈려 임의로 한쪽을 채택하지 않았다.

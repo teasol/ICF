@@ -138,16 +138,21 @@ $q_{10}/q_{50}$ · $q_{90}/q_{50}$ · $q_{99}/q_{50}$ · $\text{IQR}/q_{50}$** 8
   ~1e-3)으로 계산되고, 백색화의 `eigvals.clamp_min(1e-8).rsqrt()`가 이를 **약 100배 증폭**한다.
   `sj_slide_features()` 내부에서 `torch.autocast(enabled=False)`로 float32를 강제한다.
 
-#### SH — 차원별 모멘트 형상 *(미통합)*
+#### SH — 차원별 모멘트 형상
 
 차원별 왜도·첨도를 슬라이드 자체 평균·표준편차로 표준화해 위치·척도 불변을 만든다
-(§218에서 채택, max |r| = 0.418).
+(§218에서 채택, max |r| = 0.418). 토큰을 넓은 기저(`sh_wide`, 기본 256)에 한 번 투영한 뒤
+차원별 모멘트를 읽고 각 모멘트의 앞 `sh_dim`(기본 32)개만 남긴다 — 나머지 스크린 전용
+변형(`shs`/`shk`/`sh2`/`shr`/`shr2`)은 §219에서 실질 기각 상태로 스크립트에만 남는다.
 
-> ⚠️ **기술 부채: `SH`는 `src/models/`에 통합되어 있지 않다.** 구현은
-> `scripts/test_pathobench.py` 안에만 있고 `ICF_SHAPE_SCREEN_ONLY`가 기본값 `1`이라 앙상블
-> 경로에 들어가지 않는다. `SJ`만 §222에서 `src/models/branches/`로 이관됐다.
-> 따라서 `branch_screen.py --adopted m_sh,m_sj`는 **SH 마진이 산출된 태그에서만** 완전한
-> 심사를 수행하며, 없으면 경고를 출력한다 ([결정 이력](history/archive.md) `D-013`, `D-038`).
+- **구현**: `src/models/branches/sh.py` (스크리닝 폐쇄 함수에서 이관, `D-039` 정식 통합).
+  기본 가중치 `weight_sh = 0.0` — 채택 상태이나 활성 앙상블에는 들어가지 않는다.
+- ⚠️ **fp32 강제 필수.** SJ와 동일 계약이다. bf16 autocast가 표준화의 분모(sd)를 흔들면
+  4제곱 모멘트가 오차를 증폭하므로 `sh_slide_features()` 내부에서
+  `torch.autocast(enabled=False)`로 float32를 강제한다.
+- `branch_screen.py --adopted m_sh,m_sj`는 **SH 마진이 산출된 태그에서만** 완전한 심사를
+  수행하며, 통합 이전 태그처럼 기록에 `m_sh`가 없으면 경고를 출력한다
+  ([결정 이력](history/archive.md) `D-013`, `D-038`).
 
 ---
 
@@ -172,7 +177,7 @@ $$P(y=1) = \frac{1}{4} \sum_{k=2}^5 p_{(k)}$$
 ```
 src/models/
 ├── training_free.py          # 활성 파이프라인 — 기저 구축, 브랜치 호출, 집계 분기
-├── config.py                 # 브랜치 가중치·차원·λ 기본값 (weight_shj 기본 0.0)
+├── config.py                 # 브랜치 가중치·차원·λ 기본값 (형상 계열 weight_sj·weight_sh 기본 0.0)
 ├── registry.py               # @register_model 데코레이터 및 build_model 팩토리
 ├── stream_eval.py            # 고속 스트리밍 평가 및 통계 캐싱
 ├── common/solvers.py         # Dual Ridge / kernel ridge 해법
@@ -180,6 +185,7 @@ src/models/
 │   ├── cv.py  bm.py  bd.py  qa.py  ds.py      # 공식 5-branch
 │   ├── ct.py                                   # 계보 — 공식 비교 기준에서 제외
 │   ├── sj.py                                   # 채택된 형상 브랜치 (§2.8, shj.py는 re-export)
+│   ├── sh.py                                   # 채택된 형상 브랜치 (§2.8, D-039에서 이관)
 │   ├── dd.py                                   # DD 는 CA-02 로 닫힘; BD 마진 제공
 │   └── experimental/  de.py  lr.py  sw.py      # 기각·미판정 후보
 ├── ct/                       # CT 사전 구축 및 soft-token 할당
@@ -191,7 +197,9 @@ src/models/
   중복해 적지 않는다 (과거 판이 존재하지 않는 `eval_v118.sh`·`eval_v117.sh`·`eval_v116.sh`를
   안내하고 있었다).
 - 회귀 스위트는 브랜치별 불변식 계약을 검사한다 — `tests/test_bd_branch.py`,
-  `test_bm_branch.py`, `test_qa_branch.py`, `test_sj_branch.py`(및 `test_shj_branch.py`), `test_soft_voting.py`,
-  `test_core_contracts.py` 등.
+  `test_bm_branch.py`, `test_qa_branch.py`, `test_sj_branch.py`(및 `test_shj_branch.py`),
+  `test_sh_branch.py`, `test_soft_voting.py`, `test_core_contracts.py` 등.
+
+_by GLM-5.3-Flash on nexgem-s1 at 2026-09-09_
 
 _by Claude Opus 5 on nexgem-s1 at 2026-09-06_

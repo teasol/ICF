@@ -131,16 +131,26 @@ class TrainingFreeConfig:
     weight_ds: float = 0.0
     ds_dim: int = 32
     ds_lambda: float = 1.0
-    # SJ (formerly SHJ): joint whitened-radius shape (§220). Task specialist, off by default.
+    ds_temperature: float = 1.0
+    ds_tokens: int = 256
+
+    # 7b. Shape-family branches (location/scale invariant task specialists).
+    #     SJ (formerly SHJ): joint shape of the whitened radius distribution.
+    #     Task specialist admitted in §220, off by default.
     weight_sj: float = 0.0
     sj_dim: int = 32
     sj_lambda: float = 1.0
-    # Backward compatibility aliases for SHJ
+    #     Backward compatibility aliases for SHJ (kept permanently).
     weight_shj: float = 0.0
     shj_dim: int = 32
     shj_lambda: float = 1.0
-    ds_temperature: float = 1.0
-    ds_tokens: int = 256
+    #     SH: per-dimension skewness + excess kurtosis of the projection
+    #     (§218-§219). `sh_wide` is the projection width the moments are read
+    #     at; `sh_dim` of each moment is kept.
+    weight_sh: float = 0.0
+    sh_dim: int = 32
+    sh_wide: int = 256
+    sh_lambda: float = 1.0
 
     # 8. DD Branch (Historical Data-Dependent Direction)
     weight_dd: float = 0.0
@@ -420,9 +430,13 @@ def _validate_config_domain(cfg: TrainingFreeConfig) -> None:
         raise ValueError(f"sj_dim must be positive, got {cfg.sj_dim}")
     if cfg.shj_dim <= 0:
         raise ValueError(f"shj_dim must be positive, got {cfg.shj_dim}")
+    if cfg.sh_dim <= 0:
+        raise ValueError(f"sh_dim must be positive, got {cfg.sh_dim}")
+    if cfg.sh_wide <= 0:
+        raise ValueError(f"sh_wide must be positive, got {cfg.sh_wide}")
 
     # Weights >= 0
-    for w_name in ("weight_cv", "weight_ct", "weight_bm", "weight_bd", "weight_qa", "weight_ds", "weight_dd", "weight_sj", "weight_shj"):
+    for w_name in ("weight_cv", "weight_ct", "weight_bm", "weight_bd", "weight_qa", "weight_ds", "weight_dd", "weight_sj", "weight_shj", "weight_sh"):
         w = getattr(cfg, w_name)
         if w < 0.0:
             raise ValueError(f"{w_name} must be non-negative, got {w}")

@@ -1215,13 +1215,17 @@ def evaluate_trial(
                             # Joint shape: whiten tokens in the slide's OWN top-k basis,
                             # then describe the radius distribution. Location- and
                             # scale-invariant, and multivariate rather than marginal.
-                            # Single source of truth with src/models/branches/shj.py,
+                            # Single source of truth with src/models/branches/sj.py,
                             # so the eval path and the pipeline cannot drift apart.
                             from src.models.branches.sj import sj_slide_features  # noqa: PLC0415
+                            from src.models.branches.sh import sh_slide_features  # noqa: PLC0415
                             joint = sj_slide_features(v, wide_basis, sh_narrow)
                             n_ = sh_narrow
                             out = {
-                                "sh":   torch.cat([skew[:n_], kurt[:n_]]),
+                                # Official SH: single source of truth with
+                                # src/models/branches/sh.py (integrated from this
+                                # closure; the remaining keys stay screen-only, §219).
+                                "sh":   sh_slide_features(v, wide_basis, n_),
                                 "shs":  skew[:n_],
                                 "shk":  kurt[:n_],
                                 "sh2":  torch.cat([skew, kurt]),

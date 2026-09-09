@@ -6,60 +6,63 @@ import torch
 
 from src.models.common.solvers import fast_context_auroc
 
+#: The fixed branch set, in the canonical combination order. Each aggregation
+#: resolves (weight, margin) pairs through _fixed_branch_pairs so the on/off and
+#: weighting rules live in exactly one place.
+_FIXED_BRANCHES = ("dd", "ct", "bm", "bd", "qa", "ds", "lr", "de", "sw")
 
-def linear_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=None, m_shj=None):
-    total_margin = config.weight_cv * m_cv
-    if m_dd is not None:
-        total_margin = total_margin + config.weight_dd * m_dd
-    if m_ct is not None:
-        total_margin = total_margin + config.weight_ct * m_ct
-    if m_bm is not None:
-        total_margin = total_margin + config.weight_bm * m_bm
-    if m_bd is not None:
-        total_margin = total_margin + config.weight_bd * m_bd
-    if m_qa is not None:
-        total_margin = total_margin + config.weight_qa * m_qa
-    if m_ds is not None:
-        total_margin = total_margin + config.weight_ds * m_ds
-    if m_lr is not None:
-        total_margin = total_margin + config.weight_lr * m_lr
-    if m_de is not None:
-        total_margin = total_margin + config.weight_de * m_de
-    if m_sw is not None:
-        total_margin = total_margin + config.weight_sw * m_sw
+
+def _fixed_branch_pairs(config, margins: dict[str, torch.Tensor | None]) -> list[tuple[float, torch.Tensor]]:
+    """(weight, margin) pairs of the fixed branches whose margin exists and whose
+    configured weight is non-zero, in _FIXED_BRANCHES order."""
+    pairs = []
+    for name in _FIXED_BRANCHES:
+        m = margins.get(name)
+        if m is None:
+            continue
+        w = getattr(config, f"weight_{name}", 0.0)
+        if w != 0.0:
+            pairs.append((w, m))
+    return pairs
+
+
+def _shape_branch_pairs(config, m_sj, m_sh, m_shj=None) -> list[tuple[float, torch.Tensor]]:
+    """(weight, margin) pairs of the shape-family branches (SJ, SH).
+
+    m_shj is the legacy margin alias of m_sj (D-038): it is only consulted when
+    m_sj is absent, and the SJ weight falls back to weight_shj the same way.
+    """
+    pairs = []
     m_sj_active = m_sj if m_sj is not None else m_shj
     w_sj = getattr(config, "weight_sj", getattr(config, "weight_shj", 0.0))
     if m_sj_active is not None and w_sj != 0.0:
-        total_margin = total_margin + w_sj * m_sj_active
+        pairs.append((w_sj, m_sj_active))
+    w_sh = getattr(config, "weight_sh", 0.0)
+    if m_sh is not None and w_sh != 0.0:
+        pairs.append((w_sh, m_sh))
+    return pairs
+
+
+def linear_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=None, m_sh=None, m_shj=None):
+    total_margin = config.weight_cv * m_cv
+    pairs = _fixed_branch_pairs(config, {
+        "dd": m_dd, "ct": m_ct, "bm": m_bm, "bd": m_bd, "qa": m_qa,
+        "ds": m_ds, "lr": m_lr, "de": m_de, "sw": m_sw,
+    }) + _shape_branch_pairs(config, m_sj, m_sh, m_shj)
+    for w, m in pairs:
+        total_margin = total_margin + w * m
     return total_margin
 
 
-def soft_voting(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=None, m_shj=None):
+def soft_voting(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=None, m_sh=None, m_shj=None):
     active_pairs = []
     if config.weight_cv != 0.0:
         active_pairs.append((config.weight_cv, m_cv))
-    if m_dd is not None and config.weight_dd != 0.0:
-        active_pairs.append((config.weight_dd, m_dd))
-    if m_ct is not None and config.weight_ct != 0.0:
-        active_pairs.append((config.weight_ct, m_ct))
-    if m_bm is not None and config.weight_bm != 0.0:
-        active_pairs.append((config.weight_bm, m_bm))
-    if m_bd is not None and config.weight_bd != 0.0:
-        active_pairs.append((config.weight_bd, m_bd))
-    if m_qa is not None and config.weight_qa != 0.0:
-        active_pairs.append((config.weight_qa, m_qa))
-    if m_ds is not None and config.weight_ds != 0.0:
-        active_pairs.append((config.weight_ds, m_ds))
-    if m_lr is not None and config.weight_lr != 0.0:
-        active_pairs.append((config.weight_lr, m_lr))
-    if m_de is not None and config.weight_de != 0.0:
-        active_pairs.append((config.weight_de, m_de))
-    if m_sw is not None and config.weight_sw != 0.0:
-        active_pairs.append((config.weight_sw, m_sw))
-    m_sj_active = m_sj if m_sj is not None else m_shj
-    w_sj = getattr(config, "weight_sj", getattr(config, "weight_shj", 0.0))
-    if m_sj_active is not None and w_sj != 0.0:
-        active_pairs.append((w_sj, m_sj_active))
+    active_pairs += _fixed_branch_pairs(config, {
+        "dd": m_dd, "ct": m_ct, "bm": m_bm, "bd": m_bd, "qa": m_qa,
+        "ds": m_ds, "lr": m_lr, "de": m_de, "sw": m_sw,
+    })
+    active_pairs += _shape_branch_pairs(config, m_sj, m_sh, m_shj)
 
     if not active_pairs:
         return torch.zeros(cv.shape[0], device=cv.device, dtype=cv.dtype)
@@ -83,26 +86,38 @@ def context_loo_stacking(
     m_ds, loo_ds,
     m_de, loo_de,
     m_sw, loo_sw,
+    m_sj=None, loo_sj=None,
+    m_sh=None, loo_sh=None,
+    m_shj=None, loo_shj=None,
 ):
+    if m_sj is None and m_shj is not None:
+        m_sj, loo_sj = m_shj, loo_shj  # Legacy margin alias (D-038)
+
+    candidates = [
+        ("dd", m_dd, loo_dd),
+        ("ct", m_ct, loo_ct),
+        ("bm", m_bm, loo_bm),
+        ("bd", m_bd, loo_bd),
+        ("qa", m_qa, loo_qa),
+        ("ds", m_ds, loo_ds),
+        ("de", m_de, loo_de),
+        ("sw", m_sw, loo_sw),
+    ]
     branch_pool = []
     if config.weight_cv != 0.0:
         branch_pool.append((m_cv, loo_cv))
-    if m_dd is not None and config.weight_dd != 0.0:
-        branch_pool.append((m_dd, loo_dd))
-    if m_ct is not None and config.weight_ct != 0.0:
-        branch_pool.append((m_ct, loo_ct))
-    if m_bm is not None and config.weight_bm != 0.0:
-        branch_pool.append((m_bm, loo_bm))
-    if m_bd is not None and config.weight_bd != 0.0:
-        branch_pool.append((m_bd, loo_bd))
-    if m_qa is not None and config.weight_qa != 0.0:
-        branch_pool.append((m_qa, loo_qa))
-    if m_ds is not None and config.weight_ds != 0.0:
-        branch_pool.append((m_ds, loo_ds))
-    if m_de is not None and config.weight_de != 0.0:
-        branch_pool.append((m_de, loo_de))
-    if m_sw is not None and config.weight_sw != 0.0:
-        branch_pool.append((m_sw, loo_sw))
+    for name, m, l in candidates:
+        if m is None:
+            continue
+        w = getattr(config, f"weight_{name}", 0.0)
+        if w != 0.0:
+            branch_pool.append((m, l))
+    w_sj = getattr(config, "weight_sj", getattr(config, "weight_shj", 0.0))
+    if m_sj is not None and w_sj != 0.0:
+        branch_pool.append((m_sj, loo_sj))
+    w_sh = getattr(config, "weight_sh", 0.0)
+    if m_sh is not None and w_sh != 0.0:
+        branch_pool.append((m_sh, loo_sh))
 
     if not branch_pool:
         return torch.zeros(cv.shape[0], device=cv.device, dtype=cv.dtype)
@@ -129,32 +144,16 @@ def context_loo_stacking(
     return torch.log(clamped / (1.0 - clamped))
 
 
-def trimmed_mean(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=None, m_shj=None):
-    active_probs = []
+def trimmed_mean(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=None, m_sh=None, m_shj=None):
+    active_pairs = []
     if config.weight_cv != 0.0:
-        active_probs.append(torch.sigmoid(m_cv))
-    if m_dd is not None and config.weight_dd != 0.0:
-        active_probs.append(torch.sigmoid(m_dd))
-    if m_ct is not None and config.weight_ct != 0.0:
-        active_probs.append(torch.sigmoid(m_ct))
-    if m_bm is not None and config.weight_bm != 0.0:
-        active_probs.append(torch.sigmoid(m_bm))
-    if m_bd is not None and config.weight_bd != 0.0:
-        active_probs.append(torch.sigmoid(m_bd))
-    if m_qa is not None and config.weight_qa != 0.0:
-        active_probs.append(torch.sigmoid(m_qa))
-    if m_ds is not None and config.weight_ds != 0.0:
-        active_probs.append(torch.sigmoid(m_ds))
-    if m_lr is not None and config.weight_lr != 0.0:
-        active_probs.append(torch.sigmoid(m_lr))
-    if m_de is not None and config.weight_de != 0.0:
-        active_probs.append(torch.sigmoid(m_de))
-    if m_sw is not None and config.weight_sw != 0.0:
-        active_probs.append(torch.sigmoid(m_sw))
-    m_sj_active = m_sj if m_sj is not None else m_shj
-    w_sj = getattr(config, "weight_sj", getattr(config, "weight_shj", 0.0))
-    if m_sj_active is not None and w_sj != 0.0:
-        active_probs.append(torch.sigmoid(m_sj_active))
+        active_pairs.append((config.weight_cv, m_cv))
+    active_pairs += _fixed_branch_pairs(config, {
+        "dd": m_dd, "ct": m_ct, "bm": m_bm, "bd": m_bd, "qa": m_qa,
+        "ds": m_ds, "lr": m_lr, "de": m_de, "sw": m_sw,
+    })
+    active_pairs += _shape_branch_pairs(config, m_sj, m_sh, m_shj)
+    active_probs = [torch.sigmoid(m) for _, m in active_pairs]
 
     if not active_probs:
         return torch.zeros(cv.shape[0], device=cv.device, dtype=cv.dtype)
@@ -174,32 +173,16 @@ def trimmed_mean(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_d
         return torch.log(clamped / (1.0 - clamped))
 
 
-def hard_gated(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=None, m_shj=None):
-    active_probs = []
+def hard_gated(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=None, m_sh=None, m_shj=None):
+    active_pairs = []
     if config.weight_cv != 0.0:
-        active_probs.append(torch.sigmoid(m_cv))
-    if m_dd is not None and config.weight_dd != 0.0:
-        active_probs.append(torch.sigmoid(m_dd))
-    if m_ct is not None and config.weight_ct != 0.0:
-        active_probs.append(torch.sigmoid(m_ct))
-    if m_bm is not None and config.weight_bm != 0.0:
-        active_probs.append(torch.sigmoid(m_bm))
-    if m_bd is not None and config.weight_bd != 0.0:
-        active_probs.append(torch.sigmoid(m_bd))
-    if m_qa is not None and config.weight_qa != 0.0:
-        active_probs.append(torch.sigmoid(m_qa))
-    if m_ds is not None and config.weight_ds != 0.0:
-        active_probs.append(torch.sigmoid(m_ds))
-    if m_lr is not None and config.weight_lr != 0.0:
-        active_probs.append(torch.sigmoid(m_lr))
-    if m_de is not None and config.weight_de != 0.0:
-        active_probs.append(torch.sigmoid(m_de))
-    if m_sw is not None and config.weight_sw != 0.0:
-        active_probs.append(torch.sigmoid(m_sw))
-    m_sj_active = m_sj if m_sj is not None else m_shj
-    w_sj = getattr(config, "weight_sj", getattr(config, "weight_shj", 0.0))
-    if m_sj_active is not None and w_sj != 0.0:
-        active_probs.append(torch.sigmoid(m_sj_active))
+        active_pairs.append((config.weight_cv, m_cv))
+    active_pairs += _fixed_branch_pairs(config, {
+        "dd": m_dd, "ct": m_ct, "bm": m_bm, "bd": m_bd, "qa": m_qa,
+        "ds": m_ds, "lr": m_lr, "de": m_de, "sw": m_sw,
+    })
+    active_pairs += _shape_branch_pairs(config, m_sj, m_sh, m_shj)
+    active_probs = [torch.sigmoid(m) for _, m in active_pairs]
 
     if not active_probs:
         return torch.zeros(cv.shape[0], device=cv.device, dtype=cv.dtype)
@@ -215,32 +198,16 @@ def hard_gated(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de,
     return torch.log(clamped / (1.0 - clamped))
 
 
-def adaptive_trimmed(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=None, m_shj=None):
-    active_probs = []
+def adaptive_trimmed(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=None, m_sh=None, m_shj=None):
+    active_pairs = []
     if config.weight_cv != 0.0:
-        active_probs.append(torch.sigmoid(m_cv))
-    if m_dd is not None and config.weight_dd != 0.0:
-        active_probs.append(torch.sigmoid(m_dd))
-    if m_ct is not None and config.weight_ct != 0.0:
-        active_probs.append(torch.sigmoid(m_ct))
-    if m_bm is not None and config.weight_bm != 0.0:
-        active_probs.append(torch.sigmoid(m_bm))
-    if m_bd is not None and config.weight_bd != 0.0:
-        active_probs.append(torch.sigmoid(m_bd))
-    if m_qa is not None and config.weight_qa != 0.0:
-        active_probs.append(torch.sigmoid(m_qa))
-    if m_ds is not None and config.weight_ds != 0.0:
-        active_probs.append(torch.sigmoid(m_ds))
-    if m_lr is not None and config.weight_lr != 0.0:
-        active_probs.append(torch.sigmoid(m_lr))
-    if m_de is not None and config.weight_de != 0.0:
-        active_probs.append(torch.sigmoid(m_de))
-    if m_sw is not None and config.weight_sw != 0.0:
-        active_probs.append(torch.sigmoid(m_sw))
-    m_sj_active = m_sj if m_sj is not None else m_shj
-    w_sj = getattr(config, "weight_sj", getattr(config, "weight_shj", 0.0))
-    if m_sj_active is not None and w_sj != 0.0:
-        active_probs.append(torch.sigmoid(m_sj_active))
+        active_pairs.append((config.weight_cv, m_cv))
+    active_pairs += _fixed_branch_pairs(config, {
+        "dd": m_dd, "ct": m_ct, "bm": m_bm, "bd": m_bd, "qa": m_qa,
+        "ds": m_ds, "lr": m_lr, "de": m_de, "sw": m_sw,
+    })
+    active_pairs += _shape_branch_pairs(config, m_sj, m_sh, m_shj)
+    active_probs = [torch.sigmoid(m) for _, m in active_pairs]
 
     if not active_probs:
         return torch.zeros(cv.shape[0], device=cv.device, dtype=cv.dtype)

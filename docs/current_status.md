@@ -7,42 +7,29 @@
 
 | 항목 | 값 |
 |:---|:---|
-| **Last Updated** | 2026-09-08 15:20 (KST) |
-| **Status** | CLEAN — RU-86·87·88 종료 (Main/Idea/Coding 3에이전트 배치) |
+| **Last Updated** | 2026-09-09 16:52 (KST) |
+| **Status** | CLEAN — D-039 SH 정식 통합·집계 리팩터링 완료 (RU 없음) |
 | **Host / Node** | `nexgem-s1` · RTX A5000 8장 · driver 580.126.09 · Slurm 명령 없음 |
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · Lightning 2.6.5 |
-| **Active Job** | 없음 · RU-86·88은 GPU 0, RU-87은 GPU 6장 3,169초 |
-| **회귀 테스트** | 113 tests · `OK` (2026-09-09) |
+| **Active Job** | 없음 |
+| **회귀 테스트** | 121 tests · `OK` (2026-09-09) |
 
 ---
 
-## 2026-09-08 — RU-86·87·88 종료 인수인계
+## 2026-09-09 — SH 브랜치 정식 통합 및 집계 계층 리팩터링 (D-039)
 
-**세 RU를 종료했다. 셋 다 사전 등록한 기준을 결과 전에 고정하고 그대로 적용했다.**
-
-- **RU-86** MDX 게이트 ② — **반박·종료.** 사전 등재 과제 `Grade`에서 단독 AUROC > 0.5인 fold가
-  50 중 **10개**(단측 `p = 0.99999720`). 게이트 ①을 통과한 유일한 Tier 1 후보를 종료했고
-  §226 Tier 1 3건이 전부 종료됐다 ([보고](reports/RU-86_mdx_gate2.md)).
-  2차 탐색에서 **부호 반전**을 관측했다 — `Grade`는 50 중 40 fold가 0.5 **미만**, `KRAS`는 41 fold가
-  초과이며 `|중앙값−0.5|`가 `0.0821` 대 `0.0861`로 크기가 같고 방향이 반대다. 무정보가 아니라
-  **부호가 과제에 따라 뒤집히는 정보**일 수 있다(기전 미확인). 부호를 알려면 라벨이 필요하므로
-  `CA-R1`과 같은 벽이며, 사후 부호 선택으로 후보를 되살리지 않았다.
-- **RU-87** bf16 대 fp32 — **상쇄·종료.** 정밀도 차는 절대 AUROC fold-mean 최대 `0.0837%p`,
-  대응 Δ fold-mean `0.0674%p`로 **짝지은 Δ에서 상쇄된다**. 폐기한 `최대 0.5%p` 표기의 경위는
-  결정 이력 `D-037` ([보고](reports/RU-87_precision_bf16_fp32.md)).
-- **RU-88** CA-R1 fold 수준 지문 패널 — **반박 5 / 판별 불가 3, 보류.** 진입 기준 충족 0/8.
-  새 지문 F1(이상치 근접도)·F2(context↔query MMD)는 두 표적 모두에 대해 구간이 관심 크기
-  `|ρ| = 0.3`을 배제했다. 대조군 F3(Task-Geometry 계열)에 판별 불가가 몰렸다
-  ([보고](reports/RU-88_car1_fingerprint_panel.md)). **`CA-R1`은 닫지 않았다** — 과제 군집 7로는
-  부재를 입증할 검정력이 없다.
-
-**후보 큐에 `CA-R1` 계열 5건을 등재했다**([`research_directions.md` §0 P1-B](research_directions.md)
-행 `B1`~`B5`). 출처는 Idea Agent 산출 제안서 6건이다
-([제안서](proposals/2026-09-08_car1-label-free-task-identification.md)).
-
-**경계 판정 2건을 사용자 판단 대기로 올렸다** ([`closed_axes.md` §3](closed_axes.md)) —
-`§3-I` 컨텍스트 라벨만 쓰는 판별 통계가 `CA-06` 경계인가, `§3-J` 다중 강도 브랜치 동시 투입이
-`P2-SELECTOR-CEILING`·`CA-09` 경계인가. 판단이 갈려 임의로 한쪽을 채택하지 않았다.
+- **SH를 `src/models/branches/sh.py`로 이관**했다. §222 때 SJ(구 SHJ)만 이관되고 SH는
+  `scripts/test_pathobench.py` 모놀리스에 남아 있던 기술 부채를 해소했다. `weight_sh`
+  (기본 0.0)·`sh_dim`·`sh_wide`·`sh_lambda`를 `TrainingFreeConfig`에 신설해 SH가
+  환경변수로만 조작되던 구조를 끝냈다. 기본 구성은 비트 단위 불변이다.
+- **결함 수정**: `context_loo_stacking`의 branch_pool에 SJ가 전달되지 않아
+  `context_loo_*` 집계에서는 `weight_sj`를 켜도 SJ가 조용히 누락됐다. SJ·SH를 pool에
+  연결했고 회귀 핀 테스트를 추가했다 (`tests/test_sh_branch.py`).
+- **중복 제거**: voting.py 5개 집계 함수에 수동 반복되던 SJ fallback(`m_shj`)과
+  브랜치별 on/off 분기를 헬퍼로 통일했다. SHJ alias(`shj.py`, `weight_shj`)는
+  `D-038` 영구 적용에 따라 유지한다.
+- 회귀 테스트 121 tests `OK` (신설 8건 포함). RU-86·87·88 종료 요약은
+  [결정·이력](history/archive.md) 말미로 이관했다.
 
 ## 진행 중 RU
 
@@ -95,3 +82,5 @@ cat docs/reports/RU-88_car1_fingerprint_panel.md
 - `history/archive.md`에 **§199·§200 절 번호가 각각 중복** ([`closed_axes.md` §4](closed_axes.md)).
 
 _by Claude Opus 5 (Main) on nexgem-s1 at 2026-09-08_
+
+_by GLM-5.3-Flash on nexgem-s1 at 2026-09-09 16:52_

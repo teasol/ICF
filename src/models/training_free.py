@@ -83,7 +83,8 @@ from src.models.branches.bm import bm_features
 from src.models.branches.bd import bd_features
 from src.models.branches.qa import qa_features
 from src.models.branches.ds import ds_features
-from src.models.branches.sj import shj_features, sj_features
+from src.models.branches.sj import sj_features
+from src.models.branches.sh import sh_features
 from src.models.branches.experimental.lr import lr_features
 from src.models.branches.experimental.de import de_features
 from src.models.branches.experimental.sw import sw_features
@@ -311,12 +312,18 @@ class TrainingFreeClassifier:
                 m_sj, loo_sj = (sj_res[0], sj_res[1]) if return_loo else (sj_res, None)
             else:
                 m_sj, loo_sj = None, None
-            m_shj, loo_shj = m_sj, loo_sj  # Backward compatibility alias
+
+            if getattr(config, "weight_sh", 0.0) != 0.0:
+                sh_res = sh_features(config, context_bags, context_labels, query_bags,
+                                     basis, return_loo=return_loo)
+                m_sh, loo_sh = (sh_res[0], sh_res[1]) if return_loo else (sh_res, None)
+            else:
+                m_sh, loo_sh = None, None
 
             if config.aggregation == "linear":
-                return linear_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=m_sj, m_shj=m_shj)
+                return linear_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=m_sj, m_sh=m_sh)
             elif config.aggregation == "soft_voting":
-                return soft_voting(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=m_sj, m_shj=m_shj)
+                return soft_voting(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=m_sj, m_sh=m_sh)
             elif config.aggregation.startswith("context_loo"):
                 return context_loo_stacking(
                     config, cv, context_labels,
@@ -329,13 +336,15 @@ class TrainingFreeClassifier:
                     m_ds, loo_ds,
                     m_de, loo_de,
                     m_sw, loo_sw,
+                    m_sj=m_sj, loo_sj=loo_sj,
+                    m_sh=m_sh, loo_sh=loo_sh,
                 )
             elif config.aggregation == "trimmed_mean":
-                return trimmed_mean_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=m_sj, m_shj=m_shj)
+                return trimmed_mean_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=m_sj, m_sh=m_sh)
             elif config.aggregation == "hard_gated":
-                return hard_gated_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=m_sj, m_shj=m_shj)
+                return hard_gated_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=m_sj, m_sh=m_sh)
             elif config.aggregation == "adaptive_trimmed":
-                return adaptive_trimmed_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=m_sj, m_shj=m_shj)
+                return adaptive_trimmed_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=m_sj, m_sh=m_sh)
             else:
                 raise ValueError(f'aggregation must be "soft_voting", "trimmed_mean", "hard_gated", "adaptive_trimmed", or "linear", got {config.aggregation!r}')
 
