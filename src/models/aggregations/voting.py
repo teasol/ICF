@@ -7,7 +7,7 @@ import torch
 from src.models.common.solvers import fast_context_auroc
 
 
-def linear_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_shj=None):
+def linear_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=None, m_shj=None):
     total_margin = config.weight_cv * m_cv
     if m_dd is not None:
         total_margin = total_margin + config.weight_dd * m_dd
@@ -27,12 +27,14 @@ def linear_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_l
         total_margin = total_margin + config.weight_de * m_de
     if m_sw is not None:
         total_margin = total_margin + config.weight_sw * m_sw
-    if m_shj is not None:
-        total_margin = total_margin + config.weight_shj * m_shj
+    m_sj_active = m_sj if m_sj is not None else m_shj
+    w_sj = getattr(config, "weight_sj", getattr(config, "weight_shj", 0.0))
+    if m_sj_active is not None and w_sj != 0.0:
+        total_margin = total_margin + w_sj * m_sj_active
     return total_margin
 
 
-def soft_voting(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_shj=None):
+def soft_voting(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=None, m_shj=None):
     active_pairs = []
     if config.weight_cv != 0.0:
         active_pairs.append((config.weight_cv, m_cv))
@@ -54,8 +56,10 @@ def soft_voting(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de
         active_pairs.append((config.weight_de, m_de))
     if m_sw is not None and config.weight_sw != 0.0:
         active_pairs.append((config.weight_sw, m_sw))
-    if m_shj is not None and config.weight_shj != 0.0:
-        active_pairs.append((config.weight_shj, m_shj))
+    m_sj_active = m_sj if m_sj is not None else m_shj
+    w_sj = getattr(config, "weight_sj", getattr(config, "weight_shj", 0.0))
+    if m_sj_active is not None and w_sj != 0.0:
+        active_pairs.append((w_sj, m_sj_active))
 
     if not active_pairs:
         return torch.zeros(cv.shape[0], device=cv.device, dtype=cv.dtype)
@@ -125,7 +129,7 @@ def context_loo_stacking(
     return torch.log(clamped / (1.0 - clamped))
 
 
-def trimmed_mean(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_shj=None):
+def trimmed_mean(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=None, m_shj=None):
     active_probs = []
     if config.weight_cv != 0.0:
         active_probs.append(torch.sigmoid(m_cv))
@@ -147,8 +151,10 @@ def trimmed_mean(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_d
         active_probs.append(torch.sigmoid(m_de))
     if m_sw is not None and config.weight_sw != 0.0:
         active_probs.append(torch.sigmoid(m_sw))
-    if m_shj is not None and config.weight_shj != 0.0:
-        active_probs.append(torch.sigmoid(m_shj))
+    m_sj_active = m_sj if m_sj is not None else m_shj
+    w_sj = getattr(config, "weight_sj", getattr(config, "weight_shj", 0.0))
+    if m_sj_active is not None and w_sj != 0.0:
+        active_probs.append(torch.sigmoid(m_sj_active))
 
     if not active_probs:
         return torch.zeros(cv.shape[0], device=cv.device, dtype=cv.dtype)
@@ -168,7 +174,7 @@ def trimmed_mean(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_d
         return torch.log(clamped / (1.0 - clamped))
 
 
-def hard_gated(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_shj=None):
+def hard_gated(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=None, m_shj=None):
     active_probs = []
     if config.weight_cv != 0.0:
         active_probs.append(torch.sigmoid(m_cv))
@@ -190,8 +196,10 @@ def hard_gated(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de,
         active_probs.append(torch.sigmoid(m_de))
     if m_sw is not None and config.weight_sw != 0.0:
         active_probs.append(torch.sigmoid(m_sw))
-    if m_shj is not None and config.weight_shj != 0.0:
-        active_probs.append(torch.sigmoid(m_shj))
+    m_sj_active = m_sj if m_sj is not None else m_shj
+    w_sj = getattr(config, "weight_sj", getattr(config, "weight_shj", 0.0))
+    if m_sj_active is not None and w_sj != 0.0:
+        active_probs.append(torch.sigmoid(m_sj_active))
 
     if not active_probs:
         return torch.zeros(cv.shape[0], device=cv.device, dtype=cv.dtype)
@@ -207,7 +215,7 @@ def hard_gated(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de,
     return torch.log(clamped / (1.0 - clamped))
 
 
-def adaptive_trimmed(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_shj=None):
+def adaptive_trimmed(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=None, m_shj=None):
     active_probs = []
     if config.weight_cv != 0.0:
         active_probs.append(torch.sigmoid(m_cv))
@@ -229,8 +237,10 @@ def adaptive_trimmed(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr,
         active_probs.append(torch.sigmoid(m_de))
     if m_sw is not None and config.weight_sw != 0.0:
         active_probs.append(torch.sigmoid(m_sw))
-    if m_shj is not None and config.weight_shj != 0.0:
-        active_probs.append(torch.sigmoid(m_shj))
+    m_sj_active = m_sj if m_sj is not None else m_shj
+    w_sj = getattr(config, "weight_sj", getattr(config, "weight_shj", 0.0))
+    if m_sj_active is not None and w_sj != 0.0:
+        active_probs.append(torch.sigmoid(m_sj_active))
 
     if not active_probs:
         return torch.zeros(cv.shape[0], device=cv.device, dtype=cv.dtype)

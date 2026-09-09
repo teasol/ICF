@@ -131,7 +131,11 @@ class TrainingFreeConfig:
     weight_ds: float = 0.0
     ds_dim: int = 32
     ds_lambda: float = 1.0
-    # SHJ: joint whitened-radius shape (§220). Task specialist, off by default.
+    # SJ (formerly SHJ): joint whitened-radius shape (§220). Task specialist, off by default.
+    weight_sj: float = 0.0
+    sj_dim: int = 32
+    sj_lambda: float = 1.0
+    # Backward compatibility aliases for SHJ
     weight_shj: float = 0.0
     shj_dim: int = 32
     shj_lambda: float = 1.0
@@ -184,6 +188,24 @@ class TrainingFreeConfig:
     gated_tau: float = 0.05
     adaptive_tau: float = 0.08
     adaptive_ratio: float = 1.5
+
+    def __post_init__(self) -> None:
+        # Synchronize SJ <-> SHJ aliases if one is set and the other remains at default
+        # Note: object.__setattr__ is required because TrainingFreeConfig is frozen.
+        if self.weight_sj != 0.0 and self.weight_shj == 0.0:
+            object.__setattr__(self, "weight_shj", self.weight_sj)
+        elif self.weight_shj != 0.0 and self.weight_sj == 0.0:
+            object.__setattr__(self, "weight_sj", self.weight_shj)
+
+        if self.sj_dim != 32 and self.shj_dim == 32:
+            object.__setattr__(self, "shj_dim", self.sj_dim)
+        elif self.shj_dim != 32 and self.sj_dim == 32:
+            object.__setattr__(self, "sj_dim", self.shj_dim)
+
+        if self.sj_lambda != 1.0 and self.shj_lambda == 1.0:
+            object.__setattr__(self, "shj_lambda", self.sj_lambda)
+        elif self.shj_lambda != 1.0 and self.sj_lambda == 1.0:
+            object.__setattr__(self, "sj_lambda", self.shj_lambda)
 
     @classmethod
     def from_yaml(cls, path_or_content: str | Path, strict: bool = True) -> TrainingFreeConfig:
@@ -394,11 +416,13 @@ def _validate_config_domain(cfg: TrainingFreeConfig) -> None:
         raise ValueError(f"qa_dim must be positive, got {cfg.qa_dim}")
     if cfg.ds_dim <= 0:
         raise ValueError(f"ds_dim must be positive, got {cfg.ds_dim}")
+    if cfg.sj_dim <= 0:
+        raise ValueError(f"sj_dim must be positive, got {cfg.sj_dim}")
     if cfg.shj_dim <= 0:
         raise ValueError(f"shj_dim must be positive, got {cfg.shj_dim}")
 
     # Weights >= 0
-    for w_name in ("weight_cv", "weight_ct", "weight_bm", "weight_bd", "weight_qa", "weight_ds", "weight_dd", "weight_shj"):
+    for w_name in ("weight_cv", "weight_ct", "weight_bm", "weight_bd", "weight_qa", "weight_ds", "weight_dd", "weight_sj", "weight_shj"):
         w = getattr(cfg, w_name)
         if w < 0.0:
             raise ValueError(f"{w_name} must be non-negative, got {w}")

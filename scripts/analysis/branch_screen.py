@@ -19,10 +19,10 @@ from scripts.analysis.branch_diagnostics import (
 
 REJECT_ABOVE = 0.6
 
-# Adopted but not promoted into the default ensemble: SH (§218), SHJ (§220).
+# Adopted but not promoted into the default ensemble: SH (§218), SJ (formerly SHJ, §220).
 # Gate 1 screens candidates against these too - they are real branches - while
 # BRANCHES stays the official 5-branch comparison basis (invariant 3).
-ADOPTED = ["m_sh", "m_shj"]
+ADOPTED = ["m_sh", "m_sj"]
 
 
 def main() -> None:
@@ -32,15 +32,20 @@ def main() -> None:
                     help="comma-separated candidate margin keys, e.g. m_bs,m_sh")
     ap.add_argument("--adopted", default=",".join(ADOPTED),
                     help="comma-separated already-adopted branches to screen against in "
-                         "addition to BRANCHES (gate 1 must see SH/SHJ). Pass '' to disable.")
+                         "addition to BRANCHES (gate 1 must see SH/SJ). Pass '' to disable.")
     args = ap.parse_args()
 
     cands = [c.strip() for c in args.candidate.split(",") if c.strip()]
     wanted = [a.strip() for a in args.adopted.split(",") if a.strip()]
+    # Normalize m_shj in wanted to m_sj
+    wanted = ["m_sj" if a == "m_shj" else a for a in wanted]
     data = {}
     for t in PRIMARY7:
         folds = torch.load(f"predictions/pathobench_{t}_{args.tag}_official50_bf16.pt",
                            map_location="cpu", weights_only=False)["per_fold"]
+        for f in folds:
+            if "m_sj" not in f and "m_shj" in f:
+                f["m_sj"] = f["m_shj"]
         for c in cands:
             if folds[0].get(c) is None:
                 raise SystemExit(f"{c} missing for {t} - was the screening run enabled?")

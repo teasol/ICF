@@ -1217,10 +1217,8 @@ def evaluate_trial(
                             # scale-invariant, and multivariate rather than marginal.
                             # Single source of truth with src/models/branches/shj.py,
                             # so the eval path and the pipeline cannot drift apart.
-                            # Imported here, not at module scope: sys.path is only
-                            # bootstrapped once this script starts running.
-                            from src.models.branches.shj import shj_slide_features  # noqa: PLC0415
-                            joint = shj_slide_features(v, wide_basis, sh_narrow)
+                            from src.models.branches.sj import sj_slide_features  # noqa: PLC0415
+                            joint = sj_slide_features(v, wide_basis, sh_narrow)
                             n_ = sh_narrow
                             out = {
                                 "sh":   torch.cat([skew[:n_], kurt[:n_]]),
@@ -1229,7 +1227,8 @@ def evaluate_trial(
                                 "sh2":  torch.cat([skew, kurt]),
                                 "shr":  torch.cat([bowley[:n_], moors[:n_]]),
                                 "shr2": torch.cat([bowley, moors]),
-                                "shj":  joint,
+                                "sj":   joint,
+                                "shj":  joint,  # Backward compatibility alias
                             }
                             # RU-85 Tier 1 candidates. Off unless ICF_TIER1 asks for
                             # them, so an ordinary run is bit-identical to before.
@@ -1260,7 +1259,7 @@ def evaluate_trial(
                             return out
 
                         _feats = [sh_all(episode_bags[i]) for i in shp_idx]
-                        _keys = ("sh", "shs", "shk", "sh2", "shr", "shr2", "shj") + tuple(
+                        _keys = ("sh", "shs", "shk", "sh2", "shr", "shr2", "sj", "shj") + tuple(
                             k for k in ("aks", "akd", "akf", "mdx", "mdx129", "lid", "lid1024")
                             if k in _feats[0])
                         _want = os.environ.get("ICF_SH_VARIANTS", ",".join(_keys)).split(",")
@@ -2620,9 +2619,9 @@ def evaluate_official_folds(
                if k.startswith("m_ds_f") or k.startswith("draws_ds_f")},
             "context_label": result.get("context_label"),
             **{f"loo_{_n}": result.get(f"loo_{_n}")
-               for _n in ("bm", "bd", "qa", "ds", "sh", "shj")},
+               for _n in ("bm", "bd", "qa", "ds", "sh", "sj", "shj")},
             **{f"m_{_k}": result.get(f"m_{_k}")
-               for _k in ("shs", "shk", "sh2", "shr", "shr2", "shj",
+               for _k in ("shs", "shk", "sh2", "shr", "shr2", "sj", "shj",
                           "aks", "akd", "akf", "mdx", "mdx129", "lid", "lid1024")},
             **{_k: result.get(_k) for _k in ("d_aks", "d_mdx", "d_lid")},
             "m_bd": result.get("m_bd"),

@@ -23,7 +23,7 @@ from scipy.stats import spearmanr
 from scripts.analysis.branch_diagnostics import PRIMARY7, auroc, short
 
 # feature dimensionality entering each branch's ridge
-DIMS = {"bm": 32, "qa": 128, "ds": 32, "sh": 64, "shj": 8}
+DIMS = {"bm": 32, "qa": 128, "ds": 32, "sh": 64, "sj": 8, "shj": 8}
 
 
 def main() -> None:
