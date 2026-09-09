@@ -2074,3 +2074,26 @@ F3(대조군)만 유의: 새 지문의 기여가 없다는 뜻이므로 Task-Geo
 범위: Primary 7 · official 50 fold · v121. SEAL hold-out 미검증.
 
 ---
+
+### RU-89. 5-branch + SH + SJ 7-branch paired comparison and shape-family additivity
+
+- **일자 (Date)**: `2026-09-09` ~ `2026-09-09`
+- **커밋 범위**: - (`265fb05e` ... `25a58e67`)
+- **작업 유형**: `experiment`
+- **질문 (Question)**: SH(Shape Moments)와 SJ(자체백색화 반경 형상)를 동시에 투입한 7-branch(CV,BM,BD,QA,DS,SH,SJ)는 공식 5-branch 기준선(0.6171) 대비 승격 기준을 넘는가? 그리고 같은 형상 계열인 두 브랜치의 이득은 가산적인가?
+- **가설 (Hypothesis)**: [사전 선언] SH(+0.29%p)와 SJ(+0.32%p)는 같은 형상 계열이라 중복되어, 동시 투입 이득이 단순합(+0.61%p)에 크게 못 미친다. 기전 미확인 — SH-SJ 상호 |r|이 미측정이었다. [Phase 0 결과에 의해 도전받음] 상관 실측 결과 SH-SJ max |r| = 0.177(과제별 -0.022~0.177)로 거의 직교했다. 즉 '중복' 가설의 전제가 상관 수준에서는 성립하지 않는다. 가설은 사후 수정하지 않고 그대로 두며, Phase 1의 판정으로 검증한다.
+- **판정 기준 (Criteria, 사전 고정)**: [Phase 1 착수 전 고정] 대응 per-fold Δ(7과제×50fold=350)의 과제 군집 t 구간(df=6) 95%로 판정한다. Δ_i = (7-branch fold-i AUROC) − (5-branch fold-i AUROC), 같은 fold에서 짝지어 계산. 구간 하한 > +0.3%p(δ_min) → 지지 / 구간이 0을 포함 → 판별 불가 / 구간 상한 < +0.3%p → 반박. sign agreement(7과제 중 개선 수)는 보조 지표로만 보고하며 단독 판정 근거가 아니다. 악화된 과제는 전량 명시한다. 가산성은 부차 지표로 관측치 Δ(SH+SJ)와 Δ(SH)+Δ(SJ)의 차로 보고하되 이것으로 지지/반박을 판정하지 않는다.
+- **예산 / 중단 조건**: Phase 0(SH-SJ 상관, 저장 마진 오프라인 재집계): GPU 0h — 집행 완료. Phase 1(7-branch 350 fold 평가, GPU 6·7만 사용): 상한 2.0 GPU-h. 기준 단가 스윕 1회 0.7~1.0 GPU-h(research_directions.md:20) 기준 대조 2 arm. / ① 오염 검사 불일치 — SJ 배선 추가 후 기본값 off 상태에서 SMAD4 0.4421 / PBRM1 0.5553이 소수 4자리로 재현되지 않으면 기준선 오염이므로 즉시 중단한다(PROJECT.md §3.4). ② [사전 선언, Phase 0 실행 전 고정] SH-SJ max |r| > 0.6이면 게이트 ① 위반이므로 Phase 1을 집행하지 않고 종료한다 → 실측 0.177로 미발동, Phase 1 진행. ③ 예산 2.0 GPU-h 초과 시 중단. ④ GPU 6·7 외 장치를 점유하게 되면 중단.
+- **실험 및 변경 (Experiment)**: Phase 0: scripts/analysis/branch_screen.py --tag v121_sh_variants --candidate m_sh --adopted m_sj (GPU 0, 집행 완료). Phase 1: SJ 로짓 융합 배선(ICF_FIXED_HEAD_SJ_WEIGHT) 추가 후 5-branch arm과 7-branch arm을 동일 조건 Primary 7 × 50 fold로 실행하고 저장 마진에서 대응 Δ를 산출한다. GPU는 6·7만 사용한다.
+- **관측 결과 (Observations)**: [Phase 0 · GPU 0] SH 대 기존 브랜치 max |r| = 0.418 → ADMIT. SH-SJ 상호 |r| = 0.141/-0.022/0.177/0.146/0.171/0.075/0.103 (max 0.177) — 거의 직교. eff.rank 2.26/5 → 2.81/6 (효율 45% → 47%) 유지. [Phase 1 · GPU 0 · 저장 마진 오프라인 재집계, tag=v121_sh_variants] 충실성 검증: BASE macro 0.6171(공식 기준선 일치), SMAD4 0.4421 / PBRM1 0.5553(오염 검사 상수 소수 4자리 일치). macro: BASE 0.6171 / +SH 0.6197 / +SJ 0.6202 / +SH+SJ(7-branch) 0.6231. 대응 per-fold Δ의 과제 군집 95% t 구간(df=6): +SH +0.26%p [-0.69, +1.21] sign 4/7 · +SJ +0.32%p [-0.79, +1.42] sign 3/7 · +SH+SJ +0.60%p [-1.05, +2.25] sign 4/7. 가산성 gap = +0.60%p − (+0.26%p + +0.32%p) = +0.03%p — 사실상 완전 가산. 악화 과제(전량): 7-branch에서 Histologic_Grade, progression_regression, PBRM1 3건. 이 3건은 +SH·+SJ 단독에서도 동일하게 악화되어 방향이 일관된다. 기전 미확인.
+- **결정 (Decision)**: [증거 판정] 판별 불가. 7-branch의 대응 Δ 95% 구간 [-1.05%p, +2.25%p]가 0을 포함한다. 사전 고정 기준(하한 > +0.3%p → 지지 / 0 포함 → 판별 불가 / 상한 < +0.3%p → 반박)을 그대로 적용했다. 점추정 +0.60%p는 δ_min을 넘지만 구간이 넓어 확증되지 않는다. sign agreement 4/7로 보조 지표도 승격선(≥5/7) 미달이다. [사전 가설에 대한 판정] 반박. '같은 형상 계열이라 중복되어 단순합에 크게 못 미친다'는 가설은 가산성 gap +0.03%p로 반박됐다. 이득은 사실상 가산적이며 Phase 0의 직교성 실측(max |r| 0.177)과 정합한다. 가설을 사후 수정하지 않고 반박된 채로 남긴다. [운영 결정] 보류. 승격 심사에 상정하지 않는다. 축은 닫지 않는다 — 부재를 입증한 것이 아니라 과제 군집 7의 검정력으로 판별하지 못한 것이다. [부수 확정 사실] 7-branch 평가는 GPU를 전혀 쓰지 않고 수행 가능하다. 저장 마진 오프라인 재집계로 충분하며, 사전 배정한 2.0 GPU-h는 집행하지 않았다.
+- **결과별 후속 행동**: 지지(구간 하한 > +0.3%p) → 7-branch를 공식 구성 교체 후보로 승격 심사에 상정하고, hold-out 미검증을 명시한 채 사용자 판단을 요청한다. 판별 불가(0 포함) → 관측 구간과 검정력을 기록하고 보류한다. 축은 닫지 않는다. 반박(상한 < +0.3%p) → 형상 계열 동시 투입으로 승격에 도달하는 경로를 종료하고 closed_axes.md 상정을 검토한다. 세 경우 모두 SH-SJ 직교성 실측(0.177)은 별도 사실로 기록해 이후 후보 심사의 게이트 ① 기준집합에 반영한다.
+- **원문 근거 (Evidence)**:
+  - scripts/analysis/ru89_shape_joint.py (신규, commit 25a58e6) — 오프라인 재집계·군집 t 구간 산출
+  - scripts/analysis/branch_screen.py --tag v121_sh_variants --candidate m_sh --adopted m_sj — Phase 0 상관
+  - predictions/pathobench_{PRIMARY7}_v121_sh_variants_official50_bf16.pt — m_sh·m_sj 저장 마진
+  - 회귀 스위트 121 tests OK
+- **선행·후속 관계 (Relations)**: §218(SH 채택, archive.md:1411-1451) · §219-§220(SJ 채택, archive.md:1484-1571) · D-005(CT 제외 5-branch 기준) · D-018/D-019/D-021(승격 기준·정밀도) · D-038(SJ 명칭) · D-039(SH 통합). 선행 코드 작업: c050a13(SH를 src/models로 통합), 그리고 본 RU를 위한 SJ 융합 배선 추가.
+- **확인 필요 사항 및 한계 (Uncertainties)**: ① 검정력이 결론을 지배한다. 과제 군집 SE가 +SH 0.39%p → +SJ 0.45%p → 7-branch 0.67%p로 커져 δ_min = 0.3%p를 구간으로 가르지 못한다. RU-80의 대응 SE 0.022%p는 거의 동일한 두 arm의 비교값이며 여기에 적용되지 않는다(PROJECT.md §4.1의 '공통 검출 한계가 아니다'). ② Trimmed Mean은 최저·최고 1개씩 절사하므로 브랜치 수가 5에서 7로 늘면 절사 비율이 바뀐다. 이 집계 규칙 변화가 Δ에 기여한 몫은 분리하지 않았다. ③ Histologic_Grade·progression_regression·PBRM1 3과제에서 형상 계열이 일관되게 해로운 이유는 기전 미확인이다. ④ 모든 판정은 hold-out 미검증이다(PROJECT.md §3.1). ⑤ 상관이 낮다는 것과 이득이 가산적이라는 것은 별개 사실이며, 여기서는 둘 다 관측됐을 뿐 전자가 후자를 함의한다고 주장하지 않는다.
+
+---
