@@ -232,6 +232,8 @@ class TestDocumentedTestCount(unittest.TestCase):
                 cwd=REPO, text=True, stderr=subprocess.DEVNULL,
             ).strip().splitlines()
             if out:
+                if str(REPO) not in sys.path:
+                    sys.path.insert(0, str(REPO))
                 if str(REPO / "tests") not in sys.path:
                     sys.path.insert(0, str(REPO / "tests"))
                 loader = unittest.TestLoader()

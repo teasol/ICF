@@ -87,3 +87,5 @@ results/*
 !results/README.md
 # Harness state (agent config, Planner registry) — infrastructure, not the experiment.
 .harness/
+
+*.pdf
