@@ -10,7 +10,7 @@ import lightning as L
 import torch
 import torch.nn.functional as F
 
-from src.datasets.synthetic_data import RESPONSE_TASK_NAMES
+from src.datasets.synthetic import RESPONSE_TASK_NAMES
 from src.models.registry import build_model as registry_build_model
 from src.modules.diagnostics.metrics import binary_query_diagnostics
 from src.modules.diagnostics.oracle import (

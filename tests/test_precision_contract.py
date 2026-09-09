@@ -96,21 +96,12 @@ class TestPrecisionContract(unittest.TestCase):
         scripts = REPO_ROOT / "scripts"
         for path in (
             scripts / "test_pathobench.py",
-            scripts / "archive" / "legacy_evals" / "test_musk.py",
             scripts / "analysis" / "probe_slot_headroom.py",
         ):
             with self.subTest(script=path.name):
                 source = path.read_text()
                 self.assertIn("add_eval_precision_argument", source)
                 self.assertIn("eval_autocast", source)
-        for path in (
-            scripts / "archive" / "legacy_evals" / "test.py",
-            scripts / "archive" / "legacy_evals" / "run_official_folds_parallel.py",
-        ):
-            with self.subTest(script=path.name):
-                source = path.read_text()
-                self.assertIn(f'"{REQUIRED_PRECISION}"', source)
-                self.assertNotIn('default="16-mixed"', source)
 
     def test_every_selectable_trainer_group_uses_bf16_mixed(self) -> None:
         """No trainer group may opt out -- selecting one must not dodge SS3.4.

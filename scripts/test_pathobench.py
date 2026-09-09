@@ -650,7 +650,7 @@ def evaluate_trial(
                 or ct_sampling_seed is not None or ct_distance_kernel is not None
                 or ct_tokenizer is not None or ct_tokens is not None
                 or ct_kernel is not None or ct_abundance_pooling is not None):
-            from src.models.ct_readout import (  # noqa: PLC0415
+            from src.models.ct import (  # noqa: PLC0415
                 CTReadoutConfig,
                 ct_margins,
                 parse_cell_budget,

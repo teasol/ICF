@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.models.ct_readout import CTReadoutConfig, ct_margins
+from src.models.ct import CTReadoutConfig, ct_margins
 
 
 def ct_features(config, context_bags, labels, query_bags, basis=None):

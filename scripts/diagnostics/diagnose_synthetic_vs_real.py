@@ -34,7 +34,7 @@ import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.datasets.synthetic_data import SyntheticEpisodeDataset  # noqa: E402
+from src.datasets.synthetic import SyntheticEpisodeDataset  # noqa: E402
 
 FEAT = "/NHNHOME/BASE/kimds/Data/PathoBench/features"
 # Cohorts with no in_seal=yes task -- see docs SS123.

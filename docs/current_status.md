@@ -30,6 +30,14 @@
   `D-038` 영구 적용에 따라 유지한다.
 - 회귀 테스트 121 tests `OK` (신설 8건 포함). RU-86·87·88 종료 요약은
   [결정·이력](history/archive.md) 말미로 이관했다.
+- **레거시 정리 (사용자 지시)**: `tests/history/`(46파일, 스위트 미수집)·
+  `tests/fixtures/`·`scripts/archive/`(93파일)를 삭제했다. 고아 모듈
+  `models/mla.py`·`utils/schedulers.py`와 하위 호환 facade
+  (`datasets/synthetic_data.py`·`models/ct_readout.py`)도 제거했고, facade
+  참조 10곳을 실제 패키지(`datasets/synthetic`·`models/ct`)로 재지정했다.
+  `set_transformer_ridge.py`·`src/modules/`·`baseline.py`는 **보존한다** —
+  공식 평가 경로(`eval_v121.sh` → `test_pathobench.py`)가 lineage 모델의
+  신규(head-less) 인스턴스로 v121 마진을 계산하므로 live 의존이다.
 
 ## 진행 중 RU
 

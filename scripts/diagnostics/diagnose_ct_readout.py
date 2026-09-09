@@ -38,7 +38,7 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scripts.diagnose_full_basis import ALL_TASKS, auroc, index_h5, load_task  # noqa: E402
-from src.models.ct_readout import (  # noqa: E402
+from src.models.ct import (  # noqa: E402
     CTReadoutConfig,
     calibrate,
     ct_abundance,

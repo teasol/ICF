@@ -34,7 +34,7 @@ import torch
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.datasets.synthetic_data import SyntheticManifoldGenerator  # noqa: E402
+from src.datasets.synthetic import SyntheticManifoldGenerator  # noqa: E402
 from src.modules.model_interface import ModelInterface  # noqa: E402
 from src.utils.metrics import auroc as _auroc  # noqa: E402
 from src.utils.utils import merge_train_config  # noqa: E402

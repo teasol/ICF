@@ -23,7 +23,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.datasets.synthetic_data import SyntheticManifoldGenerator  # noqa: E402
+from src.datasets.synthetic import SyntheticManifoldGenerator  # noqa: E402
 from src.models.baseline import BaseModel  # noqa: E402
 
 TOLERANCE = 1e-4
