@@ -12,7 +12,7 @@
 | **Host / Node** | `nexgem-s1` · RTX A5000 8장 · driver 580.126.09 · Slurm 명령 없음 |
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · Lightning 2.6.5 |
 | **Active Job** | 없음 · RU-86·88은 GPU 0, RU-87은 GPU 6장 3,169초 |
-| **회귀 테스트** | 108 tests · `OK` (2026-09-08) |
+| **회귀 테스트** | 113 tests · `OK` (2026-09-09) |
 
 ---
 
@@ -77,7 +77,7 @@ cat docs/reports/RU-88_car1_fingerprint_panel.md
 
 **연구상의 교착**
 - **과제 특화 이득을 활용할 선택 신호가 없다.** 이득은 실재하나 라벨 없이 과제를 판별할 수단이
-  없다 — §221(SHJ)·§225(subsampling)가 같은 벽이다 ([`closed_axes.md` `CA-R1`](closed_axes.md)).
+  없다 — §221(SJ/구 SHJ)·§225(subsampling)가 같은 벽이다 ([`closed_axes.md` `CA-R1`](closed_axes.md)).
 - **모든 판정이 `hold-out 미검증`** 이다 ([`PROJECT.md` §3.1](PROJECT.md)).
 - **v115~v120 6브랜치 조합이 미검증이다.** 과거 기록은 그대로 보존하고, 현행 승격 규칙
   (대응 per-fold Δ의 과제 군집 95% 구간 하한 > `δ_min`)으로 현행 조합을 검증하는 것은 남은 과제다. **절대 macro는 과제 모집단 성능으로 주장 불가**

@@ -2741,3 +2741,22 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
   범위를 좁힌다. 판정값 `0.0674`가 사용한 문턱 `0.072 %p`(RU-80 MDE)에 근접했고, 그 문턱은
   `PROJECT.md` §4.1이 "모든 후보에 공통인 검출 한계가 아니다"라고 명시한 값이므로,
   근접이 구조적인지 확인되면 다시 판단한다.
+
+## D-038 · 2026-09-09 · SHJ 브랜치 명칭의 SJ(Shape Joint) 2글자 규격 통일 *(사용자 결정)*
+
+- **결정 주체·출처**: 사용자 지시 및 승인 — Antigravity(Main Agent 관점 검토) 리팩터링 진행.
+- **결정**:
+  1. 형상(Shape) 계열 채택 브랜치 `SHJ`의 공식 명칭을 **`SJ` (Shape Joint)**로 통일한다.
+  2. 구현 파일: `src/models/branches/sj.py`로 승격하고, 기존 `src/models/branches/shj.py`는 하위 호환 re-export 모듈로 보존한다.
+  3. 인터페이스 및 설정: `TrainingFreeConfig`와 aggregation 함수에 `weight_sj`, `sj_dim`, `sj_lambda`, `m_sj`를 기본 제공하되, 기존 `weight_shj` 및 `m_shj`와의 완전한 양방향 alias를 보장한다.
+  4. 심사 및 평가: `scripts/analysis/branch_screen.py`의 `ADOPTED` 목록을 `["m_sh", "m_sj"]`로 갱신하며, 기존 태그 파일의 `m_shj` 자동 폴백을 지원한다.
+- **근거**:
+  - ICF의 모든 정식/채택 브랜치(`CV`, `BM`, `BD`, `QA`, `DS`, `SH`, `FC`)는 2글자 대문자 약어 규격을 따르나, `SHJ`만 §219 탐색 당시 임시 명칭이 굳어진 유일한 3글자 예외였다.
+  - `S`(Shape) + `J`(Joint)로 "백색화 반경 분포 결합 형상"이라는 수학적 본질과 단변량 형상 `SH`와의 개념적 대칭성이 온전히 유지된다.
+- **영향 범위**:
+  - `src/models/branches/sj.py` 신설, `src/models/branches/shj.py` re-export.
+  - `src/models/config.py`, `src/models/training_free.py`, `src/models/aggregations/voting.py`.
+  - `scripts/analysis/branch_screen.py`, `scripts/test_pathobench.py`, `scripts/analysis/loo_capacity.py`.
+  - `docs/current_architecture.md`, `docs/PROJECT.md`, `docs/closed_axes.md`, `docs/current_status.md`.
+  - 단위 테스트 `tests/test_sj_branch.py` 추가 및 전체 회귀 테스트(113 tests) `OK`.
+- **재검토 조건**: 없음 (영구 적용).

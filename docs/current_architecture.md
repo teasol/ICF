@@ -116,11 +116,11 @@ Dual Ridge (λ=1) Dual Ridge (λ=1) Dual Ridge (λ=1) Bounded Margin   Dual Ridg
 기존 위치 계열의 상관 관측을 다른 경로의 불가능으로 확대하지 않으며, 평균 차분 특징 FC도
 비저촉으로 열려 있다 ([`closed_axes.md` `CA-09`](closed_axes.md), `D-022`).
 
-현 형상 계열은 **`BD`·`SH`·`SHJ` 3개**다. `BD`는 §2.5의 정식 브랜치이고, 나머지 둘은
-게이트를 통과해 **채택(adopted)** 됐으나 공식 구성 승격은 별개 요건으로 남아 있다
-([`PROJECT.md` §5](PROJECT.md), [결정 이력](history/archive.md) `D-009`).
+현 형상 계열은 **`BD`·`SH`·`SJ` 3개**다 (`SJ`는 구 `SHJ`, `D-025`에서 2글자 규격으로 개정).
+`BD`는 §2.5의 정식 브랜치이고, 나머지 둘은 게이트를 통과해 **채택(adopted)** 됐으나 공식 구성
+승격은 별개 요건으로 남아 있다 ([`PROJECT.md` §5](PROJECT.md), [결정 이력](history/archive.md) `D-009`, `D-025`).
 
-#### SHJ — 백색화 반경 분포의 결합 형상
+#### SJ (구 SHJ) — 백색화 반경 분포의 결합 형상
 
 각 슬라이드를 **자기 자신의 평균과 공분산으로 백색화**한 뒤 토큰 구름의 반경 분포에서 8개
 형상 기술자를 뽑는다. 구성상 위치·척도 불변이므로 평균을 다시 진술할 수 없다.
@@ -132,11 +132,11 @@ $r$의 정렬된 분위수로부터 **왜도 · 초과첨도 · Bowley 왜도 ·
 $q_{10}/q_{50}$ · $q_{90}/q_{50}$ · $q_{99}/q_{50}$ · $\text{IQR}/q_{50}$** 8차원을 만들고
 클래스 균형 kernel ridge(선형)로 마진을 얻는다.
 
-- **구현**: `src/models/branches/shj.py` (§222에서 정식 통합).
-  기본 가중치 `weight_shj = 0.0` — 채택 상태이나 활성 앙상블에는 들어가지 않는다.
+- **구현**: `src/models/branches/sj.py` (§222 정식 통합 후 `D-025`에서 명칭 통일, `shj.py`는 하위 호환 re-export 유지).
+  기본 가중치 `weight_sj = 0.0` (`weight_shj` alias 지원) — 채택 상태이나 활성 앙상블에는 들어가지 않는다.
 - ⚠️ **fp32 강제 필수.** 평가 파이프라인이 bf16 autocast 안에서 돌면 투영이 bf16(상대오차
   ~1e-3)으로 계산되고, 백색화의 `eigvals.clamp_min(1e-8).rsqrt()`가 이를 **약 100배 증폭**한다.
-  `shj_slide_features()` 내부에서 `torch.autocast(enabled=False)`로 float32를 강제한다.
+  `sj_slide_features()` 내부에서 `torch.autocast(enabled=False)`로 float32를 강제한다.
 
 #### SH — 차원별 모멘트 형상 *(미통합)*
 
@@ -145,9 +145,9 @@ $q_{10}/q_{50}$ · $q_{90}/q_{50}$ · $q_{99}/q_{50}$ · $\text{IQR}/q_{50}$** 8
 
 > ⚠️ **기술 부채: `SH`는 `src/models/`에 통합되어 있지 않다.** 구현은
 > `scripts/test_pathobench.py` 안에만 있고 `ICF_SHAPE_SCREEN_ONLY`가 기본값 `1`이라 앙상블
-> 경로에 들어가지 않는다. `SHJ`만 §222에서 `src/models/branches/`로 이관됐다.
-> 따라서 `branch_screen.py --adopted m_sh,m_shj`는 **SH 마진이 산출된 태그에서만** 완전한
-> 심사를 수행하며, 없으면 경고를 출력한다 ([결정 이력](history/archive.md) `D-013`).
+> 경로에 들어가지 않는다. `SJ`만 §222에서 `src/models/branches/`로 이관됐다.
+> 따라서 `branch_screen.py --adopted m_sh,m_sj`는 **SH 마진이 산출된 태그에서만** 완전한
+> 심사를 수행하며, 없으면 경고를 출력한다 ([결정 이력](history/archive.md) `D-013`, `D-025`).
 
 ---
 

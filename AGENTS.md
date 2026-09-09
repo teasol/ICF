@@ -33,9 +33,11 @@ ICF 프로젝트에는 다음 세 에이전트가 배속되어 역할을 엄격�
 
 ### 상호작용 및 호출 규칙
 1. **판정은 Main(Orca)만 내린다.** Idea(Owl)의 확신도 Coding(Lime)의 실패도 그 자체로는 결론이 아닙니다.
-2. **Orca가 서브에이전트를 호출하여 지휘한다.**
+2. **에이전트 호출 및 위임 (`/call` 스킬, `.agents/skills/call/SKILL.md`)**:
+   - 호출 구문 (대소문자 무관): `/call <agent>`, `to <agent>`, `<agent>에게`, `<agent> 호출`
+   - 위 구문이 입력되면 현재 세션의 어시스턴트는 임의로 답변을 가로채지 않고, 반드시 `bash scripts/call_agent.sh <agent_lower> "<prompt>"`를 실행하여 실제 에이전트의 출력을 그대로 전달합니다.
    - Claude Code 내부: 내장 `Agent` 도구 (`Agent(agent="owl", ...)` / `Agent(agent="lime", ...)`)
-   - CLI 래퍼: `bash scripts/call_agent.sh owl "<prompt>"` / `bash scripts/call_agent.sh lime "<prompt>"`
+   - CLI 래퍼: `bash scripts/call_agent.sh owl "<prompt>"` / `bash scripts/call_agent.sh lime "<prompt>"` / `bash scripts/call_agent.sh orca "<prompt>"`
 3. **역할은 별도의 에이전트 문맥으로 분리한다.** 한 세션에서 이름만 바꾸어 번갈아 수행하지 않습니다.
 4. **동의는 검증이 아니다.** 셋이 같은 말을 해도 확인된 것이 아니며 독립된 대조·재계산·반례만이 확인입니다.
 
@@ -44,12 +46,26 @@ ICF 프로젝트에는 다음 세 에이전트가 배속되어 역할을 엄격�
 - **Orca**: `[작성자: Orca / Main Agent / claude-opus-5 (effort: high) · YYYY-MM-DD HH:MM KST]`
 - **Owl**: `[작성자: Owl / Idea Agent / claude-sonnet-5 (effort: medium) · YYYY-MM-DD HH:MM KST]`
 - **Lime**: `[작성자: Lime / Coding Agent / claude-sonnet-5 (effort: medium) · YYYY-MM-DD HH:MM KST]`
-- **Git 커밋 공통**: 커밋 메시지 하단에 `Co-Authored-By: <이름> <<소문자이름>@<모델>.<추론강도>>`를 기록합니다.
+- **작성 주체 단독 명기 (Co-Author 표기 절대 금지)**:
+  - '함께 적었다', '공동 작성', 'Co-Authored-By' 등의 모호한 표현은 절대 사용하지 않습니다.
+  - 모든 작업물과 커밋에는 실제로 작성한 주체를 단독 작성자(`작성자: ...`)로 명확히 적습니다.
+  - 현재 대화 세션(Antigravity)이 직접 작성한 내용·커밋에는 서브에이전트 이름을 붙이지 않습니다.
+  - 실제 호출되어 작업을 수행한 에이전트(Orca, Owl, Lime)가 있을 때만 해당 에이전트를 단독 작성자로 명시합니다.
 
 ### GitHub 접근 권한 (GitHub Authority)
 - 모든 에이전트는 `~/.gittoken_icf`에 저장된 GitHub Personal Access Token을 통해 저장소 푸시/풀 권한을 완전히 보유합니다.
 - 저장소 로컬 설정(`.git/config`)에 `credential.https://github.com.helper = store --file /home/kimds/.gittoken_icf`가 구성되어 있어 비대화형 실행이 보장됩니다.
 
+
+### 토큰·비용 효율 및 위임 원칙 (Token Efficiency & Delegation Principles)
+- **토큰·비용 효율을 우선한다.** 불필요한 컨텍스트 비대화와 중복 추론을 방지합니다.
+- **Orca의 집중**: Orca는 목표 설정, 작업 분배, 핵심 증거 확인과 최종 판단에 집중합니다.
+- **우선 위임**: 독립적으로 맡길 수 있는 작업은 Idea Agent(`owl`), Coding Agent(`lime`)에게 우선 위임합니다.
+- **정밀한 컨텍스트 전달**: 위임할 때는 목표·필요한 맥락·수정 범위·완료 조건만 압축 전달합니다. 전체 대화나 문서를 불필요하게 반복 복사하지 않습니다.
+- **간결한 보고 수신**: 결과는 핵심 결론, 근거 위치(파일:행), 변경 파일, 검증 결과, 미해결 사항 중심으로 짧게 보고받습니다.
+- **중복 재수행 방지**: Orca는 위임한 작업을 전부 재수행하지 않습니다. 결론을 좌우하는 핵심 코드·증거와 중요한 위험만 직접 확인합니다.
+- **직접 처리 기준**: 간단한 답변이나 작은 수정처럼 위임 비용이 더 큰 작업은 Orca가 직접 처리합니다. 불필요한 다중 검토와 반복 호출을 피합니다.
+- **검증 무결성 유지**: 토큰 절약을 이유로 필수 검증(회귀 테스트, 실측 계측)을 생략하거나, 승인된 작업을 미완료로 끝내지 않습니다.
 
 ## 1. 세션 시작 (Resume Handoff)
 사용자가 "이어서 시작하자", "핸드오프 받아줘", "resume", "어디까지 했지" 등으로 작업을 시작할 때:
