@@ -1150,6 +1150,7 @@ def evaluate_trial(
                 #         construction, so it cannot restate BM/QA/DS or BS.
                 bs_weight = float(os.environ.get("ICF_FIXED_HEAD_BS_WEIGHT", "0.0"))
                 sh_weight = float(os.environ.get("ICF_FIXED_HEAD_SH_WEIGHT", "0.0"))
+                sj_weight = float(os.environ.get("ICF_FIXED_HEAD_SJ_WEIGHT", "0.0"))
                 if bs_weight != 0.0 or sh_weight != 0.0:
                     shp_eps = 1e-6
                     basis = inner._effective_covariance_projection()
@@ -1296,7 +1297,8 @@ def evaluate_trial(
                     if os.environ.get("ICF_SHAPE_SCREEN_ONLY", "1") != "1":
                         logits = logits.clone()
                         for _w, _m in ((bs_weight, locals().get("bs_margin")),
-                                       (sh_weight, locals().get("sh_margin"))):
+                                       (sh_weight, locals().get("sh_margin")),
+                                       (sj_weight, sh_variant_margins.get("sj") if 'sh_variant_margins' in locals() else None)):
                             if _w != 0.0 and _m is not None:
                                 logits[:, 0] -= 0.5 * _w * _m
                                 logits[:, 1] += 0.5 * _w * _m
