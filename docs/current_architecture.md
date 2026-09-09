@@ -1,6 +1,6 @@
 # Current Architecture Specification
 
-**Last updated**: `2026-09-06`
+**Last updated**: `2026-09-09`
 
 > **정본 분리.** 이 문서는 **브랜치 정의와 수식**의 정본이다. 성능 수치·비교 기준·승격 기준은
 > 여기서 선언하지 않는다 — [`PROJECT.md`](PROJECT.md)를 본다.
@@ -116,9 +116,9 @@ Dual Ridge (λ=1) Dual Ridge (λ=1) Dual Ridge (λ=1) Bounded Margin   Dual Ridg
 기존 위치 계열의 상관 관측을 다른 경로의 불가능으로 확대하지 않으며, 평균 차분 특징 FC도
 비저촉으로 열려 있다 ([`closed_axes.md` `CA-09`](closed_axes.md), `D-022`).
 
-현 형상 계열은 **`BD`·`SH`·`SJ` 3개**다 (`SJ`는 구 `SHJ`, `D-025`에서 2글자 규격으로 개정).
+현 형상 계열은 **`BD`·`SH`·`SJ` 3개**다 (`SJ`는 구 `SHJ`, `D-038`에서 2글자 규격으로 개정).
 `BD`는 §2.5의 정식 브랜치이고, 나머지 둘은 게이트를 통과해 **채택(adopted)** 됐으나 공식 구성
-승격은 별개 요건으로 남아 있다 ([`PROJECT.md` §5](PROJECT.md), [결정 이력](history/archive.md) `D-009`, `D-025`).
+승격은 별개 요건으로 남아 있다 ([`PROJECT.md` §5](PROJECT.md), [결정 이력](history/archive.md) `D-009`, `D-038`).
 
 #### SJ (구 SHJ) — 백색화 반경 분포의 결합 형상
 
@@ -132,7 +132,7 @@ $r$의 정렬된 분위수로부터 **왜도 · 초과첨도 · Bowley 왜도 ·
 $q_{10}/q_{50}$ · $q_{90}/q_{50}$ · $q_{99}/q_{50}$ · $\text{IQR}/q_{50}$** 8차원을 만들고
 클래스 균형 kernel ridge(선형)로 마진을 얻는다.
 
-- **구현**: `src/models/branches/sj.py` (§222 정식 통합 후 `D-025`에서 명칭 통일, `shj.py`는 하위 호환 re-export 유지).
+- **구현**: `src/models/branches/sj.py` (§222 정식 통합 후 `D-038`에서 명칭 통일, `shj.py`는 하위 호환 re-export 유지).
   기본 가중치 `weight_sj = 0.0` (`weight_shj` alias 지원) — 채택 상태이나 활성 앙상블에는 들어가지 않는다.
 - ⚠️ **fp32 강제 필수.** 평가 파이프라인이 bf16 autocast 안에서 돌면 투영이 bf16(상대오차
   ~1e-3)으로 계산되고, 백색화의 `eigvals.clamp_min(1e-8).rsqrt()`가 이를 **약 100배 증폭**한다.
@@ -147,7 +147,7 @@ $q_{10}/q_{50}$ · $q_{90}/q_{50}$ · $q_{99}/q_{50}$ · $\text{IQR}/q_{50}$** 8
 > `scripts/test_pathobench.py` 안에만 있고 `ICF_SHAPE_SCREEN_ONLY`가 기본값 `1`이라 앙상블
 > 경로에 들어가지 않는다. `SJ`만 §222에서 `src/models/branches/`로 이관됐다.
 > 따라서 `branch_screen.py --adopted m_sh,m_sj`는 **SH 마진이 산출된 태그에서만** 완전한
-> 심사를 수행하며, 없으면 경고를 출력한다 ([결정 이력](history/archive.md) `D-013`, `D-025`).
+> 심사를 수행하며, 없으면 경고를 출력한다 ([결정 이력](history/archive.md) `D-013`, `D-038`).
 
 ---
 
@@ -179,7 +179,7 @@ src/models/
 ├── branches/
 │   ├── cv.py  bm.py  bd.py  qa.py  ds.py      # 공식 5-branch
 │   ├── ct.py                                   # 계보 — 공식 비교 기준에서 제외
-│   ├── shj.py                                  # 채택된 형상 브랜치 (§2.8)
+│   ├── sj.py                                   # 채택된 형상 브랜치 (§2.8, shj.py는 re-export)
 │   ├── dd.py                                   # DD 는 CA-02 로 닫힘; BD 마진 제공
 │   └── experimental/  de.py  lr.py  sw.py      # 기각·미판정 후보
 ├── ct/                       # CT 사전 구축 및 soft-token 할당
@@ -191,7 +191,7 @@ src/models/
   중복해 적지 않는다 (과거 판이 존재하지 않는 `eval_v118.sh`·`eval_v117.sh`·`eval_v116.sh`를
   안내하고 있었다).
 - 회귀 스위트는 브랜치별 불변식 계약을 검사한다 — `tests/test_bd_branch.py`,
-  `test_bm_branch.py`, `test_qa_branch.py`, `test_shj_branch.py`, `test_soft_voting.py`,
+  `test_bm_branch.py`, `test_qa_branch.py`, `test_sj_branch.py`(및 `test_shj_branch.py`), `test_soft_voting.py`,
   `test_core_contracts.py` 등.
 
 _by Claude Opus 5 on nexgem-s1 at 2026-09-06_

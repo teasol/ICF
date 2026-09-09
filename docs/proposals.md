@@ -2,7 +2,7 @@
 
 > **작성일:** 2026-09-07  
 > **상태:** 제안 (Proposed) · 사전 점검 및 프로브 설계  
-> **기준 및 원칙:** [`research_agent.md`](/home/kimds/agent_rules/research_agent.md) 및 [`research_protocol.md`](/home/kimds/agent_rules/research_protocol.md) 준수  
+> **기준 및 원칙:** [`research_hierarchy.md`](/home/kimds/agent_rules/research_hierarchy.md) 및 [`research_protocol.md`](/home/kimds/agent_rules/research_protocol.md) 준수  
 > **목적:** 가중치/결합 함수 튜닝 포화(RU-82·83) 이후, 기존 구현 관습과 전제를 재검토하여 도출한 새로운 모델 구조 및 접근법 정의.
 
 ---
