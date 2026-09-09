@@ -61,6 +61,18 @@ from src.models.stream_eval import (  # noqa: E402
 )
 
 from src.models.training_free import _solve_kernel_ridge, _fast_context_auroc  # noqa: E402
+# Shape-family branch feature functions (BS/SH/SJ) and RU-85 Tier 1 candidates
+# (AKS/LID/MDX): hoisted to module scope (A5 of the BS/SH/SJ soundness
+# review). sh_all() below used to re-import sj/sh per slide inside its own
+# closure, which re-runs the import machinery once per slide in the episode;
+# none of these modules import anything from scripts/ or from this module, so
+# there is no circular-import reason to keep them local.
+from src.models.branches.bs import bs_slide_features  # noqa: E402
+from src.models.branches.sh import sh_slide_features  # noqa: E402
+from src.models.branches.sj import sj_slide_features  # noqa: E402
+from src.models.branches.aks import aks_slide_features  # noqa: E402
+from src.models.branches.lid import lid_slide_features  # noqa: E402
+from src.models.branches.mdx import mdx_slide_features  # noqa: E402
 from src.utils.metrics import auroc, log_loss  # noqa: E402
 
 from src.utils.utils import (  # noqa: E402
@@ -1161,12 +1173,11 @@ def evaluate_trial(
                     shp_idx = list(range(n_context)) + query_index.tolist()
 
                     if bs_weight != 0.0:
-                        # Single source of truth with src/models/branches/bs.py, so
-                        # the eval path and the training-free pipeline cannot drift
-                        # apart. Both the bag_stats_cache (scatter) fast path and
-                        # the plain from-bag path are preserved inside bs_slide_features.
-                        from src.models.branches.bs import bs_slide_features  # noqa: PLC0415
-
+                        # Single source of truth with src/models/branches/bs.py (module-
+                        # level import above), so the eval path and the training-free
+                        # pipeline cannot drift apart. Both the bag_stats_cache (scatter)
+                        # fast path and the plain from-bag path are preserved inside
+                        # bs_slide_features.
                         bs_dim = min(int(os.environ.get("ICF_BS_DIM", "256")), basis.shape[1])
 
                         def bs_feat(b):
@@ -1219,10 +1230,9 @@ def evaluate_trial(
                             # Joint shape: whiten tokens in the slide's OWN top-k basis,
                             # then describe the radius distribution. Location- and
                             # scale-invariant, and multivariate rather than marginal.
-                            # Single source of truth with src/models/branches/sj.py,
-                            # so the eval path and the pipeline cannot drift apart.
-                            from src.models.branches.sj import sj_slide_features  # noqa: PLC0415
-                            from src.models.branches.sh import sh_slide_features  # noqa: PLC0415
+                            # Single source of truth with src/models/branches/sj.py
+                            # (module-level import above), so the eval path and the
+                            # pipeline cannot drift apart.
                             joint = sj_slide_features(v, wide_basis, sh_narrow)
                             n_ = sh_narrow
                             out = {
@@ -1241,9 +1251,7 @@ def evaluate_trial(
                             # RU-85 Tier 1 candidates. Off unless ICF_TIER1 asks for
                             # them, so an ordinary run is bit-identical to before.
                             if tier1_want:
-                                from src.models.branches.aks import aks_slide_features  # noqa: PLC0415
-                                from src.models.branches.lid import lid_slide_features  # noqa: PLC0415
-                                from src.models.branches.mdx import mdx_slide_features  # noqa: PLC0415
+                                # aks/lid/mdx: module-level imports above.
                                 if "aks" in tier1_want:
                                     f_aks, d_aks = aks_slide_features(v, wide_basis, sh_narrow)
                                     out["aks"] = f_aks
@@ -2109,25 +2117,31 @@ def evaluate_trial(
             context_labels = episode_y[:n_context].long().to(device)
             branch_pool = [(name, w, m, l) for name, w, m, l in _active_branches]
 
-            gamma = float(os.environ.get("ICF_LOO_GAMMA", "2.0"))
-            floor = float(os.environ.get("ICF_LOO_FLOOR", "0.50"))
-
-            r_list = []
-            for name, w_init, q_m, l_m in branch_pool:
-                if l_m is not None and len(context_labels.unique()) >= 2:
-                    r = _fast_context_auroc(l_m, context_labels)
-                else:
-                    r = 0.50
-                r_list.append(r)
-
-            q_list = [max(0.0, r - floor) ** gamma for r in r_list]
-            sum_q = sum(q_list)
-            if sum_q > 0:
-                weights = [q / sum_q for q in q_list]
+            if not branch_pool:
+                # Same early return as voting.py::context_loo_stacking (A4):
+                # every branch weight zero/unset must not divide by
+                # len(branch_pool) == 0 below.
+                scores = torch.softmax(logits.float(), dim=-1)[:, 1]
             else:
-                weights = [1.0 / len(branch_pool)] * len(branch_pool)
+                gamma = float(os.environ.get("ICF_LOO_GAMMA", "2.0"))
+                floor = float(os.environ.get("ICF_LOO_FLOOR", "0.50"))
 
-            scores = sum(w * torch.sigmoid(q_m.float()) for w, (_, _, q_m, _) in zip(weights, branch_pool))
+                r_list = []
+                for name, w_init, q_m, l_m in branch_pool:
+                    if l_m is not None and len(context_labels.unique()) >= 2:
+                        r = _fast_context_auroc(l_m, context_labels)
+                    else:
+                        r = 0.50
+                    r_list.append(r)
+
+                q_list = [max(0.0, r - floor) ** gamma for r in r_list]
+                sum_q = sum(q_list)
+                if sum_q > 0:
+                    weights = [q / sum_q for q in q_list]
+                else:
+                    weights = [1.0 / len(branch_pool)] * len(branch_pool)
+
+                scores = sum(w * torch.sigmoid(q_m.float()) for w, (_, _, q_m, _) in zip(weights, branch_pool))
         else:
             scores = torch.softmax(logits.float(), dim=-1)[:, 1]
 
