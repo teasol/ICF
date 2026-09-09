@@ -151,6 +151,12 @@ class TrainingFreeConfig:
     sh_dim: int = 32
     sh_wide: int = 256
     sh_lambda: float = 1.0
+    #     BS: log total projected variance of the slide (§218) -- pure scale,
+    #     what BD's normalised entropy discards. `bs_dim` is the projection
+    #     width the variance is read at.
+    weight_bs: float = 0.0
+    bs_dim: int = 256
+    bs_lambda: float = 1.0
 
     # 8. DD Branch (Historical Data-Dependent Direction)
     weight_dd: float = 0.0
@@ -434,9 +440,11 @@ def _validate_config_domain(cfg: TrainingFreeConfig) -> None:
         raise ValueError(f"sh_dim must be positive, got {cfg.sh_dim}")
     if cfg.sh_wide <= 0:
         raise ValueError(f"sh_wide must be positive, got {cfg.sh_wide}")
+    if cfg.bs_dim <= 0:
+        raise ValueError(f"bs_dim must be positive, got {cfg.bs_dim}")
 
     # Weights >= 0
-    for w_name in ("weight_cv", "weight_ct", "weight_bm", "weight_bd", "weight_qa", "weight_ds", "weight_dd", "weight_sj", "weight_shj", "weight_sh"):
+    for w_name in ("weight_cv", "weight_ct", "weight_bm", "weight_bd", "weight_qa", "weight_ds", "weight_dd", "weight_sj", "weight_shj", "weight_sh", "weight_bs"):
         w = getattr(cfg, w_name)
         if w < 0.0:
             raise ValueError(f"{w_name} must be non-negative, got {w}")

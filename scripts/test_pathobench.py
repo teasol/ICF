@@ -1151,35 +1151,38 @@ def evaluate_trial(
                 bs_weight = float(os.environ.get("ICF_FIXED_HEAD_BS_WEIGHT", "0.0"))
                 sh_weight = float(os.environ.get("ICF_FIXED_HEAD_SH_WEIGHT", "0.0"))
                 sj_weight = float(os.environ.get("ICF_FIXED_HEAD_SJ_WEIGHT", "0.0"))
-                if bs_weight != 0.0 or sh_weight != 0.0:
+                # SJ's margin comes out of the SH block's `sh_variant_margins["sj"]`
+                # (both are derived from the same wide projection), so SJ alone
+                # must still enter the SH block even when sh_weight is 0.
+                if bs_weight != 0.0 or sh_weight != 0.0 or sj_weight != 0.0:
                     shp_eps = 1e-6
                     basis = inner._effective_covariance_projection()
                     labels_shp = episode_y[:n_context].long().to(device)
                     shp_idx = list(range(n_context)) + query_index.tolist()
 
                     if bs_weight != 0.0:
+                        # Single source of truth with src/models/branches/bs.py, so
+                        # the eval path and the training-free pipeline cannot drift
+                        # apart. Both the bag_stats_cache (scatter) fast path and
+                        # the plain from-bag path are preserved inside bs_slide_features.
+                        from src.models.branches.bs import bs_slide_features  # noqa: PLC0415
+
                         bs_dim = min(int(os.environ.get("ICF_BS_DIM", "256")), basis.shape[1])
-                        bs_basis = basis[:, :bs_dim].float()
 
                         def bs_feat(b):
-                            if bag_stats_cache is not None and id(b) in bag_stats_cache:
-                                n_i, _, scatter = bag_stats_cache[id(b)]
-                                tr = ((scatter.to(device).float() @ bs_basis) * bs_basis).sum() / float(n_i)
-                            else:
-                                v = b.to(device).float()
-                                pr = (v - v.mean(dim=0, keepdim=True)) @ bs_basis
-                                tr = pr.square().sum() / float(v.shape[0])
-                            return tr.clamp_min(shp_eps).log().reshape(1)
+                            stats = bag_stats_cache.get(id(b)) if bag_stats_cache is not None else None
+                            return bs_slide_features(b, basis, bs_dim, bag_stats=stats)
 
                         f_bs = torch.stack([bs_feat(episode_bags[i]) for i in shp_idx])
-                        bs_margin = _solve_kernel_ridge(
+                        bs_res = _solve_kernel_ridge(
                             f_bs[:n_context], labels_shp, f_bs[n_context:],
                             kernel="linear", gamma=None, degree=2, coef0=1.0,
                             reg_lambda=float(os.environ.get("ICF_BS_LAMBDA", "1.0")),
-                            return_loo=False,
+                            return_loo=do_context_loo,
                         )
+                        bs_margin, loo_bs = (bs_res[0], bs_res[1]) if do_context_loo else (bs_res, None)
 
-                    if sh_weight != 0.0:
+                    if sh_weight != 0.0 or sj_weight != 0.0:
                         # §219 SH variants. Tokens are projected ONCE at the widest
                         # dim; every variant is a cheap derivation of that projection.
                         sh_wide = min(int(os.environ.get("ICF_SH_WIDE", "256")), basis.shape[1])
@@ -1294,6 +1297,14 @@ def evaluate_trial(
                             if f"_diag_{_n}" in _feats[0]
                         }
 
+                    # Legacy fallback path, kept but no longer load-bearing: with
+                    # ICF_SHAPE_SCREEN_ONLY=0 BS/SH/SJ now enter every aggregation's
+                    # POOL directly (see `_branch_specs`/`_active_branches` below),
+                    # so `logits` is only ever read back by the `else: softmax(logits)`
+                    # branch of each of the 5 aggregations, which fires only when
+                    # EVERY branch's weight (cv/dd/ct/bm/bd/qa/ds/lr/de/sw/sj/sh/bs) is
+                    # zero or unset -- i.e. this addition is reachable only through
+                    # that all-zero fallback, never alongside a populated pool.
                     if os.environ.get("ICF_SHAPE_SCREEN_ONLY", "1") != "1":
                         logits = logits.clone()
                         for _w, _m in ((bs_weight, locals().get("bs_margin")),
@@ -1985,29 +1996,53 @@ def evaluate_trial(
         m_lr = lr_margin.detach() if ("lr_margin" in locals() and lr_margin is not None) else torch.zeros(len(test_ids), device=device)
         m_de = de_margin.detach() if ("de_margin" in locals() and de_margin is not None) else torch.zeros(len(test_ids), device=device)
         m_sw = sw_margin.detach() if ("sw_margin" in locals() and sw_margin is not None) else torch.zeros(len(test_ids), device=device)
+        m_sj = (sh_variant_margins.get("sj").detach()
+                if ("sh_variant_margins" in locals() and sh_variant_margins.get("sj") is not None)
+                else None)
+        loo_sj = (sh_variant_loo.get("sj") if ("sh_variant_loo" in locals()
+                  and sh_variant_loo.get("sj") is not None) else None)
+        loo_sh = (sh_variant_loo.get("sh") if ("sh_variant_loo" in locals()
+                  and sh_variant_loo.get("sh") is not None) else None)
+        loo_bs = locals().get("loo_bs")
+
+        # ICF_SHAPE_SCREEN_ONLY governs whether BS/SH/SJ enter the aggregation
+        # POOL below (default "1" = screen-only: margins are computed and
+        # saved -- see m_bs/m_sh/m_sj in the returned dict -- but excluded from
+        # every aggregation's pool, so a default run stays bit-identical to
+        # before this branch existed). "0" wires them into all 5 aggregations
+        # (and context_loo) exactly like any other branch.
+        _shape_pool_open = os.environ.get("ICF_SHAPE_SCREEN_ONLY", "1") != "1"
+        sj_pool_weight = sj_weight if _shape_pool_open else 0.0
+        sh_pool_weight = sh_weight if _shape_pool_open else 0.0
+        bs_pool_weight = bs_weight if _shape_pool_open else 0.0
+
+        # Single source of truth for which (weight, margin, loo) triples feed
+        # the 5 aggregations below, in the SAME cv,dd,ct,bm,bd,qa,ds,lr,de,sw,
+        # sj,sh,bs order as src/models/aggregations/voting.py's
+        # _fixed_branch_pairs/_shape_branch_pairs, so the two paths cannot
+        # silently drift apart the way BS/SH/SJ did (this RU's root cause).
+        _branch_specs = [
+            ("cv", cv_weight, m_cv, None),
+            ("dd", dd_weight, m_dd, None),
+            ("ct", ct_weight, m_ct, None),
+            ("bm", bm_weight, m_bm, locals().get("loo_bm")),
+            ("bd", bd_weight, m_bd, locals().get("loo_bd")),
+            ("qa", qa_weight, m_qa, locals().get("loo_qa")),
+            ("ds", ds_weight, m_ds, locals().get("loo_ds")),
+            ("lr", lr_weight, m_lr, None),
+            ("de", de_weight, m_de, locals().get("loo_de")),
+            ("sw", sw_weight, m_sw, locals().get("loo_sw")),
+            ("sj", sj_pool_weight, m_sj, loo_sj),
+            ("sh", sh_pool_weight, m_sh, loo_sh),
+            ("bs", bs_pool_weight, m_bs, loo_bs),
+        ]
+        _active_branches = [
+            (name, w, m, l) for name, w, m, l in _branch_specs
+            if w != 0.0 and m is not None
+        ]
 
         if aggregation == "trimmed_mean":
-            active_probs = []
-            if cv_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_cv.float()))
-            if dd_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_dd.float()))
-            if ct_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_ct.float()))
-            if bm_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_bm.float()))
-            if bd_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_bd.float()))
-            if qa_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_qa.float()))
-            if ds_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_ds.float()))
-            if lr_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_lr.float()))
-            if de_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_de.float()))
-            if sw_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_sw.float()))
+            active_probs = [torch.sigmoid(m.float()) for _, _, m, _ in _active_branches]
 
             if len(active_probs) >= 3:
                 stacked = torch.stack(active_probs, dim=-1)
@@ -2020,27 +2055,7 @@ def evaluate_trial(
             else:
                 scores = torch.softmax(logits.float(), dim=-1)[:, 1]
         elif aggregation == "soft_voting":
-            active_pairs = []
-            if cv_weight != 0.0:
-                active_pairs.append((cv_weight, m_cv))
-            if dd_weight != 0.0:
-                active_pairs.append((dd_weight, m_dd))
-            if ct_weight != 0.0:
-                active_pairs.append((ct_weight, m_ct))
-            if bm_weight != 0.0:
-                active_pairs.append((bm_weight, m_bm))
-            if bd_weight != 0.0:
-                active_pairs.append((bd_weight, m_bd))
-            if qa_weight != 0.0:
-                active_pairs.append((qa_weight, m_qa))
-            if ds_weight != 0.0:
-                active_pairs.append((ds_weight, m_ds))
-            if lr_weight != 0.0:
-                active_pairs.append((lr_weight, m_lr))
-            if de_weight != 0.0:
-                active_pairs.append((de_weight, m_de))
-            if sw_weight != 0.0:
-                active_pairs.append((sw_weight, m_sw))
+            active_pairs = [(w, m) for _, w, m, _ in _active_branches]
 
             if active_pairs:
                 total_weight = sum(w for w, _ in active_pairs)
@@ -2048,27 +2063,7 @@ def evaluate_trial(
             else:
                 scores = torch.softmax(logits.float(), dim=-1)[:, 1]
         elif aggregation == "hard_gated":
-            active_probs = []
-            if cv_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_cv.float()))
-            if dd_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_dd.float()))
-            if ct_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_ct.float()))
-            if bm_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_bm.float()))
-            if bd_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_bd.float()))
-            if qa_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_qa.float()))
-            if ds_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_ds.float()))
-            if lr_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_lr.float()))
-            if de_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_de.float()))
-            if sw_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_sw.float()))
+            active_probs = [torch.sigmoid(m.float()) for _, _, m, _ in _active_branches]
 
             if active_probs:
                 stacked = torch.stack(active_probs, dim=-1)  # [N, B]
@@ -2081,27 +2076,7 @@ def evaluate_trial(
             else:
                 scores = torch.softmax(logits.float(), dim=-1)[:, 1]
         elif aggregation == "adaptive_trimmed":
-            active_probs = []
-            if cv_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_cv.float()))
-            if dd_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_dd.float()))
-            if ct_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_ct.float()))
-            if bm_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_bm.float()))
-            if bd_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_bd.float()))
-            if qa_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_qa.float()))
-            if ds_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_ds.float()))
-            if lr_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_lr.float()))
-            if de_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_de.float()))
-            if sw_weight != 0.0:
-                active_probs.append(torch.sigmoid(m_sw.float()))
+            active_probs = [torch.sigmoid(m.float()) for _, _, m, _ in _active_branches]
 
             if active_probs:
                 stacked = torch.stack(active_probs, dim=-1)  # [N, B]
@@ -2131,28 +2106,8 @@ def evaluate_trial(
             else:
                 scores = torch.softmax(logits.float(), dim=-1)[:, 1]
         elif aggregation.startswith("context_loo"):
-            branch_pool = []
             context_labels = episode_y[:n_context].long().to(device)
-            if cv_weight != 0.0:
-                branch_pool.append(("cv", cv_weight, m_cv, None))
-            if dd_weight != 0.0:
-                branch_pool.append(("dd", dd_weight, m_dd, None))
-            if ct_weight != 0.0:
-                branch_pool.append(("ct", ct_weight, m_ct, None))
-            if bm_weight != 0.0:
-                branch_pool.append(("bm", bm_weight, m_bm, loo_bm if "loo_bm" in locals() else None))
-            if bd_weight != 0.0:
-                branch_pool.append(("bd", bd_weight, m_bd, loo_bd if "loo_bd" in locals() else None))
-            if qa_weight != 0.0:
-                branch_pool.append(("qa", qa_weight, m_qa, loo_qa if "loo_qa" in locals() else None))
-            if ds_weight != 0.0:
-                branch_pool.append(("ds", ds_weight, m_ds, loo_ds if "loo_ds" in locals() else None))
-            if lr_weight != 0.0:
-                branch_pool.append(("lr", lr_weight, m_lr, None))
-            if de_weight != 0.0:
-                branch_pool.append(("de", de_weight, m_de, loo_de if "loo_de" in locals() else None))
-            if sw_weight != 0.0:
-                branch_pool.append(("sw", sw_weight, m_sw, loo_sw if "loo_sw" in locals() else None))
+            branch_pool = [(name, w, m, l) for name, w, m, l in _active_branches]
 
             gamma = float(os.environ.get("ICF_LOO_GAMMA", "2.0"))
             floor = float(os.environ.get("ICF_LOO_FLOOR", "0.50"))

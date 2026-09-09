@@ -10,6 +10,7 @@ from src.models.branches.sj import (
     sj_slide_features,
 )
 from src.models.branches.sh import sh_features, sh_slide_features
+from src.models.branches.bs import bs_features, bs_slide_features
 from src.models.branches.ct import ct_features
 from src.models.branches.dd import dd_features
 from src.models.branches.experimental.de import de_features
@@ -28,6 +29,8 @@ __all__ = [
     "sj_slide_features",
     "sh_features",
     "sh_slide_features",
+    "bs_features",
+    "bs_slide_features",
     "ct_features",
     "dd_features",
     "de_features",
