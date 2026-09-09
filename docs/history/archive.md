@@ -2801,6 +2801,98 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
 
 _by GLM-5.3-Flash on nexgem-s1 at 2026-09-09_
 
+## D-040 · 2026-09-10 · 형상 계열(BS·SH·SJ)의 집계 배선 정정과 pool 참여 계약 신설 *(사용자 보고 → 실측 확증)*
+
+- **결정 주체·출처**: 사용자 보고 — "`test_pathobench.py`의 모든 집계 분기가 `bs/sh/sj_weight`를
+  `active_probs`·`branch_pool`에 전혀 넣지 않는다. 셋은 `logits`에만 가산되는데 그 `logits`는 다른
+  모든 weight가 0일 때만 도달하는 폴백에서만 쓰인다." 코드로 확증했고 보고에 없던 결함 2건을
+  추가로 확인했다. 수정의 유효성은 `RU-90`이 실측했다.
+- **확증된 결함**:
+  1. **다섯 집계 분기 전부가 형상 계열을 열거하지 않았다.** `trimmed_mean`·`soft_voting`·
+     `hard_gated`·`adaptive_trimmed`·`context_loo` 모두 `cv/dd/ct/bm/bd/qa/ds/lr/de/sw` 10개만
+     넣었다.
+  2. **`logits` 전용 경로는 도달 불가였다.** 세 마진은 `logits`에만 가산됐고 그것도
+     `ICF_SHAPE_SCREEN_ONLY != "1"`(기본 `"1"`)이라는 2차 게이트 뒤에 있었다. `logits`를 읽는
+     곳은 `else: scores = softmax(logits)` 폴백뿐이며, `cv_weight` 기본 1.442(v121 arm 1.0)이라
+     그 폴백에는 도달할 수 없다. 따라서 커밋 `9e9b560`("wire SJ margin into the fixed-head shape
+     fusion")은 **죽은 경로에 배선한 것**이었다.
+  3. **`sj_weight`가 마진 계산 게이트에서 빠져 있었다.** 게이트가
+     `bs_weight != 0 or sh_weight != 0`이라 SJ만 켜면 SJ 마진이 계산되지 않았고, SJ 계산이 SH
+     블록 안에 종속돼 있었다.
+  4. **파이프라인 경로에 BS가 전무했다.** `voting.py`는 `D-039` 이후 SH·SJ를 6개 집계 전부에
+     통과시켰으나 BS는 없었고, `src/models/branches/bs.py`도 없어 BS는
+     `test_pathobench.py` 모놀리스 안에만 존재했다.
+- **결정**:
+  1. **참여 조건과 순서를 한 곳에서만 정한다.** 평가 경로는 `_branch_specs`·`_active_branches`,
+     파이프라인은 `_fixed_branch_pairs`·`_shape_branch_pairs`이며 순서는 양쪽 모두
+     `cv, dd, ct, bm, bd, qa, ds, lr, de, sw, sj, sh, bs`, 조건은 `weight != 0 이고 마진 존재`다.
+  2. **`ICF_SHAPE_SCREEN_ONLY`의 지배 대상을 `logits` 가산에서 pool 참여로 옮긴다.** 기본값
+     `"1"`을 유지하므로 기존 스크리닝 실행은 비트 단위로 불변이고, `"0"`이면 형상 계열이 다른
+     브랜치와 동일하게 5개 집계와 `context_loo`에 들어간다. 계약은
+     [`current_architecture.md` §3.1](../current_architecture.md)이 정본이다.
+  3. **BS를 `src/models/branches/bs.py`로 승격하고** `weight_bs`·`bs_dim`·`bs_lambda`를
+     `TrainingFreeConfig`에 신설한다. **단 BS의 게이트 ② 기각(31/50, `p = 0.059`)은 유지되며 어떤
+     구성에서도 승격 심사에 상정하지 않는다** — 구현 보존은 스크리닝 재현성과 큐 `B5`(게이트 ②
+     통계량의 단측/양측 판정) 대비 목적이다.
+  4. **두 경로의 일치를 회귀 테스트로 고정한다.** 드리프트가 이번 결함의 근본 원인이므로
+     동일 마진에 동일 결과를 요구하는 핀을 둔다.
+  5. **`logits` 가산 블록은 삭제하지 않는다.** 모든 브랜치 가중치가 0인 폴백에서만 의미를
+     가지므로 도달 조건을 주석으로 명기한 채 보존한다.
+- **근거 — `RU-90` 실측** (3층 기준을 결과 전에 고정하고 그대로 적용):
+  - **층 1**: 정정 후 5-branch BASE가 공식 `v121_baseline`과 7과제 전부 `max|diff| = 0.000e+00`
+    으로 비트 동일. macro `0.617054`(→ `0.6171`), 오염 검사 SMAD4 `0.4421` · PBRM1 `0.5553` 일치.
+  - **층 2**: live 경로와 저장 마진 오프라인 재집계가 `max|diff| = 1.788e-07`, per-fold AUROC는
+    `0.000e+00`으로 일치(BASE 7과제 + live 3 arm).
+  - **층 3**: `+SH`·`+SJ`·`+SH+SJ`의 대응 Δ가 RU-89와 `0.01`·`0.00`·`0.04 %p` 차로 일치하고
+    sign agreement와 악화 과제 목록도 동일하다.
+  - 예산 `1.385 GPU-h` 집행(상한 2.0).
+- **과거 수치의 유효 범위 — 정정 없음**: `RU-89`·§218·§219·§220의 형상 계열 수치는 전부 **저장
+  마진의 오프라인 재집계**로 산출된 것이어서 유효하다. 문제는 그것을 공식 live 경로로 재현할
+  수 없었다는 점이며, 층 2가 두 경로의 등가성을 확인해 해소됐다. `RU-89`의 증거 판정
+  (`판별 불가`)과 운영 결정(`보류`)은 그대로 유지한다.
+- **영향 범위**:
+  - `src/models/branches/bs.py` 신설, `src/models/branches/__init__.py`,
+    `src/models/config.py`, `src/models/aggregations/voting.py`, `src/models/training_free.py`,
+    `scripts/test_pathobench.py`.
+  - `scripts/lib/free_gpus.sh`·`scripts/run_ru90_shape_triple.sh`·`scripts/run_ru90_live_arms.sh`·
+    `scripts/analysis/ru90_wiring_equivalence.py` 신설.
+  - `tests/test_bs_branch.py`(18건)·`tests/test_shape_branch_invariance.py`(12건) 신설,
+    회귀 스위트 **153 tests**.
+  - `docs/current_architecture.md` §2.8(BS 항목)·§3.1(pool 참여 계약)·§4.1(집계 이중 구현 부채).
+- **부수 정정 — `adaptive_tau`는 죽은 코드가 아니다**: `current_status.md`의 기술 부채 항목이
+  "`adaptive_trimmed`의 `adaptive_tau`는 무효 인자(죽은 코드)"라고 적고 있었으나 사실과 다르다.
+  `adaptive_tau`는 `config.py:205`의 실제 필드이고 직렬화(`:578`)를 거쳐
+  `voting.py:237,240-241`의 `drop_min`·`drop_max` 조건에 쓰이며, 평가 경로에도
+  `ICF_ADAPTIVE_TAU` 환경변수로 같은 계산에 연결된다. 해당 항목을 본문에서 삭제한다.
+- **재검토 조건**: 없음 (영구 적용). 다만 집계 로직의 이중 구현 자체는 남아 있고
+  ([`current_architecture.md` §4.1](../current_architecture.md)), 형상 계열의 공식 구성 승격은
+  별개 요건으로 남는다 ([`PROJECT.md` §4](../PROJECT.md)).
+
+_by Orca / Main Agent / claude-opus-5 (effort: high) on nexgem-s1 at 2026-09-10_
+
+## 2026-09-09 — D-039 인수인계 (current_status.md에서 이관)
+
+- **SH를 `src/models/branches/sh.py`로 이관**했다. §222 때 SJ(구 SHJ)만 이관되고 SH는
+  `scripts/test_pathobench.py` 모놀리스에 남아 있던 기술 부채를 해소했다. `weight_sh`
+  (기본 0.0)·`sh_dim`·`sh_wide`·`sh_lambda`를 `TrainingFreeConfig`에 신설해 SH가
+  환경변수로만 조작되던 구조를 끝냈다. 기본 구성은 비트 단위 불변이다.
+- **결함 수정**: `context_loo_stacking`의 branch_pool에 SJ가 전달되지 않아
+  `context_loo_*` 집계에서는 `weight_sj`를 켜도 SJ가 조용히 누락됐다. SJ·SH를 pool에
+  연결했고 회귀 핀 테스트를 추가했다 (`tests/test_sh_branch.py`).
+- **중복 제거**: voting.py 5개 집계 함수에 수동 반복되던 SJ fallback(`m_shj`)과
+  브랜치별 on/off 분기를 헬퍼로 통일했다. SHJ alias(`shj.py`, `weight_shj`)는
+  `D-038` 영구 적용에 따라 유지한다.
+- 회귀 테스트 121 tests `OK` (신설 8건 포함). RU-86·87·88 종료 요약은
+  [결정·이력](history/archive.md) 말미로 이관했다.
+- **레거시 정리 (사용자 지시)**: `tests/history/`(46파일, 스위트 미수집)·
+  `tests/fixtures/`·`scripts/archive/`(93파일)를 삭제했다. 고아 모듈
+  `models/mla.py`·`utils/schedulers.py`와 하위 호환 facade
+  (`datasets/synthetic_data.py`·`models/ct_readout.py`)도 제거했고, facade
+  참조 10곳을 실제 패키지(`datasets/synthetic`·`models/ct`)로 재지정했다.
+  `set_transformer_ridge.py`·`src/modules/`·`baseline.py`는 **보존한다** —
+  공식 평가 경로(`eval_v121.sh` → `test_pathobench.py`)가 lineage 모델의
+  신규(head-less) 인스턴스로 v121 마진을 계산하므로 live 의존이다.
+
 ## 2026-09-08 — RU-86·87·88 종료 인수인계 (current_status.md에서 이관)
 
 

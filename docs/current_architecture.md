@@ -154,6 +154,25 @@ $q_{10}/q_{50}$ · $q_{90}/q_{50}$ · $q_{99}/q_{50}$ · $\text{IQR}/q_{50}$** 8
   수행하며, 통합 이전 태그처럼 기록에 `m_sh`가 없으면 경고를 출력한다
   ([결정 이력](history/archive.md) `D-013`, `D-038`).
 
+#### BS — 로그 총분산 (게이트 ② 기각, 구현만 보존)
+
+투영 토큰 구름의 **로그 총분산** $\log\big(\mathrm{tr}(B^\top S B)/n\big)$ 한 개 값이다.
+`BD`의 엔트로피 경로가 $p = \text{eig}/\sum\text{eig}$로 정규화하며 버리는 축을 그대로 읽으므로
+순수 척도(scale) 통계이며, 평행이동에 완전 불변이고 등방 스케일 $s$에 대해 정확히 $\log(s^2)$만큼
+이동한다.
+
+- **지위**: 게이트 ①은 통과했으나(max |r| = 0.262) **게이트 ②에서 기각**됐다 — 단독 AUROC가
+  `0.4201 ~ 0.5478`로 Primary 7 중 4과제에서 우연 이하이고, 최선 과제도 50 fold 중 31개로
+  `p = 0.059`다(컷 40/50, `p < 0.01`). §218이 "직교하나 무정보(orthogonal but uninformative)"라는
+  범주를 만든 사례이며, 정보량 게이트 신설의 계기다 ([결정·이력](history/archive.md) §218).
+- **구현**: `src/models/branches/bs.py`, 기본 가중치 `weight_bs = 0.0`. **기각 후보이므로 어떤
+  구성에서도 승격 심사에 상정하지 않는다.** 구현을 보존하는 이유는 스크리닝 이력의 재현성과,
+  게이트 ② 통계량을 단측에서 양측(`|AUROC − 0.5|`)으로 바꿀지에 대한 미결 판정
+  ([`research_directions.md`](research_directions.md) 큐 `B5`)에 BS가 직접 걸리는 후보이기
+  때문이다. 그 판정 전에는 BS를 되살리지 않는다.
+- BS는 척도 통계라 백색화·표준화를 쓰지 않으므로 SH·SJ와 달리 **fp32 강제 계약이 없다**.
+  단일 토큰 슬라이드(N = 1)에서도 NaN을 내지 않는다.
+
 ---
 
 ## 3. Head 마진 결합: Trimmed Mean Voting
@@ -167,6 +186,28 @@ $$P(y=1) = \frac{1}{4} \sum_{k=2}^5 p_{(k)}$$
   $$M_{eff} = \operatorname{logit}(P(y=1)) = \log \frac{P(y=1)}{1 - P(y=1)}$$
   $$\text{logits} = \left(-\frac{M_{eff}}{2}, +\frac{M_{eff}}{2}\right)$$
 - **장점**: 특정 단일 브랜치에서 발생하는 파멸적 오작동(False Positive/Negative)을 100% 차단하며, 동시에 독립성이 높은 다종 브랜치의 순수 신호를 손실 없이 융합함.
+
+### 3.1. 어떤 브랜치가 실제로 pool에 들어가는가 (`D-040`)
+
+집계에 참여하는 브랜치는 **한 곳에서만** 결정된다 — 파이프라인은
+`voting.py`의 `_fixed_branch_pairs`·`_shape_branch_pairs`, 평가 경로는
+`test_pathobench.py`의 `_branch_specs`·`_active_branches`다. 두 목록의 순서는
+`cv, dd, ct, bm, bd, qa, ds, lr, de, sw, sj, sh, bs`로 동일하며, 참여 조건도
+`weight != 0 이고 마진이 존재함`으로 동일하다. 이 순서와 조건이 갈라지면 브랜치가
+조용히 누락되므로 회귀 테스트(`tests/test_bs_branch.py`)가 두 경로의 일치를 고정한다.
+
+**`ICF_SHAPE_SCREEN_ONLY`가 형상 계열(BS·SH·SJ)의 참여를 지배한다.**
+
+| 값 | 동작 |
+|:---|:---|
+| `1` (기본) | 마진을 계산·저장하되 **어떤 집계 pool에도 넣지 않는다**. 스크리닝용이며, 이 상태의 실행 결과는 형상 브랜치가 없던 때와 비트 단위로 같다. |
+| `0` | 다른 브랜치와 동일하게 5개 집계 전부(및 `context_loo`)에 참여한다. |
+
+> ⚠️ **`D-040` 이전에는 이 계약이 성립하지 않았다.** 다섯 집계 분기가 형상 계열을 열거하지
+> 않아 BS·SH·SJ는 `ICF_SHAPE_SCREEN_ONLY=0`으로도 최종 확률에 도달하지 못했다. 세 마진은
+> `logits`에만 가산됐고, `logits`는 모든 브랜치 가중치가 0일 때만 도달하는 폴백에서만
+> 읽힌다. 형상 계열이 실제로 융합된 수치는 전부 **저장 마진의 오프라인 재집계**로 산출된
+> 것이며(RU-89·RU-90), live 경로로 재현 가능해진 것은 `D-040` 이후다.
 
 ---
 
@@ -186,6 +227,7 @@ src/models/
 │   ├── ct.py                                   # 계보 — 공식 비교 기준에서 제외
 │   ├── sj.py                                   # 채택된 형상 브랜치 (§2.8, shj.py는 re-export)
 │   ├── sh.py                                   # 채택된 형상 브랜치 (§2.8, D-039에서 이관)
+│   ├── bs.py                                   # 게이트 ② 기각 — 스크리닝 이력 보존 (§2.8, D-040)
 │   ├── dd.py                                   # DD 는 CA-02 로 닫힘; BD 마진 제공
 │   └── experimental/  de.py  lr.py  sw.py      # 기각·미판정 후보
 ├── ct/                       # CT 사전 구축 및 soft-token 할당
@@ -198,7 +240,23 @@ src/models/
   안내하고 있었다).
 - 회귀 스위트는 브랜치별 불변식 계약을 검사한다 — `tests/test_bd_branch.py`,
   `test_bm_branch.py`, `test_qa_branch.py`, `test_sj_branch.py`(및 `test_shj_branch.py`),
-  `test_sh_branch.py`, `test_soft_voting.py`, `test_core_contracts.py` 등.
+  `test_sh_branch.py`, `test_bs_branch.py`, `test_shape_branch_invariance.py`,
+  `test_soft_voting.py`, `test_core_contracts.py` 등.
+
+### 4.1. 남은 기술 부채 — 집계 로직의 이중 구현
+
+집계 수식이 **두 곳에 따로 구현돼 있다**: `src/models/aggregations/voting.py`(파이프라인
+`training_free.py` 전용, 로짓을 반환)와 `scripts/test_pathobench.py`의 인라인 분기(고정 head
+평가 전용, 확률을 반환)다. 두 경로가 물리적으로 분리돼 있다는 것이 `D-040` 배선 누락의
+근본 원인이었다. `§3.1`의 순서·조건 통일과 두 경로 일치 회귀 테스트로 **드리프트는 차단했으나
+중복 자체는 남아 있다.**
+
+통합하려면 두 호출 계약을 먼저 통일해야 한다 — 자료구조가 다르고(`_branch_specs` 대
+`_fixed_branch_pairs`), 반환값의 종류가 다르며(확률 대 로짓), `test_pathobench.py` 쪽에는
+`ICF_*` 환경변수로만 켜지는 스크리닝 전용 변형(`RM`, §219 SH 변형 5종, §226 Tier 1 3종)이
+얽혀 있다. 승격되지 않은 변형의 특징 계산(`sh_all` 내부의 `skew`/`kurt`/`bowley`/`moors`)도
+`sh.py`·`sj.py`와 별도로 재구현된 상태이며, 이쪽 통합은 **어느 변형을 승격할지에 대한 연구
+판단이 선행**돼야 한다(§219·§220).
 
 _by GLM-5.3-Flash on nexgem-s1 at 2026-09-09_
 
