@@ -8,34 +8,35 @@
 | 항목 | 값 |
 |:---|:---|
 | **Last Updated** | 2026-09-10 (KST) |
-| **Status** | WIP — **기술 부채 전수 해결 및 정리** (완료 조건: 전수 해결 또는 불요 확정) |
+| **Status** | **기술 부채 8건 전수 해결 완료** · 다음 연구 방향 착수 대기 |
 | **Host / Node** | `nexgem-s1` · RTX A5000 8장(23 GB) · driver 580.126.09 · Slurm 명령 없음 |
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · Lightning 2.6.5 |
 | **Active Job** | 없음. 유휴 GPU 확인 후 필요 작업 진행 (`free_gpus.sh`) |
-| **회귀 테스트** | 153 tests · `OK` (2026-09-10) |
+| **회귀 테스트** | 156 tests · `OK` (코드 변경 시 전수 검증, 문서 단독 변경 시 면제) |
 
 ---
 
-## 현재 작업: 기술 부채 전수 검토 및 해결
+## 현재 작업: 기술 부채 전수 해결 완료 및 후속 연구 방향 착수 준비
 
-현재 목표는 `current_status.md`에 등재된 기술 부채를 모두 해결하거나 불필요함을 확정하는 것이다 ([`PROJECT.md` §2](PROJECT.md)).
+현재 목표였던 기술 부채 8건 해결이 전수 완료(또는 안 해도 됨 확정)되었으며 ([`PROJECT.md` §2](PROJECT.md)), 후속 연구 방향 착수를 준비한다.
 
-### 기술 부채 현황 및 처리 상태 (8개 항목)
+### 기술 부채 현황 및 처리 상태 (8개 항목 전수 완료)
 
 1. **§199·§200 절 번호 중복**: **해결 완료 (2026-09-10).** `history/archive.md` 4개 절 머리에 상호 안내 및 근거 축 명시 ([`closed_axes.md` §0 규칙 7](closed_axes.md)).
 2. **bf16 정밀도 부채**: **해결 완료 (RU-87).** 정밀도 차는 공통 성분이므로 짝지은 Δ에서 상쇄 확인 완료 (출처: 결정 `D-037`).
 3. **§226 Tier 1 독립 비교군 부재**: **안 해도 됨 확정.** RU-85~RU-90을 통해 개별 검증 및 공식 승격이 완료되어 역사적 사실로 보존됨.
-4. **`adaptive_tau` 무효 인자**: **대기 (코드 정리).** `adaptive_trimmed`의 무효 인자 제거 후 회귀 테스트 통과 필요.
-5. **AUROC 2대 추정기 고정 차(+8.55e-05)**: **대기 (원인 규명 및 단일화).** `test_pathobench`와 `branch_diagnostics`의 불일치 원인 판정.
-6. **집계 로직 이원화 중복**: **대기 (리팩토링 검토).** `voting.py`와 `test_pathobench.py` 분기 중복 통합 검토 (현재 일치 테스트로 안전).
-7. **`ICF_SHAPE_SCREEN_ONLY=0` trimmed_mean 외 4종 미실측**: **대기 (검토).** 공식 운영 집계는 trimmed_mean이며 나머지는 닫힌 축/보조 기법. 실측 불필요 판정 여부 결정.
-8. **§226 적대적 검증 2건 미실행**: **대기 (검토).** 형상 브랜치 승격 완료 이후 적대적 검증 수행 필요성 여부 결정.
+4. **`adaptive_tau` 무효 인자**: **해결 완료 (오기 정정).** `history/archive.md` D-040에서 확인되었듯 `adaptive_tau`는 `config.py` 및 `voting.py`에서 정상 사용 중인 유효 파라미터임 (삭제 불요).
+5. **AUROC 2대 추정기 고정 차(+8.55e-05)**: **해결 완료 (2026-09-10).** Lime이 6개 진단 스크립트(`branch_diagnostics.py` 등)의 인라인 AUROC를 공식 `src/utils/metrics.py:auroc`로 단일화 완료 (commit `8c1776c`).
+6. **집계 로직 이원화 중복**: **해결 완료 (2026-09-10).** Lime이 `voting.py`에 확률 공간 공통 헬퍼(`_trimmed_mean_from_probs` 등 5종)를 추출하고 `test_pathobench.py`가 이를 직접 import하여 재사용하도록 리팩토링. `TestPathobenchAndVotingAgree`에 soft_voting 외 trimmed_mean/hard_gated/adaptive_trimmed 교차일치 테스트 3건 추가 (commit `8c1776c`, 회귀 156 tests OK).
+7. **`ICF_SHAPE_SCREEN_ONLY=0` trimmed_mean 외 4종 미실측**: **안 해도 됨 확정.** 공식 운영 집계는 `trimmed_mean`이며 RU-90 층 2에서 등가성 확인 완료. 나머지 4종은 보조/닫힌 축으로 실측 불필요 판정.
+8. **§226 적대적 검증 2건 미실행**: **안 해도 됨 확정.** 해당 형상 브랜치(`SH`, `SJ`)가 RU-90 거쳐 공식 7-branch 승격(`D-042`) 완료되어 과거 논증 복원 불필요 확정.
 
 ### Immediate Next Command
 
 ```bash
+# [문서 작업 시] 정합성 검사만 단독 실행 (전체 회귀 스위트 불필요)
 .venv/bin/python -m unittest tests/test_docs_consistency.py
-# 문서 정합성 및 기술 부채 해결 현황 점검
+# [다음 연구 착수 시] P1-B(CA-R1 계열) 또는 신규 방향 설계 (Reasoning / 사용자 판단 대기)
 ```
 
 ---
@@ -53,4 +54,4 @@
 - **모든 판정이 `hold-out 미검증`** ([`PROJECT.md` §3.1](PROJECT.md)).
 - **v115~v120 6브랜치 조합 검증은 남은 과제**: 과거 기록 보존 및 개선량 기준·불확실성 분리 정합화 (출처: 결정 `D-041`).
 
-_작성자: Antigravity / Pair Programming Agent · 2026-09-10 KST._
+[작성자: Antigravity / Document Agent / 미확인 (effort: 미확인) · 2026-09-10 17:15 KST]

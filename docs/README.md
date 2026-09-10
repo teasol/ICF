@@ -1,6 +1,6 @@
 # Documentation Map
 
-**Last updated**: `2026-09-07`
+**Last updated**: `2026-09-10`
 
 > 이 파일은 **어느 사실이 어느 문서의 정본인지**만 말한다. 수치·상태·결정을 여기에 적지 않는다.
 
@@ -35,7 +35,7 @@
 | 브랜치 정의와 수식 · 집계 규칙 | [`current_architecture.md`](current_architecture.md) |
 | 연구 이력 전수 (RU-01~) | [`history/research_units_all.md`](history/research_units_all.md) |
 | **진행 가능한 후보 전체와 우선순위** | [`research_directions.md`](research_directions.md) §0 |
-| Slurm 노드 스펙 · 선택 우선순위 · job 로그 경로 | [`/home/kimds/agent_rules/slurm_rules.md`](/home/kimds/agent_rules/slurm_rules.md) (저장소 밖) |
+| 실행 환경 · 노드 선택 우선순위 · job 로그 경로 | [`agent_handoff.md` §5](agent_handoff.md) |
 | 노드 종속 설정 (인터프리터 · GPU 수 · 경로) | [`../scripts/node_env.sh`](../scripts/node_env.sh) |
 | arm 구성과 환경변수 주입 | [`../scripts/lib/arms.sh`](../scripts/lib/arms.sh) |
 

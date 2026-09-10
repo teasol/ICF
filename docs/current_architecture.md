@@ -252,21 +252,17 @@ src/models/
   `test_sh_branch.py`, `test_bs_branch.py`, `test_shape_branch_invariance.py`,
   `test_soft_voting.py`, `test_core_contracts.py` 등.
 
-### 4.1. 남은 기술 부채 — 집계 로직의 이중 구현
+### 4.1. 집계 로직의 단일 정본화 (해결 완료 — 2026-09-10)
 
-집계 수식이 **두 곳에 따로 구현돼 있다**: `src/models/aggregations/voting.py`(파이프라인
-`training_free.py` 전용, 로짓을 반환)와 `scripts/test_pathobench.py`의 인라인 분기(고정 head
-평가 전용, 확률을 반환)다. 두 경로가 물리적으로 분리돼 있다는 것이 `D-040` 배선 누락의
-근본 원인이었다. `§3.1`의 순서·조건 통일과 두 경로 일치 회귀 테스트로 **드리프트는 차단했으나
-중복 자체는 남아 있다.**
+과거 집계 수식이 두 곳에 따로 구현돼 있던 부채는 2026-09-10 Lime 리팩토링을 통해 해소됐다.
+`src/models/aggregations/voting.py`에 확률 공간 수식 본체(`_trimmed_mean_from_probs`, `_soft_voting_from_pairs`,
+`_hard_gated_from_probs`, `_adaptive_trimmed_from_probs`, `_context_loo_from_pool`)를 단일 정본 헬퍼로 추출하고,
+`scripts/test_pathobench.py`의 고정 head 평가 분기가 이를 직접 import하여 재사용하도록 통합했다.
+`voting.py`의 파이프라인 공개 함수는 헬퍼 호출 후 `_to_logit()`으로 변환하여 반환형 계약(로짓 vs 확률)을 깔끔히 분리했다.
 
-통합하려면 두 호출 계약을 먼저 통일해야 한다 — 자료구조가 다르고(`_branch_specs` 대
-`_fixed_branch_pairs`), 반환값의 종류가 다르며(확률 대 로짓), `test_pathobench.py` 쪽에는
-`ICF_*` 환경변수로만 켜지는 스크리닝 전용 변형(`RM`, §219 SH 변형 5종, §226 Tier 1 3종)이
-얽혀 있다. 승격되지 않은 변형의 특징 계산(`sh_all` 내부의 `skew`/`kurt`/`bowley`/`moors`)도
-`sh.py`·`sj.py`와 별도로 재구현된 상태이며, 이쪽 통합은 **어느 변형을 승격할지에 대한 연구
-판단이 선행**돼야 한다(§219·§220).
+`tests/test_bs_branch.py`의 `TestPathobenchAndVotingAgree`에 4종(`soft_voting`, `trimmed_mean`, `hard_gated`,
+`adaptive_trimmed`) 교차일치 테스트가 추가되어 허용오차 1e-5 이내 일치를 상시 검증하며, 전체 회귀 스위트(156 tests)가
+비트 불변성과 무회귀를 보증한다.
 
-_by GLM-5.3-Flash on nexgem-s1 at 2026-09-09_
+[작성자: Lime / Coding Agent / claude-sonnet-5 (effort: medium) · 2026-09-10 16:05 KST]
 
-_by Claude Opus 5 on nexgem-s1 at 2026-09-06_
