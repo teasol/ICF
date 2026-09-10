@@ -7,8 +7,8 @@
 
 | 항목 | 값 |
 |:---|:---|
-| **Last Updated** | 2026-09-10 11:15 (KST) |
-| **Status** | CLEAN — 사용자 승격 기준 명확화(`D-041`) 전 문서 정합화 완료 (진행 중 RU 없음) |
+| **Last Updated** | 2026-09-10 (KST) |
+| **Status** | CLEAN — **`SH`·`SJ` 승격 완료, 공식 구성을 7-branch로 고정**(`D-042`) (진행 중 RU 없음) |
 | **Host / Node** | `nexgem-s1` · RTX A5000 8장(23 GB) · driver 580.126.09 · Slurm 명령 없음 |
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · Lightning 2.6.5 |
 | **Active Job** | 없음. GPU 1·5는 **타 프로세스 점유 중**(16.1 GB / 15.3 GB)이므로 실행 전 `scripts/lib/free_gpus.sh`의 `icf_free_gpus`로 유휴 장치를 확인한다 |
@@ -16,27 +16,30 @@
 
 ---
 
-## 2026-09-10 — 사용자 승격 기준 명확화(`D-041`) 전 문서 정합화 완료
+## 2026-09-10 — `SH`·`SJ` 승격 및 최종 아키텍처 고정
 
-- **사용자 확정 의도**: 승격의 개선량 기준은 **Primary 7 평균 AUROC의 절대 증가량 +0.003 이상(= +0.3%p)**이다.
-  **95% 신뢰구간 하한에 +0.3%p를 요구하는 기준이 아니다.** 상대 증가율 0.3%도 아니다.
-- **계산**: 각 과제의 고정 50 fold에서 후보−기준선 AUROC를 짝지어 평균하고, 과제별 평균 Δ 7개를 동일 비중으로 평균한다.
-  `Δ_macro = (1/7) Σ_task [(1/50) Σ_fold (AUC_candidate − AUC_baseline)] ≥ 0.003`.
-  모든 과제의 개별 개선이나 `sign agreement ≥ 5/7`을 추가 필수 조건으로 요구하지 않는다.
-- **직관 확인 예시**: [공식 비교 기준선](PROJECT.md) 대비 후보 +0.3%p 이상이면 개선량 기준 충족.
-  RU-90은 약 0.6227, 대응 Δ `+0.562964%p`로 **이 개선량 기준을 충족**한다.
-  (독립적 성능 확증·hold-out 검증·공식 구성 교체 완료는 별개 절차다).
-- **불확실성의 역할**: CI·SE와 과제별 악화는 투명하게 별도로 보고한다. CI 하한 `> +0.3%p` 또는 `> 0`을
-  사용자 승인 없이 승격 필수 조건으로 덧붙이지 않는다. hold-out·선택 이력·비교 조건에 관한 기존 규칙은 별도다.
-- **전 문서 정합화 완료**: `PROJECT.md §4·§4.1`, `agent_handoff.md R5·R6`, `history/archive.md D-018·D-021·D-041`,
-  `research_directions.md`, RU-89·90 기록 전반에 정합화를 완료했다.
-  과거 원자료·당시 판정은 보존하고, 의도 정정 이력(`D-041`)을 남겼다.
+**공식 비교 기준을 5-branch(`CV,BM,BD,QA,DS`)에서 7-branch(`CV,BM,BD,QA,DS,SH,SJ`)로 교체했다.**
+집계는 Trimmed Mean 그대로다. 새 기준선 macro·유효 랭크·불확실성 수치는
+[`PROJECT.md` §3.2](PROJECT.md)에만 선언하며 여기에 복사하지 않는다 (출처: 결정 `D-042`).
 
-## 이전 실행 상태 — D-040 배선 정정 및 RU-90 종료
-
-- BS·SH·SJ의 live 집계 누락을 수정했고 BASE 비트 불변·live/오프라인 등가성·세대 간 Δ 재현을 확인했다.
-- RU-89의 당시 `판별 불가`·`보류` 기록은 남아 있으며, RU-90에서 live 재현성과 개선량 충족을 확인했다.
-- BS는 게이트 ② 기각 상태이며 RU-90의 arm에서 제외됐다. 상세 증거는 [RU-90](history/research_units_all.md#ru-90-live-path-equivalence-of-the-corrected-bsshsj-wiring-and-single-generation-re-measurement-of-the-shsj-arms)과 [D-040](history/archive.md)에 있다.
+- **승격 판정 방법**: 각 과제의 고정 50 fold에서 후보−기준선 AUROC를 짝지어 평균하고 과제별 평균 Δ
+  7개를 동일 비중 평균한 값이 확정 개선량 기준을 넘는지로 판정했다. 넘었고, 랭크 효율도 상승했다.
+  수치는 Main Agent가 `ru90_shape_triple` 태그에서 직접 재현했다.
+- **과거 재현성 보존**: 분석 코드의 `BRANCHES`는 7-branch가 되었고, 직전 5-branch 집합은
+  `BRANCHES_V121_5` 상수로 분리했다. 과거 RU 재현 스크립트는 후자를 쓰므로 옛 수치가 그대로 나온다.
+- **반드시 함께 읽을 것 — 확증이 아니다.** 과제 군집 95% 신뢰구간이 **0을 포함**하므로 개선량 기준은
+  충족했으나 **개선의 부호를 확정하지 못했다.** 세 과제(`Histologic_Grade`·`progression_regression`·
+  `PBRM1`)는 형상 계열 투입으로 **일관되게 악화**되며 **기전 미확인**이다. 모든 판정은
+  **`hold-out 미검증`** 이다. 구간·SE·악화 폭은 [`PROJECT.md` §3.2](PROJECT.md)에 있다.
+- **기준 변경의 투명성 — 결과를 보고 완화한 것이 아니다.** RU-89는 같은 브랜치 집합을 `판별 불가`로
+  종료했다. 당시 적용한 조건은 신뢰구간 **하한**이 개선량 기준을 넘을 것이었는데, 이 조건은 2026-09-06
+  기록 과정에서 사용자 의도와 다르게 들어간 오기였음이 감사로 확인되어 정정됐다. 확정된 기준은
+  **평균 개선량의 점추정**이다. 본 승격은 정정된 기준을 **같은 원자료에 다시 적용한 재판정**이며,
+  RU-89·RU-90의 당시 판정 기록과 원자료는 그대로 보존한다 (출처: `D-041`·`D-042`).
+- **개정 범위**: `PROJECT.md` §3.2·§3.3·§3.4·§5 · `current_architecture.md` §2.8 ·
+  `branch_diagnostics.py`(`BRANCHES` 교체 + `BRANCHES_V121_5` 신설) · `branch_screen.py`(`ADOPTED` 비움).
+  오염 검사 앵커는 **5-branch 기저 앵커로 의도적으로 유지**했다 — 검사 목적이 "스크리닝이 기저
+  앙상블을 건드리지 않았음"의 확인이라 값을 갱신하면 과거 실행과 대조할 수 없기 때문이다.
 
 ## 실행 환경 — 현재 접속 호스트
 
@@ -46,7 +49,8 @@
 ### Immediate Next Command
 
 ```bash
-bash scripts/run_tests.sh   # 전 문서 정합화 회귀 테스트 검증
+PYTHONPATH=. CUDA_VISIBLE_DEVICES="" .venv/bin/python scripts/analysis/branch_screen.py --tag ru90_shape_triple --candidate m_bs
+# 새 공식 기준집합(BRANCHES 7개, adopted 없음)에서 게이트 ①이 도는지 확인
 ```
 
 ---
@@ -87,4 +91,4 @@ bash scripts/run_tests.sh   # 전 문서 정합화 회귀 테스트 검증
   인용하면 소수 4자리에서 어긋난다.** 어느 쪽이 옳은지는 판정하지 않았다 (RU-90 한계 ③).
 - `history/archive.md`에 **§199·§200 절 번호가 각각 중복** ([`closed_axes.md` §4](closed_axes.md)).
 
-_기존 실행·환경 기록 작성자: Orca / Main Agent / claude-opus-5 (effort: high) · 2026-09-10 02:05 KST; D-041 전 문서 정합화: 2026-09-10 11:15 KST._
+_작성자: Orca / Main Agent / claude-opus-5 (effort: high) · 2026-09-10 KST (D-042 승격 및 아키텍처 고정)._

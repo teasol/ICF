@@ -6,8 +6,9 @@
 > 여기서 선언하지 않는다 — [`PROJECT.md`](PROJECT.md)를 본다.
 >
 > ⚠️ **아래 §1~§3은 6-branch 구성(CV·CT·BM·BD·QA·DS)을 기술한다.**
-> **공식 비교 기준은 CT를 제외한 5-branch**이며([`PROJECT.md` §3.2](PROJECT.md)), CT의 수식은
-> 계보 참조용으로 남겨 둔다. 채택됐으나 공식 구성에 들어가지 않은 형상 브랜치는 §2.8에 있다.
+> **공식 비교 기준은 CT를 제외하고 형상 계열을 포함한 7-branch**
+> `CV, BM, BD, QA, DS, SH, SJ`이며([`PROJECT.md` §3.2](PROJECT.md)), CT의 수식은
+> 계보 참조용으로 남겨 둔다. `SH`·`SJ`의 승격 경위는 `D-042`이고 정의는 §2.8에 있다.
 
 ---
 
@@ -108,7 +109,7 @@ Dual Ridge (λ=1) Dual Ridge (λ=1) Dual Ridge (λ=1) Bounded Margin   Dual Ridg
 
 ---
 
-### 2.8. 형상(Shape) 계열 — 채택됐으나 공식 구성 밖
+### 2.8. 형상(Shape) 계열 — `SH`·`SJ`는 공식 구성에 편입됨 (`D-042`)
 
 §217의 브랜치 분류 체계는 전 브랜치를 두 부류로 나눈다. **위치(Location) 계열**
 (`CV`·`BM`·`QA`·`DS`, 상호 상관 0.25~0.93)은 표현이 *어디에 놓이는가*를 읽고,
@@ -116,9 +117,14 @@ Dual Ridge (λ=1) Dual Ridge (λ=1) Dual Ridge (λ=1) Bounded Margin   Dual Ridg
 기존 위치 계열의 상관 관측을 다른 경로의 불가능으로 확대하지 않으며, 평균 차분 특징 FC도
 비저촉으로 열려 있다 ([`closed_axes.md` `CA-09`](closed_axes.md), `D-022`).
 
-현 형상 계열은 **`BD`·`SH`·`SJ` 3개**다 (`SJ`는 구 `SHJ`, `D-038`에서 2글자 규격으로 개정).
-`BD`는 §2.5의 정식 브랜치이고, 나머지 둘은 게이트를 통과해 **채택(adopted)** 됐으나 공식 구성
-승격은 별개 요건으로 남아 있다 ([`PROJECT.md` §5](PROJECT.md), [결정 이력](history/archive.md) `D-009`, `D-038`).
+현 형상 계열은 **`BD`·`SH`·`SJ` 3개**이며 **셋 다 공식 구성의 정식 브랜치**다
+(`SJ`는 구 `SHJ`, `D-038`에서 2글자 규격으로 개정).
+`BD`는 §2.5부터 정식이었고, `SH`·`SJ`는 게이트 ①·②를 통과해 채택된 뒤
+**`D-042`에서 승격**되어 공식 7-branch에 편입됐다 — 근거는 5-branch 대비 대응
+`Δ_macro = +0.56%p`(기준 `+0.3%p`, `D-041`)와 랭크 효율 45.2% → 50.3% 상승이다
+([`PROJECT.md` §3.2·§5](PROJECT.md), [결정 이력](history/archive.md) `D-009`, `D-038`, `D-041`, `D-042`).
+**단, 세 과제(`Histologic_Grade`·`progression_regression`·`PBRM1`)는 형상 계열 투입으로
+일관되게 악화된다. 기전 미확인이며 `hold-out 미검증`이다.**
 
 #### SJ (구 SHJ) — 백색화 반경 분포의 결합 형상
 
@@ -133,7 +139,8 @@ $q_{10}/q_{50}$ · $q_{90}/q_{50}$ · $q_{99}/q_{50}$ · $\text{IQR}/q_{50}$** 8
 클래스 균형 kernel ridge(선형)로 마진을 얻는다.
 
 - **구현**: `src/models/branches/sj.py` (§222 정식 통합 후 `D-038`에서 명칭 통일, `shj.py`는 하위 호환 re-export 유지).
-  기본 가중치 `weight_sj = 0.0` (`weight_shj` alias 지원) — 채택 상태이나 활성 앙상블에는 들어가지 않는다.
+  `weight_sj`의 코드 기본값은 `0.0`이며 (`weight_shj` alias 지원), **공식 구성에서는 활성화한다**
+  (`D-042`). 기본값을 0으로 두는 것은 과거 설정의 재현성을 지키기 위한 것이지 미승격을 뜻하지 않는다.
 - ⚠️ **fp32 강제 필수.** 평가 파이프라인이 bf16 autocast 안에서 돌면 투영이 bf16(상대오차
   ~1e-3)으로 계산되고, 백색화의 `eigvals.clamp_min(1e-8).rsqrt()`가 이를 **약 100배 증폭**한다.
   `sj_slide_features()` 내부에서 `torch.autocast(enabled=False)`로 float32를 강제한다.
@@ -146,13 +153,15 @@ $q_{10}/q_{50}$ · $q_{90}/q_{50}$ · $q_{99}/q_{50}$ · $\text{IQR}/q_{50}$** 8
 변형(`shs`/`shk`/`sh2`/`shr`/`shr2`)은 §219에서 실질 기각 상태로 스크립트에만 남는다.
 
 - **구현**: `src/models/branches/sh.py` (스크리닝 폐쇄 함수에서 이관, `D-039` 정식 통합).
-  기본 가중치 `weight_sh = 0.0` — 채택 상태이나 활성 앙상블에는 들어가지 않는다.
+  `weight_sh`의 코드 기본값은 `0.0`이며, **공식 구성에서는 활성화한다** (`D-042`).
+  기본값을 0으로 두는 것은 과거 설정의 재현성을 지키기 위한 것이지 미승격을 뜻하지 않는다.
 - ⚠️ **fp32 강제 필수.** SJ와 동일 계약이다. bf16 autocast가 표준화의 분모(sd)를 흔들면
   4제곱 모멘트가 오차를 증폭하므로 `sh_slide_features()` 내부에서
   `torch.autocast(enabled=False)`로 float32를 강제한다.
-- `branch_screen.py --adopted m_sh,m_sj`는 **SH 마진이 산출된 태그에서만** 완전한 심사를
-  수행하며, 통합 이전 태그처럼 기록에 `m_sh`가 없으면 경고를 출력한다
-  ([결정 이력](history/archive.md) `D-013`, `D-038`).
+- `SH`·`SJ`가 승격되어 `branch_screen.py`의 기준 집합(`BRANCHES`)에 편입됐으므로
+  "채택됐으나 미승격" 목록(`--adopted`)은 **비어 있다** (`D-042`). 심사는 여전히 **`m_sh`·`m_sj`
+  마진이 산출된 태그에서만** 완전하며, 통합 이전 태그처럼 기록에 없으면 경고를 출력한다
+  ([결정 이력](history/archive.md) `D-013`, `D-038`, `D-042`).
 
 #### BS — 로그 총분산 (게이트 ② 기각, 구현만 보존)
 
@@ -223,10 +232,10 @@ src/models/
 ├── stream_eval.py            # 고속 스트리밍 평가 및 통계 캐싱
 ├── common/solvers.py         # Dual Ridge / kernel ridge 해법
 ├── branches/
-│   ├── cv.py  bm.py  bd.py  qa.py  ds.py      # 공식 5-branch
+│   ├── cv.py  bm.py  bd.py  qa.py  ds.py      # 공식 7-branch 중 5개
 │   ├── ct.py                                   # 계보 — 공식 비교 기준에서 제외
-│   ├── sj.py                                   # 채택된 형상 브랜치 (§2.8, shj.py는 re-export)
-│   ├── sh.py                                   # 채택된 형상 브랜치 (§2.8, D-039에서 이관)
+│   ├── sj.py                                   # 공식 형상 브랜치 (§2.8, D-042 승격, shj.py는 re-export)
+│   ├── sh.py                                   # 공식 형상 브랜치 (§2.8, D-042 승격, D-039에서 이관)
 │   ├── bs.py                                   # 게이트 ② 기각 — 스크리닝 이력 보존 (§2.8, D-040)
 │   ├── dd.py                                   # DD 는 CA-02 로 닫힘; BD 마진 제공
 │   └── experimental/  de.py  lr.py  sw.py      # 기각·미판정 후보
