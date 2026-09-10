@@ -45,7 +45,9 @@ import sys
 import numpy as np
 import torch
 
-from scripts.analysis.branch_diagnostics import BRANCHES, PRIMARY7, auroc, short, trimmed_mean
+from scripts.analysis.branch_diagnostics import (
+    BRANCHES_V121_5 as BRANCHES, PRIMARY7, auroc, short, trimmed_mean,
+)
 from scripts.analysis.ru89_shape_joint import task_cluster_ci, _T_CRIT_DF6, _T_CRIT_SRC
 
 ANCHOR_MACRO = 0.6171

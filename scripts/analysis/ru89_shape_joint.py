@@ -23,7 +23,7 @@ import numpy as np
 import torch
 
 from scripts.analysis.branch_diagnostics import (
-    BRANCHES, PRIMARY7, auroc, short, trimmed_mean,
+    BRANCHES_V121_5 as BRANCHES, PRIMARY7, auroc, short, trimmed_mean,
 )
 
 try:

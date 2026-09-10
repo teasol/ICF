@@ -19,10 +19,11 @@ from scripts.analysis.branch_diagnostics import (
 
 REJECT_ABOVE = 0.6
 
-# Adopted but not promoted into the default ensemble: SH (§218), SJ (formerly SHJ, §220).
-# Gate 1 screens candidates against these too - they are real branches - while
-# BRANCHES stays the official 5-branch comparison basis (invariant 3).
-ADOPTED = ["m_sh", "m_sj"]
+# Adopted-and-promoted branches (SH §218, SJ formerly SHJ §220) are now part of
+# BRANCHES itself (D-042), so the adopted-but-unpromoted list is empty. Kept as
+# a hook: any future adopted-but-unpromoted branch goes here, screened against
+# BRANCHES in addition to the candidate's siblings.
+ADOPTED = []
 
 
 def main() -> None:
@@ -31,8 +32,9 @@ def main() -> None:
     ap.add_argument("--candidate", default="m_rm",
                     help="comma-separated candidate margin keys, e.g. m_bs,m_sh")
     ap.add_argument("--adopted", default=",".join(ADOPTED),
-                    help="comma-separated already-adopted branches to screen against in "
-                         "addition to BRANCHES (gate 1 must see SH/SJ). Pass '' to disable.")
+                    help="comma-separated adopted-but-unpromoted branches to screen against "
+                         "in addition to BRANCHES (SH/SJ are already in BRANCHES; empty by "
+                         "default). Pass '' to disable.")
     args = ap.parse_args()
 
     cands = [c.strip() for c in args.candidate.split(",") if c.strip()]
@@ -51,9 +53,8 @@ def main() -> None:
                 raise SystemExit(f"{c} missing for {t} - was the screening run enabled?")
         data[t] = folds
 
-    # Adopted-but-unpromoted branches (SH §218, SHJ §220) are part of the gate-1
-    # reference set but NOT of BRANCHES, which stays the official 5-branch
-    # comparison basis (agent_handoff.md invariant 3). Report presence explicitly:
+    # SH (§218) and SJ (formerly SHJ, §220) are now part of BRANCHES itself
+    # (D-042), so ADOPTED is empty by default. Report presence explicitly:
     # a silently dropped reference would let a candidate pass a screen it never faced.
     adopted = [a for a in wanted if all(data[t][0].get(a) is not None for t in PRIMARY7)]
     missing = [a for a in wanted if a not in adopted]

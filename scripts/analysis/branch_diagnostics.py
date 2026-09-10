@@ -30,7 +30,10 @@ PRIMARY7 = [
     "ucla_lung_progression_regression",
     "cptac_ccrcc_PBRM1_mutation",
 ]
-BRANCHES = ["m_cv", "m_bm", "m_bd", "m_qa", "m_ds"]  # CT excluded: official 5-branch basis
+BRANCHES = ["m_cv", "m_bm", "m_bd", "m_qa", "m_ds", "m_sh", "m_sj"]
+# CT excluded; SH/SJ promoted into the official comparison basis (D-042).
+BRANCHES_V121_5 = ["m_cv", "m_bm", "m_bd", "m_qa", "m_ds"]
+# Previous official basis (v121_baseline). For reproducing past RUs only.
 
 
 def auroc(score: torch.Tensor, target: torch.Tensor) -> float:
