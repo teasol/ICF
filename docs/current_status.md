@@ -2,13 +2,13 @@
 
 > **이 파일은 "지금 무엇을 하고 있는가"만 담는다. 100줄을 넘기지 않는다.**
 > 수치·기준은 [`PROJECT.md`](PROJECT.md), 닫힌 축은 [`closed_axes.md`](closed_axes.md),
-> 결정 이력은 [결정 이력](history/archive.md)가 정본이다. **여기에 복사하지 않는다.**
+> 결정 이력은 [결정 이력](history/archive.md)가 정본이다.
 > 종료된 RU의 상세는 [`history/research_units_all.md`](history/research_units_all.md)로 이관한다.
 
 | 항목 | 값 |
 |:---|:---|
-| **Last Updated** | 2026-09-10 02:05 (KST) |
-| **Status** | CLEAN — D-040 형상 계열 배선 정정 완료, RU-90 종료 (진행 중 RU 없음) |
+| **Last Updated** | 2026-09-10 11:15 (KST) |
+| **Status** | CLEAN — 사용자 승격 기준 명확화(`D-041`) 전 문서 정합화 완료 (진행 중 RU 없음) |
 | **Host / Node** | `nexgem-s1` · RTX A5000 8장(23 GB) · driver 580.126.09 · Slurm 명령 없음 |
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · Lightning 2.6.5 |
 | **Active Job** | 없음. GPU 1·5는 **타 프로세스 점유 중**(16.1 GB / 15.3 GB)이므로 실행 전 `scripts/lib/free_gpus.sh`의 `icf_free_gpus`로 유휴 장치를 확인한다 |
@@ -16,45 +16,37 @@
 
 ---
 
-## 2026-09-10 — 형상 계열 배선 정정과 RU-90 종료 (`D-040`)
+## 2026-09-10 — 사용자 승격 기준 명확화(`D-041`) 전 문서 정합화 완료
 
-- **사용자 보고가 확증됐다.** `scripts/test_pathobench.py`의 다섯 집계 분기가 BS·SH·SJ를 pool에
-  넣지 않아, 세 브랜치는 **공식 평가 경로에서 최종 확률에 도달한 적이 없다.** 세 마진은
-  `logits`에만 가산됐고 `logits`는 모든 브랜치 가중치가 0일 때만 도달하는 폴백에서만 읽힌다.
-  `cv_weight` 기본 1.442(v121 arm 1.0)이라 그 폴백은 도달 불가다. 보고에 없던 결함 2건도
-  확인했다 — `sj_weight`가 마진 계산 게이트에서 빠져 SJ 단독 활성이 불가능했고, 파이프라인
-  경로(`voting.py`)에는 BS가 전무했다.
-- **수정**: 참여 조건·순서를 양쪽 경로에서 한 곳으로 통일(`cv…sw, sj, sh, bs`),
-  `ICF_SHAPE_SCREEN_ONLY`의 지배 대상을 `logits` 가산에서 **pool 참여**로 이전(기본 `"1"` 유지 →
-  기존 스크리닝 실행 비트 불변), BS를 `src/models/branches/bs.py`로 승격. 계약의 정본은
-  [`current_architecture.md` §3.1](current_architecture.md)이다.
-- **`RU-90`이 수정을 실측 검증했다** (재현·계측, 3층 기준을 결과 전에 고정). **세 층 전부 통과**:
-  정정 후 5-branch BASE가 공식 `v121_baseline`과 7과제 전부 `max|diff| = 0.000e+00`으로 비트
-  동일하고([`PROJECT.md` §3.2](PROJECT.md)의 기준선 macro와 [§3.4](PROJECT.md)의 오염 검사 상수를
-  소수 4자리로 재현), live 경로와 오프라인 재집계가
-  `1.788e-07` 안에서 일치하며(per-fold AUROC는 `0.000e+00`), `+SH`/`+SJ`/`+SH+SJ`의 대응 Δ가
-  RU-89와 `0.01`/`0.00`/`0.04 %p` 차로 재현된다. 예산 `1.385 GPU-h`(상한 2.0).
-- **RU-89의 판정은 바뀌지 않는다** — `판별 불가`·`보류` 유지. 과거 형상 계열 수치는 전부 오프라인
-  재집계 산출이어서 유효했고, 문제는 live 재현 불가였다. **수치 정정 없음.**
-- **BS는 게이트 ② 기각 상태를 유지한다**(31/50, `p = 0.059`). 사용자 결정(2026-09-10)에 따라
-  RU-90의 arm에서 제외했고 마진만 저장했다(`m_bs` 50/50 전 과제). 어떤 구성에서도 승격 심사에
-  상정하지 않는다.
+- **사용자 확정 의도**: 승격의 개선량 기준은 **Primary 7 평균 AUROC의 절대 증가량 +0.003 이상(= +0.3%p)**이다.
+  **95% 신뢰구간 하한에 +0.3%p를 요구하는 기준이 아니다.** 상대 증가율 0.3%도 아니다.
+- **계산**: 각 과제의 고정 50 fold에서 후보−기준선 AUROC를 짝지어 평균하고, 과제별 평균 Δ 7개를 동일 비중으로 평균한다.
+  `Δ_macro = (1/7) Σ_task [(1/50) Σ_fold (AUC_candidate − AUC_baseline)] ≥ 0.003`.
+  모든 과제의 개별 개선이나 `sign agreement ≥ 5/7`을 추가 필수 조건으로 요구하지 않는다.
+- **직관 확인 예시**: [공식 비교 기준선](PROJECT.md) 대비 후보 +0.3%p 이상이면 개선량 기준 충족.
+  RU-90은 약 0.6227, 대응 Δ `+0.562964%p`로 **이 개선량 기준을 충족**한다.
+  (독립적 성능 확증·hold-out 검증·공식 구성 교체 완료는 별개 절차다).
+- **불확실성의 역할**: CI·SE와 과제별 악화는 투명하게 별도로 보고한다. CI 하한 `> +0.3%p` 또는 `> 0`을
+  사용자 승인 없이 승격 필수 조건으로 덧붙이지 않는다. hold-out·선택 이력·비교 조건에 관한 기존 규칙은 별도다.
+- **전 문서 정합화 완료**: `PROJECT.md §4·§4.1`, `agent_handoff.md R5·R6`, `history/archive.md D-018·D-021·D-041`,
+  `research_directions.md`, RU-89·90 기록 전반에 정합화를 완료했다.
+  과거 원자료·당시 판정은 보존하고, 의도 정정 이력(`D-041`)을 남겼다.
 
-## 진행 중 RU
+## 이전 실행 상태 — D-040 배선 정정 및 RU-90 종료
 
-없음. 다음 RU의 질문·대조·예산은 사용자와 확정한다.
+- BS·SH·SJ의 live 집계 누락을 수정했고 BASE 비트 불변·live/오프라인 등가성·세대 간 Δ 재현을 확인했다.
+- RU-89의 당시 `판별 불가`·`보류` 기록은 남아 있으며, RU-90에서 live 재현성과 개선량 충족을 확인했다.
+- BS는 게이트 ② 기각 상태이며 RU-90의 arm에서 제외됐다. 상세 증거는 [RU-90](history/research_units_all.md#ru-90-live-path-equivalence-of-the-corrected-bsshsj-wiring-and-single-generation-re-measurement-of-the-shsj-arms)과 [D-040](history/archive.md)에 있다.
 
 ## 실행 환경 — 현재 접속 호스트
 
-현재는 `nexgem-s1`이다. `.venv` 버전은 헤더와 일치하며 시스템 `python3`는 3.8.10이다.
-`source scripts/node_env.sh`는 `.venv`와 GPU 8장을 탐지하고, GPU 0~7 CUDA matmul 정상 동작을
-2026-09-07 확인했다. `sinfo`·`squeue`가 없어 **이 호스트는 직접 실행 유형**이다(`D-030`).
-`nexgem`을 통해 제출할 때만 공용 [Slurm 규칙](/home/kimds/agent_rules/slurm_rules.md)이 적용된다.
+기존 환경 기록은 `nexgem-s1` 직접 실행 유형(`D-030`), 시스템 Python 3.8.10이다.
+`nexgem` 제출 시 공용 [Slurm 규칙](/home/kimds/agent_rules/slurm_rules.md)이 적용된다.
 
 ### Immediate Next Command
 
 ```bash
-sed -n '1,60p' docs/research_directions.md   # 큐 P1-B(CA-R1 5건)·B5 착수 순서 확정
+bash scripts/run_tests.sh   # 전 문서 정합화 회귀 테스트 검증
 ```
 
 ---
@@ -75,9 +67,7 @@ sed -n '1,60p' docs/research_directions.md   # 큐 P1-B(CA-R1 5건)·B5 착수 �
 - **과제 특화 이득을 활용할 선택 신호가 없다.** 이득은 실재하나 라벨 없이 과제를 판별할 수단이
   없다 — §221(SJ/구 SHJ)·§225(subsampling)가 같은 벽이다 ([`closed_axes.md` `CA-R1`](closed_axes.md)).
 - **모든 판정이 `hold-out 미검증`** 이다 ([`PROJECT.md` §3.1](PROJECT.md)).
-- **v115~v120 6브랜치 조합이 미검증이다.** 과거 기록은 그대로 보존하고, 현행 승격 규칙
-  (대응 per-fold Δ의 과제 군집 95% 구간 하한 > `δ_min`)으로 현행 조합을 검증하는 것은 남은 과제다. **절대 macro는 과제 모집단 성능으로 주장 불가**
-  (군집 SE `4.34%p`, [`PROJECT.md` §4.1](PROJECT.md)) — 대응 비교만 정밀하다.
+- **v115~v120 6브랜치 조합 검증은 남은 과제다.** 과거 기록을 보존하고 위 사용자 개선량 기준과 불확실성 보고를 구분해 문서를 정합화했다(`D-041`).
 
 **기술 부채**
 - §226 Tier 1 3건(`AKS`·`MDX`·`LID`)이 **동일 에이전트 한 배치 산출**이며 독립 비교군이 없다.
@@ -97,4 +87,4 @@ sed -n '1,60p' docs/research_directions.md   # 큐 P1-B(CA-R1 5건)·B5 착수 �
   인용하면 소수 4자리에서 어긋난다.** 어느 쪽이 옳은지는 판정하지 않았다 (RU-90 한계 ③).
 - `history/archive.md`에 **§199·§200 절 번호가 각각 중복** ([`closed_axes.md` §4](closed_axes.md)).
 
-_by Orca / Main Agent / claude-opus-5 (effort: high) on nexgem-s1 at 2026-09-10 02:05 KST_
+_기존 실행·환경 기록 작성자: Orca / Main Agent / claude-opus-5 (effort: high) · 2026-09-10 02:05 KST; D-041 전 문서 정합화: 2026-09-10 11:15 KST._

@@ -3782,7 +3782,7 @@
         "predictions/pathobench_{PRIMARY7}_v121_sh_variants_official50_bf16.pt — m_sh·m_sj 저장 마진",
         "회귀 스위트 121 tests OK"
       ],
-      "relations": "§218(SH 채택, archive.md:1411-1451) · §219-§220(SJ 채택, archive.md:1484-1571) · D-005(CT 제외 5-branch 기준) · D-018/D-019/D-021(승격 기준·정밀도) · D-038(SJ 명칭) · D-039(SH 통합). 선행 코드 작업: c050a13(SH를 src/models로 통합), 그리고 본 RU를 위한 SJ 융합 배선 추가.",
+      "relations": "§218(SH 채택, archive.md:1411-1451) · §219-§220(SJ 채택, archive.md:1484-1571) · D-005(CT 제외 5-branch 기준) · D-018/D-019/D-021/D-041(승격 기준·정밀도 — 2026-09-10 D-041 사용자 명확화에 따라 7-branch 평균 대응 Δ +0.60%p는 확정 개선량 기준 +0.3%p를 충족함. 당시 구간 하한 기준에 따른 판별 불가·보류 판정 기록은 보존) · D-038(SJ 명칭) · D-039(SH 통합). 선행 코드 작업: c050a13(SH를 src/models로 통합), 그리고 본 RU를 위한 SJ 융합 배선 추가.",
       "uncertainties": "① 검정력이 결론을 지배한다. 과제 군집 SE가 +SH 0.39%p → +SJ 0.45%p → 7-branch 0.67%p로 커져 δ_min = 0.3%p를 구간으로 가르지 못한다. RU-80의 대응 SE 0.022%p는 거의 동일한 두 arm의 비교값이며 여기에 적용되지 않는다(PROJECT.md §4.1의 '공통 검출 한계가 아니다'). ② Trimmed Mean은 최저·최고 1개씩 절사하므로 브랜치 수가 5에서 7로 늘면 절사 비율이 바뀐다. 이 집계 규칙 변화가 Δ에 기여한 몫은 분리하지 않았다. ③ Histologic_Grade·progression_regression·PBRM1 3과제에서 형상 계열이 일관되게 해로운 이유는 기전 미확인이다. ④ 모든 판정은 hold-out 미검증이다(PROJECT.md §3.1). ⑤ 상관이 낮다는 것과 이득이 가산적이라는 것은 별개 사실이며, 여기서는 둘 다 관측됐을 뿐 전자가 후자를 함의한다고 주장하지 않는다.",
       "end_date": "2026-09-09T20:39:38+09:00",
       "end_sha": "25a58e67ad593e269ed5ee90603d20f394c68e43",
@@ -3812,7 +3812,7 @@
         "배선 수정 commit c5a6c90 (5개 집계 배선·중복 제거), 건전성 commit 9633199 (context_loo 빈 pool 가드·import 호이스트·불변성 테스트)",
         "회귀 스위트 153 tests (test_bs_branch.py 18건 · test_shape_branch_invariance.py 12건 신설)"
       ],
-      "relations": "RU-89(동일 arm 집합을 오프라인 재집계로 `판별 불가` 종료 — 본 RU가 그 수치의 live 재현성을 확보했다) · §218(BS·SH 스크리닝, BS 게이트 ② 기각, archive.md:1402-1452) · §219-§220(SJ 채택) · D-038(SJ 명칭) · D-039(SH src 통합 및 context_loo에서 SJ 누락 결함 수정 — 본 RU의 결함은 같은 종류의 누락이 평가 경로에 남아 있던 것이다) · D-040(본 RU가 근거인 배선 결함 수정 레코드) · PROJECT.md §3.2(기준선 0.6171) · §3.4(오염 검사 상수) · §4(승격 기준, 본 RU에서는 판정하지 않음) · §5(게이트, BS 기각 근거)",
+      "relations": "RU-89(동일 arm 집합을 오프라인 재집계로 `판별 불가` 종료 — 본 RU가 그 수치의 live 재현성을 확보했다) · §218(BS·SH 스크리닝, BS 게이트 ② 기각, archive.md:1402-1452) · §219-§220(SJ 채택) · D-038(SJ 명칭) · D-039(SH src 통합 및 context_loo에서 SJ 누락 결함 수정 — 본 RU의 결함은 같은 종류의 누락이 평가 경로에 남아 있던 것이다) · D-040(본 RU가 근거인 배선 결함 수정 레코드) · D-041(사용자 승격 기준 명확화 — 7-branch 평균 대응 Δ +0.56%p는 확정 개선량 기준 +0.3%p를 충족함) · PROJECT.md §3.2(기준선 0.6171) · §3.4(오염 검사 상수) · §4(승격 기준, 본 RU에서는 판정하지 않음) · §5(게이트, BS 기각 근거)",
       "uncertainties": "① 층 2는 단일 과제(progression_regression) 50 fold, 공식 trimmed_mean 1종에서 확인했다. 등가성은 정확 산술이므로 과제 확대가 증거력을 더하지 않지만, 나머지 4개 집계(soft_voting·hard_gated·adaptive_trimmed·context_loo)에서 형상 계열이 pool에 들어가는 것은 회귀 테스트로만 고정됐고 실측 평가로는 확인되지 않았다. ② m_sh의 세대 간 차이(max|diff| 6.5e-2)의 기전은 미확인이다. 집계량에는 전파되지 않았으나 개별 과제 Δ는 최대 0.0033 달랐다. 상관이 낮다는 것과 집계량이 안정적이라는 것은 별개 사실이며 전자가 후자를 함의한다고 주장하지 않는다. ③ AUROC 추정기가 두 개다 — test_pathobench 내부와 branch_diagnostics.auroc가 동일 입력에서 +8.55e-05 차를 낸다. 짝지은 Δ에서 상쇄되므로 판정에는 영향이 없으나, 절대 AUROC를 두 출처에서 섞어 인용하면 소수 4자리에서 어긋난다. 어느 쪽이 옳은지는 판정하지 않았다. ④ 모든 판정은 hold-out 미검증이다(PROJECT.md §3.1). ⑤ Trimmed Mean은 최저·최고 1개씩 절사하므로 브랜치 수가 5에서 6·7로 늘면 절사 비율이 바뀐다. 이 집계 규칙 변화가 Δ에 기여한 몫은 RU-89와 마찬가지로 분리하지 않았다. ⑥ Histologic_Grade·progression_regression·PBRM1 3과제에서 형상 계열이 일관되게 해로운 이유는 기전 미확인이다. RU-89와 동일한 3과제이며 방향도 같다.",
       "end_date": "2026-09-10T01:42:52+09:00",
       "end_sha": "4a53636c84b6d73b7f8e17fd37efdabf52c1724c",
