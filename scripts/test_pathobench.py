@@ -74,6 +74,19 @@ from src.models.branches.aks import aks_slide_features  # noqa: E402
 from src.models.branches.lid import lid_slide_features  # noqa: E402
 from src.models.branches.mdx import mdx_slide_features  # noqa: E402
 from src.utils.metrics import auroc, log_loss  # noqa: E402
+# Single source of truth for the 5 aggregation formulas (technical debt #6,
+# docs/current_status.md item 6): these are the same probability-space
+# helpers src/models/aggregations/voting.py's public functions call, so the
+# fixed-head path below and the training-free pipeline path cannot silently
+# drift the way BS/SH/SJ did. tests/test_bs_branch.py::TestPathobenchAndVotingAgree
+# pins the two paths to agree on the same inputs.
+from src.models.aggregations.voting import (  # noqa: E402
+    _adaptive_trimmed_from_probs,
+    _context_loo_from_pool,
+    _hard_gated_from_probs,
+    _soft_voting_from_pairs,
+    _trimmed_mean_from_probs,
+)
 
 from src.utils.utils import (  # noqa: E402
     add_eval_precision_argument,
@@ -2049,68 +2062,40 @@ def evaluate_trial(
             if w != 0.0 and m is not None
         ]
 
+        # The 5 aggregations' probability-space math below reuses
+        # src/models/aggregations/voting.py's _..._from_...  helpers (the
+        # single source of truth, see the import comment above): only the
+        # (weight, margin)/(margin, loo-margin) pool resolution and each
+        # aggregation's own empty-pool fallback stay local to this path.
         if aggregation == "trimmed_mean":
             active_probs = [torch.sigmoid(m.float()) for _, _, m, _ in _active_branches]
 
-            if len(active_probs) >= 3:
-                stacked = torch.stack(active_probs, dim=-1)
-                sum_p = torch.sum(stacked, dim=-1)
-                min_p = torch.min(stacked, dim=-1).values
-                max_p = torch.max(stacked, dim=-1).values
-                scores = (sum_p - min_p - max_p) / (len(active_probs) - 2)
-            elif active_probs:
-                scores = sum(active_probs) / len(active_probs)
+            if active_probs:
+                scores = _trimmed_mean_from_probs(active_probs)
             else:
                 scores = torch.softmax(logits.float(), dim=-1)[:, 1]
         elif aggregation == "soft_voting":
-            active_pairs = [(w, m) for _, w, m, _ in _active_branches]
+            active_pairs = [(w, m.float()) for _, w, m, _ in _active_branches]
 
             if active_pairs:
-                total_weight = sum(w for w, _ in active_pairs)
-                scores = sum(w * torch.sigmoid(m.float()) for w, m in active_pairs) / total_weight
+                scores = _soft_voting_from_pairs(active_pairs)
             else:
                 scores = torch.softmax(logits.float(), dim=-1)[:, 1]
         elif aggregation == "hard_gated":
             active_probs = [torch.sigmoid(m.float()) for _, _, m, _ in _active_branches]
 
             if active_probs:
-                stacked = torch.stack(active_probs, dim=-1)  # [N, B]
                 tau = float(os.environ.get("ICF_GATED_TAU", "0.05"))
-                c = (stacked - 0.5).abs()
-                mask = (c >= tau).float()
-                has_active = (mask.sum(dim=-1, keepdim=True) > 0)
-                weights = torch.where(has_active, mask, torch.ones_like(mask))
-                scores = (weights * stacked).sum(dim=-1) / weights.sum(dim=-1).clamp_min(1.0)
+                scores = _hard_gated_from_probs(active_probs, tau)
             else:
                 scores = torch.softmax(logits.float(), dim=-1)[:, 1]
         elif aggregation == "adaptive_trimmed":
             active_probs = [torch.sigmoid(m.float()) for _, _, m, _ in _active_branches]
 
             if active_probs:
-                stacked = torch.stack(active_probs, dim=-1)  # [N, B]
-                B = stacked.shape[-1]
-                if B < 3:
-                    scores = stacked.mean(dim=-1)
-                else:
-                    sorted_p, _ = torch.sort(stacked, dim=-1)
-                    c = (stacked - 0.5).abs()
-                    c_med = torch.median(c, dim=-1).values
-                    min_p = sorted_p[:, 0]
-                    max_p = sorted_p[:, -1]
-                    c_min = (min_p - 0.5).abs()
-                    c_max = (max_p - 0.5).abs()
-
-                    tau = float(os.environ.get("ICF_ADAPTIVE_TAU", "0.08"))
-                    ratio = float(os.environ.get("ICF_ADAPTIVE_RATIO", "1.5"))
-
-                    drop_min = (c_min <= ratio * c_med) | (c_min <= tau)
-                    drop_max = (c_max <= ratio * c_med) | (c_max <= tau)
-
-                    sum_all = sorted_p.sum(dim=-1)
-                    count_all = torch.full_like(sum_all, float(B))
-                    sum_trimmed = sum_all - torch.where(drop_min, min_p, torch.zeros_like(min_p)) - torch.where(drop_max, max_p, torch.zeros_like(max_p))
-                    count_trimmed = count_all - drop_min.float() - drop_max.float()
-                    scores = sum_trimmed / count_trimmed.clamp_min(1.0)
+                tau = float(os.environ.get("ICF_ADAPTIVE_TAU", "0.08"))
+                ratio = float(os.environ.get("ICF_ADAPTIVE_RATIO", "1.5"))
+                scores = _adaptive_trimmed_from_probs(active_probs, tau, ratio)
             else:
                 scores = torch.softmax(logits.float(), dim=-1)[:, 1]
         elif aggregation.startswith("context_loo"):
@@ -2125,23 +2110,8 @@ def evaluate_trial(
             else:
                 gamma = float(os.environ.get("ICF_LOO_GAMMA", "2.0"))
                 floor = float(os.environ.get("ICF_LOO_FLOOR", "0.50"))
-
-                r_list = []
-                for name, w_init, q_m, l_m in branch_pool:
-                    if l_m is not None and len(context_labels.unique()) >= 2:
-                        r = _fast_context_auroc(l_m, context_labels)
-                    else:
-                        r = 0.50
-                    r_list.append(r)
-
-                q_list = [max(0.0, r - floor) ** gamma for r in r_list]
-                sum_q = sum(q_list)
-                if sum_q > 0:
-                    weights = [q / sum_q for q in q_list]
-                else:
-                    weights = [1.0 / len(branch_pool)] * len(branch_pool)
-
-                scores = sum(w * torch.sigmoid(q_m.float()) for w, (_, _, q_m, _) in zip(weights, branch_pool))
+                pool = [(q_m.float(), l_m) for _, _, q_m, l_m in branch_pool]
+                scores = _context_loo_from_pool(pool, context_labels, gamma, floor)
         else:
             scores = torch.softmax(logits.float(), dim=-1)[:, 1]
 

@@ -3,29 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 import torch
 
+# `scripts/analysis/` is two levels below the repo root, so the repo root has
+# to go on sys.path before `src` imports resolve (matches drop2_furthest_detail.py).
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-def compute_auroc(score: torch.Tensor, target: torch.Tensor) -> float:
-    """Compute exact AUROC without external dependency."""
-    score = score.flatten().float()
-    target = target.flatten().long()
-    n_pos = int((target == 1).sum())
-    n_neg = int((target == 0).sum())
-    if n_pos == 0 or n_neg == 0:
-        return float("nan")
-    # Sort scores descending
-    indices = torch.argsort(score, descending=True)
-    target_sorted = target[indices]
-    tps = (target_sorted == 1).float().cumsum(0)
-    fps = (target_sorted == 0).float().cumsum(0)
-    tpr = tps / n_pos
-    fpr = fps / n_neg
-    # Trapezoidal rule: integrate TPR with respect to FPR
-    fpr_all = torch.cat([torch.tensor([0.0]), fpr])
-    tpr_all = torch.cat([torch.tensor([0.0]), tpr])
-    return float(torch.trapz(tpr_all, fpr_all).item())
+from src.utils.metrics import auroc as compute_auroc  # noqa: E402
 
 
 PRIMARY_7_TASKS = [

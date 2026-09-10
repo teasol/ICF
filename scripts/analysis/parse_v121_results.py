@@ -1,20 +1,16 @@
 import glob
+import sys
 from pathlib import Path
 import torch
 import numpy as np
 
-def compute_auroc(score, target):
-    indices = torch.argsort(score, descending=True)
-    t = target[indices].float()
-    n_pos = (t == 1).sum()
-    n_neg = (t == 0).sum()
-    if n_pos == 0 or n_neg == 0:
-        return float("nan")
-    tps = (t == 1).float().cumsum(0)
-    fps = (t == 0).float().cumsum(0)
-    tpr = torch.cat([torch.tensor([0.0]), tps / n_pos])
-    fpr = torch.cat([torch.tensor([0.0]), fps / n_neg])
-    return float(torch.trapz(tpr, fpr).item())
+# `scripts/analysis/` is two levels below the repo root, so the repo root has
+# to go on sys.path before `src` imports resolve (matches drop2_furthest_detail.py).
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.utils.metrics import auroc as compute_auroc  # noqa: E402
 
 primary7 = [
     "cptac_lscc_ARID1A_mutation",

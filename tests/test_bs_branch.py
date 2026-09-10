@@ -388,7 +388,13 @@ class TestPathobenchAndVotingAgree(unittest.TestCase):
         test_y = {s: labels[s] for s in test_ids}
         return bags, train_ids, test_ids, train_y, test_y
 
-    def test_soft_voting_matches_voting_py_on_the_same_margins(self):
+    def _agree_check(self, aggregation_name, voting_fn):
+        """Shared body for the 4 margin-only aggregations (no LOO pool):
+        run evaluate_trial with ICF_AGGREGATION=<aggregation_name> and check
+        its probability against voting_fn's logit->probability on the SAME
+        margins, mirroring the pool test_pathobench.py resolves internally
+        (technical debt #6, docs/current_status.md item 6)."""
+        os.environ["ICF_AGGREGATION"] = aggregation_name
         bags, train_ids, test_ids, train_y, test_y = self._episode()
         model = _Wrapper(self._build_model())
         with torch.no_grad():
@@ -404,10 +410,10 @@ class TestPathobenchAndVotingAgree(unittest.TestCase):
         cfg = TrainingFreeConfig(
             weight_cv=0.0, weight_ct=0.0, weight_dd=0.0,
             weight_bm=1.0, weight_bd=1.0, weight_qa=1.0, weight_ds=0.0,
-            weight_sh=1.0, weight_bs=1.0, weight_sj=1.0, aggregation="soft_voting",
+            weight_sh=1.0, weight_bs=1.0, weight_sj=1.0, aggregation=aggregation_name,
         )
         zeros = torch.zeros_like(result["m_bm"])
-        expected_margin = soft_voting(
+        expected_margin = voting_fn(
             cfg, zeros, zeros,
             m_dd=None, m_ct=None, m_bm=result["m_bm"], m_bd=result["m_bd"],
             m_qa=result["m_qa"], m_ds=None, m_lr=None, m_de=None, m_sw=None,
@@ -416,9 +422,21 @@ class TestPathobenchAndVotingAgree(unittest.TestCase):
         expected_probability = torch.sigmoid(expected_margin)
         self.assertLess(
             (expected_probability - result["probability"]).abs().max().item(), 1e-5,
-            "scripts/test_pathobench.py's soft_voting pool drifted from "
-            "src/models/aggregations/voting.py's soft_voting given identical margins",
+            f"scripts/test_pathobench.py's {aggregation_name} pool drifted from "
+            f"src/models/aggregations/voting.py's {aggregation_name} given identical margins",
         )
+
+    def test_soft_voting_matches_voting_py_on_the_same_margins(self):
+        self._agree_check("soft_voting", soft_voting)
+
+    def test_trimmed_mean_matches_voting_py_on_the_same_margins(self):
+        self._agree_check("trimmed_mean", trimmed_mean)
+
+    def test_hard_gated_matches_voting_py_on_the_same_margins(self):
+        self._agree_check("hard_gated", hard_gated)
+
+    def test_adaptive_trimmed_matches_voting_py_on_the_same_margins(self):
+        self._agree_check("adaptive_trimmed", adaptive_trimmed)
 
 
 if __name__ == "__main__":

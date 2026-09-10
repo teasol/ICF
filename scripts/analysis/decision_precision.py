@@ -28,9 +28,19 @@ MDE 는 양측 alpha=0.05, power=0.80 정규 근사 `(z_.975 + z_.80) * SE` 로 
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
 
 import numpy as np
 import torch
+
+# `scripts/analysis/` is two levels below the repo root, so the repo root has
+# to go on sys.path before `src` imports resolve (matches drop2_furthest_detail.py).
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.utils.metrics import auroc  # noqa: E402
 
 PRIMARY7 = [
     "cptac_lscc_ARID1A_mutation",
@@ -43,17 +53,6 @@ PRIMARY7 = [
 ]
 BRANCHES = ["m_cv", "m_bm", "m_bd", "m_qa", "m_ds"]  # CT 제외: 공식 5-branch 기준
 Z_ALPHA, Z_POWER = 1.959964, 0.841621  # 양측 alpha=0.05, power=0.80
-
-
-def auroc(score: torch.Tensor, target: torch.Tensor) -> float:
-    idx = torch.argsort(score, descending=True)
-    t = target[idx].float()
-    n_pos, n_neg = (t == 1).sum(), (t == 0).sum()
-    if n_pos == 0 or n_neg == 0:
-        return float("nan")
-    tpr = torch.cat([torch.tensor([0.0]), (t == 1).float().cumsum(0) / n_pos])
-    fpr = torch.cat([torch.tensor([0.0]), (t == 0).float().cumsum(0) / n_neg])
-    return float(torch.trapz(tpr, fpr).item())
 
 
 def trimmed_mean(probs: torch.Tensor) -> torch.Tensor:

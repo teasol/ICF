@@ -17,9 +17,19 @@ from __future__ import annotations
 
 import argparse
 import itertools
+import sys
+from pathlib import Path
 
 import numpy as np
 import torch
+
+# `scripts/analysis/` is two levels below the repo root, so the repo root has
+# to go on sys.path before `src` imports resolve (matches drop2_furthest_detail.py).
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.utils.metrics import auroc  # noqa: E402
 
 PRIMARY7 = [
     "cptac_lscc_ARID1A_mutation",
@@ -34,17 +44,6 @@ BRANCHES = ["m_cv", "m_bm", "m_bd", "m_qa", "m_ds", "m_sh", "m_sj"]
 # CT excluded; SH/SJ promoted into the official comparison basis (D-042).
 BRANCHES_V121_5 = ["m_cv", "m_bm", "m_bd", "m_qa", "m_ds"]
 # Previous official basis (v121_baseline). For reproducing past RUs only.
-
-
-def auroc(score: torch.Tensor, target: torch.Tensor) -> float:
-    idx = torch.argsort(score, descending=True)
-    t = target[idx].float()
-    n_pos, n_neg = (t == 1).sum(), (t == 0).sum()
-    if n_pos == 0 or n_neg == 0:
-        return float("nan")
-    tpr = torch.cat([torch.tensor([0.0]), (t == 1).float().cumsum(0) / n_pos])
-    fpr = torch.cat([torch.tensor([0.0]), (t == 0).float().cumsum(0) / n_neg])
-    return float(torch.trapz(tpr, fpr).item())
 
 
 def trimmed_mean(probs: torch.Tensor) -> torch.Tensor:
