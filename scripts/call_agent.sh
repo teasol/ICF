@@ -130,12 +130,13 @@ if [[ -f "$TOKEN_FILE" ]] && ! git config --local --get-all credential.https://g
 fi
 
 # Execute Claude via persistent Session ID (--resume with --session-id fallback)
+# Note: permission-mode set to bypassPermissions per user authorization
 if ! "$CLAUDE_BIN" -p \
     --resume "$SESSION_ID" \
     --model "$MODEL" \
     --effort "$EFFORT" \
     --settings '{"autoMemoryEnabled":false}' \
-    --permission-mode acceptEdits \
+    --permission-mode bypassPermissions \
     "$PROMPT"; then
     # Fallback to --session-id if resume fails
     exec "$CLAUDE_BIN" -p \
@@ -143,6 +144,6 @@ if ! "$CLAUDE_BIN" -p \
         --model "$MODEL" \
         --effort "$EFFORT" \
         --settings '{"autoMemoryEnabled":false}' \
-        --permission-mode acceptEdits \
+        --permission-mode bypassPermissions \
         "$PROMPT"
 fi
