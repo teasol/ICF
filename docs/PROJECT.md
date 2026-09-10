@@ -18,6 +18,10 @@
 목표의 달성 여부는 **SEAL 10-task hold-out 단 한 번의 개봉**으로 판정한다. 판정 대상 수치는
 SEAL 논문(`seal_univ2_baseline_17tasks.csv`)의 UNI2 기준선이다.
 
+> **SEAL Baseline 측정 프로토콜 (SEAL 논문 및 PathoBench 권고사항)**:
+> SEAL의 ABMIL, MeanMIL Baseline 수치는 **고정된 slide-level 50-fold CV (train-test만 분리)** 환경에서 산출되었다.
+> 각 폴드는 별도의 validation check나 early stopping 없이 **20 epoch 고정 학습** 후 Test AUROC를 기록한 값이다.
+
 | 대상 | SEAL 10-task macro-AUC | ICF와의 거리 |
 |:---|---:|---:|
 | **ABMIL (목표)** | **0.7266** | **−0.0294** |
@@ -37,11 +41,11 @@ SEAL 논문(`seal_univ2_baseline_17tasks.csv`)의 UNI2 기준선이다.
 
 | 항목 | 내용 |
 |:---|:---|
-| **현재 목표** | `CA-R1` 교착 해소 방향(라벨 무관 과제 판별) 착수 준비 및 경계 판정 (Tier 1 3건 RU-85·86 종료, RU-87 bf16 정밀도 부채 종료, RU-88 fold 지문 패널 보류) |
-| **완료 조건** | 경계 판정 2건([`closed_axes.md` §3-I, §3-J](closed_axes.md)) 확정 및 큐의 `P1-B`(B1~B5) 중 다음 착수 후보·설계 확정 |
-| **예산** | 착수 시 RU 카드에 확정한다 |
-| **중단 조건** | 사전 등록된 사망/중단 조건 충족 시 조기 종료 |
-| **다음 목표 슬롯** | 진행 가능한 후보 전체와 우선순위는 [`research_directions.md` §0](research_directions.md)의 큐가 정본이다 |
+| **현재 목표** | **기술 부채 해결** |
+| **완료 조건** | `current_status.md`의 기술 부채를 모두 해결(혹은 안 해도 된다고 확정) |
+| **예산** | 문서 변경 = gemini, 기술부채해결 = `claude-sonnet-5` (medium) |
+| **중단 조건** | 토큰이 모자라거나 해결해야 하지만 당장은 해결할 수 없는 기술부채를 발견하면 중단 |
+| **다음 목표 슬롯** | 미정 |
 
 ---
 

@@ -3,7 +3,7 @@
 - 유형: `exploratory` · 카드: `docs/ru/RU-88.json`
 - 실행: `nexgem-s1` · **GPU 0 · CPU 오프라인 재집계** · wall `695초` (상한 2시간 내)
 - 산출물: `scripts/analysis/ru88_fingerprint.py` · `predictions/ru88_fingerprint/summary.json`
-- 후보 출처: [CA-R1 제안서](../proposals/2026-09-08_car1-label-free-task-identification.md) 후보 1·3·4
+- 후보 출처: [CA-R1 제안서](../research_directions.md#9-제안서-전문-ca-r1-label-free-task-identification-구-단일-제안서-이관) 후보 1·3·4
 
 ## 1. 결론
 

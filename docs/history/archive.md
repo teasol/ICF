@@ -321,6 +321,8 @@ _by Gemini 3.7 Flash (High) on gnode3 at 2026-08-22 19:15:00_
 
 ## §199. 9대 Voting / Ensembling 기법 전수 비교 및 Trimmed Mean Voting 채택 (2026-08-22 20:55)
 
+> **절 번호 안내 (closed_axes.md §0 규칙 7):** 본 절은 앙상블 기법 비교 및 Trimmed Mean 채택 절이다. 동일 번호의 비선형 KRR 기각 절(§199, `CA-04` 근거)은 아래 [KRR 기각 절](#199-non-linear-kernel-ridge-regression-krr-전면-교체-실험-및-심층-분석-기각)에 별도로 보존되어 있다.
+
 5개 브랜치 로짓($M_{CV}, M_{CT}, M_{BM}, M_{BD}, M_{QA}$)을 기반으로 9가지 앙상블 기법을 오프라인 전수 비교함.
 
 | 앙상블 기법 | 4-Branch Base (CV,CT,BM,BD) | 5-Branch (+QA) | **4-Branch No-CV (CT,BM,BD,QA)** |
@@ -339,6 +341,8 @@ _by Gemini 3.7 Flash (High) on gnode3 at 2026-08-22 19:15:00_
 ---
 
 ## §200. v119 공식 승격: 5-Branch (CV + CT + BM + BD + QA) + Trimmed Mean Voting (2026-08-22 22:25)
+
+> **절 번호 안내 (closed_axes.md §0 규칙 7):** 본 절은 v119 승격 절이다. 동일 번호의 Direct LR 기각 절(§200, `CA-05` 근거)은 아래 [LR 기각 절](#200-lr-direct-in-context-patch-likelihood-ratio--top-k-mil-실험-및-분석-기각)에 별도로 보존되어 있다.
 
 ### 1. v119 아키텍처 확정 (5-Branch Trimmed Mean)
 - **Active 5 Branches (DD 폐기, CV 유지)**:
@@ -440,6 +444,8 @@ _by Gemini 3.7 Flash (High) on gnode3 at 2026-08-23 00:25:00_
 
 ## §199. Non-Linear Kernel Ridge Regression (KRR) 전면 교체 실험 및 심층 분석 (기각)
 
+> **절 번호 안내 (closed_axes.md §0 규칙 7):** 본 절은 `CA-04`의 근거가 된 KRR 기각 절이다. 동일 번호의 앞쪽 앙상블 Voting 비교 절(§199)은 [앙상블 Voting 비교 절](#199-9대-voting--ensembling-기법-전수-비교-및-trimmed-mean-voting-채택-2026-08-22-2055)에 보존되어 있다.
+
 ### 1. 가설 및 실험 설계
 - **가설**: 슬라이드 레벨의 선형 Ridge 판별 경계면을 RBF / Cosine 커널 기반 비선형 Kernel Ridge Regression (KRR)으로 전환하면, 복잡한 유전자 변이 경계를 비선형 매니폴드로 분리할 수 있을 것이다.
 - **수식**:
@@ -468,6 +474,8 @@ _by Antigravity on gnode3 at 2026-08-23 03:00:00_
 ---
 
 ## §200. LR (Direct In-Context Patch Likelihood Ratio + Top-K MIL) 실험 및 분석 (기각)
+
+> **절 번호 안내 (closed_axes.md §0 규칙 7):** 본 절은 `CA-05`의 근거가 된 Direct LR 기각 절이다. 동일 번호의 앞쪽 v119 승격 절(§200)은 [v119 승격 절](#200-v119-공식-승격-5-branch-cv--ct--bm--bd--qa--trimmed-mean-voting-2026-08-22-2225)에 보존되어 있다.
 
 ### 1. 가설 및 구현
 - **가설**: 256개 군집 병목 없이, Context 세트의 Class 1 및 Class 0 패치 메모리 뱅크로부터 직접 비모수 우도비(Log-Odds)를 구하고, 상/하위 $K$개 극값 패치만 풀링(Top-K MIL)하면 95% 정상 기질 희석 문제를 원천 차단할 수 있을 것이다.
