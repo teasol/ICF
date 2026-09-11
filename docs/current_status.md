@@ -12,7 +12,7 @@
 | **Host / Node** | `nexgem-s1` · RTX A5000 8장(23 GB) · driver 580.126.09 · Slurm 명령 없음 |
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · Lightning 2.6.5 |
 | **Active Job** | 없음. 유휴 GPU 확인 후 필요 작업 진행 (`free_gpus.sh`) |
-| **회귀 테스트** | 156 tests · `OK` (코드 변경 시 전수 검증, 문서 단독 변경 시 면제) |
+| **회귀 테스트** | 159 tests · `OK` (코드 변경 시 전수 검증, 문서 단독 변경 시 면제) |
 
 ---
 
@@ -27,7 +27,7 @@
 3. **§226 Tier 1 독립 비교군 부재**: **안 해도 됨 확정.** RU-85~RU-90을 통해 개별 검증 및 공식 승격이 완료되어 역사적 사실로 보존됨.
 4. **`adaptive_tau` 무효 인자**: **해결 완료 (오기 정정).** `history/archive.md` D-040에서 확인되었듯 `adaptive_tau`는 `config.py` 및 `voting.py`에서 정상 사용 중인 유효 파라미터임 (삭제 불요).
 5. **AUROC 2대 추정기 고정 차(+8.55e-05)**: **해결 완료 (2026-09-10).** Lime이 6개 진단 스크립트(`branch_diagnostics.py` 등)의 인라인 AUROC를 공식 `src/utils/metrics.py:auroc`로 단일화 완료 (commit `8c1776c`).
-6. **집계 로직 이원화 중복**: **해결 완료 (2026-09-10).** Lime이 `voting.py`에 확률 공간 공통 헬퍼(`_trimmed_mean_from_probs` 등 5종)를 추출하고 `test_pathobench.py`가 이를 직접 import하여 재사용하도록 리팩토링. `TestPathobenchAndVotingAgree`에 soft_voting 외 trimmed_mean/hard_gated/adaptive_trimmed 교차일치 테스트 3건 추가 (commit `8c1776c`, 회귀 156 tests OK).
+6. **집계 로직 이원화 중복**: **해결 완료 (2026-09-10).** Lime이 `voting.py`에 확률 공간 공통 헬퍼(`_trimmed_mean_from_probs` 등 5종)를 추출하고 `test_pathobench.py`가 이를 직접 import하여 재사용하도록 리팩토링. `TestPathobenchAndVotingAgree`에 soft_voting 외 trimmed_mean/hard_gated/adaptive_trimmed 교차일치 테스트 3건 추가 (commit `8c1776c`).
 7. **`ICF_SHAPE_SCREEN_ONLY=0` trimmed_mean 외 4종 미실측**: **안 해도 됨 확정.** 공식 운영 집계는 `trimmed_mean`이며 RU-90 층 2에서 등가성 확인 완료. 나머지 4종은 보조/닫힌 축으로 실측 불필요 판정.
 8. **§226 적대적 검증 2건 미실행**: **안 해도 됨 확정.** 해당 형상 브랜치(`SH`, `SJ`)가 RU-90 거쳐 공식 7-branch 승격(`D-042`) 완료되어 과거 논증 복원 불필요 확정.
 
