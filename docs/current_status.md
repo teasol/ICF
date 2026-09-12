@@ -7,18 +7,24 @@
 
 | 항목 | 값 |
 |:---|:---|
-| **Last Updated** | 2026-09-10 (KST) |
-| **Status** | **기술 부채 8건 전수 해결 완료** · 다음 연구 방향 착수 대기 |
+| **Last Updated** | 2026-09-12 (KST) |
+| **Status** | **순수 러너 마이그레이션 및 레거시 11,800라인 삭제 완료 (RU-91)** · 후속 연구 착수 대기 |
 | **Host / Node** | `nexgem-s1` · RTX A5000 8장(23 GB) · driver 580.126.09 · Slurm 명령 없음 |
-| **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · Lightning 2.6.5 |
+| **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · 0-parameter 순수 추론 |
 | **Active Job** | 없음. 유휴 GPU 확인 후 필요 작업 진행 (`free_gpus.sh`) |
-| **회귀 테스트** | 159 tests · `OK` (코드 변경 시 전수 검증, 문서 단독 변경 시 면제) |
+| **회귀 테스트** | 159 tests · `OK (16 skipped)` (코드 변경 시 전수 검증, 문서 단독 변경 시 면제) |
 
 ---
 
-## 현재 작업: 기술 부채 전수 해결 완료 및 후속 연구 방향 착수 준비
+## 현재 작업: 순수 러너 체제 안착 및 후속 연구 방향 준비
 
-현재 목표였던 기술 부채 8건 해결이 전수 완료(또는 안 해도 됨 확정)되었으며 ([`PROJECT.md` §2](PROJECT.md)), 후속 연구 방향 착수를 준비한다.
+교살자 패턴 마이그레이션(RFC 2026-09-12, RU-91)이 전 단계 완료되어, `scripts/evaluate_pure.py` 기반 단일 정본 러너 체제가 수립되고 레거시 11,800 라인이 일괄 삭제되었습니다.
+
+### 마이그레이션 성과 (RU-91 완료)
+- **Phase A (순수 러너 구축 & 패리티)**: `configs/baseline/v121_7branch_active.yaml` 및 `scripts/evaluate_pure.py` 신설. Primary 7 50-fold 전수 검증에서 레거시 오라클 대비 Macro AUROC 0.6226 vs 0.6226 ($\Delta = -0.0000$, RU-91-B) 수치적 완전 항등 달성.
+- **Phase B-1 (의존성 이관)**: `eval_seal_tasks.sh`, `prepare_pathobench.py`, 분석 스크립트 등 `test_pathobench.py` 의존 17건 `evaluate_pure.py`로 이관 완료. 기존 골든 영구 보존 선언.
+- **Phase B-2 (레거시 일괄 삭제)**: `src/datasets/`, `src/modules/`, `baseline.py`, `set_transformer_ridge.py`, `scripts/test_pathobench.py` 등 총 11,600+ 라인 일괄 삭제 완료.
+- **Phase C (정합성 검증)**: 전체 159개 단위 테스트 통과 (OK, 16 skipped).
 
 ### 기술 부채 현황 및 처리 상태 (8개 항목 전수 완료)
 

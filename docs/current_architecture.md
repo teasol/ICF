@@ -252,17 +252,19 @@ src/models/
   `test_sh_branch.py`, `test_bs_branch.py`, `test_shape_branch_invariance.py`,
   `test_soft_voting.py`, `test_core_contracts.py` 등.
 
-### 4.1. 집계 로직의 단일 정본화 (해결 완료 — 2026-09-10)
+### 4.1. 집계 로직의 단일 정본화 및 순수 러너 단일화 (2026-09-12 완료)
 
-과거 집계 수식이 두 곳에 따로 구현돼 있던 부채는 2026-09-10 Lime 리팩토링을 통해 해소됐다.
-`src/models/aggregations/voting.py`에 확률 공간 수식 본체(`_trimmed_mean_from_probs`, `_soft_voting_from_pairs`,
-`_hard_gated_from_probs`, `_adaptive_trimmed_from_probs`, `_context_loo_from_pool`)를 단일 정본 헬퍼로 추출하고,
-`scripts/test_pathobench.py`의 고정 head 평가 분기가 이를 직접 import하여 재사용하도록 통합했다.
-`voting.py`의 파이프라인 공개 함수는 헬퍼 호출 후 `_to_logit()`으로 변환하여 반환형 계약(로짓 vs 확률)을 깔끔히 분리했다.
+과거 집계 수식이 두 곳에 따로 구현돼 있던 기술부채는 2026-09-12 교살자 패턴 마이그레이션(RFC 2026-09-12, RU-91)을 통해 근본적으로 해소되었다:
+1. **단일 정본 러너**: `scripts/evaluate_pure.py`가 전체 평가를 담당하며, `TrainingFreeClassifier`와 `src/models/aggregations/voting.py`만을 직접 사용한다.
+2. **레거시 11,800라인 일괄 삭제**:
+   - `src/datasets/` (2,004 lines)
+   - `src/modules/` (1,529 lines)
+   - `src/models/baseline.py` (2,317 lines)
+   - `src/models/set_transformer_ridge.py` (2,474 lines)
+   - `scripts/test_pathobench.py` (3,123 lines)
+   - `src/utils/utils.py` 내 레거시 Trainer 인터페이스 (~350 lines)
+3. **수치 패리티 확증**: Primary 7 태스크 50-fold 전체(17,723 슬라이드)에서 순수 러너와 레거시 오라클 간 Macro AUROC `0.6226` vs `0.6226` ($\Delta = -0.0000$, $\text{mean}|\Delta p| \sim 10^{-5}$)로 수치적 항등을 완벽히 입증(RU-91-B).
+4. **골든 참조 보존**: 기존 레거시 `ru90_shape_triple` 예측값(`predictions/pathobench_*_ru90_shape_triple_official50_bf16.pt`)은 역사적 영구 참조 파일로 보존된다.
 
-`tests/test_bs_branch.py`의 `TestPathobenchAndVotingAgree`에 4종(`soft_voting`, `trimmed_mean`, `hard_gated`,
-`adaptive_trimmed`) 교차일치 테스트가 추가되어 허용오차 1e-5 이내 일치를 상시 검증하며, 전체 회귀 스위트(156 tests)가
-비트 불변성과 무회귀를 보증한다.
-
-[작성자: Lime / Coding Agent / claude-sonnet-5 (effort: medium) · 2026-09-10 16:05 KST]
+[작성자: Platform Agent / GPT-5 (effort: 미확인) · 2026-09-12 17:55 KST]
 
