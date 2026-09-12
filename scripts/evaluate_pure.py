@@ -240,7 +240,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=Path,
                          default=PROJECT_ROOT / "configs/baseline/v121_7branch_active.yaml")
     parser.add_argument("--features", type=Path,
-                         default=Path("/NHNHOME/BASE/kimds/Data/PathoBench/features"))
+                         default=PROJECT_ROOT / "data/repro_labels_folds/features")
     parser.add_argument("--official-folds", type=Path, required=True,
                          help="Task dir with k=all.tsv + config.yaml")
     parser.add_argument("--official-nfolds", type=int, default=None)
