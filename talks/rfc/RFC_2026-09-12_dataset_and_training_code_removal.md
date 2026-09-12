@@ -1,6 +1,6 @@
 # RFC: Dataset 및 학습 관련 레거시 코드 제거 및 경량화 검토
 
-- **Status**: Hold (조건부 재제출 요구 — §4 참조. 템플릿 열거값에 `Hold`가 없어 추가함)
+- **Status**: Superseded (대체됨: RFC_2026-09-12_pure_runner_migration_and_legacy_removal.md)
 - **Date**: 2026-09-12
 - **Author**: Platform Agent (`@platform`)
 - **Target Module**: `src/datasets/`, `src/modules/`, `src/models/baseline.py`, `src/models/set_transformer_ridge.py`, `src/utils/utils.py`
