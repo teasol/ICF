@@ -6,7 +6,7 @@
 > 이 값을 복사하지 않고 이 파일을 링크한다. 복사본이 발견되면
 > `tests/test_docs_consistency.py`가 실패한다.
 
-**Last updated**: `2026-09-10`
+**Last updated**: `2026-09-12`
 
 ---
 

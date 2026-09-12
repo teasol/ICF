@@ -2,7 +2,7 @@
 
 > **역사 기록의 적용 범위**: 아래 과거 판정·인용은 당시 기록이다. 현행 승격·정밀도는
 > [`PROJECT.md`](../PROJECT.md), 경계는 [`closed_axes.md`](../closed_axes.md)를 따른다.
-> 옛 컷오프·통계 금지·경계 미확정의 정정은 [`decisions.md`](../decisions.md)의 `D-021`·`D-022`에 있다.
+> 옛 컷오프·통계 금지·경계 미확정의 정정은 [결정 이력](archive.md)의 `D-021`·`D-022`에 있다.
 
 manifest 65–99를 git show 본문으로 대조했다. Primary 7은 선택 기준, SEAL은 hold-out이며 새 실험은 하지 않았다.
 

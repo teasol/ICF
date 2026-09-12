@@ -269,4 +269,4 @@ Phase B(삭제)는 구현 작업이므로 카드 없이 진행합니다.
 _§4는 Orca가 작성했습니다. 그 외 본문은 원 작성자의 기술을 보존했습니다._
 _§4의 전제 검증은 Orca의 직접 실측이며, 인용한 `+8.55e-05`·`1.788e-07`은 RU-90(Lime 측정) 기록입니다._
 
-[작성자: Platform Agent / GPT-5 (effort: 미확인) · 2026-09-12 17:55 KST]
+[작성자: Platform Agent / Gemini 3.8 Flash (effort: high) · 2026-09-12 17:55 KST]

@@ -2,7 +2,7 @@
 
 > **역사 기록의 적용 범위**: 아래 과거 판정·인용은 당시 기록이다. 현행 승격·정밀도는
 > [`PROJECT.md`](../PROJECT.md), 경계는 [`closed_axes.md`](../closed_axes.md)를 따른다.
-> 옛 컷오프·통계 금지·경계 미확정의 정정은 [`decisions.md`](../decisions.md)의 `D-021`·`D-022`에 있다.
+> 옛 컷오프·통계 금지·경계 미확정의 정정은 [결정 이력](archive.md)의 `D-021`·`D-022`에 있다.
 
 > **감사 기준선 및 개요**  
 > - **고정 HEAD**: `f3f0b201f85d2bb7eafe1e63561e2bbda2b277c1` (Index 99)  
@@ -327,7 +327,7 @@
   - `31ea065d:src/models/training_free.py#L205`:
     > "    # BM branch: projected bag-mean in leading subspace with class-balanced ridge."
   - `af004748:README.md#L28`:
-    > "| [`docs/current_status.md`](docs/current_status.md) | 개발 현황 **SSOT** — 최신 수치·커밋·Action Plan |"
+    > "| [`docs/current_status.md`](../current_status.md) | 개발 현황 **SSOT** — 최신 수치·커밋·Action Plan |"
 - **선행·후속 관계 (Relations)**: RU-15, RU-21
 - **확인 필요 사항 및 한계 (Uncertainties)**: 35–45에는 문서/리팩터링이 포함되므로 이를 독립 성능 주장으로 쓰지 않는다.
 
@@ -498,7 +498,7 @@
 - **당시 결정 (Decision)**: 학습 계보는 archive/git history에 보존하고 활성 v120과 분리했다.
 - **원문 근거 (Evidence)**:
   - `10484d9a:docs/current_status.md#L641`:
-    > "| v120 활성 경로가 로드하는 yaml | **`configs/train_v98_p1_reverse_1536_1gpu.yaml` 단 1개** ([`scripts/node_env.sh`](../scripts/node_env.sh) `ICF_CONFIG` 기본값) |"
+    > "| v120 활성 경로가 로드하는 yaml | **`configs/train_v98_p1_reverse_1536_1gpu.yaml` 단 1개** ([`scripts/node_env.sh`](../../scripts/node_env.sh) `ICF_CONFIG` 기본값) |"
   - `10484d9a:docs/current_status.md#L670`:
     > "- **dangling 참조**: 코드/Living 문서에서 존재하지 않는 config 경로 참조 0건"
 - **선행·후속 관계 (Relations)**: RU-21

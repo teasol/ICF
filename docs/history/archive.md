@@ -653,7 +653,7 @@ _by Antigravity on gnode3 at 2026-08-24 18:20:00_
 
 | 항목 | 실측 |
 | :--- | :--- |
-| v120 활성 경로가 로드하는 yaml | **`configs/train_v98_p1_reverse_1536_1gpu.yaml` 단 1개** ([`scripts/node_env.sh`](../scripts/node_env.sh) `ICF_CONFIG` 기본값) |
+| v120 활성 경로가 로드하는 yaml | **`configs/train_v98_p1_reverse_1536_1gpu.yaml` 단 1개** ([`scripts/node_env.sh`](../../scripts/node_env.sh) `ICF_CONFIG` 기본값) |
 | 그 config의 역할 | **체크포인트 껍데기 전용** — v106+ 가 projection과 head를 덮어쓰므로 학습값이 마진에 닿지 않는다(§152) |
 | 루트 config가 참조하는 config-group | **0개** — 루트 config는 전부 자체 포함형(inline dict)이고, group 참조는 `configs/archive/`만 한다 |
 | 코드에서 참조되는 루트 config | `train_v98`(node_env + diagnostics 2개), `train_v83`(diagnostics 1개, **stale 절대경로**) |
@@ -1944,7 +1944,7 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
 ## §226. 멀티에이전트 연구방향 라운드 · 게이트 ① 도구 결함 수정 · 낡은 서술 정정
 
 > 이관: `current_status.md` 2026-09-05 절 (2026-09-06 문서 재구성 시 이관).
-> 결정 요약은 [`../decisions.md`](../decisions.md) `D-013`·`D-014`, 후보 목록은
+> 결정 요약은 [결정 이력](archive.md) `D-013`·`D-014`, 후보 목록은
 > [`../research_directions.md`](../research_directions.md)가 정본이다.
 
 ### 1. 수행 내용
@@ -2070,7 +2070,7 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
 - **근거**: 브랜치 집합이 다르면 비교 불가능하다. 수치는 §214-V에서
   `predictions/*_v121_baseline_official50_bf16.pt`로부터 독립 재계산해 확인했다.
 - **재검토 조건**: CT의 기여가 통제 비교로 확인되는 경우.
-- **출처**: §214-V · RU-69 · [`PROJECT.md` §3.2](PROJECT.md)
+- **출처**: §214-V · RU-69 · [`PROJECT.md` §3.2](../PROJECT.md)
 
 ## D-006 · 2026-09-03 · 집계 함수 변형 탐색 축 종료 + 보고 무결성 계약 신설
 
@@ -2094,7 +2094,7 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
 - **재검토 조건**: 없음 — 사용자 결정으로 확정된 영구 규칙.
 - **주의**: 이 결정은 RU-54(2026-08-21, Primary 7과 SEAL 역할 전환)를 **후속 정정**한 것이다.
   RU-54 시점 규칙으로 내려진 과거 판정은 당시 사실로 읽는다.
-- **출처**: §216 · RU-70 · [`PROJECT.md` §3.1](PROJECT.md)
+- **출처**: §216 · RU-70 · [`PROJECT.md` §3.1](../PROJECT.md)
 
 ## D-008 · 2026-09-04 · 신규 브랜치 2단계 게이트 신설
 
@@ -2104,7 +2104,7 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
 - **근거**: 성능 순위로 후보를 고르는 절차는 §214에서 실패가 입증됐다.
 - **재검토 조건**: 게이트 기준값(max |r| 0.6, eff.rank 비하락)의 근거가 반증되는 경우.
 - **이후**: D-009(②b 신설) · D-011(Oracle 폐기로 ②b 개정) · D-013(게이트 ① 기준 집합 수정)
-- **출처**: §218 · RU-71 · [`PROJECT.md` §5](PROJECT.md)
+- **출처**: §218 · RU-71 · [`PROJECT.md` §5](../PROJECT.md)
 
 ## D-009 · 2026-09-04 · 게이트 ②b 과제 특화 경로 신설 *(사용자 지시)*
 
@@ -2189,8 +2189,8 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
   구조적 원인은 **탐색 공간의 기대 효과가 측정 장치의 분해능(±1.0%p) 아래**에 있다는 것이다
   (§226 채점자 전원이 `promotion_realism` 0~3점, 4점 이상 0건).
 - **결정**:
-  1. **문서 체계를 전면 재구성한다.** 수치 SSOT([`PROJECT.md`](PROJECT.md)), 닫힌 축
-     레지스트리([`closed_axes.md`](closed_axes.md)), 결정 기록(이 파일)을 분리하고,
+  1. **문서 체계를 전면 재구성한다.** 수치 SSOT([`PROJECT.md`](../PROJECT.md)), 닫힌 축
+     레지스트리([`closed_axes.md`](../closed_axes.md)), 결정 기록(이 파일)을 분리하고,
      `current_status.md`는 상태만 담는 짧은 문서로 되돌린다.
   2. **진행 단위를 커밋이 아니라 RU(연구 단위)로 되돌린다.** 착수 전 RU 카드에
      질문·가설·판정 기준·예산·**중단 조건**·결과별 후속 행동을 등록한다.
@@ -2198,7 +2198,7 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
 - **근거**: 방향성 상실이 아니라 목표 함수가 측정 불가 영역에 있는 것이 원인이므로, 후보를
   더 만들기 전에 판정 체계와 기록 체계를 먼저 고친다.
 - **재검토 조건**: 정비 완료 후 연구 방향 설정 시점.
-- **출처**: 본 세션 · [`history/research_units_all.md`](history/research_units_all.md)
+- **출처**: 본 세션 · [`research_units_all.md`](research_units_all.md)
 
 ## D-016 · 2026-09-06 · 실행 환경 정정 — 로그인 노드 + Slurm 클러스터 *(사용자 지시)*
 
@@ -2212,7 +2212,7 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
      `gnode5`(A6000) > `gnode6`(H100). 같은 등급에서는 한산한 노드를 고른다.
   3. **job 제출 전 사용자 승인을 받는다.** job 로그는
      `slurm_outputs/YYYY-MM-DD/HHMM/%x-%j.{out,err}`에 남긴다.
-  4. 노드 스펙·우선순위·로그 규약의 **정본은 [`/home/kimds/agent_rules/slurm_rules.md`](/home/kimds/agent_rules/slurm_rules.md)** 로 둔다 (저장소 밖,
+  4. 노드 스펙·우선순위·로그 규약의 **정본은 공용 `slurm_rules.md`** 로 둔다 (저장소 밖,
      여러 프로젝트 공용).
 - **근거**: `gnode6`(H100 80GB · 드라이버 595.71.05 · CUDA 13.2)에서 기존 `.venv`가 재설치 없이
   동작함을 job 131263으로 확인했다 — `cuda_available=True`, 4096² matmul 성공. 따라서 D-015 시점의
@@ -2233,10 +2233,9 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
   - **양식 B — 선택 결과를 확증으로 포장** (Era 6): §214에서 집계 8종·부분집합 31종을
     탐색해 고른 최댓값이 성과로 보고됐다. 이 위반이 확인되어 `D-006`이 신설됐다.
 - **결정**:
-  1. **연구 방법론의 정본을
-     [`/home/kimds/agent_rules/research_protocol.md`](/home/kimds/agent_rules/research_protocol.md)(v3.0)로
-     둔다.** 저장소 밖, 모든 프로젝트 공용이다. 이 저장소의 규범은 그것을 **상속하고 좁힌다.**
-  2. [`agent_handoff.md`](agent_handoff.md) **맨 위**에 이 저장소의 적용 규칙 **R1~R7**을 둔다 —
+  1. **연구 방법론의 정본을 공용 `research_protocol.md`(v3.0)로 둔다.**
+     저장소 밖, 모든 프로젝트 공용이다. 이 저장소의 규범은 그것을 **상속하고 좁힌다.**
+  2. [`agent_handoff.md`](../agent_handoff.md) **맨 위**에 이 저장소의 적용 규칙 **R1~R7**을 둔다 —
      RU 유형 선언 · 계측 우선 점검(예산 포함) · 성능↛기전 · 확증 기준 사전 고정과 선택 이력 ·
      `±1.0%p`의 정확한 명명 · 개별 기여와 조합 검증의 분리 · 증거 판정과 운영 결정의 분리.
   3. RU 카드에 **`type`**(§2.1의 4종)을 도입하고, 종료 시 **증거 판정·운영 결정·기전 확인
@@ -2255,12 +2254,12 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
   않는다.** 남는 규칙은 "개별 기여를 확정하지 않되 조합은 별도 검증 대상"이다(R6).
 - **영향 범위**: 이 저장소의 모든 신규 RU. 과거 판정은 소급 무효화하지 않는다
   (`D-016`과 같은 원칙). 다만 v115~v120 조합에 의존하는 **현행 구성 자체는 검증 대상으로
-  남는다** — 미해결 항목은 [`current_status.md`](current_status.md)에 있다.
-- **재검토 조건**: 보편 규범이 개정될 때. 그리고 [`PROJECT.md` §4.1](PROJECT.md)의 `±1.0%p`가
+  남는다** — 미해결 항목은 [`current_status.md`](../current_status.md)에 있다.
+- **재검토 조건**: 보편 규범이 개정될 때. 그리고 [`PROJECT.md` §4.1](../PROJECT.md)의 `±1.0%p`가
   무엇의 불확실성인지(고정 fold 점수 vs 목표 모집단 기대 성능) 사용자가 확정할 때 R5를 함께 개정한다.
 - **관련**: `D-006`(보고 무결성) · `D-010`(통제 비교) · `D-015`(문서 체계). 검토 근거는
-  [`history/era_review_notes.md`](history/era_review_notes.md).
-- **출처**: 본 세션 · [`history/research_units_all.md`](history/research_units_all.md) 전수 검토 ·
+  [`era_review_notes.md`](era_review_notes.md).
+- **출처**: 본 세션 · [`research_units_all.md`](research_units_all.md) 전수 검토 ·
   보편 규범 v3.0
 
 ## D-018 · 2026-09-06 · 승격 기준 재정의 — per-fold Δ 구간 추정과 `δ_min = 0.3%p` *(사용자 결정)*
@@ -2306,7 +2305,7 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
   그러나 **fold는 시드 반복이 아니라 데이터 표집 단위**이므로, per-fold Δ의 표집 불확실성에는
   구간 추정을 **사용한다.** 두 규범은 충돌하지 않는다.
 - **영향 범위**: 이후 모든 승격 판정. `PROJECT.md` §4·§4.1,
-  [`agent_handoff.md`](agent_handoff.md) R5·R6. 게이트 ①·②(§5)는 그대로다 — 그 근거는 분해능이
+  [`agent_handoff.md`](../agent_handoff.md) R5·R6. 게이트 ①·②(§5)는 그대로다 — 그 근거는 분해능이
   아니라 **선택 편향**이므로 이 결정에 영향받지 않는다.
 - **재검토 조건**: 평가 fold 구성이나 Primary 7 과제 집합이 바뀔 때. `δ_min`은 목표(ABMIL까지의
   잔여 거리, §1)가 바뀌면 함께 재검토한다.
@@ -2316,7 +2315,7 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
 ## D-019 · 2026-09-06 · `D-003` 폐지 — 시드 편차 기준의 오적용 금지였지 통계 기준 금지가 아니었다 *(사용자 정정)*
 
 - **맥락**: `D-003`은 *"결정론적 arm에 t·p·CI를 쓰지 않는다"* 로 기록됐고, `PROJECT.md` §4와
-  [`agent_handoff.md`](agent_handoff.md) §3 불변식에 **"승격 판정에 사용 금지"** 로 박혔다.
+  [`agent_handoff.md`](../agent_handoff.md) §3 불변식에 **"승격 판정에 사용 금지"** 로 박혔다.
   사용자가 밝힌 **원래 의도는 그보다 좁았다**:
   > 확률론적 arm에서 **시드별 편차로 만든 통계 기준**을 결정론적 arm에 **적용하지 말라**는 뜻이었지,
   > 통계적 기준을 **만드는 것**까지 제한한 적이 없다.
@@ -2329,7 +2328,7 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
   않는다. `D-018`이 세운 기준 — **fold 표집 불확실성 위의 per-fold Δ 구간 추정** — 이 그 자리를
   대신한다. `D-018`의 "`D-003`과의 관계" 항목도 이 레코드가 대체한다.
 - **폐지해도 남는 사실 (금지가 아니라 사실)**:
-  - `seed std = 0.00000`은 여전히 참이고 **핵심 불변식**이다([`agent_handoff.md` §3](agent_handoff.md)).
+  - `seed std = 0.00000`은 여전히 참이고 **핵심 불변식**이다([`agent_handoff.md` §3](../agent_handoff.md)).
   - **같은 실행을 반복해 얻은 동일 점수는 새로운 독립 증거가 아니다.** 시드 반복을 표본 수로
     세지 않는다. 이는 통계 도구의 금지가 아니라 **표본 단위를 잘못 세지 말라**는 것이다.
   - **fold는 시드 반복이 아니라 데이터 표집 단위**이므로 표집 불확실성이 실재하고, 그에 대한
@@ -2352,7 +2351,7 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
   ③ RU 카드 작성의 왕복 규칙과 면제 하한선이 없었다,
   ④ 닫힌 축 저촉 시 "성능·점수와 무관하게 기각"이 **조용한 기각**으로 읽힐 수 있었다.
   넷 다 에이전트가 문서 근거 없이 임의 운영하고 있었다.
-- **결정** *(사용자)*: [`agent_handoff.md`](agent_handoff.md) **§1.0 착수 절차**를 신설하고,
+- **결정** *(사용자)*: [`agent_handoff.md`](../agent_handoff.md) **§1.0 착수 절차**를 신설하고,
   **사용자도 읽고 따르는 공통 규약**으로 둔다. 에이전트만의 체크리스트가 아니다 —
   사용자가 절차를 모르면 에이전트가 절차를 지키는 것이 방해로만 보인다.
 
@@ -2439,7 +2438,7 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
 ## D-024 · 2026-09-07 · RU-81 종료 · 기준선 유지와 정규화 처방 보류
 
 - **결정 주체**: Codex, 사용자가 승인한 RU-81의 결과 해석·종료 범위와 사전 next_actions에 따라.
-- **맥락·출처**: [RU-81 종료 보고](reports/RU-81_regularization_diagnosis.md),
+- **맥락·출처**: [RU-81 종료 보고](../reports/RU-81_regularization_diagnosis.md),
   실행 `ru81_reg_20260907_r1`, 원시 예측 독립 검산 `audit.json`.
 - **증거 판정**: 같은 λ에서 상대적 수축이 다르고 λ 변화가 순위·마진을 바꾼다는 관측은 지지.
   일관된 앙상블 개선은 판별 불가. 순위와 크기의 개별 기전 귀속은 미확인.
@@ -2454,7 +2453,7 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
 ## D-025 · 2026-09-07 · RU-82 종료 · λ 앙상블에 추가 예산 미투입, 축은 유지
 
 - **결정 주체**: Claude Code, 사용자 제안(여러 λ의 로짓을 결합)에 대한 RU-82의 사전 next_actions에 따라.
-- **맥락·출처**: [RU-82 종료 보고](reports/RU-82_lambda_ensemble.md), `docs/ru/RU-82.json`,
+- **맥락·출처**: [RU-82 종료 보고](../reports/RU-82_lambda_ensemble.md), `docs/ru/RU-82.json`,
   출처 실행 `ru81_reg_20260907_r1`의 저장 마진 오프라인 재집계(GPU 0).
 - **경계 판정**: 제안은 `CA-08` 경계 밖이다 — `D-022`의 "브랜치 내부 변형을 결합한다는 형식만으로
   폐쇄 축을 적용하지 않는다"에 해당하고, `CA-09`의 `FC` 판례와 같은 구조다.
@@ -2518,7 +2517,7 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
 ## D-028 · 2026-09-07 · RU-83 종료 · 정규화·결합 진단 종료, 자원을 신규 브랜치로
 
 - **결정 주체**: Claude Code, RU-83의 사전 `next_actions` "H1 반박" 분기에 따라.
-- **맥락·출처**: [RU-83 종료 보고](reports/RU-83_rank_size_separation.md), `docs/ru/RU-83.json`,
+- **맥락·출처**: [RU-83 종료 보고](../reports/RU-83_rank_size_separation.md), `docs/ru/RU-83.json`,
   출처 실행 `ru81_reg_20260907_r1`의 저장 마진 오프라인 재집계(GPU 0).
 - **증거 판정**: H2(가법성) 지지 — 순위 효과와 크기 효과는 근사적으로 분리된다.
   H1(크기 지배) 반박 — 크기 우세 4/12, 순위 우세 8/12. H3 반박 — 2/4.
@@ -2540,7 +2539,7 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
 ## D-029 · 2026-09-07 · RU-84 종료 · §199의 Gram 대각 지배 기전 반박
 
 - **결정 주체**: Claude Code, RU-84의 사전 `next_actions` "H1 지지" 분기에 따라.
-- **맥락·출처**: [RU-84 종료 보고](reports/RU-84_gram_diagonal_dominance.md), `docs/ru/RU-84.json`,
+- **맥락·출처**: [RU-84 종료 보고](../reports/RU-84_gram_diagonal_dominance.md), `docs/ru/RU-84.json`,
   `D-027`이 지정한 `CA-04` 활용 전 해소 항목 ①.
 - **증거 판정**: **반박.** §199가 `CA-04`의 기각 기전으로 제시한 "RBF Gram이 대각선 근처만 1이고
   나머지는 0에 수렴"은 현행 구현에서 성립하지 않는다. `solvers.solve_kernel_ridge`의 피처별
@@ -2577,7 +2576,7 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
 - **`D-016`과의 관계 — 폐기가 아니라 범위 한정**: `D-016`의 판단은 그 시점에 옳았다.
   당시 측정 대상은 GPU가 없는 `nexgem`이었고, 차단 판정이 로그인 노드 측정에 근거했다는 정정도
   유효하다. 이 레코드는 그 규칙이 **`nexgem` 경로에만 적용된다**는 범위를 명시한다.
-- **영향 범위**: [`agent_handoff.md`](agent_handoff.md) §5·§6. `/home/kimds/agent_rules/slurm_rules.md`는
+- **영향 범위**: [`agent_handoff.md`](../agent_handoff.md) §5·§6. 공용 `slurm_rules.md`는
   Slurm 경로의 정본으로 그대로 유지된다. 모델·판정 기준·fold·hold-out 정책 변경 없음.
 - **미해결(승계)**: `gnode1`~`gnode5`의 드라이버는 여전히 미실측이다. cu130 동작 확인은 `gnode6`뿐이다.
 - **재검토 조건**: 클러스터 구성 변경, s1에 Slurm이 도입되는 경우, 또는 새 호스트 추가.
@@ -2710,11 +2709,11 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
 
 **세 RU를 GPU 0으로 종료했다.**
 - **RU-82** λ 앙상블 — 4구성 전부 판별 불가. λ 평균은 과제 간 이질성을 흡수하지 못했다
-  ([보고](reports/RU-82_lambda_ensemble.md)).
+  ([보고](../reports/RU-82_lambda_ensemble.md)).
 - **RU-83** 순위·크기 분리 — 가법성 지지, 크기 지배 반박(4/12). 12 cell 전부 구간이 겹쳐 판정은
-  약하다 ([보고](reports/RU-83_rank_size_separation.md)). **정규화·결합 진단을 종료한다.**
+  약하다 ([보고](../reports/RU-83_rank_size_separation.md)). **정규화·결합 진단을 종료한다.**
 - **RU-84** RBF Gram 대각 지배 — §199 기각 기전 반박, 1,050건 중 0건
-  ([보고](reports/RU-84_gram_diagonal_dominance.md)).
+  ([보고](../reports/RU-84_gram_diagonal_dominance.md)).
 
 **축 15건·결정 33건 전수 조사 완료.** 기각 근거를 분류해 `CA-04`·`CA-02`를 **재개**했다 —
 둘 다 사유가 악화가 아니라 "이득 없음"이고 승격 기준이 구간 추정으로 바뀌기 전의 점추정에
@@ -2807,7 +2806,7 @@ BM/QA/DS의 역전은 3개의 독립 실패가 아니라 **1개 신호의 실패
     context_loo 회귀 핀 8건) 및 전체 회귀 테스트(121 tests) `OK`.
   - `docs/current_architecture.md`(§2.8·§4 기술 부채 해소), `docs/current_status.md`.
 - **재검토 조건**: 없음 (영구 적용). 다만 SH의 공식 구성 승격은 별개 요건으로 남는다
-  ([`PROJECT.md` §5](../../PROJECT.md)).
+  ([`PROJECT.md` §5](../PROJECT.md)).
 
 _by GLM-5.3-Flash on nexgem-s1 at 2026-09-09_
 
@@ -2966,6 +2965,33 @@ _by Orca / Main Agent / claude-opus-5 (effort: high) on nexgem-s1 at 2026-09-10_
 
 ---
 
+## D-043 · 2026-09-12 · 순수 러너(evaluate_pure.py) 단일화 및 레거시 11,800라인 일괄 삭제 (교살자 패턴 완결) *(사용자 결정 → RU-91 실측 확증)*
+
+- **결정 주체·출처**: 사용자 승인 (RFC 2026-09-12: `talks/rfc/RFC_2026-09-12_pure_runner_migration_and_legacy_removal.md` 채택 및 실행 지시).
+- **맥락 및 배경**:
+  1. ICF는 0-parameter 순수 추론(Training-Free) 시스템으로 전향했으나, 과거 딥러닝 학습/인코더 스택(`src/datasets/`, `src/modules/`, `baseline.py`, `set_transformer_ridge.py`) 및 모놀리스 평가 스크립트(`scripts/test_pathobench.py`)가 11,800라인 규모로 잔존했습니다.
+  2. 평가 경로(`test_pathobench.py`)와 프로덕션 경로(`voting.py`, `TrainingFreeClassifier`)의 집계 로직·브랜치 열거가 이원화되어 있어 `D-040`과 같은 잠재적 배선 결함 위험이 지속되었습니다.
+  3. 교살자 패턴(Strangler Fig Pattern)을 적용하여 신규 순수 러너(`scripts/evaluate_pure.py`)를 구축하고 완벽한 수치 동등성을 검증한 후 레거시를 안전하게 일괄 삭제하기로 결정하였습니다.
+- **결정**:
+  1. **순수 러너 단일 정본 채택**: `scripts/evaluate_pure.py` 및 `configs/baseline/v121_7branch_active.yaml`을 공식 단일 실행 러너 및 설정으로 확정합니다.
+  2. **레거시 11,800라인 영구 삭제**: `src/datasets/`(2,004 라인), `src/modules/`(1,529 라인), `src/models/baseline.py`(2,317 라인), `src/models/set_transformer_ridge.py`(2,474 라인), `scripts/test_pathobench.py`(3,122 라인) 및 관련 유틸리티 등 총 11,800라인 이상의 레거시 학습/평가 코드를 영구 삭제하였습니다.
+  3. **브랜치 풀 SSOT 일원화**: 집계 브랜치 정의는 `src/models/aggregations/voting.py`만을 단일 정본으로 유지하며, `test_pathobench.py`에 중복 존재하던 평가 분기를 완전히 제거하였습니다.
+  4. **골든 참조 영구 보존**: 레거시 실행의 공식 골든 아티팩트(`predictions/pathobench_*_ru90_shape_triple_official50_bf16.pt`)는 영구 보존하여 미래의 모든 검증과 비교의 오라클 앵커로 삼습니다.
+- **근거 — RU-91 패리티 실측**:
+  - **Phase A (RU-91-A)**: Primary 7 전 과제 50-fold(350 fold, 17,723 slide) 전수 검증에서 레거시 골든 오라클 대비 Macro AUROC 0.6226 vs 0.6227 ($\Delta = -0.0001$), mean|Δp| = 1.9e-4 ~ 6.3e-4 달성.
+  - **Phase B-1 (RU-91-B)**: 레거시 `32-true` 조건 전수 재현에서 Macro AUROC 0.6226 vs 0.6226 ($\Delta = -0.0000$, 소수점 4자리 완전 항등, 7과제 중 6과제 소수점 4자리 완전 일치, 1과제 0.0001) 달성.
+  - **Phase B-2 & C**: `test_pathobench.py` 의존 17개 파일(`eval_seal_tasks.sh`, `prepare_pathobench.py`, 분석 도구 등)의 `evaluate_pure.py` 이관 완료 및 전체 회귀 스위트 통과.
+- **영향 범위**:
+  - `scripts/evaluate_pure.py`, `configs/baseline/v121_7branch_active.yaml`.
+  - `docs/current_architecture.md`(§3.1, §4.1 레거시 이원화 부채 해소 반영), `docs/current_status.md`, `docs/PROJECT.md`.
+  - 삭제: `src/datasets/`, `src/modules/`, `src/models/baseline.py`, `src/models/set_transformer_ridge.py`, `scripts/test_pathobench.py`.
+- **재검토 조건**: 없음 (영구 적용). 향후 새로운 브랜치 추가나 집계 방식 변경 시 `evaluate_pure.py`와 `src/models/` 체계만 단일 확장함.
+- **관련**: `D-042`(공식 7-branch 고정) · `D-040`(집계 배선 정정) · `D-039`(SH의 `src` 통합) · `RU-91`(순수 러너 패리티 검증 및 레거시 삭제).
+
+[작성자: Platform Agent / Gemini 3.8 Flash (effort: high) · 2026-09-12 19:35 KST]
+
+---
+
 
 ## 2026-09-09 — D-039 인수인계 (current_status.md에서 이관)
 
@@ -2980,7 +3006,7 @@ _by Orca / Main Agent / claude-opus-5 (effort: high) on nexgem-s1 at 2026-09-10_
   브랜치별 on/off 분기를 헬퍼로 통일했다. SHJ alias(`shj.py`, `weight_shj`)는
   `D-038` 영구 적용에 따라 유지한다.
 - 회귀 테스트 121 tests `OK` (신설 8건 포함). RU-86·87·88 종료 요약은
-  [결정·이력](history/archive.md) 말미로 이관했다.
+  [결정·이력](archive.md) 말미로 이관했다.
 - **레거시 정리 (사용자 지시)**: `tests/history/`(46파일, 스위트 미수집)·
   `tests/fixtures/`·`scripts/archive/`(93파일)를 삭제했다. 고아 모듈
   `models/mla.py`·`utils/schedulers.py`와 하위 호환 facade
@@ -2989,6 +3015,7 @@ _by Orca / Main Agent / claude-opus-5 (effort: high) on nexgem-s1 at 2026-09-10_
   `set_transformer_ridge.py`·`src/modules/`·`baseline.py`는 **보존한다** —
   공식 평가 경로(`eval_v121.sh` → `test_pathobench.py`)가 lineage 모델의
   신규(head-less) 인스턴스로 v121 마진을 계산하므로 live 의존이다.
+  *(2026-09-12 추기: RFC 2026-09-12 / RU-91에서 순수 러너 evaluate_pure.py가 확립됨에 따라 해당 11,800라인은 D-043에 의해 전면 삭제되었다.)*
 
 ## 2026-09-08 — RU-86·87·88 종료 인수인계 (current_status.md에서 이관)
 
@@ -2997,24 +3024,24 @@ _by Orca / Main Agent / claude-opus-5 (effort: high) on nexgem-s1 at 2026-09-10_
 
 - **RU-86** MDX 게이트 ② — **반박·종료.** 사전 등재 과제 `Grade`에서 단독 AUROC > 0.5인 fold가
   50 중 **10개**(단측 `p = 0.99999720`). 게이트 ①을 통과한 유일한 Tier 1 후보를 종료했고
-  §226 Tier 1 3건이 전부 종료됐다 ([보고](reports/RU-86_mdx_gate2.md)).
+  §226 Tier 1 3건이 전부 종료됐다 ([보고](../reports/RU-86_mdx_gate2.md)).
   2차 탐색에서 **부호 반전**을 관측했다 — `Grade`는 50 중 40 fold가 0.5 **미만**, `KRAS`는 41 fold가
   초과이며 `|중앙값−0.5|`가 `0.0821` 대 `0.0861`로 크기가 같고 방향이 반대다. 무정보가 아니라
   **부호가 과제에 따라 뒤집히는 정보**일 수 있다(기전 미확인). 부호를 알려면 라벨이 필요하므로
   `CA-R1`과 같은 벽이며, 사후 부호 선택으로 후보를 되살리지 않았다.
 - **RU-87** bf16 대 fp32 — **상쇄·종료.** 정밀도 차는 절대 AUROC fold-mean 최대 `0.0837%p`,
   대응 Δ fold-mean `0.0674%p`로 **짝지은 Δ에서 상쇄된다**. 폐기한 `최대 0.5%p` 표기의 경위는
-  결정 이력 `D-037` ([보고](reports/RU-87_precision_bf16_fp32.md)).
+  결정 이력 `D-037` ([보고](../reports/RU-87_precision_bf16_fp32.md)).
 - **RU-88** CA-R1 fold 수준 지문 패널 — **반박 5 / 판별 불가 3, 보류.** 진입 기준 충족 0/8.
   새 지문 F1(이상치 근접도)·F2(context↔query MMD)는 두 표적 모두에 대해 구간이 관심 크기
   `|ρ| = 0.3`을 배제했다. 대조군 F3(Task-Geometry 계열)에 판별 불가가 몰렸다
-  ([보고](reports/RU-88_car1_fingerprint_panel.md)). **`CA-R1`은 닫지 않았다** — 과제 군집 7로는
+  ([보고](../reports/RU-88_car1_fingerprint_panel.md)). **`CA-R1`은 닫지 않았다** — 과제 군집 7로는
   부재를 입증할 검정력이 없다.
 
-**후보 큐에 `CA-R1` 계열 5건을 등재했다**([`research_directions.md` §0 P1-B](research_directions.md)
+**후보 큐에 `CA-R1` 계열 5건을 등재했다**([`research_directions.md` §0 P1-B](../research_directions.md)
 행 `B1`~`B5`). 출처는 Idea Agent 산출 제안서 6건이다
-([제안서](proposals/2026-09-08_car1-label-free-task-identification.md)).
+([제안서](../research_directions.md#9-ca-r1----)).
 
-**경계 판정 2건을 사용자 판단 대기로 올렸다** ([`closed_axes.md` §3](closed_axes.md)) —
+**경계 판정 2건을 사용자 판단 대기로 올렸다** ([`closed_axes.md` §3](../closed_axes.md)) —
 `§3-I` 컨텍스트 라벨만 쓰는 판별 통계가 `CA-06` 경계인가, `§3-J` 다중 강도 브랜치 동시 투입이
 `P2-SELECTOR-CEILING`·`CA-09` 경계인가. 판단이 갈려 임의로 한쪽을 채택하지 않았다.

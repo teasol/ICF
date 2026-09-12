@@ -1,6 +1,6 @@
 # Documentation Map
 
-**Last updated**: `2026-09-10`
+**Last updated**: `2026-09-12`
 
 > 이 파일은 **어느 사실이 어느 문서의 정본인지**만 말한다. 수치·상태·결정을 여기에 적지 않는다.
 
@@ -52,7 +52,7 @@
 | [`history/archive.md`](history/archive.md) | 세션 절 아카이브 (§190~§226) |
 | [`history/history.md`](history/history.md) | v18~v184 시대의 설계·딥다이브 통합본(7,458줄). §19는 "다시 열면 안 되는 결론" 요약이나, **경계 정의를 갖춘 정본은 [`closed_axes.md`](closed_axes.md)다.** 파일 안의 `history.md §N` 자기 인용은 이 파일 자신을 가리킨다 |
 
-폐기된 architecture/진단 테스트의 archive 정책은 [`../tests/history/README.md`](../tests/history/README.md)를 따른다.
+과거 폐기된 architecture/진단 테스트의 archive(`tests/history/`)는 2026-09-09(commit 265fb05) 레거시 정리 작업에서 완전히 퇴역하여 제거되었다.
 
 ---
 

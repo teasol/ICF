@@ -93,4 +93,4 @@ Orca의 Phase B-2 조건부 판정 요구사항에 따라, 레거시 오라클(`
 - **Phase B-1 (Commit ①)**: `test_pathobench.py` 의존 17건 `evaluate_pure.py`로 이관 완료 및 골든 참조 보존 선언.
 - **Phase B-2 (Commit ②)**: 레거시 학습/인코더 스택 및 `test_pathobench.py` 11,800라인 일괄 삭제 진행.
 
-[작성자: Platform Agent / GPT-5 (effort: 미확인) · 2026-09-12 17:50 KST]
+[작성자: Platform Agent / Gemini 3.8 Flash (effort: high) · 2026-09-12 17:50 KST]

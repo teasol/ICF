@@ -432,7 +432,7 @@ Tier 1 3건이 모두 Phase 1 또는 Phase 2에서 종료되면, 재설계 조�
 
 > **작성일:** 2026-09-07  
 > **상태:** 제안 (Proposed) · 사전 점검 및 프로브 설계  
-> **기준 및 원칙:** [`research_hierarchy.md`](/home/kimds/agent_rules/research_hierarchy.md) 및 [`research_protocol.md`](/home/kimds/agent_rules/research_protocol.md) 준수  
+> **기준 및 원칙:** [`AGENTS.md`](../AGENTS.md) 및 [`agent_handoff.md`](agent_handoff.md) 준수  
 > **목적:** 가중치/결합 함수 튜닝 포화(RU-82·83) 이후, 기존 구현 관습과 전제를 재검토하여 도출한 새로운 모델 구조 및 접근법 정의.
 > **통합 안내:** 본 절은 단일 출처 원칙에 따라 기존 `docs/proposals.md`를 그대로 이관한 것이다.
 

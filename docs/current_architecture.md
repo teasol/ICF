@@ -196,14 +196,11 @@ $$P(y=1) = \frac{1}{4} \sum_{k=2}^5 p_{(k)}$$
   $$\text{logits} = \left(-\frac{M_{eff}}{2}, +\frac{M_{eff}}{2}\right)$$
 - **장점**: 특정 단일 브랜치에서 발생하는 파멸적 오작동(False Positive/Negative)을 100% 차단하며, 동시에 독립성이 높은 다종 브랜치의 순수 신호를 손실 없이 융합함.
 
-### 3.1. 어떤 브랜치가 실제로 pool에 들어가는가 (`D-040`)
+### 3.1. 어떤 브랜치가 실제로 pool에 들어가는가 (`D-040`, 2026-09-12 단일화)
 
-집계에 참여하는 브랜치는 **한 곳에서만** 결정된다 — 파이프라인은
-`voting.py`의 `_fixed_branch_pairs`·`_shape_branch_pairs`, 평가 경로는
-`test_pathobench.py`의 `_branch_specs`·`_active_branches`다. 두 목록의 순서는
-`cv, dd, ct, bm, bd, qa, ds, lr, de, sw, sj, sh, bs`로 동일하며, 참여 조건도
-`weight != 0 이고 마진이 존재함`으로 동일하다. 이 순서와 조건이 갈라지면 브랜치가
-조용히 누락되므로 회귀 테스트(`tests/test_bs_branch.py`)가 두 경로의 일치를 고정한다.
+집계에 참여하는 브랜치는 **단일 정본**인 `src/models/aggregations/voting.py`의 `_fixed_branch_pairs`·`_shape_branch_pairs`에서 결정된다.
+브랜치 순서는 `cv, dd, ct, bm, bd, qa, ds, lr, de, sw, sj, sh, bs`이며, 참여 조건은 `weight != 0 이고 마진이 존재함`이다.
+(과거 `test_pathobench.py`에 이원화되어 존재하던 평가 분기는 RFC 2026-09-12 / RU-91 마이그레이션에서 완전히 제거되어 `voting.py` 단일 출처로 일원화되었다.)
 
 **`ICF_SHAPE_SCREEN_ONLY`가 형상 계열(BS·SH·SJ)의 참여를 지배한다.**
 
@@ -266,5 +263,5 @@ src/models/
 3. **수치 패리티 확증**: Primary 7 태스크 50-fold 전체(17,723 슬라이드)에서 순수 러너와 레거시 오라클 간 Macro AUROC `0.6226` vs `0.6226` ($\Delta = -0.0000$, $\text{mean}|\Delta p| \sim 10^{-5}$)로 수치적 항등을 완벽히 입증(RU-91-B).
 4. **골든 참조 보존**: 기존 레거시 `ru90_shape_triple` 예측값(`predictions/pathobench_*_ru90_shape_triple_official50_bf16.pt`)은 역사적 영구 참조 파일로 보존된다.
 
-[작성자: Platform Agent / GPT-5 (effort: 미확인) · 2026-09-12 17:55 KST]
+[작성자: Platform Agent / Gemini 3.8 Flash (effort: high) · 2026-09-12 17:55 KST]
 
