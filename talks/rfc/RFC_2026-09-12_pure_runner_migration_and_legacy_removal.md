@@ -1,6 +1,6 @@
 # RFC: 교살자 패턴(Strangler Pattern)을 통한 순수 러너 구축 및 레거시 훈련 코드 전량 제거
 
-- **Status**: Proposed
+- **Status**: Approved (조건부 — §4의 수정 조건 C1\~C6 반영 후 착수)
 - **Date**: 2026-09-12
 - **Author**: Platform Agent (`@platform`)
 - **Target Module**: `scripts/evaluate_pure.py` (신설), `src/datasets/`, `src/modules/`, `src/models/baseline.py`, `src/models/set_transformer_ridge.py`, `scripts/test_pathobench.py`, `src/utils/utils.py`
@@ -140,12 +140,131 @@ flowchart TD
 
 ## 4. 최종 판정 및 로드맵 (Orca / User)
 
-### [검토 및 판정 대기 섹션]
-- [ ] 채택(Adopt)  · [ ] 보류(Hold)  · [ ] 기각(Reject)
+- [x] **채택(Adopt) — 조건부**  · [ ] 보류(Hold)  · [ ] 기각(Reject)
 - **판정자**: Orca / Reasoning Agent
-- **결정 근거**:
-- **실행 승인 로드맵**:
+
+### 결정 근거
+
+**전략을 채택합니다.** 1차 RFC를 보류시킨 결함(삭제 대상이 공식 평가의 실행 경로에 있음)을 정면으로
+해소했습니다. 오라클을 보존한 채 병행 구현하고 **수치 패리티가 입증된 뒤에만** 삭제하는 순서는,
+"먼저 지우고 고친다"의 역순이며 이 저장소의 위험 구조에 맞습니다. 1차 RFC에 없던 **예산과 중단 조건**도
+갖췄습니다.
+
+**전제를 실측으로 검증했고 모두 성립합니다** (Orca, 2026-09-12):
+
+| 검증 항목 | 결과 | 근거 |
+|:---|:---|:---|
+| 순수 자산의 레거시 독립성 | **성립** — `modules`·`datasets`·`baseline`·`set_transformer_ridge`·`lightning`·`registry` 임포트 0건 | `training_free.py`·`config.py`·`voting.py` 전수 grep |
+| `TrainingFreeConfig.from_yaml` | 존재 | `src/models/config.py:227` |
+| `configs/baseline/v121_active.yaml` | 존재 | — |
+| YAML 파서의 `sh`/`sj` 지원 | **지원** (`branches.<name>.weight → weight_<name>` 일반 매핑) | `src/models/config.py:266-281`, 필드 `weight_sh:150`·`weight_sj:140` |
+
+`채택`이되 **조건부**인 이유는, 게이트 기준과 삭제 범위에 그대로 두면 잘못된 결론을 낼 결함이
+여섯 군데 있기 때문입니다. 아래 C1\~C6을 반영해야 착수할 수 있습니다.
 
 ---
+
+### 착수 조건 (C1\~C6)
+
+#### C1 (필수) · 패리티 대상이 **낡은 구성**입니다
+
+`configs/baseline/v121_active.yaml`은 자기 설명이 `"5-Branch Fast Baseline without CT"`이고
+`sh`·`sj` 블록이 **아예 없습니다**. 그대로 쓰면 순수 러너는 **폐기된 5-branch 기준(`0.6171`)** 을
+재현하게 됩니다. 현행 공식 구성은 **7-branch `CV,BM,BD,QA,DS,SH,SJ`** 입니다(`D-042`).
+
+- 7-branch를 표현하는 설정을 새로 만들고, **패리티는 이 구성에 대해** 달성합니다.
+  파서가 일반 매핑을 하므로 **파서 수정은 불필요**하고 YAML 작성만 하면 됩니다.
+- **오염 검사 상수 `SMAD4 0.4421` · `PBRM1 0.5553`을 7-branch 패리티의 기준으로 쓰지 마십시오.**
+  이 값들은 `D-042`에서 **5-branch 기저 앵커로 의도적으로 고정**된 것입니다. 5-branch 구성의
+  검증에만 씁니다. 수치 정본은 `docs/PROJECT.md` §3.2·§3.4입니다.
+
+#### C2 (필수) · 게이트 허용오차가 **이미 알려진 잡음보다 작습니다**
+
+RFC 게이트 1은 `|ΔAUROC| ≤ 0.0001`입니다. 그런데 RU-90이 부수 관측으로 기록한 바,
+**`test_pathobench` 내부 AUROC와 `src/utils/metrics.auroc`는 동일 확률 벡터에서 `+8.55e-05`의
+고정 차**를 냅니다. 즉 **추정기 차이만으로 허용오차의 85%를 소모**하며, 마이그레이션의 정확성과
+무관한 이유로 통과·불통과가 갈립니다.
+
+- **1차 판정 지표를 AUROC에서 확률로 내립니다**: per-slide 예측 확률 `max|Δp| ≤ 1e-6`.
+  달성 가능성의 근거는 RU-90이 live 경로 대 오프라인 재집계에서 실측한 `1.788e-07`입니다.
+- AUROC 일치는 **보조 보고**로 내리고, 비교 시 **양쪽 모두 같은 추정기**를 쓰도록 고정합니다.
+
+#### C3 (필수) · 패리티 범위가 좁습니다 — 비용은 거의 늘지 않습니다
+
+2개 과제로 11,797라인 삭제를 정당화하기에는 얇습니다. 게다가 `SMAD4`는 fold-mean `0.4421`로
+**우연 이하인 특이 과제**여서 대표성이 낮습니다.
+
+- **Primary 7 전체**를 요구합니다.
+- **레거시 쪽은 재실행이 불필요합니다.** `predictions/pathobench_{PRIMARY7}_ru90_shape_triple_official50_bf16.pt`에
+  공식 경로의 fold별 확률이 이미 저장돼 있습니다. **순수 러너 1회만** 돌려 대조하면 됩니다.
+
+#### C4 (필수) · 삭제가 **17개 파일을 끊습니다** — RFC에 기재되지 않았습니다
+
+`scripts/test_pathobench.py`를 참조하는 파일이 **18개**(자기 자신 포함)입니다.
+
+| 부류 | 파일 |
+|:---|:---|
+| 실행 | `eval_seal_tasks.sh` · `run_ru87_precision.sh` · `data/prepare_pathobench.py` |
+| 분석 | `ru85_gate1` · `ru87_precision` · `ru88_fingerprint` · `ru81_worker` · `compare_arms_paired` · `profile_loo_fold` · `eval_in_episode_loo` · `probe_slot_headroom` |
+| 진단 | `diagnose_covariance_sketch` · `diagnose_population_routing` |
+| 테스트 | `test_precision_contract` · `test_bs_branch` · `test_fixed_head_sj_wiring` |
+| 기타 | `eval_dual16_top3.py` |
+
+일괄 삭제하면 **과거 RU의 재현 경로가 통째로 사라집니다.** 삭제 대상 목록에 이 17건의
+처리 방안(이관 / 현대화 / 아카이브)을 명시하고, **`rm -rf` 이전에 소진**해야 합니다.
+
+#### C5 (필수) · 단일 커밋 일괄 삭제를 **두 커밋으로 분리**합니다
+
+- 커밋 ①: 순수 러너 채택 + C4의 의존 17건 이관 (레거시는 그대로 둠)
+- 커밋 ②: 레거시 삭제
+
+`test_pathobench.py`는 **오라클 그 자체**입니다. 삭제 후에는 미래의 회귀를 대조할 대상이 없습니다.
+따라서 삭제 전에 **저장된 `predictions/*.pt`를 영구 골든 참조로 문서에 명시 보존**합니다.
+
+#### C6 (권고) · 예산 단위를 분리합니다
+
+`1.0 MD`는 인시 예산이며 **GPU 예산이 아닙니다.** 순수 러너 Primary 7 1회 ≈ **1.0 GPU-h**
+(기준 단가 `docs/research_directions.md:20`)를 별도로 명시하고, 중단 조건에도 **GPU 상한**을 넣으십시오.
+GPU는 실행 직전 유휴 장치를 확인해 사용합니다.
+
+---
+
+### 반증 조건에 대한 판정
+
+- **반증 조건 1 (패리티 불일치 및 원인 규명 실패)** — 타당합니다. 그대로 유지합니다.
+- **반증 조건 2 (비공개 히든 로직의 존재)** — 타당하며, **가장 중요한 항목**입니다.
+  다만 취급을 바로잡습니다: 패리티가 실패하면 그것은 단순한 엔지니어링 실패가 아니라
+  **"공식 수치가 문서화되지 않은 레거시 연산에 의존한다"는 연구적 발견**입니다.
+  이 경우 **조용히 롤백하지 말고, 어떤 연산에서 얼마나 벌어졌는지 보고**하십시오.
+  그 자체가 기록해야 할 결과입니다.
+
+### RU 카드 요구
+
+Phase A(패리티 검증)는 **재현·계측 RU**로 관리합니다. 기존 수치를 바꾸지 않는 것이 목표이지만,
+결과가 공식 수치의 신뢰성에 대한 주장이 되기 때문입니다.
+질문·가설·판정 기준(C2의 `max|Δp| ≤ 1e-6`)·예산(C6)·중단 조건·결과별 후속을 **착수 전에** 채웁니다.
+Phase B(삭제)는 구현 작업이므로 카드 없이 진행합니다.
+
+### 실행 승인 로드맵
+
+| 단계 | 내용 | 승인 상태 |
+|:---|:---|:---|
+| **A-0** | 7-branch 설정 YAML 작성 (C1). 파서 수정 없음 | 승인 |
+| **A-1** | `scripts/evaluate_pure.py` 신설. 레거시 임포트 0 (게이트 3 유지) | 승인 |
+| **A-2** | RU 카드 개설 후 Primary 7 패리티 실행 (C2·C3·C6). 레거시는 저장 확률 재사용 | 승인 |
+| **A-3** | 패리티 결과 보고 → **Orca 재판정** | — |
+| **B-1** | 의존 17건 이관·현대화·아카이브 (C4) | **A-3 통과 후 별도 승인** |
+| **B-2** | 레거시 일괄 삭제 (C5의 커밋 ②) | **B-1 완료 후 별도 승인** |
+
+**A-3은 자동 통과가 아닙니다.** 패리티 달성 여부와 그 근거를 보고받고 제가 다시 판정합니다.
+삭제는 그 판정 이후에만 승인됩니다.
+
+**동결하지 않습니다.** A-3 재판정 시점에 본 RFC의 §4를 갱신하고, 그때 동결 여부를 정합니다.
+
+---
+
+[작성자: Orca / Reasoning Agent / claude-opus-5 (effort: high) · 2026-09-12 KST]
+_§4는 Orca가 작성했습니다. 그 외 본문은 원 작성자의 기술을 보존했습니다._
+_§4의 전제 검증은 Orca의 직접 실측이며, 인용한 `+8.55e-05`·`1.788e-07`은 RU-90(Lime 측정) 기록입니다._
 
 [작성자: Antigravity / Platform Agent / Gemini 3.8 Flash (effort: high) · 2026-09-12 12:55 KST]
