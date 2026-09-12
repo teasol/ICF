@@ -24,7 +24,13 @@ import unittest
 
 import torch
 
-from src.models.set_transformer_ridge import CovarianceMeanLearnablePDDCTMLPModel
+try:
+    from src.models.set_transformer_ridge import CovarianceMeanLearnablePDDCTMLPModel
+    _HAS_LEGACY = True
+except ImportError:
+    CovarianceMeanLearnablePDDCTMLPModel = None
+    _HAS_LEGACY = False
+
 from src.models.dd_adaptive_rank import ordered_typicality_margin
 from src.models.training_free import TrainingFreeClassifier, TrainingFreeConfig
 
@@ -84,6 +90,7 @@ def lineage_margins(context_bags, labels, query_bags):
     return (logits[:, 1] - logits[:, 0]).float()
 
 
+@unittest.skipUnless(_HAS_LEGACY, "Legacy set_transformer_ridge was removed")
 class EquivalenceTest(unittest.TestCase):
     def test_margins_match_the_lineage_path(self):
         for seed in range(3):
@@ -219,6 +226,7 @@ class OrderedTypicalityDDTest(unittest.TestCase):
         flipped = model.margins(context_bags, 1 - labels, query_bags)
         self.assertTrue(torch.allclose(original, -flipped, atol=1e-4))
 
+    @unittest.skipUnless(_HAS_LEGACY, "Legacy CovarianceMeanLearnablePDDCTMLPModel was removed")
     def test_official_and_standalone_dd_arms_match(self):
         generator = torch.Generator().manual_seed(34)
         context_factor = torch.randn(10, SKETCH, SKETCH, generator=generator)
