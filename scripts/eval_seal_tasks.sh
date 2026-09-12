@@ -25,14 +25,14 @@ for task in "$@"; do
   out="predictions/pathobench_${name}_${TAG}_official50_bf16.pt"
   log="logs/official50/${name}_${TAG}.log"
   echo "=== START ${task} $(date +%H:%M:%S)"
-  ckpt_args=()
-  if [ -n "$CKPT" ]; then
-    ckpt_args=(--checkpoint "$CKPT")
+  cfg="${CONFIG:-configs/baseline/v121_7branch_active.yaml}"
+  if [ ! -f "$cfg" ] || grep -q "model:" "$cfg" 2>/dev/null; then
+    cfg="configs/baseline/v121_7branch_active.yaml"
   fi
-  CUDA_VISIBLE_DEVICES="$GPU" "$PY" scripts/test_pathobench.py \
-    "${ckpt_args[@]}" --config "$CONFIG" \
+  CUDA_VISIBLE_DEVICES="$GPU" "$PY" scripts/evaluate_pure.py \
+    --config "$cfg" \
     --official-folds "$OFFICIAL/$task" --features "$FEATURES" \
-    --input-dim 1536 --precision bf16-mixed --output "$out" > "$log" 2>&1
+    --output "$out" > "$log" 2>&1
   rc=$?
   if [ "$rc" -ne 0 ]; then overall_rc="$rc"; fi
   res=$(grep -aoE "fold-mean AUROC: [0-9.]+ ± [0-9.]+   pooled AUROC: [0-9.]+" "$log" | tail -1)

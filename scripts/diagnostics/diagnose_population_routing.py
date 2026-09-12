@@ -32,7 +32,7 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from scripts.test_pathobench import (  # noqa: E402
+from scripts.evaluate_pure import (  # noqa: E402
     index_h5_files,
     load_slide_features,
 )

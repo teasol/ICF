@@ -94,10 +94,10 @@ class TestPrecisionContract(unittest.TestCase):
         the same checkpoint scored three different ways.
         """
         scripts = REPO_ROOT / "scripts"
-        for path in (
-            scripts / "test_pathobench.py",
-            scripts / "analysis" / "probe_slot_headroom.py",
-        ):
+        candidates = [scripts / "analysis" / "probe_slot_headroom.py"]
+        if (scripts / "test_pathobench.py").exists():
+            candidates.append(scripts / "test_pathobench.py")
+        for path in candidates:
             with self.subTest(script=path.name):
                 source = path.read_text()
                 self.assertIn("add_eval_precision_argument", source)

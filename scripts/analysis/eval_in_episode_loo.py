@@ -13,7 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.models.stream_eval import cpu_bag_mapping
-from scripts.test_pathobench import index_h5_files, load_slide_features
+from scripts.evaluate_pure import index_h5_files, load_slide_features
 from src.models.training_free import TrainingFreeClassifier, TrainingFreeConfig
 from src.utils.metrics import auroc
 

@@ -37,13 +37,21 @@ from src.models.aggregations.voting import (  # noqa: E402
     context_loo_stacking,
 )
 
-_SPEC = importlib.util.spec_from_file_location(
-    "test_pathobench_module_bs", REPO_ROOT / "scripts" / "test_pathobench.py"
-)
-_pathobench = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(_pathobench)
-
-from src.models.set_transformer_ridge import CovarianceMeanLearnablePDDCTMLPModel  # noqa: E402
+_TEST_PATHOBENCH_PATH = REPO_ROOT / "scripts" / "test_pathobench.py"
+_HAS_LEGACY = _TEST_PATHOBENCH_PATH.exists()
+if _HAS_LEGACY:
+    _SPEC = importlib.util.spec_from_file_location(
+        "test_pathobench_module_bs", _TEST_PATHOBENCH_PATH
+    )
+    _pathobench = importlib.util.module_from_spec(_SPEC)
+    _SPEC.loader.exec_module(_pathobench)
+    try:
+        from src.models.set_transformer_ridge import CovarianceMeanLearnablePDDCTMLPModel  # noqa: E402
+    except ImportError:
+        _HAS_LEGACY = False
+        _pathobench = None
+else:
+    _pathobench = None
 
 
 # ---- (e) bs_slide_features: cache path vs plain path ------------------------
@@ -335,6 +343,7 @@ class _Wrapper:
         self.model = model
 
 
+@unittest.skipUnless(_HAS_LEGACY, "Legacy test_pathobench.py was removed")
 class TestPathobenchAndVotingAgree(unittest.TestCase):
     """The fixed-head path (scripts/test_pathobench.py) and the training-free
     pipeline path (src/models/aggregations/voting.py) must compute the SAME

@@ -84,7 +84,7 @@ def stage1(dims) -> None:
 
 
 def _load_cells(task_dir: Path, features: Path, max_slides: int, max_cells: int):
-    from test_pathobench import index_h5_files, load_slide_features
+    from scripts.evaluate_pure import index_h5_files, load_slide_features
     import csv as _csv
     import yaml
 

@@ -1,0 +1,72 @@
+{
+  "timestamp": "2026-09-12 17:47:31",
+  "total_elapsed_seconds": 789.5507051944733,
+  "macro_pure": 0.6225725138766014,
+  "macro_legacy_32true": 0.622582584465237,
+  "macro_delta": -1.0070588635557876e-05,
+  "results": [
+    {
+      "task": "cptac_lscc/ARID1A_mutation",
+      "pure_auroc": 0.5795003438350648,
+      "legacy_32true_auroc": 0.5794239720639546,
+      "delta_auroc": 7.637177111019522e-05,
+      "max_delta_p": 0.0003135502338409424,
+      "mean_delta_p": 2.5177741755484573e-05,
+      "n_slides": 2977
+    },
+    {
+      "task": "cptac_lscc/Histologic_Grade",
+      "pure_auroc": 0.6664935332727918,
+      "legacy_32true_auroc": 0.6664796251546684,
+      "delta_auroc": 1.3908118123406865e-05,
+      "max_delta_p": 0.00015020370483398438,
+      "mean_delta_p": 1.7372890005238316e-05,
+      "n_slides": 2862
+    },
+    {
+      "task": "cptac_lscc/KEAP1_mutation",
+      "pure_auroc": 0.6248440376384362,
+      "legacy_32true_auroc": 0.6246229381716225,
+      "delta_auroc": 0.00022109946681370118,
+      "max_delta_p": 0.00025326013565063477,
+      "mean_delta_p": 2.4465154689562724e-05,
+      "n_slides": 2902
+    },
+    {
+      "task": "cptac_luad/KRAS_mutation",
+      "pure_auroc": 0.7031186798898303,
+      "legacy_32true_auroc": 0.7030846464069423,
+      "delta_auroc": 3.4033482887996236e-05,
+      "max_delta_p": 0.00016510486602783203,
+      "mean_delta_p": 1.7849634146230822e-05,
+      "n_slides": 3061
+    },
+    {
+      "task": "cptac_pda/SMAD4_mutation",
+      "pure_auroc": 0.46612107489092724,
+      "legacy_32true_auroc": 0.46607345584330817,
+      "delta_auroc": 4.7619047619074095e-05,
+      "max_delta_p": 0.0003127157688140869,
+      "mean_delta_p": 3.100457158501723e-05,
+      "n_slides": 2459
+    },
+    {
+      "task": "ucla_lung/progression_regression",
+      "pure_auroc": 0.7771794871794871,
+      "legacy_32true_auroc": 0.7775213675213675,
+      "delta_auroc": -0.00034188034188031846,
+      "max_delta_p": 0.0016087591648101807,
+      "mean_delta_p": 8.21702859618447e-05,
+      "n_slides": 1100
+    },
+    {
+      "task": "cptac_ccrcc/PBRM1_mutation",
+      "pure_auroc": 0.5407504404296719,
+      "legacy_32true_auroc": 0.5408720860947959,
+      "delta_auroc": -0.00012164566512395947,
+      "max_delta_p": 0.0002269744873046875,
+      "mean_delta_p": 2.4946562624098787e-05,
+      "n_slides": 2362
+    }
+  ]
+}

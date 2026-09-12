@@ -60,6 +60,39 @@ from src.models.aggregations.voting import trimmed_mean  # noqa: E402
 from src.utils.metrics import auroc  # noqa: E402
 
 FEATURE_DIM = 1536
+MODEL_INPUT_DIM = FEATURE_DIM
+
+
+def fit_pca(
+    features: torch.Tensor,
+    out_dim: int,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """PCA over ALL given tile features, chunked so the full data fits on GPU.
+
+    Two exact passes over the whole tile set (mean, then centered covariance,
+    both accumulated in float64), then eigendecomposition of the D x D
+    covariance matrix. Returns (mean [1, dim], components [dim, out_dim]) on
+    CPU.
+    """
+    n_total, dim = features.shape
+    chunk = 2**16  # 65536 tiles per GPU block (~400MB float32 at D=1536)
+    mean = torch.zeros(dim, device=device, dtype=torch.float64)
+    for start in range(0, n_total, chunk):
+        block = features[start : start + chunk].to(device).double()
+        mean += block.sum(dim=0)
+    mean /= n_total
+    covariance = torch.zeros(dim, dim, device=device, dtype=torch.float64)
+    for start in range(0, n_total, chunk):
+        centered = features[start : start + chunk].to(device).double() - mean
+        covariance += centered.t() @ centered
+    covariance /= n_total
+    eigenvalues, eigenvectors = torch.linalg.eigh(covariance)
+    components = eigenvectors[:, -out_dim:]  # top out_dim eigenvectors
+    return (
+        mean.float().cpu().unsqueeze(0),
+        components.float().cpu().contiguous(),
+    )
 
 
 # ---- Pure H5 feature loading (self-contained, no legacy imports) -----------

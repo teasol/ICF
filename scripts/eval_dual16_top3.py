@@ -112,7 +112,7 @@ def main():
 
     n_folds = min(len(fold_cols), args.official_nfolds)
 
-    from scripts.test_pathobench import index_h5_files, load_slide_features
+    from scripts.evaluate_pure import index_h5_files, load_slide_features
     h5_index = index_h5_files(Path(args.features))
     all_slide_ids = [s for s in all_slide_ids if s in h5_index]
     print(f"Preloading {len(all_slide_ids)} slide features into CPU RAM from {args.features}...")
