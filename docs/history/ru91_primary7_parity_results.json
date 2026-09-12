@@ -1,0 +1,70 @@
+{
+  "macro_pure": 0.6225714285714286,
+  "macro_gold": 0.6226857142857144,
+  "macro_delta": -0.00011428571428584444,
+  "results": [
+    {
+      "task": "cptac_lscc/ARID1A_mutation",
+      "pure_auroc": 0.5795,
+      "gold_auroc": 0.5797,
+      "delta_auroc": -0.0002,
+      "max_delta_p": 0.001357,
+      "mean_delta_p": 0.0002365,
+      "n_slides": 2977
+    },
+    {
+      "task": "cptac_lscc/Histologic_Grade",
+      "pure_auroc": 0.6665,
+      "gold_auroc": 0.6666,
+      "delta_auroc": -0.0001,
+      "max_delta_p": 0.00139,
+      "mean_delta_p": 0.0001919,
+      "n_slides": 2862
+    },
+    {
+      "task": "cptac_lscc/KEAP1_mutation",
+      "pure_auroc": 0.6248,
+      "gold_auroc": 0.6249,
+      "delta_auroc": -0.0001,
+      "max_delta_p": 0.001278,
+      "mean_delta_p": 0.000239,
+      "n_slides": 2902
+    },
+    {
+      "task": "cptac_luad/KRAS_mutation",
+      "pure_auroc": 0.7031,
+      "gold_auroc": 0.703,
+      "delta_auroc": 0.0001,
+      "max_delta_p": 0.002952,
+      "mean_delta_p": 0.0002065,
+      "n_slides": 3061
+    },
+    {
+      "task": "cptac_pda/SMAD4_mutation",
+      "pure_auroc": 0.4661,
+      "gold_auroc": 0.4658,
+      "delta_auroc": 0.0003,
+      "max_delta_p": 0.001439,
+      "mean_delta_p": 0.0002072,
+      "n_slides": 2459
+    },
+    {
+      "task": "ucla_lung/progression_regression",
+      "pure_auroc": 0.7772,
+      "gold_auroc": 0.7779,
+      "delta_auroc": -0.0007,
+      "max_delta_p": 0.00202,
+      "mean_delta_p": 0.00037,
+      "n_slides": 1100
+    },
+    {
+      "task": "cptac_ccrcc/PBRM1_mutation",
+      "pure_auroc": 0.5408,
+      "gold_auroc": 0.5409,
+      "delta_auroc": -0.0001,
+      "max_delta_p": 0.05552,
+      "mean_delta_p": 0.0006286,
+      "n_slides": 2362
+    }
+  ]
+}

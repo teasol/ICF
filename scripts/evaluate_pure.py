@@ -155,8 +155,8 @@ def evaluate_task(
             print(f"  fold {k + 1}/{total_folds}: skip (only {len(test_ids)} test slides)")
             continue
 
-        context_bags = [bags[s].to(device) for s in context_ids]
-        query_bags = [bags[s].to(device) for s in test_ids]
+        context_bags = [bags[s] for s in context_ids]
+        query_bags = [bags[s] for s in test_ids]
         context_labels = torch.tensor(
             [labels[s] for s in context_ids], dtype=torch.long, device=device
         )
@@ -208,29 +208,52 @@ def compare_with_golden(
     golden_path: Path,
     pure_results: list[dict],
     config: TrainingFreeConfig,
-) -> tuple[float, int]:
-    """max|Δp| between this script's per-slide probabilities and the golden
-    reference's per-slide probabilities (reconstructed per
-    `reconstruct_golden_probability`), matched by (fold index, slide_id)."""
+) -> dict:
+    """Compare pure-runner predictions against golden reference reconstructed
+    via trimmed_mean over its stored margins. Returns comparison metrics dict."""
     if not golden_path.exists():
         raise FileNotFoundError(f"golden reference not found: {golden_path}")
     golden = torch.load(golden_path, map_location="cpu", weights_only=False)
     golden_by_fold = dict(zip(golden["fold_indices"], golden["per_fold"]))
 
     max_abs_diff = 0.0
+    sum_abs_diff = 0.0
     n_compared = 0
+    golden_aurocs = []
+    pure_aurocs = []
+
     for entry in pure_results:
-        g = golden_by_fold.get(entry["fold"])
+        k = entry["fold"]
+        g = golden_by_fold.get(k)
         if g is None:
             continue
-        golden_probability = reconstruct_golden_probability(g, config)
-        golden_map = dict(zip(g["slide_id"], golden_probability.tolist()))
+        golden_prob = reconstruct_golden_probability(g, config)
+        g_auroc = float(auroc(golden_prob, g["label"]))
+        p_auroc = float(auroc(entry["probability"], entry["label"]))
+        golden_aurocs.append(g_auroc)
+        pure_aurocs.append(p_auroc)
+
+        golden_map = dict(zip(g["slide_id"], golden_prob.tolist()))
         for sid, p in zip(entry["slide_id"], entry["probability"].tolist()):
             if sid not in golden_map:
                 continue
-            max_abs_diff = max(max_abs_diff, abs(p - golden_map[sid]))
+            diff = abs(p - golden_map[sid])
+            max_abs_diff = max(max_abs_diff, diff)
+            sum_abs_diff += diff
             n_compared += 1
-    return max_abs_diff, n_compared
+
+    mean_abs_diff = sum_abs_diff / max(n_compared, 1)
+    gold_mean = sum(golden_aurocs) / max(len(golden_aurocs), 1)
+    pure_mean = sum(pure_aurocs) / max(len(pure_aurocs), 1)
+
+    return {
+        "max_delta_p": max_abs_diff,
+        "mean_delta_p": mean_abs_diff,
+        "n_compared": n_compared,
+        "pure_mean_auroc": pure_mean,
+        "golden_mean_auroc": gold_mean,
+        "delta_auroc": pure_mean - gold_mean,
+    }
 
 
 # ---- CLI ---------------------------------------------------------------------
@@ -286,9 +309,14 @@ def main() -> None:
         print(f"Saved pure-runner predictions to {args.output}")
 
     if args.compare_golden is not None:
-        max_delta, n_compared = compare_with_golden(args.compare_golden, per_fold, config)
+        metrics = compare_with_golden(args.compare_golden, per_fold, config)
         print(f"\n[compare-golden] {args.compare_golden.name}: "
-              f"max|Δp| = {max_delta:.3e} over {n_compared} slide predictions")
+              f"max|Δp| = {metrics['max_delta_p']:.3e}, "
+              f"mean|Δp| = {metrics['mean_delta_p']:.3e} "
+              f"over {metrics['n_compared']} slide predictions. "
+              f"pure AUROC = {metrics['pure_mean_auroc']:.4f} vs "
+              f"gold = {metrics['golden_mean_auroc']:.4f} "
+              f"(Δ = {metrics['delta_auroc']:+.4f})")
 
 
 if __name__ == "__main__":
