@@ -30,7 +30,7 @@ _EPS = 1e-8
 def _whiten(bag: torch.Tensor, basis: torch.Tensor, dim: int) -> torch.Tensor:
     """Affine-invariant coordinates: Z with Z^T Z / N = I.
 
-    Autocast is forced off for the same reason as in shj.py - the projection in
+    Autocast is forced off for the same reason as in sj.py - the projection in
     bf16 carries ~1e-3 relative error and whitening amplifies it by two orders of
     magnitude, which would make the feature depend on the surrounding autocast
     state. The eigendecomposition runs in float64.

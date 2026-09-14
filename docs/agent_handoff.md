@@ -227,8 +227,8 @@ Context 슬라이드만으로 within-slide PCA 기저(K=256)를 만들고, 상�
 | 경로 | 역할 |
 |:---|:---|
 | `src/models/training_free.py` | 활성 파이프라인 핵심 — 브랜치 특징 추출, Dual Ridge, 집계 |
-| `src/models/branches/` | 개별 브랜치 구현 (`shj.py` 등) |
-| `src/models/ct/` | CT 사전 구축 및 soft-token 할당 (현재 비교 기준에서 제외) |
+| `src/models/branches/` | 개별 브랜치 구현 (`sj.py` 등) |
+| `src/models/branches/ct.py` | CT 사전 구축 및 soft-token 할당 (단일 파일 통합, 공식 비교 기준에서 제외) |
 | `src/models/dd_adaptive_rank.py` | BD ordered-typicality 마진 (DD는 `CA-02`로 닫힘) |
 | `scripts/evaluate_pure.py` | **단일 정본 순수 러너** — 레거시 스택 없이 Zero-Leakage WSI 인컨텍스트 평가 |
 | `scripts/node_env.sh` | **노드 종속 설정의 단일 출처** — 인터프리터·GPU 수·경로 탐색 |

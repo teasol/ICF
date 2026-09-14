@@ -35,7 +35,7 @@ def _top_directions(bag: torch.Tensor, basis: torch.Tensor, dim: int
                     ) -> tuple[torch.Tensor, torch.Tensor]:
     """Standardised projections onto the slide's own top-8 principal directions.
 
-    Autocast off and float64 eigendecomposition, for the reason given in shj.py.
+    Autocast off and float64 eigendecomposition, for the reason given in sj.py.
     Returns (T[N, 8] standardised, adjacent eigenvalue ratios[7]).
     """
     with torch.autocast(device_type=bag.device.type, enabled=False):

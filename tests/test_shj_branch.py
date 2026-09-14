@@ -2,7 +2,7 @@ import unittest
 
 import torch
 
-from src.models.branches.shj import SHJ_FEATURE_DIM, shj_slide_features
+from src.models.branches.sj import SHJ_FEATURE_DIM, shj_slide_features
 from src.models.training_free import TrainingFreeClassifier, TrainingFreeConfig
 
 

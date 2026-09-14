@@ -86,9 +86,9 @@ from src.models.branches.ds import ds_features
 from src.models.branches.sj import sj_features
 from src.models.branches.sh import sh_features
 from src.models.branches.bs import bs_features
-from src.models.branches.experimental.lr import lr_features
-from src.models.branches.experimental.de import de_features
-from src.models.branches.experimental.sw import sw_features
+from src.models.branches.lr import lr_features
+from src.models.branches.de import de_features
+from src.models.branches.sw import sw_features
 from src.models.aggregations.voting import (
     linear_aggregation,
     soft_voting,

@@ -138,7 +138,7 @@ $r$의 정렬된 분위수로부터 **왜도 · 초과첨도 · Bowley 왜도 ·
 $q_{10}/q_{50}$ · $q_{90}/q_{50}$ · $q_{99}/q_{50}$ · $\text{IQR}/q_{50}$** 8차원을 만들고
 클래스 균형 kernel ridge(선형)로 마진을 얻는다.
 
-- **구현**: `src/models/branches/sj.py` (§222 정식 통합 후 `D-038`에서 명칭 통일, `shj.py`는 하위 호환 re-export 유지).
+- **구현**: `src/models/branches/sj.py` (§222 정식 통합 후 `D-038`에서 명칭 통일, `shj_*` 하위 호환 alias 내장).
   `weight_sj`의 코드 기본값은 `0.0`이며 (`weight_shj` alias 지원), **공식 구성에서는 활성화한다**
   (`D-042`). 기본값을 0으로 두는 것은 과거 설정의 재현성을 지키기 위한 것이지 미승격을 뜻하지 않는다.
 - ⚠️ **fp32 강제 필수.** 평가 파이프라인이 bf16 autocast 안에서 돌면 투영이 bf16(상대오차
@@ -230,13 +230,13 @@ src/models/
 ├── common/solvers.py         # Dual Ridge / kernel ridge 해법
 ├── branches/
 │   ├── cv.py  bm.py  bd.py  qa.py  ds.py      # 공식 7-branch 중 5개
-│   ├── ct.py                                   # 계보 — 공식 비교 기준에서 제외
-│   ├── sj.py                                   # 공식 형상 브랜치 (§2.8, D-042 승격, shj.py는 re-export)
+│   ├── ct.py                                   # 계보 — 공식 비교 기준에서 제외 (ct/ 서브시스템 통합)
+│   ├── sj.py                                   # 공식 형상 브랜치 (§2.8, D-042 승격, shj alias 내장)
 │   ├── sh.py                                   # 공식 형상 브랜치 (§2.8, D-042 승격, D-039에서 이관)
 │   ├── bs.py                                   # 게이트 ② 기각 — 스크리닝 이력 보존 (§2.8, D-040)
 │   ├── dd.py                                   # DD 는 CA-02 로 닫힘; BD 마진 제공
-│   └── experimental/  de.py  lr.py  sw.py      # 기각·미판정 후보
-├── ct/                       # CT 사전 구축 및 soft-token 할당
+│   ├── de.py  lr.py  sw.py                      # 기각·미판정 후보 (평탄화 완료)
+│   └── aks.py  lid.py  mdx.py                  # Tier 1 스크리닝 후보
 └── dd_adaptive_rank.py       # BD ordered-typicality 마진
 ```
 

@@ -121,3 +121,12 @@ def sj_features(
 
 # Backward compatibility alias
 shj_features = sj_features
+
+__all__ = [
+    "SHJ_FEATURE_DIM",
+    "SJ_FEATURE_DIM",
+    "shj_features",
+    "shj_slide_features",
+    "sj_features",
+    "sj_slide_features",
+]

@@ -13,9 +13,9 @@ from src.models.branches.sh import sh_features, sh_slide_features
 from src.models.branches.bs import bs_features, bs_slide_features
 from src.models.branches.ct import ct_features
 from src.models.branches.dd import dd_features
-from src.models.branches.experimental.de import de_features
-from src.models.branches.experimental.sw import sw_features
-from src.models.branches.experimental.lr import lr_features
+from src.models.branches.de import de_features
+from src.models.branches.sw import sw_features
+from src.models.branches.lr import lr_features
 
 __all__ = [
     "cv_logits",

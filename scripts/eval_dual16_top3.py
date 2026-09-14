@@ -25,7 +25,7 @@ import torch
 from src.models.common.solvers import fast_context_auroc, solve_kernel_ridge
 from src.models.branches.cv import cv_logits
 from src.models.branches.bd import bd_features
-from src.models.ct.readout import ct_margins
+from src.models.branches.ct import ct_margins
 
 
 def parse_args():

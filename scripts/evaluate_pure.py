@@ -169,7 +169,7 @@ def evaluate_task(
     if missing:
         print(f"WARNING: dropping {missing} slides with no feature file")
     bags = {sid: load_slide_features(sid, h5_index) for sid in slide_ids}
-    index = {sid: i for i, sid in enumerate(slide_ids)}
+    records_by_sid = {str(r["slide_id"]).strip(): r for r in records}
     print(f"Loaded {len(bags)} slides, {len(fold_cols)} official folds "
           f"({fold_cols[0]}..{fold_cols[-1]}), raw {FEATURE_DIM}-d")
 
@@ -182,8 +182,8 @@ def evaluate_task(
     per_fold: list[dict] = []
     for k in scope:
         fc = fold_cols[k]
-        test_ids = [s for s in slide_ids if records[index[s]][fc].strip() == "test"]
-        context_ids = [s for s in slide_ids if records[index[s]][fc].strip() != "test"]
+        test_ids = [s for s in slide_ids if records_by_sid[s][fc].strip() == "test"]
+        context_ids = [s for s in slide_ids if records_by_sid[s][fc].strip() != "test"]
         if len(test_ids) < 2:
             print(f"  fold {k + 1}/{total_folds}: skip (only {len(test_ids)} test slides)")
             continue
