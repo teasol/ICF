@@ -1,0 +1,63 @@
+{
+  "results": {
+    "2000": {
+      "ok": true,
+      "wall_s": 0.9798531588166952,
+      "peak_mem_mib": 12978.16796875,
+      "out_shape": [
+        1,
+        10,
+        2
+      ]
+    },
+    "4000": {
+      "ok": false,
+      "error": "OutOfMemoryError: CUDA out of memory. Tried to allocate 3.05 GiB. GPU 0 has a total capacity of 23.55 GiB of which 779.25 MiB is free. Including non-PyTorch memory, this process has 22.78 GiB memory in use. Of the allocated memory 22.25 GiB is allocated by PyTorch, and 283.44 MiB is reserved by PyTorch but unallocate"
+    },
+    "3000": {
+      "ok": true,
+      "wall_s": 1.8439923515543342,
+      "peak_mem_mib": 19443.0537109375,
+      "out_shape": [
+        1,
+        10,
+        2
+      ]
+    },
+    "3500": {
+      "ok": true,
+      "wall_s": 1.9856587955728173,
+      "peak_mem_mib": 22674.74658203125,
+      "out_shape": [
+        1,
+        10,
+        2
+      ]
+    },
+    "3750": {
+      "ok": false,
+      "error": "OutOfMemoryError: CUDA out of memory. Tried to allocate 2.86 GiB. GPU 0 has a total capacity of 23.55 GiB of which 2.14 GiB is free. Including non-PyTorch memory, this process has 21.40 GiB memory in use. Of the allocated memory 20.86 GiB is allocated by PyTorch, and 288.20 MiB is reserved by PyTorch but unallocated."
+    },
+    "3625": {
+      "ok": true,
+      "wall_s": 2.1112060621380806,
+      "peak_mem_mib": 23482.794921875,
+      "out_shape": [
+        1,
+        10,
+        2
+      ]
+    },
+    "3687": {
+      "ok": false,
+      "error": "OutOfMemoryError: CUDA out of memory. Tried to allocate 2.81 GiB. GPU 0 has a total capacity of 23.55 GiB of which 2.49 GiB is free. Including non-PyTorch memory, this process has 21.05 GiB memory in use. Of the allocated memory 20.51 GiB is allocated by PyTorch, and 290.94 MiB is reserved by PyTorch but unallocated."
+    },
+    "3656": {
+      "ok": false,
+      "error": "OutOfMemoryError: CUDA out of memory. Tried to allocate 2.79 GiB. GPU 0 has a total capacity of 23.55 GiB of which 2.66 GiB is free. Including non-PyTorch memory, this process has 20.88 GiB memory in use. Of the allocated memory 20.34 GiB is allocated by PyTorch, and 291.75 MiB is reserved by PyTorch but unallocated."
+    }
+  },
+  "largest_ok": 3625,
+  "smallest_oom": 3656,
+  "pool_size": 1990922
+}

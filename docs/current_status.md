@@ -7,8 +7,8 @@
 
 | 항목 | 값 |
 |:---|:---|
-| **Last Updated** | 2026-09-12 (KST) |
-| **Status** | **순수 러너 마이그레이션 및 레거시 11,800라인 삭제 완료 (RU-91)** · 후속 연구 착수 대기 |
+| **Last Updated** | 2026-09-14 (KST) |
+| **Status** | **후속 연구 착수 대기** · ICLR 2027 스프린트는 당일 중단 판정(`D-044`, 반증 결과는 RU-93·95·96으로 보존) |
 | **Host / Node** | `nexgem-s1` · RTX A5000 8장(23 GB) · driver 580.126.09 · Slurm 명령 없음 |
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · 0-parameter 순수 추론 |
 | **Active Job** | 없음. 유휴 GPU 확인 후 필요 작업 진행 (`free_gpus.sh`) |
@@ -61,3 +61,4 @@
 - **v115~v120 6브랜치 조합 검증은 남은 과제**: 과거 기록 보존 및 개선량 기준·불확실성 분리 정합화 (출처: 결정 `D-041`).
 
 [작성자: Antigravity / Document Agent / 미확인 (effort: 미확인) · 2026-09-10 17:15 KST]
+[작성자: GitHub Copilot / Document Agent / GLM-5.3-Flash (effort: 미확인) · 2026-09-14 17:15 KST]

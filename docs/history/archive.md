@@ -3045,3 +3045,44 @@ _by Orca / Main Agent / claude-opus-5 (effort: high) on nexgem-s1 at 2026-09-10_
 **경계 판정 2건을 사용자 판단 대기로 올렸다** ([`closed_axes.md` §3](../closed_axes.md)) —
 `§3-I` 컨텍스트 라벨만 쓰는 판별 통계가 `CA-06` 경계인가, `§3-J` 다중 강도 브랜치 동시 투입이
 `P2-SELECTOR-CEILING`·`CA-09` 경계인가. 판단이 갈려 임의로 한쪽을 채택하지 않았다.
+
+## D-044 · 2026-09-14 · ICLR 2027 12일 스프린트 중단 판정 및 산출물 정리 *(사용자 결정 → 실측 확증)*
+
+### 배경
+
+2026-09-14, "새 단순 모델이 ICMIL/PFN 기반 in-context MIL을 대체한다"는 피벗으로 ICLR 2027
+(초록 9/19 · 본문 9/26 KST) 12일 스프린트를 시작했다. 당일 내에 다음이 실측됐다.
+
+### 당일 실측 요약 (상세는 이관된 보고서 참조)
+
+| 항목 | 결과 | 근거 |
+|:---|:---|:---|
+| ICMIL 재현 (Gate 1) | **통과** — 12과제 평균 84.06 vs 논문 84.17 (Δ −0.11pp), 62초, 8.26M 파라미터 | [RU-93](../reports/RU-93_icmil_reproduction.md) |
+| Context Bottleneck 주장 | **반박** — instance 축 하드 제약 없음, `n` 10→1000에서 ICMIL macro +0.52pp (4/7 과제 하락), `mean_logreg`는 −1.04pp | [RU-95](../reports/RU-95_bagsize_sweep_primary7.md) |
+| ICF 7-branch vs ICMIL@1000 | ICF 0.6226 vs 0.5993 (+2.33pp), 단 ICF 승리 3/7, macro 우위는 ICMIL이 0.5 미만인 2과제가 만듦 | RU-95 §과제별 |
+| S1/S2/S3 사양 후보 | **전량 폐기** — S1은 φ 34,176차원 vs 컨텍스트 ~240의 과소결정으로 ARID1A 반예측(사양 실패) | 부분 실측만 확보 후 중단 |
+| Token-MIL (사용자 승인 사양) | **기각** — macro 0.5754 vs 0.6226 (Δ −4.72pp, sign 1/7) | [RU-96](../reports/RU-96_token_mil_primary7.md) |
+
+### 판정
+
+계획 문서에 사전 등록된 중단 조건(프레임을 지지하는 증거 부재 + 새 모델 채택 기준 대폭 미달)에
+해당한다. **사용자 결정에 따라 ICLR 2027 스프린트를 중단**하고, 스프린트 관련 산출물을
+삭제하며, 반증 결과와 재현 자산은 기록으로 보존한다. CVPR 2027 등 대체 투고는 **이 결정의
+범위 밖**이며, 다음 연구 방향은 별도로 설계한다.
+
+### 산출물 처리
+
+- **삭제**: 스프린트 계획 문서(개정 0\~9), 폐기 모델 코드(`src/models/dist_ridge.py`,
+  `src/models/token_mil.py`, `scripts/eval_dist_ridge.py`, `scripts/eval_token_mil.py`),
+  `scratch/{icmil,dist_ridge,token_mil,ICMIL}`(ICMIL 클론·venv 포함), 폐기 사양의 부분
+  재실행 데이터(`docs/history/ru94_rerun/`).
+- **보존**: 보고서 3건(RU-93·95·96 → `docs/reports/`), F1 sweep 원시 결과
+  (`docs/history/ru95_f1_sweep_results/`, 952KB), Token-MIL per-fold 데이터
+  (`docs/history/ru96/`, 88KB), RU-92 SEAL 10 hold-out 측정(기존 공식 모델에 대한 것).
+- 파생 사실: ICMIL 벤치마크가 전부 `d=25`·bag 10\~18인 것, ICMIL 집계가 평균류 attention
+  이며 instance 위치 인코딩이 없는 것, `ARID1A`에서 context-통계 계열이 반복 붕괴하는 것 —
+  이 세 가지는 스프린트와 무관한 재현 가능한 관측으로 남는다.
+
+- **관련**: `D-042`(공식 7-branch 고정) · `D-043`(순수 러너 단일화) · RU-92 · RU-93 · RU-95 · RU-96.
+
+[작성자: GitHub Copilot / GLM-5.3-Flash on nexgem-s1 at 2026-09-14 17:10:00]
