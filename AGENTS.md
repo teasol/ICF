@@ -14,7 +14,7 @@ Platform은 모든 전문 작업의 필수 관문이 아니며, Reasoning도 모
 | 역할 | ICF 배속 | 역할의 목적 |
 |---|---|---|
 | Platform Agent | 필요할 때 지정하는 운영 세션. 고정 코드네임·모델 없음 | 사용자 소통, 작업 연결, 실행과 기록 |
-| Reasoning Agent | **Orca (`orca`)** · 기본 `claude-opus-5`, effort `high` | 깊은 추론, 연구 설계와 증거 판정 |
+| Reasoning Agent | **Orca (`orca`)** · `gpt-6-astra`, effort `medium` (Codex) | 깊은 추론, 연구 설계와 증거 판정 |
 | Idea Agent | **Owl (`owl`)** · 기본 `claude-sonnet-5`, effort `medium` | 새로운 접근과 반증 가능한 가설 생성 |
 | Coding Agent | **Lime (`lime`)** · 기본 `claude-sonnet-5`, effort `medium` | 사양 구현, 검증 설계와 기술 분석 |
 | Document Agent | 필요할 때 지정하는 문서 전담 세션. 고정 코드네임·모델 없음 | 문서 최신화, 정합성, 수명 관리 |
