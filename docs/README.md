@@ -1,6 +1,6 @@
 # Documentation Map
 
-**Last updated**: `2026-09-12`
+**Last updated**: `2026-09-14`
 
 > 이 파일은 **어느 사실이 어느 문서의 정본인지**만 말한다. 수치·상태·결정을 여기에 적지 않는다.
 
@@ -8,15 +8,19 @@
 
 ## 1. 새 세션이 읽는 순서
 
+새 세션은 역할부터 정한다. 순서는 [`../AGENTS.md`](../AGENTS.md)와
+[`agent_handoff.md`](agent_handoff.md) §0의 진입 절차가 정본이며, 아래는 그 요약이다.
+
 | 순서 | 문서 | 무엇을 얻는가 |
 |---:|:---|:---|
-| 1 | [`PROJECT.md`](PROJECT.md) | 최종 목표, 현재 목표, 기준선 수치, 승격 기준, 채택 게이트 |
-| 2 | [`current_status.md`](current_status.md) | 지금 무엇을 하고 있는가, 블로커, 다음 명령 |
-| 3 | [`agent_handoff.md`](agent_handoff.md) | 작업 규범, RU 프로세스, 불변식, 보고 무결성 계약, 실행 환경 |
-| 4 | [`closed_axes.md`](closed_axes.md) | 다시 열지 않는 축과 **그 경계** — 제안을 심사하기 전에 반드시 |
-| 5 | [`current_architecture.md`](current_architecture.md) | 브랜치 수식과 파이프라인 (구조·수식을 다룰 때) |
+| 1 | [`../AGENTS.md`](../AGENTS.md) | 역할 정의·권한·경계. 역할 미배정 시 Platform/Reasoning을 임의로 가정하지 않고 요청 범위로 적용 경로를 판단한다 |
+| 2 | [`agent_handoff.md`](agent_handoff.md) §0.1 | 공통 진입 절차 (git 동기화, 문서 확인 순서, 환경 실측) |
+| 3 | [`PROJECT.md`](PROJECT.md) | 최종 목표, 현재 목표, 기준선 수치, 승격 기준, 채택 게이트 |
+| 4 | [`current_status.md`](current_status.md) | 지금 무엇을 하고 있는가, 블로커, 다음 명령 |
+| 5 | [`agent_handoff.md`](agent_handoff.md) §0.2 해당 역할 절 + 역할별 추가 자료 | 조건부: Reasoning은 [`closed_axes.md`](closed_axes.md)·[`research_directions.md`](research_directions.md), Coding은 [`current_architecture.md`](current_architecture.md), Document는 이 파일(문서 지도) 자체 |
 
-`git log --oneline -20`으로 최근 궤적을 함께 확인한다.
+`git log --oneline -20`으로 최근 궤적을 함께 확인한다. 4\~5는 항상 전부 읽는 목록이 아니라
+맡은 역할과 작업에 필요한 만큼만 읽는 대상이다.
 
 ---
 
@@ -27,6 +31,7 @@
 
 | 사실 | 정본 |
 |:---|:---|
+| 역할 정의 · 권한 · 결정 경계 · 연구 행동 원칙 · 서명 규칙 | [`../AGENTS.md`](../AGENTS.md) |
 | 기준선 AUROC · 승격 기준 · 게이트 조건 · 판정 설계와 정밀도 · 오염 검사 상수 | [`PROJECT.md`](PROJECT.md) |
 | 현재 목표 · 진행 중 RU · 블로커 · 다음 명령 · 환경 실측값 | [`current_status.md`](current_status.md) |
 | 닫힌 축과 경계 정의 · 경계 미확정 목록 | [`closed_axes.md`](closed_axes.md) |
