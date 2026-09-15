@@ -26,7 +26,7 @@
 
 #### Platform으로 시작한 경우
 
-- **입력**: 사용자 요청, `current_status.md`, 관련 RU 카드와 담당 역할의 실행·후속 작업 명세.
+- **입력**: 사용자 요청, [`current_status.md`](current_status.md), 관련 RU 카드와 담당 역할의 실행·후속 작업 명세.
 - **작업**: 요청을 분류하고 필요한 역할에 §0.3 형식으로 전달합니다. 실행 전 §1의 범위·예산·
   접근 제한과 §5 환경을 확인하고 §6 명령을 실행합니다. 명령·환경·종료 코드·로그·산출물 위치를
   기록하여 Coding에 돌려줍니다. 판정이 필요한 근거는 Reasoning에, 문서 변경은 Document에 전달합니다.
@@ -35,8 +35,8 @@
 
 #### Reasoning(Orca)으로 시작한 경우
 
-- **입력**: `PROJECT.md`의 목표·판정 설계, [research_directions.md](research_directions.md)의 후보 큐,
-  [closed_axes.md](closed_axes.md)의 경계, 해당 제안·RU·Coding 검증·실행 기록.
+- **입력**: [`PROJECT.md`](PROJECT.md)의 목표·판정 설계, [`research_directions.md`](research_directions.md)의 후보 큐,
+  [`closed_axes.md`](closed_axes.md)의 경계, 해당 제안·RU·Coding 검증·실행 기록.
 - **작업**: 질문과 줄일 불확실성을 정합니다. 방향이 미정이면 탐색을 설계합니다. 후보 심사 때
   닫힌 축의 실제 기전·경계를 대조하고 모호한 항목은 `closed_axes.md` §3에 남깁니다.
   §1의 카드에 비교 조건·자료 접근·예산·기준·중단 조건을 구체화하고 전문 작업을 연결합니다.
@@ -46,8 +46,8 @@
 
 #### Idea(Owl)로 시작한 경우
 
-- **입력**: 현재 목표, `research_directions.md`, 관련 구조를 다룰 때
-  [current_architecture.md](current_architecture.md), 허용된 탐색·개발 결과.
+- **입력**: 현재 목표, [`research_directions.md`](research_directions.md), 관련 구조를 다룰 때
+  [`current_architecture.md`](current_architecture.md), 허용된 탐색·개발 결과.
 - **작업**: 해결할 한계와 기존 전제를 드러내고 대안별 바꾸는 전제·기대 관측·반증 조건·미확인
   사항을 적습니다. `closed_axes.md`와의 관계는 제약과 대안으로 보고하며 스스로 최종 기각하지 않습니다.
   아직 확인하기 어려운 접근도 제시하고 작은 프로브가 배울 내용을 설명합니다.
@@ -56,7 +56,8 @@
 
 #### Coding(Lime)으로 시작한 경우
 
-- **입력**: 승인 사양과 RU, `current_architecture.md`, 대상 코드, `scripts/lib/arms.sh`, 관련 테스트.
+- **입력**: 승인 사양과 RU, [`current_architecture.md`](current_architecture.md), 대상 코드,
+  [`scripts/lib/arms.sh`](../scripts/lib/arms.sh), 관련 테스트.
 - **작업**: §3 불변식을 확인하고 구현·검증 코드와 예상 동작을 준비합니다. 변경 사양·환경·명령·
   비용 추정·중단 조건을 실행자에게 제공합니다. Platform 없는 직접 작업은 §5~§6에 따라 실행합니다.
   로그·예측 파일로 의도한 개입과 실제 동작을 대조하고 필요한 회귀 검사를 수행합니다.
@@ -214,13 +215,10 @@ $PYTHON scripts/docs/ru.py close --id RU-xx
 
 ## 2. 프로젝트 개요
 
-**ICF**는 미리 추출된 MIL 패치 임베딩(UNI2, 1536D) 위에서 병리 WSI를 분류하는 **in-context
-분류기**다. 활성 구성은 **학습 파라미터 0개의 완전 결정론적 통계 앙상블**이다 —
-Context 슬라이드만으로 within-slide PCA 기저(K=256)를 만들고, 상보적 통계 브랜치들이 각각
-독립 마진을 산출한 뒤 Trimmed Mean으로 결합한다.
+프로젝트 설명·아키텍처는 이 문서의 정본이 아니다. 중복 서술하지 않고 아래로 위임한다.
 
-- 목표·기준선·승격 기준: [`PROJECT.md`](PROJECT.md)
-- 브랜치 정의와 수식: [`current_architecture.md`](current_architecture.md)
+- 무엇을 하는 프로젝트인가, 목표·기준선·승격 기준: [`PROJECT.md`](PROJECT.md)
+- 아키텍처 개요와 브랜치 정의·수식: [`current_architecture.md`](current_architecture.md)
 
 ### 2.1 디렉토리와 역할
 
@@ -409,12 +407,8 @@ bash scripts/run_and_wait.sh scripts/run_v121_shape_screen.sh v121_sh_v2 \
 arm 정의는 config가 아니라 [`../scripts/lib/arms.sh`](../scripts/lib/arms.sh)의 `icf_arm_v1xx`
 함수 + 환경변수로 주입한다. fold/seed도 config가 아니라 `--cv`/`--seed`로 주입한다.
 
-**2026-09-02 정리 내역 (§205)**: 학습 파라미터 계보(v77~v105) 루트 config 26개를 시대별
-`configs/archive/` 폴더로 이관하고, 참조가 0인 config-group 23개와 Research Harness 전용 yaml
-5개를 삭제했다(tracked config 277 → 249). 이관 폴더는 `v77_hard_orthogonal/`,
-`v80_v82_seed_batch/`, `v83_linear_head/`, `v86_v93_episode_shape/`, `v94_v102_cell_value/`,
-`v103_v105_head_proj/`이며, 기존 시대별 폴더와 함께 전부 `base_config` 없는 **자체 포함형**으로
-보관한다. 원문은 git 이력에 보존된다.
+현재 상태에 이른 정리 경위(이관 대상·폴더·삭제 개수)는 시점 기록이므로 여기서 되풀이하지 않는다 —
+[`history/archive.md` §205](history/archive.md)에 보존되어 있다.
 
 
 ## 8. 세션 종료와 다음 담당자 인계

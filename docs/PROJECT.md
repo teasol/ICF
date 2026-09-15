@@ -221,13 +221,8 @@ SEAL 논문(`seal_univ2_baseline_17tasks.csv`)의 UNI2 기준선이다.
 
 ---
 
-## 6. 규범 문서 링크
+## 6. 다른 문서
 
-| 알고 싶은 것 | 정본 |
-|:---|:---|
-| 다시 열면 안 되는 축과 그 **경계 정의** | [`closed_axes.md`](closed_axes.md) |
-| 과거 결정의 근거·정정·철회 이력 | [결정 이력](history/archive.md) |
-| 보고 무결성 계약, 불변식, 작업 규범 | [`agent_handoff.md`](agent_handoff.md) |
-| 브랜치 수식과 아키텍처 | [`current_architecture.md`](current_architecture.md) |
-| 현재 상태·진행 중 RU·다음 명령 | [`current_status.md`](current_status.md) |
-| 450커밋 전수 연구 이력 (RU-01~) | [`history/research_units_all.md`](history/research_units_all.md) |
+이 문서는 목표·평가 체계·기준 수치만 선언한다. 전체 문서 지도와 그 밖의 모든 사실(작업 규범,
+아키텍처, 진행 상태, 결정 이력, 닫힌 축 등)의 정본 위치는 [`README.md`](README.md) §2에서
+한 곳으로만 관리하며, 여기서 다시 나열하지 않는다.
