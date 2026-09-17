@@ -1,0 +1,536 @@
+# ICF Council — C-20260918-6
+
+- **연구 질문**: D-048로 학습 파라미터가 허용됐다. 이제 첫 후보를 정해야 한다. 이 회차는 그 후보의 사전 등록안을 만든다. 실행 승인이 아니며 어떤 성능도 조회하지 않는다.
+
+제약: (1) 개선 근거는 Primary 7 뿐이다(D-047). (2) RU-38 관측 - within-context PCA + closed-form ridge가 학습 계보보다 일반화·OOD에서 월등했다 - 은 소급 취소되지 않았다. 후보는 그 관측을 어떻게 반박하거나 회피하는지 밝혀야 한다. (3) 라벨로 학습한 margin을 라벨 무관 게이트 1에 넣는 것은 현재 절차상 실행 무효다. 이 구멍을 어떻게 다룰지 정해야 한다. (4) 적합 분산을 포함한 승격 절차는 아직 미승인이므로, 후보 설계는 그 절차가 승인될 때까지 승격 판정을 요구하지 않는 형태여야 한다.
+
+실측 맥락: RU-97에서 GF 단독은 어느 구성에서든 macro 0.586 부근이었고 구성 간 차이는 적합 분산에 묻혔다. 목표는 SEAL 10에서 ABMIL 0.7266을 넘는 것이고 공식 7-branch의 Primary 7은 0.6227이다.
+
+설계할 것: 후보 하나를 구체적으로 확정하라 - 무엇을 학습하는가, 파라미터 수, 입력과 출력, 기존 7-branch와의 결합 방식, 학습 데이터 범위와 라벨 사용 여부, fold별 재학습 여부, 중단 기준, 예산. 그리고 이 후보가 실패했다고 판단할 조건을 결과 전에 고정하라. 문서에 없는 수치를 지어내지 말라.
+- **RU 유형**: 탐색
+- **최대 권한 등급**: T1
+- **소집자**: Claude Code (claude-opus-5)
+- **좌석**: P1(P, temp 0.9, http://127.0.0.1:8000/v1/chat/completions), R1(R, temp 0.5, http://127.0.0.1:8001/v1/chat/completions), T1(T, temp 0.4, http://127.0.0.1:8003/v1/chat/completions), A1(A, temp 0.2, http://127.0.0.1:8000/v1/chat/completions), G1(G, temp 0.3, http://127.0.0.1:8003/v1/chat/completions), S1(S, temp 0.2, http://127.0.0.1:8001/v1/chat/completions)
+- **호출**: 11/18 · **소요**: 780.1초
+
+> 이 문서는 로컬 모델이 생성한 것이며 **검증되지 않았습니다.** 좌석이 인용한 수치는
+> 정본 문서와 대조하기 전에는 결론에 넣지 마십시오. 좌석 수와 동의 수는 증거가 아닙니다.
+
+## 편성 근거 (결과 전 기록)
+
+D-048 이후 첫 후보 설계이므로 좌석을 다시 6개로 늘렸다. 제안(P)이 후보를 확정하고, 반증(R)은 '제약이 풀렸으니 학습하면 된다'와 후보가 RU-38 관측을 회피하는 척만 하는지를 공격한다. 이론(T)은 RU-38 관측과 후보의 관계를 본다. 감사(A)는 라벨 사용 범위와 게이트 1 절차 구멍을 점검한다 - 학습 후보에서 가장 새기 쉬운 지점이다. 일반화(G)를 다시 넣었다: RU-38의 기각 근거가 바로 일반화·OOD였으므로 이번엔 그 관점이 필수다. 실측(M)은 제외 - GPU 4가 m16 적합 분산 검사에 쓰이고 있고, 비용 추정은 후보가 확정된 뒤가 맞다.
+
+---
+
+## Phase 1 — 독립
+
+### P1 (제안)
+
+## 제안 1: closed-form ridge margin에 0-init residual MLP를 더하는 Primary 7 readout probe
+- **바꾸는 것**: 공식 7-branch(`CV,BM,BD,QA,DS,SH,SJ`)의 fold별 closed-form/Dual Ridge margin을 baseline으로 유지하고, 같은 fold의 7개 branch margin을 입력으로 하는 2층 MLP residual head를 학습한다. head는 `7 → 8 → 1`, 편향 포함, hidden activation `tanh`, output linear, output weight와 bias를 0-initialization 하며, 파라미터 수는 `7*8 + 8 + 8*1 + 1 = 73`개다. 입력은 fold train split에서 산출된 7-branch margin의 7차원 벡터이며, fold train의 mean/std로 표준화한 뒤 fold test에도 같은 train 표준화를 적용한다. 출력은 baseline margin에 더할 scalar residual이며, 후보 스코어는 `baseline margin + head(margin_7)`이다. 이는 8-branch로 편입하지 않는 readout 후보다. 학습 데이터는 Primary 7의 7과제×50fold fold train split slide label만으로 한정한다. fold test label은 AUROC 계산에만 사용하고, SEAL 10은 열지 않는다. fold별·seed별 독립 재학습을 하며 seed는 1~8, 즉 잠정 `R=8`으로 고정한다. 학습은 20 epoch 고정, early stopping 없음, Adam `lr=1e-3`, weight decay `1e-3`, fold train 전량 batch, seed별 shuffle·초기화 제어한다. 예산은 문서의 NEXGEM B200 1장 합계 4 GPU-hour를 초과하지 않는다. 중단 기준은 NaN/Inf, OOM, 입력 누락, 4 GPU-hour 초과, 350 fold×8 fit 중 하나라도 미완료, baseline margin 산출 경로 변경, §3.4 오염 검사 상수와 기저 앵커 불일치다. 라벨로 학습한 head margin을 라벨 무관 게이트 ①에 넣지 않는다. 이 후보는 신규 브랜치 채택 게이트 ①의 대상이 아니라 readout 변경으로 처리하며, 향후 학습 margin을 브랜치로 쓰려면 라벨 무관 대리 margin을 사전 등록해야 한다고 둔다. 이 실행은 승격 판정을 요구하지 않고, 적합 분산 포함 승격 절차가 승인될 때까지 탐색 기록으로만 종료한다. CA-08의 선택 편향 실패 양식을 피하기 위해 Primary 7에서 여러 결합 함수를 탐색해 최댓값을 고르지 않고, 단일 residual readout만 사전 등록한다.
+- **바꾸는 전제**: (1) “학습 파라미터를 활성 경로에 두지 않는 것이 안전하다”는 `D-048` 이전 전제를, “closed-form ridge 기본 경로를 보존하는 0-init residual에는 학습 파라미터를 둘 수 있다”로 뒤집는다. (2) “7-branch margin의 결합은 선형 closed-form ridge로 충분하다”는 전제를, “작은 비선형 residual이 fold별 잔차를 보정할 수 있다”로 둔다. (3) “라벨로 학습한 margin도 기존 브랜치처럼 게이트 ①에 넣어야 한다”는 전제를, “게이트 ①은 라벨 무관 margin에만 적용되므로 학습 margin은 readout 후보로만 두고 게이트 ① 적용 불가로 선언한다”로 둔다.
+- **기대하는 차이**: Primary 7 350-fold paired Δ_macro의 8-fit 평균이 0보다 크고 `+0.0030` 임계 근처 또는 이상으로 이동하는지 본다. RU-97에서 단일 seed가 구성 평균보다 `1.5 sd` 높아 위양성을 만든 사례가 있으므로, 단일 적합이 아니라 8-fit 평균과 적합 sd, fold 군집 SE를 함께 보고한다. `+0.0030` 도달 여부에 관계없이 SEAL 10 개선은 hold-out 미검증이며, 이 설계에서 SEAL 10 수치를 조회하지 않는다. 문서에 근거한 정량 예측은 없다(정량 예측 불가).
+- **기전**: closed-form ridge가 선형 결합의 기본 경로를 유지하고, 0-init head는 시작점에서 baseline과 동일하다. 학습이 진행되면 7개 branch margin의 상호작용이나 비선형 스케일링을 residual로 보정해 fold별 오차를 줄이는 경로로 가정한다. RU-38의 “within-context PCA + closed-form ridge가 학습 계보보다 일반화·OOD에서 우월했다”는 관측은 closed-form ridge를 대체하는 학습 계보 전체에 대한 것이므로, 이 후보는 대체가 아닌 residual 추가 방식으로 회피한다. 이 회피가 실제 일반화 이득으로 전환되는지는 미확인이다(기전 미확인).
+- **실패 조건**: 결과 전에 고정. (1) 350 fold×8 fit의 paired Δ_macro 8-fit 평균이 `+0.0030` 미만이면 실패/종료. (2) 8-fit 평균이 `+0.0030` 이상이라도 fold 군집 95% t 구간(df=6) 또는 잠정 `R=8` 적합 분산 포함 SE가 0을 포함하면 판별 불가. (3) 8-fit 평균이 `+0.0030` 이상이고 0을 포함하지 않으면 탐색 기록으로 ‘지지 후보’로 남기되, 적합 분산 포함 승격 절차가 미승인이라 승격은 보류. (4) NaN/Inf, OOM, 입력 누락, 4 GPU-hour 초과, 350×8 fit 미완료, baseline margin 또는 §3.4 오염 검사/기저 앵커 불일치 중 하나라도 생기면 실행 무효. (5) 악화된 과제는 전량 보고하되, 이 실행은 승격 판단을 내리지 않는다. (6) `+0.0030` 미만이라도 특정 과제에서 큰 이득이 보이면 그 과제를 선택 신호로 쓰지 않고 탐색 기록으로만 남긴다.
+
+### R1 (반증)
+
+## 반론 1
+- **공격 대상**: "D-048으로 학습 파라미터가 허용됐으므로, 이제 학습 파라미터를 가진 구성을 첫 후보로 정하는 것이 정당한 연구 방향이다"는 전제.
+- **더 단순한 설명**: D-048은 `CA-14` 폐기와 적합 분산 보고 의무를 만들 뿐, 학습 파라미터가 `Primary 7`에서 공식 7-branch `0.6227`을 넘는다는 증거를 제공하지 않는다. `RU-38`/`CA-14` 기록은 within-context PCA + closed-form ridge가 학습 계보보다 일반화·OOD에서 우월했다는 관측이 소급 취소되지 않는다고 명시한다. 따라서 "허용됐으므로 개선 후보"는 근거 없는 전이다.
+- **무엇이 참이면 이 주장이 무너지는가**: 학습 파라미터 후보가 `RU-38`의 비교 조건에서 closed-form ridge 또는 기존 7-branch 대비 `Primary 7` 대응 Δ를 내지 못하고, 그 차이가 적합 분산·seed 변동 안에 있으면, "허용 = 개선 가능성"이라는 전제는 반박된다.
+- **이 반론의 한계**: 후보가 `RU-38`이 다루지 않은 입력·라벨 사용·결합 방식을 쓰고, 사전 고정된 fold 대응 비교와 적합 분산 포함 불확실성에서 `+0.0030`을 넘는 Δ를 만들면 이 반론은 무너진다.
+
+## 반론 2
+- **공격 대상**: "`RU-97`에서 GF 단독이 macro `0.586` 부근이므로, 이를 첫 학습 후보의 근거 또는 출발점으로 쓸 수 있다"는 주장.
+- **더 단순한 설명**: `0.586` 부근은 공식 7-branch `Primary 7` `0.6227`보다 낮다. `RU-97` §10은 `M`, 화이트닝, 표본 정책 안에서 macro를 구분하는 축이 없었고, 적합 분산이 구성 간 차이를 묻었다고 기록한다. 같은 관측을 낳는 더 단순한 설명은 "GF 단독 신호가 약하고 기존 구성과 중복될 수 있다"는 것이다. 기전은 미확인이다.
+- **무엇이 참이면 이 주장이 무너지는가**: GF margin이 공식 7-branch와 상관이 높아 게이트 ①을 통과하지 못하거나, 8-branch 대응 Δ가 `+0.0030`을 넘지 못하면, `0.586`은 후보 근거가 아니라 단독 탐색 기록이다.
+- **이 반론의 한계**: `RU-97`은 단독 탐색이므로 GF가 7-branch와 결합했을 때 정보량은 미확인이다. `SCREEN_ONLY` 게이트 ① 통과와 fold 대응 Δ에서 이득이 확인되면 이 반론은 반박된다.
+
+## 반론 3
+- **공격 대상**: "라벨로 학습한 margin을 라벨 무관 게이트 ①에 넣고, 상관만 측정하면 절차 구멍을 메울 수 있다"는 주장.
+- **더 단순한 설명**: 게이트 ①은 "라벨 무관, 성능 조회 이전"으로 정의된다. `current_status.md`는 "라벨로 학습한 margin을 라벨 무관 게이트 ①에 넣을 수 없다"를 실행 무효 구멍으로 명시한다. 따라서 상관 수치를 계산해도 현재 절차상 무효다.
+- **무엇이 참이면 이 주장이 무너지는가**: 게이트 ①의 "라벨 무관"이 margin 생성 단계의 라벨 사용까지 포함해 금지하는 한, 라벨 학습 margin은 게이트 ① 통과 대상이 아니다.
+- **이 반론의 한계**: 사용자가 게이트 ①을 개정하거나, 라벨 학습 margin에 별도 승인 경로를 만들면 이 반론은 현재 절차에만 한정된다.
+
+## 반론 4
+- **공격 대상**: "적합 분산을 포함한 승격 절차가 미승인이라도, 후보는 기존 `+0.0030` 승격 기준으로 사전 등록할 수 있다"는 주장.
+- **더 단순한 설명**: D-048 이후 적합 분산 보고가 필수다. `RU-97` §8~10은 seed만 바꿔도 macro 폭 `0.0200`, `whiten_d256_m8` 적합 sd `0.0083`(승격 기준의 `2.8`배)을 실측했다. 단일 적합 per-fold 구간은 실제 불확실성을 과소평가한다. 미승인 절차로 승격을 판정하면 실패, 반박, 판별 불가, 실행 무효를 구분하지 못한다.
+- **무엇이 참이면 이 주장이 무너지는가**: 후보의 적합 분산이 `+0.0030`보다 크거나, seed 간 대응 Δ가 양방향으로 0을 배제할 수 있으면, 기존 승격 기준은 유효한 승격 판정을 만들지 못한다.
+- **이 반론의 한계**: 승인된 절차가 적합 평균 Δ를 estimand로 하고 best-seed 선택 금지·총 SE 병기 등을 확정하거나, 후보의 적합 분산이 충분히 작아 대응 Δ가 안정적이라면 이 반론은 해소된다.
+
+## 반론 5
+- **공격 대상**: "후보 설계의 목표는 SEAL 10 ABMIL `0.7266`을 넘는 것이므로, 그 수치를 설계 근거로 삼아도 된다"는 주장.
+- **더 단순한 설명**: D-047은 SEAL 10의 경계를 열람 금지가 아니라 선택 금지로 정하고, 개선 근거는 `Primary 7`뿐이라고 명시한다. `0.7266`은 최종 hold-out 목표이지, 후보·구조·하이퍼파라미터 선택에 쓸 수 있는 근거가 아니다.
+- **무엇이 참이면 이 주장이 무너지는가**: 후보의 학습 대상, 파라미터 수, 결합 방식, 중단 기준 중 하나가 SEAL 10 결과에 의해 선택되거나 조정되면, 이 주장은 실행 무효다.
+- **이 반론의 한계**: SEAL 10을 최종 개봉 판정에서만 쓰고, 설계 전까지 열람·선택에 쓰지 않으면 이 반론은 적용되지 않는다.
+
+## 반론 6
+- **공격 대상**: "학습 파라미터 후보는 기존 7-branch에 8번째 브랜치로 넣고, 기존 readout이 계수를 정하면 된다"는 주장.
+- **더 단순한 설명**: 신규 브랜치는 성능 조회 전에 게이트 ①을 통과해야 한다. `max |r| > 0.6`이면 성능과 무관하게 기각되고, 8-branch 기준 eff.rank가 `4.02` 미만이면 기각된다. 학습 파라미터를 넣는다고 기존 7-branch와의 상관이 낮아지거나 유효 랭크가 올라가지는 않는다.
+- **무엇이 참이면 이 주장이 무너지는가**: `SCREEN_ONLY` 측정에서 `max |r| > 0.6`이거나 eff.rank가 `4.02` 미만이면, 성능과 무관하게 기각된다.
+- **이 반론의 한계**: 게이트 ① 측정은 아직 없으므로, 후보가 실제로 직교적일 가능성은 배제되지 않는다. 게이트 ①을 통과하면 이 반론은 무력화된다.
+
+## 반론 7
+- **공격 대상**: "fold별 재학습만 하면 fold 독립이 유지된다"는 주장.
+- **더 단순한 설명**: fold 독립은 fold 번호만으로 성립하지 않는다. `RU-97` §7은 GMM 학습·검증 표본과 `Primary 7` fold manifest의 ID 수준 disjointness가 미확인이라고 기록한다. 학습 파라미터가 fold 내 query 라벨·패치·context에 접근하거나 fold 간 표본·파라미터가 공유되면 `Primary 7` 대응 Δ가 오염된다.
+- **무엇이 참이면 이 주장이 무너지는가**: 학습 데이터 범위에 평가 fold의 query 라벨이 들어가거나, fold 간 학습 표본·파라미터가 공유되면, 이 주장은 실행 무효다.
+- **이 반론의 한계**: fold별 train/test disjointness, 라벨 사용 범위, §3.4 오염 검사가 사전 등록으로 고정되고 통과하면 이 반론은 해소된다.
+
+## 반론 8
+- **공격 대상**: "실패 조건을 결과 전에 고정하지 않아도, 탐색 기록으로는 충분하다"는 주장.
+- **더 단순한 설명**: 연구 질문은 실패 조건을 결과 전에 고정하라고 요구한다. D-048 이후 적합 분산이 있으므로, 절대 macro 미달만으로 실패를 정하면 seed·fold 변동과 구분되지 않는다. `RU-97`은 단일 적합 우위가 seed 인공물이었음을 보여준다.
+- **무엇이 참이면 이 주장이 무너지는가**: 실패 조건이 fold 대응 Δ, 적합 분산, seed 수, 예산, 중단 기준(NaN/Inf, OOM, 시간 초과 등)을 포함하지 않으면, 실패/반박/판별 불가/실행 무효를 구분할 수 없다.
+- **이 반론의 한계**: 이 회차가 승격·채택을 주장하지 않는 탐색 기록만 목표로 한다면, 실패 조건은 탐색 종료 기준으로 완화될 수 있다.
+
+### T1 (이론)
+
+- **가정**: D-048 이후 첫 학습 파라미터 후보는 “기존 라벨 무관·closed-form margin을 전제로 설계된 평가 체계가 학습된 margin에 그대로 유효하다”는 것을 참으로 둔다. 즉, RU-38의 within-context PCA + closed-form ridge 우월성은 학습 파라미터 일반의 상한이 아니라 특정 학습 계보의 실패였으므로 새 학습 구성은 Primary 7에서 그 관측을 회피할 수 있고, 라벨로 학습한 margin은 라벨 무관 게이트 ①에 투입할 수 있는 라벨 무관 대리로 환원되며, 그 신호는 적합 분산보다 크다고 둔다.
+
+- **이 가정이 깨지는 조건**:  
+  1. 새 학습 구성이 Primary 7 대응 비교에서 기존 7-branch 대비 Δ가 0 이하이거나, 적합 분산 안에 묻혀 반박 또는 판별 불가가 될 때.  
+  2. 라벨 사용 여부에 따라 margin의 7-branch 상관·eff.rank가 달라지거나, 라벨 무관 대리가 실제 라벨 학습 margin을 대표하지 못할 때. 라벨 무관 대리가 정의되지 않으면 게이트 ① 투입 자체가 실행 무효가 된다.  
+  3. 같은 학습 구성의 seed·초기화·적합 변동이 fold-paired Δ의 부호나 `+0.0030` 판정을 뒤집을 때.
+
+- **깨질 때 나타나는 관측 가능한 증상**:  
+  - SCREEN_ONLY에서 라벨 무관 margin만으로는 게이트 ① 결과를 결정할 수 없거나, 라벨 학습 margin과 라벨 무관 대리의 max |r|·eff.rank가 일치하지 않는 것이 확인될 때.  
+  - Primary 7에서 단일 적합에서 개선이 보이다가 seed·초기화·적합만 바꿨을 때 소멸하거나 부호가 바뀌는 것.  
+  - 적합 평균 Δ가 0을 포함하거나 `+0.0030` 미만으로 남아, 승격 절차 승인 전이라도 후보의 실패가 판별 불가 또는 실행 무효로 고정되는 것.
+
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: RU-38/CA-14의 “within-context PCA + closed-form ridge가 학습 계보보다 일반화·OOD에서 월등했다”는 관측이 D-048 이후에도 소급 취소되지 않았다는 기록; RU-97 §8·§10에서 동일 구성의 seed만 바꿔 macro 폭 `0.0200`, `M=32 − M=8` 적합 평균 Δ `+0.0003 [-0.0067, +0.0073]`로 단일 적합 우위가 seed 인공물이었던 관측. 라벨 무관 게이트 대리의 유효성에 대해서는 해당 관측 없음.
+
+### A1 (감사)
+
+## 점검 1: GMM·화이트닝 fit의 fold disjointness
+- **확인하려는 것**: RU-97 GF의 배경 GMM·PCA 화이트닝 fit에 Primary 7 fold의 test 슬라이드·패치 ID가 포함되지 않는가. 후보가 같은 fit을 재사용할 때 fold 간 독립이 유지되는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: test fold 정보가 GMM/PCA 파라미터에 새면 fold별 AUROC가 독립 표본이 아니라 fit에 의존한다. paired Δ가 fold manifest에 따라 흔들리고, seed/fold 변동이 설명되지 않는 과대·과소 평가가 나타난다. 기전은 미확인이나, ID 중복이면 평가 독립성 실패다.
+- **확인 방법**: 문서에 manifest 파일명이 없으므로 `find . -name "*manifest*" -o -name "*fold*"`로 실제 경로를 찾고, GMM/PCA fit sample ID와 fold test ID의 교차를 계산한다. `scripts/analysis/gf_collate.py`와 GF fit 코드의 fit 범위 설정을 대조한다.
+
+## 점검 2: RU-97 사전 고정 기준의 seed 무관성
+- **확인하려는 것**: RU-97 §2의 “사전 고정 기준 통과”가 seed 무관하게 성립하는가.
+- **문서에서 확인되는가**: 모순됨
+- **샌다면 나타날 증상**: seed 42 단일 적합을 기준으로 구성을 고르면 §8·§10의 seed 폭 `0.0200`보다 작은 차이가 위양성으로 전환된다. “통과”가 seed 선택에 의존하면 탐색 기록이 선택 신호로 오염된다.
+- **확인 방법**: `talks/reports/2026-09-17_ru97_gf_primary7.md` §2·§8·§10을 대조한다. `scripts/analysis/gf_collate.py`의 사전 고정 기준 코드와 seed 1·2·3·42 per-fold 산출물로 기준을 재계산한다.
+
+## 점검 3: fold 고정·중복·매니페스트 고정
+- **확인하려는 것**: 후보 평가가 PathoBench 공식 50-fold를 그대로 쓰고, train/test/context/query 간 slide·patch 중복이 없음을 매니페스트로 고정하는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: fold 재분할, slide 중복, context-query overlap이 있으면 fold 단위가 독립 표본이 아니다. paired Δ의 SE와 승격 기준이 무효해지고, 같은 slide가 train과 test에 반복 노출되어 AUROC가 과대평가된다.
+- **확인 방법**: 공식 fold manifest와 후보 실행 manifest의 fold ID·slide ID·patch ID를 비교한다. `find . -name "*fold*" -o -name "*manifest*"`로 실제 파일을 찾고, `python -c`로 set intersection과 fold 수 50을 확인한다. `docs/PROJECT.md` §3.1과 실제 manifest 해시를 대조한다.
+
+## 점검 4: baseline paired 비교의 동일성
+- **확인하려는 것**: 후보와 공식 7-branch baseline의 paired Δ가 같은 fold, 같은 전처리, 같은 AUROC 계산으로 산출되는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: baseline을 후보 평가 시점에 재학습·재전처리하거나 fold manifest가 다르면 Δ에 후보와 무관한 변동이 섞인다. `0.6227` 기준선이 후보를 보고 조정된 것과 같은 선택 편향이 생긴다.
+- **확인 방법**: baseline per-fold AUROC 산출물(`ru90_shape_triple` 태그)과 후보 per-fold AUROC 산출물의 fold ID, slide ID, 전처리 버전, AUROC 함수 버전을 비교한다. `git grep -n "ru90_shape_triple"`, `git grep -n "0.6227"`, 관련 평가 스크립트를 확인한다.
+
+## 점검 5: 라벨 학습 margin의 게이트 ① 유입 차단
+- **확인하려는 것**: 라벨로 학습한 margin이 라벨 무관 게이트 ①에 입력되지 않도록 차단하는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: `branch_screen.py`가 라벨 학습 margin을 받으면 게이트 ①이 성능 조회 이전의 라벨 무관 직교성 검사가 아니라 라벨 정보에 의존한 선택이 된다. 이 경우 게이트 통과·탈락은 실행 무효다.
+- **확인 방법**: 후보 margin 생성 코드와 `scripts/analysis/branch_screen.py` 입력 경로를 확인한다. margin 산출물에 label 사용 플래그, 학습 데이터 manifest, fit seed가 기록되는지 확인한다. `git grep -n "branch_screen"`, `git grep -n "label" -- src scripts`로 라벨 의존 경로를 찾는다.
+
+## 점검 6: Primary 7 선택과 확인 분리
+- **확인하려는 것**: 후보 선택에 Primary 7을 사용한 경우, 같은 Primary 7으로 확증을 하지 않도록 선택 이력과 확인 설계를 분리하는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: Primary 7에서 후보를 고르고 같은 Primary 7에서 성공을 판정하면 §214식 선택 편향이 생긴다. paired Δ가 실제 개선이 아니라 탐색 최댓값의 노이즈가 된다.
+- **확인 방법**: 사전 등록안에서 탐색 공간, Primary 7 열람 이력, 후보 확정 시점, 확인 평가의 fold/seed/적합 단위를 확인한다. `talks/council/C-20260918-6_card.json`과 후보 RU 카드에 선택·확인 분리가 명시되어 있는지 확인한다.
+
+## 점검 7: SEAL 10 선택 금지 규칙
+- **확인하려는 것**: SEAL 10을 후보·구조·임계값 선택에 쓰지 말라는 규칙이 문서에 고정되어 있는가.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: SEAL 10 수치를 보고 후보를 고르면 D-047의 선택 금지를 위반한다. Primary 7 개선 근거가 hold-out에 의해 선택된 것이 되어 승격 근거가 무효다.
+- **확인 방법**: `docs/PROJECT.md` §1·§3.1, `docs/current_status.md` 최근 결정 D-047과 대조한다. `git grep -n "SEAL" talks/council docs history`로 SEAL 10 수치가 후보 선택 문맥에 쓰였는지 확인한다.
+
+## 점검 8: 적합 분산 포함과 best-seed 금지
+- **확인하려는 것**: 학습 파라미터 또는 확률적 fit의 seed 분산이 비교에 포함되고, best-seed 선택이 금지되는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 단일 적합만 비교하면 RU-97 §8·§10처럼 seed 폭 `0.0200`보다 작은 Δ가 위양성으로 보인다. best-seed를 고르면 적합 분산이 선택 편향으로 전환된다.
+- **확인 방법**: 사전 등록안에 fit seed 목록, 적합 횟수, seed 간 집계 방식, best-seed 금지 조항이 있는지 확인한다. 후보 코드에서 seed 고정·랜덤 seed 생성 로직과 per-fit per-fold 산출물을 확인한다.
+
+## 점검 9: 미승인 승격 절차에 대한 승격 요구 금지
+- **확인하려는 것**: 적합 분산 승격 절차가 승인되기 전 후보가 승격 판정을 요구하지 않는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 미승인 절차로 승격·반박을 선언하면 판정 근거가 없다. 학습 파라미터 후보의 적합 분산을 처리하지 않은 승격은 RU-97의 위양성 실패 양식을 반복한다.
+- **확인 방법**: `docs/current_status.md` 미해결 항목과 후보 RU 카드의 완료 조건을 대조한다. “승격 판정 보류”, “탐색·조건부 기록” 문구가 있는지 확인한다.
+
+## 점검 10: RU-38 관측에 대한 반박·회피 설계
+- **확인하려는 것**: RU-38의 within-context PCA + closed-form ridge 우월 관측을 후보가 반박하거나 회피하는 방법을 명시하는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 학습 파라미터 후보가 단순히 Primary 7 점수만 보고 “RU-38을 넘었다”고 주장하면 관측의 반박이 아니다. closed-form ridge와 같은 fold·seed·적합 분산 조건에서 비교하지 않으면 기전 미확인이고, 성능 관측만 남는다.
+- **확인 방법**: 사전 등록안에 closed-form ridge 대조군, 동일 fold manifest, 동일 seed·적합 횟수, paired Δ 산출 방식이 있는지 확인한다. `docs/closed_axes.md` CA-14와 후보 설계를 대조한다.
+
+## 점검 11: 실패 조건의 사전 고정
+- **확인하려는 것**: 후보 실패 조건이 결과 조회 전에 고정되어 있는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 결과를 보고 실패·성공 임계값을 바꾸면 판정이 탐색 최댓값에 의존한다. 실패, 반박, 판별 불가, 실행 무효를 구분할 수 없다.
+- **확인 방법**: `talks/council/C-20260918-6_card.json`과 후보 RU 카드에 실패 조건, 중단 조건, 판정 범주가 결과 전에 기록되어 있는지 확인한다. 파일 수정 시각과 결과 산출물 생성 시각을 대조한다.
+
+## 점검 12: 예산·중단 기준의 사전 고정
+- **확인하려는 것**: 후보 예산과 중단 기준이 결과 전에 고정되어 있는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 예산 초과, OOM, NaN/Inf, 수렴 실패를 결과 보고 후 처리하면 탐색이 무제한으로 확장되고 선택 편향이 커진다.
+- **확인 방법**: 후보 RU 카드의 GPU-hour, fold 수, fit seed 수, 중단 조건을 확인한다. `docs/PROJECT.md` §2의 RU-97 예산 형식과 비교하되 후보 수치는 후보 문서에서만 확인한다.
+
+## 점검 13: SCREEN_ONLY 오염 검사 상수
+- **확인하려는 것**: SCREEN_ONLY 실행이 공식 baseline 앙상블에 영향을 주지 않는 상수가 문서에 고정되어 있는가.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: 스크리닝이 baseline margin·앙상블을 바꾸면 오염 검사 상수와 일치하지 않고, 후보 평가의 기준선이 후보 스크리닝에 의해 이동한다.
+- **확인 방법**: `SCREEN_ONLY=1`으로 후보 margin만 기록한 뒤 `docs/PROJECT.md` §3.4의 SMAD4 `0.4421`, PBRM1 `0.5553`과 4자리까지 대조한다. `scripts/analysis/branch_screen.py`와 오염 검사 스크립트를 확인한다.
+
+## 점검 14: 게이트 ① 기준의 고정
+- **확인하려는 것**: 게이트 ①의 `max |r| > 0.6`과 `eff.rank ≥ 4.02` 기준이 문서에 고정되어 있는가.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: 기준 집합이 공식 7-branch가 아니거나 margin에 라벨이 섞이면 직교성 판정이 무효다. 성능을 조회한 뒤 기각·통과를 뒤집으면 게이트 순서가 무너진다.
+- **확인 방법**: `scripts/analysis/branch_screen.py`의 `--adopted` 기본값, 기준 브랜치 목록, `max |r|`·`eff.rank` 계산 코드를 확인한다. `docs/PROJECT.md` §5와 대조한다.
+
+## 점검 15: 학습 데이터 범위와 fold별 재학습
+- **확인하려는 것**: 학습 데이터 범위가 fold train set으로 한정되고, test fold 라벨·패치가 학습에 쓰이지 않는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: Primary 7 전체로 전역 모델을 학습한 뒤 같은 fold에서 평가하면 train/test 라벨이 새어 AUROC가 과대평가된다. fold별 재학습이 없으면 fold 독립성이 깨진다.
+- **확인 방법**: 후보 학습 코드의 train manifest, validation manifest, test manifest를 확인한다. fold loop에서 test fold ID가 학습 데이터에 포함되지 않는지, 라벨이 feature에 쓰이지 않는지 확인한다. `git grep -n "train\|test\|fold" -- src scripts`로 경로를 찾는다.
+
+## 점검 16: 전처리·통계량 fit 범위
+- **확인하려는 것**: 전처리·정규화·화이트닝·GMM 등 통계량의 fit 범위가 fold train 또는 사전 고정 외부 코호트로 한정되는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: test fold 슬라이드·패치로 표준화, PCA, GMM을 fit하면 전처리 단계에서 답이 새어 paired Δ가 무효다. RU-97의 GMM disjointness 미확인 항목이 후보로 전이된다.
+- **확인 방법**: 전처리 파이프라인의 fit/transform 분리 코드를 확인한다. fit sample manifest와 fold test manifest의 ID 교차를 계산한다. `git grep -n "fit\|transform\|standard\|pca\|gmm" -- src scripts`로 fit 범위를 확인한다.
+
+## 점검 17: context 라벨 사용과 게이트·닫힌 축 충돌
+- **확인하려는 것**: context 라벨을 학습 또는 margin 계산에 사용하는 경우, 그 사용이 게이트 ①·CA-06·CA-R1 경계와 충돌하지 않는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: context 라벨로 학습한 margin을 라벨 무관 게이트에 넣으면 실행 무효다. CA-06의 라벨 사용 판별 기저와 같은 표본 변동 문제가 재현될 수 있으나, 현재 문서만으로는 기전을 확정할 수 없다.
+- **확인 방법**: 후보 margin 코드에서 context label 사용 여부를 확인한다. `docs/closed_axes.md` CA-06·§3-I, `docs/PROJECT.md` §5 게이트 ①과 대조한다. 라벨 사용 시 게이트 ① 대체 절차가 사전 등록되어 있는지 확인한다.
+
+## 점검 18: baseline이 후보를 보는 선택 편향
+- **확인하려는 것**: 공식 7-branch baseline의 per-fold 값이 후보 선택에 사용되지 않는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: baseline fold별 약한 과제를 보고 후보 구조·강도·결합 가중을 맞추면 기준선이 정답을 본 것과 같다. paired Δ의 추정 대상이 후보 개선이 아니라 baseline 노이즈 피팅이 된다.
+- **확인 방법**: baseline per-fold AUROC 파일의 생성 시각과 후보 선택 문서의 시각을 대조한다. 후보 선택에 baseline fold별 수치를 인용했는지 `git grep -n "per_fold\|baseline" talks docs`로 확인한다.
+
+### G1 (일반화)
+
+## 일반화 위험 N
+- **위험**: 현재 실측은 Primary 7의 고정 50-fold와 현재 context/query 구성, 현재 적합 seed, 현재 과제 집합 안에서만 성립한다. 학습 파라미터 후보는 Primary 7의 과제별 라벨 패턴, fold별 context/query 구성, context 슬라이드 규모(문서 실측 90~261장), 염색·스캐너·환자 노이즈, 적합 초기화에 과적합될 수 있다. 따라서 SEAL 10, 다른 OOD 과제, 다른 fold 구성, 다른 context 규모, 다른 데이터 출처, 다른 적합 seed로 가면 개선이 유지되지 않을 위험이 있다. RU-38의 관측은 within-context PCA + closed-form ridge가 학습 계보보다 일반화·OOD에서 우월했다는 것이며, 이 관측은 소급 취소되지 않았다. 학습 파라미터를 활성 경로에 넣는 후보는 이 관측을 반박할 새 증거를 만들거나, 그 위험을 구조적으로 회피하지 않는 한 일반화 위험이 해소되지 않는다. RU-97은 GF 탐색 공간 안에서 macro를 구분하는 축이 없었다는 판별 불가 기록이지, GF 접근 전체의 실패가 아니다. 다만 동일 구성에서 seed만 바꿔도 macro 폭 0.0200이 실측됐으므로, 학습 파라미터 후보에서 단일 적합만 보고 일반화한다고 판단하면 seed 인공물을 일반화 성과로 오인할 위험이 있다. 라벨로 학습한 margin을 라벨 무관 게이트 ①에 넣는 것은 현재 절차상 실행 무효이므로, 후보가 그 구멍에 의존하면 채택 절차 자체가 무효가 된다.
+
+- **현재 증거가 말할 수 있는 범위**: 현재 증거는 Primary 7 고정 50-fold에서만 말할 수 있다. 공식 7-branch의 Primary 7 macro는 0.6227이고, RU-97의 GF 단독 탐색 구성들은 0.586 부근에서 적합 분산에 묻혔다. 목표인 SEAL 10 ABMIL 0.7266과의 거리는 문서에 기록된 목표 거리이지, 현재 후보의 도달 가능성을 입증하는 증거가 아니다. RU-97가 말할 수 있는 것은 탐색한 GF 구성 공간(M, 화이트닝, 표본 정책) 안에서 Primary 7 macro를 안정적으로 구분하는 축이 없었다는 점과, 적합 분산을 포함하지 않은 단일 적합 비교가 실제 불확실성을 과소평가할 수 있다는 점이다. RU-38 관측은 여전히 유효하며, 현재 학습 파라미터 후보가 그 관측을 반박했다는 증거는 없다. 아직 학습 파라미터 후보의 Primary 7 실측도, SEAL 10 실측도, OOD 실측도 문서에 없다.
+
+- **현재 증거가 말할 수 없는 것**: 현재 증거는 어떤 학습 파라미터 후보도 Primary 7 밖에서 개선이 유지된다고 말할 수 없다. SEAL 10에서 ABMIL 0.7266을 넘는지도 말할 수 없고, SEAL 10의 내용이나 성능을 추측해서도 안 된다. Primary 7에서 관찰된 개선이 다른 fold, 다른 context 규모, 다른 염색·스캐너·환자 노이즈, 다른 OOD 과제에서 유지되는지도 말할 수 없다. 학습 파라미터 후보가 RU-38의 일반화·OOD 열세 관측을 반박하는지도 말할 수 없다. 적합 분산이 승격 기준 +0.003보다 작아지는지도 말할 수 없다. 라벨로 학습한 margin이 라벨 무관 게이트 ①에서 어떻게 처리되어야 하는지도 현재 절차상 미확정이며, 현재로선 실행 무효다. 적합 분산을 포함한 승격 절차가 승인되지 않았으므로, 현재 증거는 학습 파라미터 후보의 승격 가능 여부를 판단할 수 없다. GF 유효 성분 붕괴의 기전, RU-38 우월성의 기전, OOD 이동의 기전은 모두 기전 미확인이다.
+
+- **확인하려면 무엇이 필요한가**: 후보의 일반화 가능성을 확인하려면, 결과 전에 후보의 학습 대상, 파라미터 수, 입력·출력, 7-branch 결합 방식, 학습 데이터 범위, 라벨 사용 여부, fold별 재학습 여부, 중단 기준, 예산, 실패 조건을 사전 등록해야 한다. Primary 7에서는 공식 7-branch와 같은 fold에서 짝지은 대응 비교를 여러 독립 적합으로 수행하고, 적합 분산을 포함해 보고해야 하며, best-seed 선택은 금지해야 한다. 이 단계는 승격 절차가 승인되기 전까지는 탐색·진단이며 승격 판정이 아니다. Primary 7 밖의 일반화를 확인하려면 D-047에 따라 SEAL 10을 선택에 쓰지 말고, 사전 등록된 Primary 7 판정 이후에 한 번만 개봉하는 hold-out 평가가 필요하다. 그러나 SEAL 10은 문서에 있는 최종 hold-out이지, SEAL 10보다 넓은 OOD 일반화를 입증하는 집합이 아니다. SEAL 10 외의 독립 OOD/외부 벤치마크는 문서에 없으므로, 그 범위의 일반화는 현재 자료로 불가다. RU-38 관측을 반박하거나 회피하려면, 학습 파라미터 후보가 within-context PCA + closed-form ridge 대비 왜 일반화·OOD에서 열세하지 않는지를 사전에 설계하고, 가능하면 같은 fold에서 짝지은 비교로 확인해야 한다. 라벨로 학습한 margin의 게이트 ① 문제는, 라벨 무관 게이트에 넣지 않는 후보 설계 또는 게이트 절차를 먼저 확정하지 않으면 실행 무효로 남는다.
+
+---
+
+## Phase 2 — 교차
+
+### R1 (반증)
+
+## 반론 1
+- **공격 대상**: P1의 핵심 주장, 즉 “0-init residual MLP는 closed-form ridge 기본 경로를 보존하므로 RU-38 관측을 회피한다”는 점과, “라벨로 학습한 margin은 라벨 무관 게이트 ①에 넣지 않고 readout 후보로만 두면 절차 구멍을 처리한다”는 점.
+- **더 단순한 설명**: 7개 branch margin은 baseline에 이미 들어 있는 정보다. 73개 파라미터의 2층 MLP는 같은 7개 margin의 비선형 재결합·재가중을 학습한다. 따라서 Primary 7에서 양의 Δ가 보이면, (1) 공식 trimmed-mean baseline이 최적 결합이 아니라 MLP가 fold train label에 맞춰 더 좋은 결합을 찾았다는 설명, (2) label noise에 맞춘 과적합이라는 설명, (3) seed·optimization noise로 8-fit 평균이 0 위로 치우쳤다는 설명이 같은 관측을 낳는다. Δ가 0에 가까우면 0-init과 20 epoch 고정으로 residual이 거의 움직이지 않았다는 설명이 더 단순하다. 이 설명들은 RU-38의 일반화·OOD 우월 관측을 반박하지도 않고, 새 정보 추가를 입증하지도 않는다. 해당 기전은 모두 미확인이다.
+- **무엇이 참이면 이 주장이 무너지는가**: output weight와 bias에 크기 상한이 없으므로 학습 후 residual이 baseline margin을 상쇄·대체할 수 있다. 그러면 “closed-form ridge 보존”은 초기화 사실만으로 성립하지 않는다. 또한 P1은 “closed-form/Dual Ridge margin”과 “공식 7-branch margin”을 동일하게 쓰지만, 문서 §3.2의 공식 집계는 trimmed mean이며 이 둘이 동일한지 문서에 명시되지 않았다. 다르면 paired Δ가 0.6227 공식 기준과 비교 불가능하다. 학습 margin이 readout이라는 명칭으로 게이트 ① 밖에서 Primary 7 성능으로만 평가되면, 라벨 의존 margin에 대한 라벨 무관 직교성·정보량 스크린이 없어진다. 따라서 양의 Primary 7 Δ가 “학습 residual이 RU-38보다 일반화에서 우월하다”는 증거가 아니라 “기존 margin의 label-fitting 재결합”으로 설명될 수 있다.
+- **이 반론의 한계**: 7개 margin에 baseline이 쓰지 않는 비선형 상호작용 정보가 실제로 있고, fold test에서 안정적으로 회복된다면 재결합 설명은 부족하다. weight decay와 0-init이 residual을 충분히 작게 유지하고, 8-fit 평균과 적합 분산 SE가 유효한 추정이라면 fit noise 설명도 약해진다. 게이트 ①이 신규 branch에만 적용되는 것으로 명시되고 readout 변경은 별도 절차로 허용된다면 명칭 회피 공격은 성립하지 않는다. RU-38이 “전체 대체 학습 계보”에만 한정되고 residual head는 그 범위에 포함되지 않는다고 해석된다면 회피 주장은 유지된다.
+
+## 반론 2
+- **공격 대상**: P1 실패 조건, 특히 “350 fold×8 fit의 paired Δ_macro 8-fit 평균이 +0.0030 미만이면 실패/종료”와 “8-fit 평균이 +0.0030 이상이라도 fold 군집 95% t 구간(df=6) 또는 잠정 R=8 적합 분산 포함 SE가 0을 포함하면 판별 불가”를 결과 전에 고정하는 것.
+- **더 단순한 설명**: +0.0030 미달은 후보가 틀렸다는 증거가 아니라, (1) 20 epoch 고정·73개 파라미터로 효과가 작거나 undertrained, (2) R=8이 적합 분산을 충분히 평균화하지 못해 seed noise, (3) fold×fit 상호작용을 처리하지 않은 SE로 점추정이 흔들린 결과일 수 있다. RU-97에서 동일 구성의 seed만 바꿨을 때 macro 폭 0.0200, 적합 sd 0.0083이 실측된 바 있어, +0.0030 규모는 적합 noise와 같은 크기대다. 학습 데이터 규모는 문서에 없으므로, 미달을 “효과 부재”로 읽는 것보다 “측정·학습 조건이 효과를 드러내지 못했다”는 설명이 더 단순할 수 있다.
+- **무엇이 참이면 이 주장이 무너지는가**: 적합 분산을 포함한 승격 절차가 미승인이고, P1의 CI 조건은 fold 군집 95% t 구간(df=6)과 잠정 R=8 적합 분산 포함 SE를 “또는”으로 두고 fold·fit·fold×fit 분산 구조를 확정하지 않았다. 이 상태에서는 +0.0030 점추정 미달을 실패로, 0 포함을 판별 불가로 분류하는 사전 판정이 운영 불가능하거나 증거 범위를 넘는다. 특히 8-fit 평균이 +0.0030 미만이라도 구간이 0을 배제해 양의 작은 효과를 지지하면, 그것을 실패로 부르는 것은 승격 기준을 승격 절차 승인 전의 실패 기준으로 전용한 것이다.
+- **이 반론의 한계**: 소집자·사용자가 +0.0030을 승격이 아닌 탐색 종료 기준으로 명시적으로 승인하고, fold×fit 분산 추정식을 별도로 확정했다면 이 반론은 약해진다. 8-fit 평균이 실제로 적합 분산보다 충분히 크고, 20 epoch가 사전에 고정된 프로토콜로서 undertraining을 허용하는 합의가 있다면 power 설명은 운영상 기각될 수 있다.
+
+### T1 (이론)
+
+이론적 병목 N
+- 가정: 제안은 “공식 7-branch margin을 대체하지 않고 0-init residual만 더하면, 최종 readout은 여전히 closed-form ridge 체제이므로 RU-38의 일반화·OOD 우월성 관측이 적용되지 않는다”고 두고 있다. 동시에 (1) 7개 margin 벡터 안에 closed-form ridge가 쓰지 못한 일반화 가능한 잔차 정보가 있고, (2) 73개 파라미터 tanh MLP가 fold train label에서 그 잔차를 seed 간 안정적으로 추출하며, (3) 라벨로 학습한 margin이 ‘신규 브랜치’가 아니라 ‘readout 변경’이므로 라벨 무관 게이트 ①은 적용 불가라고 두고 있다. (4) 잠정 R=8의 적합 평균이 fold 분산과 적합 분산을 함께 다루는 승인된 절차 없이도 실패/지지/판별 불가를 분리할 수 있다고도 두고 있다. 이 네 가지는 문서에서 입증된 사실이 아니라 제안이 암묵적으로 참으로 전제하는 것이다. residual이 fold별 오차를 보정한다는 기전은 미확인이다.
+- 이 가정이 깨지는 조건: residual head가 fold test에서 baseline margin의 slide 순위를 바꾸는 크기로 움직이고, 그 움직임이 fold train label noise·seed 초기화·fold별 표준화에 의존할 때. 구체적으로 head 출력이 baseline margin에 비해 작지 않아 실질적으로 새 learned readout이 되거나, 8개 적합 간 paired Δ의 부호가 갈리거나, 7-branch margin의 유효 랭크가 낮아 7D 입력에 nonlinear readout이 쓸 독립 정보가 부족하거나, Primary 7 fold train에서 학습된 correction이 fold test·다른 fold·다른 과제로 이전되지 않을 때. 게이트 ① 면제 전제가 깨지는 것은 learned residual margin이 기존 7-branch margin과 기능적으로 중복되거나 baseline margin의 단조 변환에 가까울 때다.
+- 깨질 때 나타나는 관측 가능한 증상: 8-fit 평균 paired Δ_macro가 +0.0030 근처여도 seed별 Δ 부호가 갈리고 fold 군집 또는 적합 분산 포함 구간이 0을 포함해 판별 불가가 된다. head 출력이 거의 0에 머물러 Δ가 0 부근이면 잔차 정보 없음; head 출력이 baseline margin과 큰 비례 관계를 보이면 실질적 readout 교체 또는 중복 margin이다. 과제별 Δ가 일부 과제에서만 양/음으로 크게 갈리고 sign agreement가 낮다. RU-97에서 관찰된 0.0200 규모의 적합 변동과 같은 크기의 seed/fit 변동이 +0.0030보다 크거나 같으면 실패와 판별 불가를 구분할 수 없다. SEAL 10은 이 실행에서 열지 않으므로 OOD 증상은 이 실행에서 관측 불가이며, RU-38 회피 주장은 hold-out 미검증 상태로 남는다.
+- 문서의 어떤 관측이 이 가정과 충돌하는가: CA-14/RU-38은 “within-context PCA + closed-form ridge가 학습 계보보다 일반화·OOD에서 월등했다”는 관측을 소급 취소하지 않고, 학습 파라미터를 활성 경로에 두는 구성은 그 관측을 반박할 새 증거가 필요하다고 둔다. 제안의 “대체하지 않으므로 회피”는 범위 해석이지 반박 증거가 아니다. §3.2의 7-branch 유효 랭크 3.52/7은 7개 margin이 독립 정보 7개를 담고 있지 않음을 보여, 7D margin 벡터에 nonlinear residual이 쓸 독립 정보가 충분히 있다는 가정과 충돌한다. CA-09/CA-10은 같은 계열의 중복·정보량 병목이 이미 기록됐음을 보여준다. current_status의 “라벨로 학습한 margin을 라벨 무관 게이트 ①에 넣을 수 없다”는 구멍이 아직 메워지지 않았다는 관측은, “readout 변경이므로 게이트 ① 적용 불가”라는 선언만으로 절차적 안전이 확보된다는 가정과 충돌한다. RU-97 §8~10은 단일 적합의 표면 우위가 seed 인공물이었고 적합 분산이 작은 Δ를 묻을 수 있음을 실측해, 8-fit 평균과 +0.0030 cutoff만으로 안정적 이득을 분리할 수 있다는 전제와 충돌한다.
+
+### A1 (감사)
+
+## 점검 1: fold train/test·context slide ID 분리
+- **확인하려는 것**: head 학습에 쓰는 slide label, 7-branch margin 산출에 쓰는 context, 입력 표준화 통계가 모두 fold train split에 한정되고 fold test slide와 ID 수준에서 교집합이 없는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: test slide가 context나 표준화 fit에 들어가면 paired Δ가 양의 편향을 보이고, 특히 context 규모가 작은 fold에서 Δ가 커질 수 있다. 기전은 미확인이며, §3.4 오염 검사만으로는 branch margin fit 범위를 증명하지 못한다.
+- **확인 방법**: PathoBench fold manifest와 branch margin 생성 코드를 읽고, fold별로 `set(train_slide_id) ∩ set(test_slide_id) = ∅`, `set(context_slide_id) ⊆ set(train_slide_id)`를 검증하는 단발 스크립트를 실행한다. manifest 해시와 코드 버전을 실행 전에 고정한다.
+
+## 점검 2: branch margin·표준화 통계의 fit 범위
+- **확인하려는 것**: 7-branch margin을 만드는 PCA/ridge/GMM 등 모든 통계와 head 입력 표준화 mean/std가 fold train 또는 train-only context에서만 fit되는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: test label이나 test slide가 margin fit에 쓰이면 73개 파라미터의 head가 train/test 경계를 넘은 신호를 입력으로 받아 Δ가 과대평가된다. baseline margin도 함께 오염됐다면 paired Δ가 0으로 보일 수 있어 더 위험하다.
+- **확인 방법**: margin 파이프라인 코드에서 fit 호출의 입력 manifest를 추적하고, test ID가 fit 입력에 없는지 정적 검사한다. fold별로 저장된 margin과 표준화 통계를 train-only 재계산값과 대조한다.
+
+## 점검 3: baseline margin의 출처와 오염 검사 적용 범위
+- **확인하려는 것**: 후보와 짝짓는 baseline margin이 공식 7-branch 고정 경로(`ru90_shape_triple`, Primary 7 macro 0.6227)의 저장값 또는 동일 재현값인지, §3.4 오염 검사가 이 readout 후보의 baseline 불변을 실제로 검증하는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: baseline을 후보 실행 중 재계산하면서 코드·manifest·branch 집합이 달라지면 paired Δ가 후보 성능이 아니라 baseline 변경을 측정한다. §3.4 상수는 5-branch 앵커이므로 7-branch readout 경로 변경을 놓칠 수 있다.
+- **확인 방법**: 실행 전 baseline per-fold margin/AUROC 해시를 저장하고, 후보 실행에서 쓰는 baseline margin과 대조한다. 공식 tag `ru90_shape_triple` 재현 스크립트와 §3.4 상수(SMAD4 0.4421, PBRM1 0.5553) 검사를 함께 통과시킨다.
+
+## 점검 4: Primary 7 선택 이력과 CA-08 경계
+- **확인하려는 것**: 이 residual readout의 구조·초기화·optimizer·epoch·seed 집합이 이전 Primary 7 성능 조회나 RU-97 seed 인공물 관찰 이후에 적응적으로 고른 것이 아니라, 성능 조회 전에 고정된 단일 후보인지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 후보가 Primary 7에서 실패한 과제나 fold 잔차에 맞춰 고르면 같은 Primary 7 test fold에서 paired Δ가 선택 편향으로 커진다. 특히 기존 7-branch에서 악화된 과제에 Δ가 집중되면 독립적 일반화 증거가 아니다.
+- **확인 방법**: `history/archive.md`, council 카드, RU-97 보고서에서 이 후보 설계 전에 Primary 7 성능을 조회한 기록을 대조한다. 설계 근거와 조회 시점을 사전 등록 카드에 기록하고, 조회 후 변경된 파라미터가 있으면 실행 무효로 처리한다.
+
+## 점검 5: 8-fit estimand와 적합 분산 공식
+- **확인하려는 것**: 350 fold × 8 fit의 paired Δ를 어떻게 집계하는지, fold 군집과 적합 분산을 어떻게 합성하는지, best-seed를 쓰지 않는지가 결과 전에 식으로 고정됐는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: fit 단위를 무시하고 fold만 짝지으면 RU-97의 seed 42 인공물처럼 단일 적합이 평균보다 1.5 sd 높아 위양성을 만든다. 반대로 fit을 과대 반영하면 실제 신호를 판별 불가로 묻을 수 있다.
+- **확인 방법**: 사전 등록에 `Δ_r`의 fold별 계산, `r=1..8` 평균, fold 군집 SE, 적합 분산 합성 공식을 명시한다. 실행 후 8개 fit의 per-fold Δ 원시값을 저장하고, best-seed 통계가 없도록 모든 seed를 전량 보고한다.
+
+## 점검 6: 실패 조건과 판별 불가의 경계
+- **확인하려는 것**: 8-fit 평균이 +0.0030 미만이라는 사실만으로 “실패/종료”를 선언하는 것이, 불확실성이 +0.0030을 포함할 때 실패·반박·판별 불가·실행 무효를 구분하는 규범과 충돌하지 않는지.
+- **문서에서 확인되는가**: 모순됨
+- **샌다면 나타날 증상**: 적합 분산이 큰 경우 점추정만 +0.0030 아래라서 실패로 기록되고, 이후 같은 결과를 “측정 불가”로 재해석할 수 있다. 또는 +0.0030을 승격 절차 미승인 상태에서 실패 컷오프로 써서 탐색 기록을 승격 판단처럼 만든다.
+- **확인 방법**: 실패 조건을 재작성한다. 점추정 < +0.0030이고 상한 CI도 +0.0030 미만이면 반박/실패, 구간이 +0.0030을 포함하면 판별 불가, 절차 오류는 실행 무효로 분리한다. 승격 절차 미승인이라 승격 판정은 내리지 않는다는 문구를 판정 라벨에 반영한다.
+
+## 점검 7: 학습 단위 — task-fold 분리 여부
+- **확인하려는 것**: head가 7과제 × 50fold 각각의 train slide label로 개별 학습되는지, 아니면 과제 간 train slide를 풀링해 하나의 head를 학습하는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 과제 간 풀링이면 margin의 과제별 스케일·분포가 task identity를 대리변수화하고, 같은 Primary 7 과제에서 평가되어 Δ가 과대평가될 수 있다. task-fold 개별 학습이면 train slide 수가 적어 fit 분산이 커질 수 있다.
+- **확인 방법**: 학습 루프를 `for task in Primary7: for fold in 50:`으로 고정하고, 각 head의 training set이 해당 task·fold train slide만 포함하는지 assert한다. label의 task ID가 단일인지, 다른 task slide가 섞이지 않았는지 원시 manifest로 검증한다.
+
+## 점검 8: 초기화·optimizer·seed의 사전 고정
+- **확인하려는 것**: hidden weight 초기화 분포, PyTorch/optimizer 상태, seed 1~8의 의미, 20 epoch·lr 1e-3·weight decay 1e-3가 성능 조회 전에 고정됐는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: output 0-init만 고정하고 hidden init을 두면 구현마다 seed 분산이 달라지고, “8-fit 평균”이 비교 불가능해진다. hyperparameter가 Primary 7 조회 후 조정됐으면 평가 독립성이 깨진다.
+- **확인 방법**: 코드에 초기화 함수, seed 설정, optimizer 생성 순서를 고정하고, output weight/bias가 0일 때 후보 스코어가 baseline margin과 허용 오차 내로 일치하는 no-op 테스트를 실행한다. hyperparameter 변경 이력을 git diff로 확인한다.
+
+## 점검 9: 열등 fold·std=0·클래스 부재 처리
+- **확인하려는 것**: fold train에 한 클래스만 있거나 margin std가 0에 가까워 표준화가 비유한수가 될 때, AUROC를 계산할 수 없을 때 실행을 어떻게 무효화하는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: std=0에서 나눗셈으로 NaN이 생기고, 일부 fold만 조용히 제외되면 macro가 350 fold가 아닌 부분집합으로 집계되어 paired Δ가 새어 나온다. budget 초과 재시도로 fit 수가 불일치할 수도 있다.
+- **확인 방법**: fold 시작 전 train label class count, margin mean/std 유한성, std > 0, test label class count를 검증한다. 하나라도 실패하면 해당 fold를 제외하지 않고 전체 실행을 무효로 하거나 사전 등록된 대체 규칙을 적용한다. 현재 제안은 제외 없이 무효로 고정하는 것이 안전하다.
+
+## 점검 10: RU-38 회피 주장과 hold-out 경계
+- **확인하려는 것**: Primary 7 paired Δ만으로 RU-38의 일반화·OOD 우월성 관측을 반박하거나, SEAL 10 목표를 달성했다고 주장하지 않는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: Primary 7에서 +0.0030 이상이면 “학습 파라미터가 유효하다” 또는 “RU-38 관측을 반박했다”고 확장할 수 있다. 그러나 Primary 7은 모델 선택 집합이고, 이 후보는 SEAL 10을 열지 않으므로 hold-out 미검증이다.
+- **확인 방법**: 보고서 라벨을 `hold-out 미검증`, `승격 미요구`, `RU-38 반박 아님`으로 고정한다. SEAL 10 파일 접근 로그가 없고, Primary 7 결과로 후보 구조를 바꾸지 않는지 실행 후 diff로 확인한다.
+
+## 점검 11: SEAL 10·게이트 ① 경계
+- **확인하려는 것**: learned margin을 `branch_screen.py` 게이트 ①에 넣지 않고, SEAL 10 결과를 설계·중단·해석에 쓰지 않는가.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: learned margin을 게이트 ①에 넣으면 라벨 사용 margin을 라벨 무관 직교성 검사로 취급하는 절차 오류가 된다. SEAL 10을 열어서 epoch·seed·head 크기를 고르면 D-047 위반이다.
+- **확인 방법**: 실행 로그에서 `branch_screen.py`에 learned margin이 입력되지 않았는지, SEAL 10 관련 파일/CSV가 읽히지 않았는지 확인한다. 게이트 ①이 필요하다면 라벨 무관 대리 margin을 별도 사전 등록으로만 만든다.
+
+## 점검 12: margin_7의 slide 단위와 표준화 적용 단위
+- **확인하려는 것**: head 입력 `margin_7`이 slide별로 산출되는 7차원 벡터인지, fold 전체를 대표하는 단일 벡터가 아니라 slide-level test scoring이 가능한지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: fold-level 단일 margin을 test slide 전체에 쓰면 AUROC가 0.5 또는 NaN이 되고, slide-level margin을 train fold 평균으로 대체하면 test slide 간 순위가 사라진다. slide별 표준화 통계를 fold train slide margin에서 구했는지 확인해야 한다.
+- **확인 방법**: 데이터 로더가 train/test slide마다 `(n_slides, 7)` 텐서를 반환하는지 shape assert를 넣고, fold train slide margin의 mean/std를 slide별 test margin에 적용하는 코드 경로를 검증한다.
+
+## 점검 13: 4 GPU-hour 예산의 실행 가능성과 축소 금지
+- **확인하려는 것**: 350 fold × 8 fit × 20 epoch가 4 GPU-hour 안에 완료되는지, 초과 시 fold/seed를 사후 축소하지 않는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: budget 초과 후 seed 수를 8에서 줄이거나 일부 fold만 평가하면 estimand가 사전 등록과 달라지고, RU-97처럼 단일 적합 위양성이 다시 들어온다.
+- **확인 방법**: 성능을 해석하지 않는 timing-only dry-run(1 task·1 fold·1 seed, no-op 또는 fixed dummy label)으로 시간당 fit 수를 측정하고, 4 GPU-hour 초과 시 실행 무효로 둔다. 실제 Primary 7 성능으로 예산을 재조정하지 않는다.
+
+### G1 (일반화)
+
+## 일반화 위험 1
+- **위험**: 이 후보는 Primary 7 fold train 라벨로 학습하는 73개 파라미터 residual readout이다. 0-init과 closed-form ridge 보존은 초기값만 baseline과 같게 할 뿐, 20 epoch Adam 학습이 fold·과제 특이적 margin-라벨 관계와 노이즈를 residual로 흡수할 수 있다. RU-38의 “within-context PCA + closed-form ridge가 학습 계보보다 일반화·OOD에서 우월했다”는 관측은 학습 파라미터를 활성 경로에 둔 구성에 대한 일반화·OOD 관측이므로, residual 추가가 그 관측을 반박하거나 회피한다고 현재 말할 수 없다. 라벨로 학습한 margin을 라벨 무관 게이트 ①에 넣지 못하므로, 학습 readout이 기존 7-branch margin 분포를 얼마나 벗어나는지 라벨 무관으로 사전 통제되지 않는다. Primary 7에 맞춰 고정된 hidden 8·lr 1e-3·weight decay 1e-3·20 epoch은 Primary 7 margin 분포에 적합할 수 있고, SEAL 10·OOD·새 스캐너·새 과제·다른 fold 규모에서는 margin 분포·라벨 비율·context/query 이동이 달라 residual이 열세로 전환될 수 있다.
+- **현재 증거가 말할 수 있는 범위**: 현재 문서와 제안이 말할 수 있는 것은 Primary 7 7과제×50fold, fold train 라벨로 학습하고 fold test에서 paired Δ를 재는 in-distribution 탐색 설계뿐이다. RU-97는 Primary 7에서 단일 적합/seed가 적합 분산보다 작은 Δ를 위양성으로 만들 수 있음을 실측했다. 제안의 판정 규칙은 Primary 7 8-fit 평균 Δ가 +0.0030 미만이면 실패, 0을 포함하면 판별 불가, 그 외에는 탐색 지지 후보로 승격 보류이며, NaN/Inf·OOM·입력 누락·예산 초과·fit 미완료·baseline margin 경로 변경·오염 검사 불일치는 실행 무효다. 이 범위에서 “Primary 7 개선 여부”만 말할 수 있고, 일반화 입증은 아니다.
+- **현재 증거가 말할 수 없는 것**: SEAL 10 hold-out에서 ABMIL 0.7266을 넘는지가 유지되는지, Primary 7 밖 과제·OOD·새 스캐너·새 fold 규모에서 residual readout이 closed-form ridge보다 우월하거나 열세인지, RU-38 관측이 이 residual 구성에서도 성립하는지, 8-fit이 적합 분산을 충분히 대표하는지, fold train 규모와 margin 분포가 fold 간에 얼마나 이동하는지, 라벨 무관 게이트 ①을 대체할 사전 통제가 존재하는지는 말할 수 없다. 현재 제안의 “지지 후보” 판정은 Primary 7 선택 집합 내 결과일 뿐, 일반화 입증으로 전환할 수 없다. RU-38 관측에 대한 반박은 현재 없으며, residual의 일반화 기전은 미확인이다.
+- **확인하려면 무엇이 필요한가**: (1) Primary 7 paired Δ 외에 task-level Δ, fold-level Δ, fit-level 분산, residual norm/변화량, baseline margin 오염 검사를 결과 전에 고정하고 전량 보고. (2) 학습 residual의 기여를 분리하려면, 같은 fold·seed에서 학습하지 않은 0 residual 대조 또는 라벨 셔플 대조를 사전 등록해야 한다. (3) Primary 7 내 cross-task 진단(예: task leave-out)을 선택에 쓰지 않고 일반화 진단으로만 수행하려면, 그 평가 설계·데이터 접근·선택 이력을 사전 등록해야 한다. (4) SEAL 10·OOD 일반화는 현재 자료로 불가; SEAL 10은 최종 hold-out으로만 사용하고 그 결과로 후보·lr·epoch·hidden을 바꾸면 안 된다. (5) 라벨 무관 게이트 ① 구멍을 메우려면 학습 readout에 적용할 라벨 무관 사전 통제(예: margin 분포 이탈·직교성·residual 상한)를 사전 등록해야 하며, 현재 문서에 그런 수치는 없다. (6) 4 GPU-hour 내 350×8 fit, 대조, cross-task 진단을 모두 수행할 수 있는지 문서에 없음; 불가능하면 실행 무효로 처리해야 한다.
+
+---
+
+## Phase 2b — 제안 좌석 응답
+
+### P1 (제안)
+
+- **R1-1**: (1) 수용·수정 — “closed-form 보존”을 학습 후에도 유지된다는 성질이 아니라, 초기값에서 baseline과 같은 no-op인 사실만으로 한정한다. baseline은 §3.2의 공식 7-branch 최종 slide score, 즉 `0.6227`을 만든 고정 tag/경로의 저장값 또는 동일 재현값을 사용한다. head 입력은 같은 fold의 7개 branch margin으로 분리하고, 후보 score는 `공식 baseline score + residual`로 고정한다. 출력을 baseline score의 fold-train 표준편차로 스케일한 `tanh` residual로 바꿔 ±1 std를 초과하지 않게 하며, std가 0이면 실행 무효로 한다. 파라미터 수는 73으로 유지한다. learned residual margin은 신규 브랜치로 간주하지 않고, `branch_screen.py` 게이트 ①에 넣지 않으며, 이 실행에서 채택 주장을 하지 않는다. 향후 브랜치화하려면 라벨 무관 대리 margin을 별도 사전 등록으로 만든다. residual norm, baseline score 대비 최대 residual, 기존 margin과의 상관은 AUROC 집계 전에 기록하되, 기록값으로 epoch·hidden·lr를 바꾸지 않는다.
+
+- **R1-2**: (1) 수용·수정 — 점추정이 `+0.0030` 미만이라는 사실만으로 실패/반박을 선언하지 않는다. 사전 등록 집계를 고정한다. task `t`, fold `f`, fit `r`에 대해 `Δ_{t,f,r}`을 같은 fold paired AUROC 차이로 계산하고, fit별 `Δ_r = (1/350)Σ_{t,f} Δ_{t,f,r}`, 8-fit 평균 `Δ̄ = (1/8)Σ_r Δ_r`, fit sd `s_fit = sd_r(Δ_r)`을 계산한다. task-cluster SE는 task별 평균 Δ의 7-task 분산에서 구하고, 잠정 총 SE는 `sqrt(SE_taskcluster^2 + s_fit^2/8)`으로 병기한다. 95% 상한은 `Δ̄ + t_{6,0.975}·SE_total`로 잠정 계산한다. 판정은 승격이 아니라 탐색 기록 분류로, 상한 `< 0`이면 반박, `0 ≤ 상한 < +0.0030`이면 개선량 미달/탐색 종료, 상한이 `+0.0030`을 포함하면 판별 불가, 하한 `> +0.0030`이면 지지 후보로 승격 보류다. `20 epoch` 고정 프로토콜의 결과로만 해석하며, undertraining은 후보 전체 기각 근거가 아니라 이 프로토콜의 한계로 기록한다. best-seed 선택을 금지한다.
+
+- **T1**: (3) 판별 불가 — 7D margin 벡터에 nonlinear residual이 쓸 정보가 충분한지는 현재 문서로 판별 불가하다. 유효 랭크 `3.52/7`은 7개 margin의 선형 의존성을 보여주는 것이지, nonlinear readout이 쓸 정보가 없다는 직접 증거는 아니다. 따라서 후보는 “7D margin에 충분한 정보가 있다”를 전제로 하지 않는다. residual norm, fit별 Δ 부호, task별 Δ, 기존 margin과의 상관을 전량 보고하고, RU-38 반박이 아니라 Primary 7 탐색 기록으로만 둔다. 기전은 미확인이며, 일반화 주장은 하지 않는다.
+
+- **A1-1**: (1) 수용·수정 — 실행 전 fold manifest와 margin 생성 코드로 fold별 `train ∩ test = ∅`, `context ⊆ train`, 표준화 fit이 train-only임을 assert한다. 하나라도 실패하면 해당 fold를 제외하지 않고 전체 실행을 무효로 한다.
+
+- **A1-2**: (1) 수용·수정 — 7-branch margin 생성과 head 입력 표준화에 쓰이는 모든 통계의 fit 범위를 코드 정적 추적과 fold별 train-only 재계산 대조로 검증한다. test slide 또는 test label이 fit 입력에 들어가면 실행 무효로 한다.
+
+- **A1-3**: (1) 수용·수정 — baseline은 공식 7-branch tag의 저장 per-fold score/AUROC를 우선 사용하고, 재현해야 하면 실행 전 baseline 해시를 고정한다. 후보 실행에서 baseline 경로가 바뀌면 실행 무효로 한다. §3.4 상수는 5-branch 앵커이므로 7-branch readout 불변 검사는 공식 tag 해시 또는 per-fold 대조와 함께 수행한다.
+
+- **A1-4**: (1) 수용·수정 — 단일 후보만 사전 등록하고, Primary 7 성능 조회 전 구조·초기화·optimizer·epoch·seed를 고정한다. RU-97는 적합 분산의 필요성을 인식하게 한 동기화 자료로만 기록한다. Primary 7 성능 조회 후 파라미터 변경이 있으면 실행 무효로 한다. CA-08 경계 안의 “여러 결합 함수를 탐색해 최댓값을 확증으로 쓰는 절차”를 하지 않고, 단일 residual readout과 선택 이력 기록으로 제한한다.
+
+- **A1-5**: (1) 수용·수정 — R1-2에 명시한 estimand 공식을 사전 등록한다. raw per-fold per-fit Δ, fit별 `Δ_r`, 8-fit 평균, fit sd, task-cluster SE, 잠정 총 SE를 전량 저장·보고한다. best-seed 통계는 산출하지 않는다.
+
+- **A1-6**: (1) 수용·수정 — 실패 조건을 R1-2의 4분류로 교체한다. 점추정만 `+0.0030` 미만이면 실패/반박이 아니라 개선량 미달 또는 판별 불가로 분류한다. 적합 분산 포함 승격 절차가 미승인 상태이므로, 이 실행은 승격 판정을 내리지 않고 탐색 기록으로만 종료한다.
+
+- **A1-7**: (1) 수용·수정 — 학습 단위를 task×fold별로 고정한다. 각 head는 해당 task·fold train slide label만 사용하고, 다른 task slide가 섞이지 않았는지 manifest로 assert한다.
+
+- **A1-8**: (1) 수용·수정 — hidden init 함수, optimizer 생성 순서, seed 설정, 코드 버전을 고정한다. output 0-init 상태에서 candidate score가 baseline score와 numerically identical/no-op임을 테스트하고, 테스트 실패 시 실행 무효로 한다.
+
+- **A1-9**: (1) 수용·수정 — fold train 또는 test에서 한 클래스가 부재하고, margin/baseline score mean/std가 nonfinite 또는 std가 0이고, AUROC를 계산할 수 없는 fold가 하나라도 있으면 fold 제외 없이 전체 실행을 무효로 한다.
+
+- **A1-10**: (1) 수용·수정 — 보고 라벨을 `hold-out 미검증`, `승격 미요구`, `RU-38 반박 아님`으로 고정한다. Primary 7 결과로 후보 구조를 사후 변경하지 않고, SEAL 10 파일 접근이 없었음을 로그로 확인한다.
+
+- **A1-11**: (1) 수용·수정 — learned margin을 `branch_screen.py` 게이트 ① 입력에 넣지 않는다. SEAL 10 결과를 설계·중단·해석에 쓰지 않는다. 실행 로그에서 learned margin이 gate 입력에 들어가거나 SEAL 10 관련 파일이 읽히면 실행 무효로 한다.
+
+- **A1-12**: (1) 수용·수정 — `margin_7`을 slide-level `(n_slides, 7)`으로 고정한다. fold train slide margin의 mean/std로 표준화하고 fold test slide margin에 같은 표준화를 적용한다. shape assert를 넣고, fold-level 단일 벡터로 대체하지 않는다.
+
+- **A1-13**: (1) 수용·수정 — 성능 해석을 하지 않는 timing-only dry-run으로 1 task·1 fold·1 seed 시간을 측정하고, `350 fold × 8 fit`이 4 GPU-hour를 초과하면 실행 무효로 한다. 사후 seed/fold 축소 금지한다.
+
+- **G1**: (1) 수용·수정 — 이 실행의 결론은 Primary 7 in-distribution 탐색 기록으로 한정한다. SEAL 10, OOD, 새 스캐너, 새 과제, RU-38 반박은 주장하지 않는다. baseline paired comparison은 0-residual 대조와 동일하며, label-shuffle 또는 cross-task 일반화 진단은 추가 진단 예산이 문서에 없으므로 이 실행에 넣지 않는다. 추가하려면 새 사전 등록과 예산을 받는다. residual norm, task별 Δ, fit별 분산을 전량 보고하고, learned margin에 대한 라벨 무관 사전 통제 부재를 이유로 이 실행에서 브랜치 채택을 주장하지 않는다.
+
+---
+
+## Phase 3 — 종합
+
+### S1 (종합)
+
+## 지지 (증거가 뒷받침함)
+- **학습 파라미터 또는 확률적 적합이 활성 경로에 들어오면 단일 적합 비교는 불확실성을 과소평가한다.**  
+  근거: `RU-97` §8~§10에서 동일 구성의 GMM 초기화 seed만 바꿔도 macro 폭 `0.0200`, `whiten_d256_m8` 적합 sd `0.0083`, `M=32 − M=8` 적합 평균 Δ `+0.0003 [-0.0067, +0.0073]`이 실측됐다. 단일 적합에서 보인 `+0.0099`는 seed 42가 해당 구성 평균보다 `1.5 sd` 높았던 사례로 기록됐다.
+- **공식 비교 기준은 7-branch `CV,BM,BD,QA,DS,SH,SJ`의 Primary 7 paired 비교다.**  
+  근거: `PROJECT.md` §3.2에서 공식 기준선 Primary 7 Macro `0.6227`, 승격 기준 `+0.0030`, 같은 fold에서 짝지은 Δ 계산이 고정돼 있다.
+- **개선 근거는 Primary 7뿐이고, SEAL 10은 후보·구조·하이퍼파라미터 선택에 사용할 수 없다.**  
+  근거: `D-047`과 `PROJECT.md` §3.1에서 SEAL 10은 최종 hold-out이며 선택·튜닝에 사용 금지라고 명시돼 있다.
+- **적합 분산을 포함한 승격 절차가 승인되기 전에는 학습 파라미터 후보가 승격 판정을 요구하면 안 된다.**  
+  근거: `current_status.md` 미해결 항목에서 적합 분산 포함 승격 절차가 미승인이고, 사용자 승인 전까지 학습 파라미터 후보의 승격 판정은 보류한다고 명시돼 있다.
+- **라벨로 학습한 margin을 라벨 무관 게이트 ①에 넣는 것은 현재 절차상 무효다.**  
+  근거: `current_status.md`에서 “라벨로 학습한 margin을 라벨 무관 게이트 ①에 넣을 수 없다”를 실행 무효 구멍으로 명시하고 있다.
+- **7-branch margin은 선형적으로 독립 7개가 아니다.**  
+  근거: `PROJECT.md` §3.2에서 공식 7-branch의 유효 랭크가 `3.52 / 7`로 기록돼 있다. 이는 7D margin 입력에 선형 독립 정보가 7개라는 것을 지지하지 않는다.
+- **0-init residual head는 초기값에서만 baseline과 동일한 no-op 성질을 가진다.**  
+  근거: output weight와 bias가 정확히 0이면 후보 score가 baseline score와 동일해지는 것은 설계상 성립한다. 따라서 실행 전 no-op 검사는 필요한 계측이다.
+- **RU-97의 GF 단독 결과는 GF 접근 전체의 불가능이 아니라 탐색한 구성 공간의 결과다.**  
+  근거: `RU-97` §10에서 `M`, 화이트닝, 표본 정책 안에서 macro를 구분하는 축이 없었다고 기록하면서도, 이는 “이 구성 공간의 결과”라고 한정한다.
+- **CA-14 폐기 이후에도 RU-38 관측은 소급 취소되지 않는다.**  
+  근거: `closed_axes.md` CA-14에서 `D-048`으로 축은 폐기됐지만, within-context PCA + closed-form ridge가 학습 계보보다 일반화·OOD에서 우월했다는 관측은 그대로 유효하다고 명시돼 있다.
+
+## 반박 (증거가 반박함)
+- **“D-048으로 학습 파라미터가 허용됐으므로 학습 후보가 개선 후보가 된다”는 전제는 반박된다.**  
+  근거: `D-048`은 학습 파라미터를 허용하고 적합 분산 보고 의무를 만들 뿐, 학습 파라미터가 Primary 7에서 공식 7-branch `0.6227`을 넘는다는 증거를 제공하지 않는다. RU-38 관측도 소급 취소되지 않았다.
+- **단일 적합 또는 단일 seed 비교로 우위를 주장하는 것은 반박된다.**  
+  근거: `RU-97` §8~§10에서 동일 구성의 seed만 바꿔도 macro 폭 `0.0200`이 실측됐고, 단일 적합 우위가 seed 인공물로 무효화된 사례가 있다.
+- **라벨로 학습한 margin을 라벨 무관 게이트 ①에 넣는 것은 현재 절차상 반박된다.**  
+  근거: 게이트 ①은 “라벨 무관, 성능 조회 이전”으로 정의되고, `current_status.md`는 라벨 학습 margin의 게이트 ① 투입을 실행 무효 구멍으로 명시한다.
+- **적합 분산 포함 승격 절차 미승인 상태에서 승격 판정을 요구하는 것은 반박된다.**  
+  근거: `current_status.md`에서 해당 절차가 미승인이고, 승인 전까지 학습 파라미터 후보의 승격 판정은 보류한다고 명시돼 있다.
+- **SEAL 10 ABMIL `0.7266`을 후보 설계·선택 근거로 쓰는 것은 반박된다.**  
+  근거: `D-047`은 SEAL 10의 경계를 열람 금지가 아니라 선택 금지로 정하고, 개선 근거는 Primary 7뿐이라고 명시한다.
+- **“0-init residual이 학습 후에도 closed-form ridge를 보존한다”는 주장은 반박된다.**  
+  근거: 0-init은 초기값에서만 baseline과 동일함을 보장할 뿐, 20 epoch 학습 후 residual이 baseline margin을 얼마나 벗어나는지는 학습 결과에 달려 있다. 학습 후 보존은 초기화 사실만으로 성립하지 않는다.
+- **점추정만 `+0.0030` 미만이라는 사실만으로 실패·반박을 선언하는 것은 반박된다.**  
+  근거: `RU-97`은 적합 분산이 `+0.0030` 규모와 같은 크기대에서 Δ를 묻을 수 있음을 실측했다. 승격 절차가 미승인 상태이므로 점추정 단독으로 실패·반박을 확정하면 증거 범위를 넘는다.
+- **fold별 재학습만 하면 fold 독립성이 유지된다는 주장은 반박된다.**  
+  근거: fold 독립성은 fold 번호만으로 성립하지 않는다. train/test/context slide ID disjointness, 표준화 fit 범위, baseline 경로 동일성이 확인되지 않으면 paired Δ가 오염될 수 있다.
+- **RU-97의 GF 단독 `0.586` 부근을 첫 학습 후보의 개선 근거로 쓰는 것은 반박된다.**  
+  근거: GF 단독 탐색 구성은 공식 7-branch Primary 7 `0.6227`보다 낮고, 탐색한 구성 공간에서 macro를 구분하는 축이 없었다. 이는 단독 탐색 기록이지 학습 후보의 개선 근거가 아니다.
+- **공식 7-branch margin의 7D 벡터에 nonlinear residual이 쓸 독립 정보가 충분히 있다는 주장은 현재 지지되지 않는다.**  
+  근거: 유효 랭크 `3.52 / 7`은 7개 margin의 선형 의존성을 보여준다. nonlinear 정보가 없다는 직접 증거는 아니지만, 충분한 nonlinear 정보가 있다는 주장도 현재 문서로 입증되지 않는다.
+
+## 판별 불가 (증거가 가르지 못함)
+- **73개 파라미터 residual MLP가 Primary 7 paired Δ에서 `+0.0030` 규모 이상의 안정적 이득을 내는지 판별 불가하다.**  
+  근거: 현재 문서에 이 residual readout의 Primary 7 실측이 없다.
+- **8-fit 평균이 적합 분산을 충분히 대표하는지 판별 불가하다.**  
+  근거: `R=8`은 잠정값이며, fold×fit×fold×fit 상호작용을 포함한 승인된 분산 구조가 문서에 없다.
+- **이 후보의 적합 분산이 `+0.0030`보다 작아지는지 판별 불가하다.**  
+  근거: 현재 문서에 residual head의 seed·초기화·optimization 변동 실측이 없다.
+- **Primary 7에서 확인된 개선이 SEAL 10, OOD, 새 스캐너, 새 과제, 다른 context 규모에서 유지되는지 판별 불가하다.**  
+  근거: SEAL 10은 이 실행에서 열지 않으며, 현재 문서에 SEAL 10 외 독립 OOD 실측도 없다.
+- **이 residual 구성이 RU-38의 일반화·OOD 열세 관측을 반박하거나 회피하는지 판별 불가하다.**  
+  근거: RU-38 관측은 여전히 유효하고, residual 추가가 그 관측을 반박하는 새 증거는 현재 없다.
+- **7D margin 벡터에 nonlinear readout이 쓸 정보가 충분한지 판별 불가하다.**  
+  근거: 유효 랭크 `3.52 / 7`은 선형 의존성만 보여줄 뿐, nonlinear 정보의 유무를 직접 가르치지 않는다.
+- **350 fold × 8 fit × 20 epoch가 4 GPU-hour 안에 완료되는지 판별 불가하다.**  
+  근거: 문서에 이 후보의 timing 실측이 없다.
+- **fold train/test/context slide ID가 실제로 disjoint인지 문서만으로는 판별 불가하다.**  
+  근거: manifest 파일명, fold별 slide ID 교차, margin fit 범위가 문서에 없다.
+- **baseline margin이 공식 7-branch `ru90_shape_triple` 경로와 동일한지 문서만으로는 판별 불가하다.**  
+  근거: 저장 per-fold score/AUROC 해시, 재현 코드 버전, 전처리 버전이 문서에 없다.
+- **hidden init, optimizer 생성 순서, seed 설정, no-op 테스트가 코드에서 실제로 고정됐는지 문서만으로는 판별 불가하다.**  
+  근거: 코드 수준 고정 사항이 문서에 없다.
+- **task×fold별 fold train slide 수가 residual head 학습에 충분한지 판별 불가하다.**  
+  근거: fold train slide 수, 클래스 분포, margin std 분포가 문서에 없다.
+- **라벨로 학습한 readout에 적용할 라벨 무관 사전 통제가 존재하는지 판별 불가하다.**  
+  근거: 현재 문서에 learned margin을 게이트 ① 밖에서 통제할 라벨 무관 대리 margin이나 사전 통제 수치가 없다.
+- **residual가 fold train label noise에 맞춘 과적합인지, 일반화 가능한 margin 잔차 보정인지 판별 불가하다.**  
+  근거: 현재 실측이 없으며, 기전은 미확인이다.
+
+## 실행 무효 (실행·계측 결함으로 판단 불가)
+- **라벨로 학습한 margin을 `branch_screen.py` 게이트 ① 입력에 넣으면 실행 무효다.**  
+  이유: 게이트 ①은 라벨 무관 margin에 대한 성능 조회 이전 검사다.
+- **적합 분산 포함 승격 절차 승인 전 승격 판정을 내리면 실행 무효다.**  
+  이유: 현재 승격 절차는 미승인이며, 학습 파라미터 후보의 승격 판정은 보류돼 있다.
+- **fold train/test slide ID가 교차하거나, context slide가 fold train에 포함되지 않으면 실행 무효다.**  
+  이유: paired Δ의 fold 독립성이 깨진다.
+- **head 입력 표준화, margin 산출, baseline score 산출에 fold test slide 또는 test label이 fit에 쓰이면 실행 무효다.**  
+  이유: 전처리·계측 단계에서 평가 정보가 학습에 새어 paired Δ가 무효화된다.
+- **baseline margin 경로가 공식 7-branch 고정 경로와 다르면 실행 무효다.**  
+  이유: paired Δ가 후보 성능이 아니라 baseline 변경을 측정하게 된다.
+- **best-seed를 선택하거나 단일 seed 결과로 판정하면 실행 무효다.**  
+  이유: `RU-97`에서 단일 적합 우위가 seed 인공물로 무효화된 사례가 있다.
+- **SEAL 10 파일을 설계·선택·중단·해석에 읽으면 실행 무효다.**  
+  이유: `D-047`의 선택 금지를 위반한다.
+- **NaN/Inf, OOM, 입력 누락, 4 GPU-hour 초과, 350 fold × 8 fit 중 하나라도 미완료되면 실행 무효다.**  
+  이유: 사전 등록 estimand가 완전히 측정되지 않는다.
+- **AUROC를 계산할 수 없는 fold, 클래스 부재 fold, std=0 fold를 조용히 제외하면 실행 무효다.**  
+  이유: 350-fold paired estimand가 부분집합으로 바뀌어 새어 나온다.
+- **0-init 상태에서 후보 score가 baseline score와 no-op으로 일치하지 않으면 실행 무효다.**  
+  이유: residual head가 baseline 경로를 보존하는 초기 조건이 성립하지 않는다.
+- **`margin_7`이 slide-level `(n_slides, 7)`이 아니라 fold-level 단일 벡터로 대체되면 실행 무효다.**  
+  이유: slide별 AUROC 계산이 불가능하거나 slide 순위가 무의미해진다.
+- **Primary 7 성능 조회 이후 구조·hidden·lr·epoch·seed·스케일링을 사후 변경하면 실행 무효다.**  
+  이유: 선택 이력이 반영되지 않은 탐색 최댓값으로 전환될 수 있다.
+- **SCREEN_ONLY 또는 후보 계측이 공식 baseline 앵커를 오염시켜 §3.4 상수와 4자리까지 일치하지 않으면 실행 무효다.**  
+  이유: baseline 불변 전제가 깨진다.
+
+## 좌석 공백 (기권·실패로 빠진 관점)
+- 없음. 제공된 기권 좌석 목록에 “없음”으로 명시돼 있다.
+
+## 다음 행동 (권한 등급과 함께)
+- **T0 — 사전 등록안 확정**: 아래 후보를 단일 후보로 고정한다.  
+  - 학습 대상: 공식 7-branch baseline score에 더할 scalar residual.  
+  - 파라미터: `7 → 8 → 1`, tanh hidden, output linear, output weight/bias 0-init, 총 `73`개.  
+  - 입력: slide-level 7-branch margin `(n_slides, 7)`. fold train slide margin의 mean/std로 표준화하고 fold test slide margin에 같은 표준화를 적용한다.  
+  - 출력: fold-train baseline score std로 스케일한 tanh residual. std가 0이면 실행 무효.  
+  - 후보 score: `공식 baseline score + residual`.  
+  - 결합 방식: 8-branch 편입이 아니라 readout residual. learned margin을 게이트 ①에 넣지 않는다.  
+  - 학습 데이터: Primary 7 7과제 × 50fold의 fold train slide label만 사용. fold test label은 AUROC 계산에만 사용. SEAL 10은 열지 않는다.  
+  - 재학습: task×fold×seed별 독립 재학습. seed 1~8, 20 epoch 고정, Adam `lr=1e-3`, weight decay `1e-3`, full batch, early stopping 없음, best-seed 선택 금지.  
+  - 예산: NEXGEM B200 1장 합계 최대 4 GPU-hour. timing-only dry-run으로 초과 여부를 확인하고, 초과 시 사후 seed/fold 축소 없이 실행 무효로 둔다.  
+  - 중단 기준: NaN/Inf, OOM, 입력 누락, 4 GPU-hour 초과, 350 fold × 8 fit 미완료, baseline 경로 변경, no-op 실패, fold disjointness 실패, 오염 검사 불일치.  
+  - 판정 라벨: `hold-out 미검증`, `승격 미요구`, `RU-38 반박 아님`.  
+  - 탐색 기록 분류: 잠정 총 SE `sqrt(SE_taskcluster^2 + s_fit^2/8)`과 95% 구간을 병기한다. 상한 `< 0`이면 반박, `0 ≤ 상한 < +0.0030`이면 개선량 미달/탐색 종료, 상한이 `+0.0030`을 포함하면 판별 불가, 하한 `> +0.0030`이면 지지 후보로 남기되 승격은 보류한다.
+- **T0 — 보고 항목 고정**: raw per-fold per-fit Δ, fit별 `Δ_r`, 8-fit 평균, fit sd, task-cluster SE, 잠정 총 SE, task별 Δ, residual norm, baseline score 대비 최대 residual, 기존 margin과의 상관을 전량 저장·보고한다. best-seed 통계는 산출하지 않는다.
+- **T1 — 실행 전 검증**: 성능 해석 없이 다음만 확인한다.  
+  - fold별 `train ∩ test = ∅`, `context ⊆ train`.  
+  - margin·표준화·baseline score fit 범위가 train-only인지.  
+  - baseline이 공식 7-branch tag의 저장값 또는 동일 재현값인지, 해시 고정 여부.  
+  - 0-init no-op 테스트 통과 여부.  
+  - `margin_7` shape이 slide-level `(n_slides, 7)`인지.  
+  - learned margin이 `branch_screen.py` 게이트 ① 입력에 들어가지 않는지.  
+  - SEAL 10 파일 접근 로그가 없는지.  
+  - 4 GPU-hour timing dry-run 통과 여부.  
+  - §3.4 오염 검사 상수와 baseline 앵커 불변 여부.
+- **T2 — 사용자 결정 요청**:  
+  - 이 단일 사전 등록 probe의 실행 승인 여부.  
+  - 적합 분산 포함 승격 절차의 승인 여부 또는 계속 보류 여부.  
+  - 승인 전까지는 승격 판정 없이 탐색 기록으로만 종료한다.
+
+## 하지 말 것 (이유와 함께)
+- **SEAL 10을 후보·구조·lr·epoch·hidden·seed·스케일링 선택에 사용하지 않는다.**  
+  이유: `D-047`은 SEAL 10을 선택에 사용하는 것을 금지한다.
+- **learned margin을 라벨 무관 게이트 ①에 넣지 않는다.**  
+  이유: 현재 절차상 실행 무효다.
+- **적합 분산 포함 승격 절차 승인 전 승격을 요구하지 않는다.**  
+  이유: 절차가 미승인이며, 승격 판정은 보류돼 있다.
+- **단일 fit, 단일 seed, best-seed로 판정하지 않는다.**  
+  이유: `RU-97`에서 단일 적합 우위가 seed 인공물로 무효화된 사례가 있다.
+- **Primary 7 성능 조회 이후 후보를 사후 변경하지 않는다.**  
+  이유: 선택 이력이 반영되지 않으면 탐색 최댓값으로 전환될 수 있다.
+- **fold를 조용히 제외하지 않는다.**  
+  이유: 350-fold paired estimand가 깨진다.
+- **Primary 7 결과만으로 RU-38 반박, SEAL 10 도달, OOD 일반화를 주장하지 않는다.**  
+  이유: 현재 증거는 Primary 7 in-distribution 탐색 기록의 범위를 넘지 않는다.
+- **GF 단독 `0.586` 부근을 학습 후보의 개선 근거로 사용하지 않는다.**  
+  이유: 공식 7-branch `0.6227`보다 낮고, 탐색 공간에서 구분되는 축이 없었다.
+- **여러 residual readout이나 결합 함수를 탐색해 최댓값을 고르지 않는다.**  
+  이유: `CA-08`의 선택 편향 실패 양식과 충돌할 수 있다.
+- **좌석 동의 수를 근거로 쓰지 않는다.**  
+  이유: 표결은 증거가 아니다.
+- **문서에 없는 수치를 지어내지 않는다.**  
+  이유: fold train slide 수, timing, manifest, 코드 고정 사항 등은 문서에 없으므로 확인 전에는 “문서에 없음”으로 둔다.
