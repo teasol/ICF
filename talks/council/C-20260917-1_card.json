@@ -1,0 +1,91 @@
+{
+  "round_id": "C-20260917-1",
+  "question": "최종 목표는 SEAL 10 과제에서 ABMIL(macro 0.7266)을 넘어서는 것이다. 단 모델 개선의 근거로 쓸 수 있는 결과는 Primary 7 뿐이며, SEAL 10 결과를 기준으로 개선 방향을 고르는 것은 부정행위다. 이 제약 아래에서, 지금 무엇을 해야 목표에 가까워지는가? 현재 문서가 보여주는 증거만으로 판단하라.",
+  "ru_type": "탐색",
+  "prefixed_criteria": "",
+  "composition_rationale": "탐색 유형이며 방향이 미확정이라 제안(P) 좌석이 필요하다. 이 프로젝트의 주된 실패 위험은 Primary 7에 대한 과적합과 선택 편향이므로 감사(A)와 일반화(G)를 반드시 넣었다. 닫힌 축을 다시 제안하는 것을 막기 위해 이론(T) 좌석으로 암묵 가정을 드러내게 했다. 실측(M) 좌석은 제외했다 — 지금은 구현 비용이 아니라 방향이 쟁점이고, 실측은 별도 실험(RU-97)이 GPU 4에서 병행 중이다. 반증(R)과 종합(S)은 규범상 필수다.",
+  "max_authority": "T1",
+  "convener": "Claude Code (claude-opus-5)",
+  "state_documents": [
+    "docs/PROJECT.md",
+    "docs/current_status.md",
+    "docs/closed_axes.md"
+  ],
+  "max_tokens_per_seat": 32000,
+  "max_total_calls": 16,
+  "seats": [
+    {
+      "name": "P1",
+      "archetype": "P",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.9,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/current_status.md",
+        "docs/closed_axes.md"
+      ]
+    },
+    {
+      "name": "R1",
+      "archetype": "R",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.5,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/current_status.md",
+        "docs/closed_axes.md"
+      ]
+    },
+    {
+      "name": "A1",
+      "archetype": "A",
+      "endpoint": "http://127.0.0.1:8003/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/current_status.md",
+        "docs/closed_axes.md"
+      ]
+    },
+    {
+      "name": "G1",
+      "archetype": "G",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.3,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/current_status.md",
+        "docs/closed_axes.md"
+      ]
+    },
+    {
+      "name": "T1",
+      "archetype": "T",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.4,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/current_status.md",
+        "docs/closed_axes.md"
+      ]
+    },
+    {
+      "name": "S1",
+      "archetype": "S",
+      "endpoint": "http://127.0.0.1:8003/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/current_status.md",
+        "docs/closed_axes.md"
+      ]
+    }
+  ],
+  "note": "SEAL 10 결과 수치는 어떤 좌석에도 입력하지 않는다 (D-047 선택 경계). ABMIL 0.7266은 SEAL 논문의 공개 기준선이며 목표 사양이다."
+}

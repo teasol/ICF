@@ -1,0 +1,79 @@
+{
+  "round_id": "C-20260917-5",
+  "question": "D-048로 결정론이 깨졌으므로, 승격 판정 절차를 다시 설계해야 한다. 이 회차는 그 절차의 사전 등록안을 만든다. 실행 승인이 아니며 어떤 후보도 판정하지 않는다.\n\n실측 근거: 동일 구성을 초기화 seed만 바꿔 재적합했을 때 Primary 7 macro의 적합 표준편차는 비화이트닝 m8_raw에서 0.0021(폭 0.0050, n=4), 화이트닝 whiten_d256_m8에서 0.0083(폭 0.0200, n=4)이었다. 현행 승격 기준은 Δ_macro >= +0.0030이며, 화이트닝 구성의 적합 표준편차는 그 기준의 2.8배다. 즉 구성에 따라 적합 분산이 4배 차이 난다.\n\n설계할 것: (1) 추정 대상(estimand)을 무엇으로 둘 것인가 - 단일 적합의 Δ인가, 적합에 대해 주변화한 Δ인가. (2) 적합 반복 수를 어떻게 정하는가. 구성마다 적합 분산이 다른데 고정 횟수가 타당한가. (3) fold 분산과 적합 분산을 어떻게 함께 집계하는가. (4) 기준값 +0.0030을 유지할 수 있는가, 유지할 수 없다면 무엇을 근거로 새 값을 정하는가. (5) 적합 분산이 큰 구성이 반복으로 유리해지는 편향(최대값 선택)을 무엇으로 막는가. (6) 이 절차가 기존 결정론 전제에 의존하던 절차(오염 검사 상수 4자리 일치 등)와 충돌하는 지점은 어디인가.\n\n문서에 없는 수치를 지어내지 말라. 통계적 선택지를 나열만 하지 말고 무엇을 권고하는지 명시하고, 그 권고가 틀릴 조건을 함께 써라.",
+  "ru_type": "탐색",
+  "prefixed_criteria": "",
+  "composition_rationale": "절차 설계 회차다. 4회차 종합이 '증거가 구체적으로 뒷받침하는 산출물은 적합 분산 포함 판정 harness'라고 했고, 그 설계를 만든다. 제안(P)이 절차안을 내고, 반증(R)은 그 절차가 특정 구성에 유리하게 짜였는지와 반복 선택 편향을 공격한다. 이론(T)은 estimand 정의와 분산 성분 분해의 타당성을 본다. 감사(A)는 기존 결정론 전제 절차와의 충돌 지점을 찾는다. 제안 좌석을 1개로 되돌렸다 - 4회차는 다양성이 목적이라 2개를 뒀으나 이번엔 하나의 일관된 절차안이 필요하고, 다양성은 R과 T의 공격으로 확보한다. 일반화(G)와 실측(M)은 제외: GPU 4가 m32 적합 분산 검사에 쓰이고 있다.",
+  "max_authority": "T1",
+  "convener": "Claude Code (claude-opus-5)",
+  "state_documents": [
+    "docs/PROJECT.md",
+    "docs/closed_axes.md",
+    "talks/reports/2026-09-17_ru97_gf_primary7.md"
+  ],
+  "max_tokens_per_seat": 32000,
+  "max_total_calls": 14,
+  "seats": [
+    {
+      "name": "P1",
+      "archetype": "P",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.8,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md"
+      ]
+    },
+    {
+      "name": "R1",
+      "archetype": "R",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.5,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md"
+      ]
+    },
+    {
+      "name": "A1",
+      "archetype": "A",
+      "endpoint": "http://127.0.0.1:8003/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md"
+      ]
+    },
+    {
+      "name": "T1",
+      "archetype": "T",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.4,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md"
+      ]
+    },
+    {
+      "name": "S1",
+      "archetype": "S",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md"
+      ]
+    }
+  ],
+  "note": "절차 설계 전용. 실행·승격 승인 아님. SEAL 10 수치 미입력 (D-047)."
+}

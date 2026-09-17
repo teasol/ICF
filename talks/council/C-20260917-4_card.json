@@ -1,0 +1,91 @@
+{
+  "round_id": "C-20260917-4",
+  "question": "사용자 결정 D-048로 프로젝트 정체성이 바뀌었다. '학습 파라미터 0개' 제약이 폐기되고 닫힌 축 CA-14(학습 파라미터 기반 readout/head)도 폐기됐다. 이제 경사하강으로 학습되는 파라미터를 활성 경로에 둘 수 있다. 목표는 SEAL 10에서 ABMIL(0.7266)을 넘는 것이다.\n\n질문: 이 제약 해제가 실제로 무엇을 가능하게 하는가? 구체적으로 무엇을 만들 것인가?\n\n반드시 함께 답할 것: (1) CA-14의 원래 기각 기전은 소급 취소되지 않았다 - RU-38 시점에 within-context PCA + closed-form ridge가 학습 계보보다 일반화·OOD에서 우월했다. 당신의 제안은 그 관측을 어떻게 반박하거나 회피하는가? (2) 결정론(seed std 0.00000)이 깨진다. RU-97 §8은 동일 구성에서 초기화 seed만 바꿔 macro 폭 0.0200, 대응 Δ가 양방향으로 0을 배제하는 것을 실측했다. 승격 기준은 Δ_macro >= +0.003으로 이 폭보다 작다. 적합 분산을 포함한 판정 절차를 어떻게 설계해야 하는가? (3) 개선 근거는 Primary 7 뿐이다 (D-047). 학습 파라미터가 허용되면 Primary 7 과적합 위험이 커지는데 무엇으로 막는가?",
+  "ru_type": "탐색",
+  "prefixed_criteria": "",
+  "composition_rationale": "정체성이 바뀐 직후의 방향 탐색이므로 제안 좌석을 2개(P1 temp 0.9, P2 temp 0.7) 두어 서로 다른 온도에서 독립적으로 제안하게 했다 - 이번에는 제안의 다양성 자체가 목적이다. 다만 같은 모델이므로 이 둘은 독립 표본이 아니며 그 한계를 결론에 적는다. 반증(R)은 '제약이 풀렸으니 학습하면 된다'는 손쉬운 결론을 공격한다. 이론(T)은 CA-14의 원래 기각 기전을 제안이 어떻게 다루는지 본다. 감사(A)는 학습 파라미터 도입으로 커지는 Primary 7 과적합과 선택 편향 경로를 점검한다. 일반화(G)는 제외했다 - T와 A가 그 역할을 나눠 맡고, 좌석 수를 6개로 제한해 비용을 통제한다. 실측(M)은 GPU 4가 적합 분산 검사에 쓰이고 있어 제외했다.",
+  "max_authority": "T1",
+  "convener": "Claude Code (claude-opus-5)",
+  "state_documents": [
+    "docs/PROJECT.md",
+    "docs/closed_axes.md",
+    "talks/reports/2026-09-17_ru97_gf_primary7.md"
+  ],
+  "max_tokens_per_seat": 32000,
+  "max_total_calls": 18,
+  "seats": [
+    {
+      "name": "P1",
+      "archetype": "P",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.9,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md"
+      ]
+    },
+    {
+      "name": "P2",
+      "archetype": "P",
+      "endpoint": "http://127.0.0.1:8003/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.7,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md"
+      ]
+    },
+    {
+      "name": "R1",
+      "archetype": "R",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.5,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md"
+      ]
+    },
+    {
+      "name": "T1",
+      "archetype": "T",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.4,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md"
+      ]
+    },
+    {
+      "name": "A1",
+      "archetype": "A",
+      "endpoint": "http://127.0.0.1:8003/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md"
+      ]
+    },
+    {
+      "name": "S1",
+      "archetype": "S",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md"
+      ]
+    }
+  ],
+  "note": "D-048 직후 방향 탐색. SEAL 10 수치 미입력 (D-047 선택 경계 유지)."
+}

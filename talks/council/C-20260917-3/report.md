@@ -1,0 +1,475 @@
+# ICF Council — C-20260917-3
+
+- **연구 질문**: 이 회차는 설계만 한다. 어떤 실험도 착수하지 않으며 Primary 7 성능을 조회하지 않는다. 과제: closed_axes.md의 CA-04가 경계 밖(비저촉)으로 둔 LSAK 후보에 대해, 게이트 ① (직교성) 실행을 위한 '사전 등록 설계안'을 작성하라. 반드시 결과를 보기 전에 고정해야 하는 것만 담는다: (1) LSAK의 단일 설계를 구체적으로 확정하라 - 커널 정의, 차원, bandwidth, 정규화, readout 경로. (2) 게이트 ① 통과/탈락 임계값과 그 근거. (3) 탈락 시 성능을 조회하지 않고 종료한다는 중단 규칙. (4) 이 설계가 CA-04 경계 밖이라는 판단이 틀릴 조건. (5) 라벨 무관 fit 범위와 오염 검사 절차. 문서에 없는 수치를 지어내지 말고, 없으면 '문서에 없음'과 함께 무엇을 먼저 확인해야 하는지 써라.
+- **RU 유형**: 탐색
+- **최대 권한 등급**: T1
+- **소집자**: Claude Code (claude-opus-5)
+- **좌석**: P1(P, temp 0.8, http://127.0.0.1:8000/v1/chat/completions), R1(R, temp 0.5, http://127.0.0.1:8001/v1/chat/completions), A1(A, temp 0.2, http://127.0.0.1:8003/v1/chat/completions), T1(T, temp 0.4, http://127.0.0.1:8000/v1/chat/completions), S1(S, temp 0.2, http://127.0.0.1:8001/v1/chat/completions)
+- **호출**: 9/14 · **소요**: 639.1초
+
+> 이 문서는 로컬 모델이 생성한 것이며 **검증되지 않았습니다.** 좌석이 인용한 수치는
+> 정본 문서와 대조하기 전에는 결론에 넣지 마십시오. 좌석 수와 동의 수는 증거가 아닙니다.
+
+## 편성 근거 (결과 전 기록)
+
+설계 회차다. 실행이 아니라 사전 등록 문서를 만드는 것이 목적이며, 2회차 종합이 'LSAK를 새 RU와 사전 등록 없이 착수하지 말 것'이라고 한 제약을 지키면서 그 사전 등록 자체를 준비한다. 제안(P)이 설계를 내고, 반증(R)이 '이 설계가 게이트를 통과하도록 편의적으로 짜였는지'를 공격한다. 감사(A)는 라벨 무관 fit 범위와 오염 검사를 본다 - LSAK 설계에서 가장 새기 쉬운 지점이다. 이론(T)은 CA-04 경계 판단이 틀릴 조건을 맡는다. 일반화(G)와 실측(M)은 제외했다: 아직 실행 대상이 없어 전이도 비용도 논할 수 없고, GPU 4는 초기화 artifact 검사에 쓰고 있다.
+
+---
+
+## Phase 1 — 독립
+
+### P1 (제안)
+
+## 제안 1: LSAK 게이트 ① 사전 등록 단일 설계
+- **바꾸는 것**: CA-04의 LSAK 후보에 대해 결과 확인 전에 고정할 단일 설계·임계값·중단 규칙·경계 반증 조건·오염 검사 절차를 다음과 같이 고정한다.  
+  (1) LSAK 단일 설계: 커널은 `K_int = K̃_L ⊙ K̃_S`로 고정한다. `L`은 공식 위치 계열 중 `BM` 디스크립터, `S`는 공식 형상 계열 중 `SH` 디스크립터로 고정한다. LSAK의 원래 `L/S` 원출은 문서에 없음; `current_architecture.md`, `src/models`, `scripts/analysis/branch_screen.py`에서 LSAK 후보가 `BM/SH`를 전제하는지 먼저 확인해야 한다. 차원은 `L`의 기존 디스크립터 차원 `D_L`과 `S`의 기존 디스크립터 차원 `D_S`를 그대로 사용하고, 상호작용 feature 공간 차원은 `D_L × D_S`로 본다. `D_L`, `D_S`의 수치는 문서에 없음; 코드에서 확인해야 한다. bandwidth는 이 단일 설계가 RBF/Cosine를 쓰지 않고 정규화 Gram의 Hadamard만 쓰므로 불필요하다. 만약 실제 LSAK 구현이 RBF Gram을 요구하면, 문서에 있는 기본 대역폭 `gamma = 1/dims`를 쓰고 `dims` 수치는 문서에 없음; 구현 코드에서 확인해야 한다. 정규화는 fold context만으로 `L`, `S`를 feature-wise standardization(mean 0, std 1; std 0 처리는 `branch_screen.py`의 기존 관례를 따르며 문서에 없음, 확인 필요)한 뒤 `K_L = L L^T`, `K_S = S S^T`, `K̃ = K / sqrt(diag(K) diag(K)^T)`로 고정한다. 기존 LSAK 정규화 공식은 문서에 없음; `branch_screen.py`의 `K̃` 관례를 먼저 확인해야 한다. readout 경로는 LSAK가 공식 7-branch(`CV,BM,BD,QA,DS,SH,SJ`)의 선형/Dual Ridge readout을 대체하지 않고, `SCREEN_ONLY=1`으로 후보 마진만 기록하는 경로로 고정한다. 게이트 ①용 라벨 무관 마진은 query `q`에 대해 `m_q = K_int(q, C) - mean_{c∈C} K_int(q, c)`로 고정한다. `branch_screen.py`의 기존 candidate margin 정의가 다르면 그 고정 정의를 우선 사용하고, 라벨이 필요한 마진은 게이트 ①에서 사용할 수 없다. 기존 margin 정의는 문서에 없음; `branch_screen.py`에서 확인해야 한다.  
+  (2) 게이트 ① 통과/탈락 임계값: LSAK와 공식 7-branch 각 브랜치의 `max |r| ≤ 0.6`이고, LSAK를 포함해 8-branch로 보았을 때 effective rank가 `≥ 4.02`일 때 통과한다. 아니면 탈락한다. 근거는 `PROJECT.md` §5의 `max |r| > 0.6` 기각과 현행 효율 `3.52 / 7 = 50.3%` 비하락 기준이다. `r`의 종류와 effective rank 산출식은 문서에 없음; `branch_screen.py`에서 확인해야 한다.  
+  (3) 중단 규칙: `max |r| > 0.6` 또는 `eff.rank < 4.02`는 LSAK 후보의 게이트 ① 탈락(failure)으로 기록한다. 오염 검사 실패, 경계 반증 조건 발생, 구현/manifest/입력 누락은 실행 무효(execution invalid)로 기록한다. 어느 쪽이든 LSAK 후보의 성능(AUROC, Primary 7 조회)을 하지 않고 즉시 종료한다. 이 경우 SEAL 10도 열지 않는다.  
+  (4) CA-04 경계 밖 판단이 틀릴 조건: 이 설계가 실제로 (a) 이미 32차원으로 압축된 디스크립터에 RBF/Cosine 등 범용 비선형 커널을 씌워 선형 Ridge readout을 대체하는 방식으로 구현되거나, (b) `K_int`가 위치×형상 사전 상호작용을 유지하지 않고 단일 범용 유사도/그람으로 환원되거나, (c) context/query 라벨을 fit, 정규화, 브랜치 선택에 쓰거나, (d) 경사하강으로 학습되는 파라미터를 활성 readout에 넣거나, (e) Primary 7 성능을 보고 `L/S`, 정규화, readout, 임계값을 변경하면 CA-04 경계 밖 판단이 틀린 것이다.  
+  (5) 라벨 무관 fit 범위와 오염 검사: fit과 정규화 통계는 각 고정 fold의 context slide에서만, context label과 query label을 쓰지 않고 계산한다. fold 분할은 PathoBench 공식 50-fold를 그대로 쓰고, Primary 7은 7과제×50fold로 고정한다. 게이트 ① 측정은 candidate margin과 공식 7-branch margin의 대응 상관만 계산하고, AUROC를 계산하지 않는다. 오염 검사는 `SCREEN_ONLY=1` 실행이 5-branch 기저 앵커를 건드리지 않는지 `SMAD4 = 0.4421`, `PBRM1 = 0.5553`을 소수 4자리까지 대조한다. 이 설계안 작성 단계에서는 어떤 Primary 7 성능도 조회하지 않는다.
+- **바꾸는 전제**: 지금 LSAK의 `L/S`·차원·bandwidth·정규화·readout을 상관 또는 성능을 보고 조정 가능하다고 두고 있는 전제를 뒤집는다. 또한 “비선형 커널이면 CA-04 경계 안”이라는 전제를 뒤집고, 범용 RBF/Cosine가 아니라 사전 정의된 위치×형상 유한차원 Gram 상호작용으로 한정해야만 경계 밖으로 남는다고 고정한다.
+- **기대하는 차이**: 성능 개선량은 정량 예측 불가. 절차적으로만 차이가 고정된다: 게이트 ① 결과는 통과/탈락/실행 무효 중 하나로 사전 확정되고, 탈락 또는 실행 무효 시 성능 조회 횟수는 0회다. 통과하더라도 게이트 ②·승격은 별도이며, CA-04 기전이 확인된 것은 아니다.
+- **기전**: LSAK가 공식 7-branch에 직교 정보를 추가해서 성능을 개선할지는 기전 미확인. 게이트 ① 절차의 기전은 성능을 보기 전에 라벨 무관 상관/랭크로 후보를 걸러 선택 편향을 줄이려는 것이지, LSAK의 성능 개선 기전이 아니다. CA-04의 과거 성능 하락 기전도 문서상 미확인이다.
+- **실패 조건**: 가장 그럴듯한 실패 이유는 LSAK가 `BM`·`SH` Gram의 상호작용으로 `BM` 또는 `SH`와 `max |r| > 0.6`을 내거나 8-branch `eff.rank < 4.02`를 내어 게이트 ①에서 탈락하는 것이다. 두 번째로, LSAK 구현이 문서에 없는 상수나 readout을 써서 경계 반증 조건 (a)~(e) 중 하나로 환원되거나, `branch_screen.py` 마진이 라벨을 사용해 게이트 ①이 실행 무효가 되는 경우다.
+
+### R1 (반증)
+
+## 반론 1
+- **공격 대상**: `closed_axes.md` CA-04·§3-D의 "LSAK는 CA-04 경계 밖(비저촉)"이라는 경계 판단, 그리고 그 판단만으로 게이트 ① 사전 등록이 유효하다는 전제.
+- **더 단순한 설명**: LSAK의 구체적 커널 정의·차원·bandwidth·정규화·readout 경로가 문서에 없음으로 남아 있으면, "비저촉"은 설계가 아니라 명칭(`K_int = K̃_L ⊙ K̃_S`)에 대한 추정이 될 수 있다. 같은 "비저촉" 관측을 낳는 더 단순한 설명은, LSAK가 실제로는 슬라이드 수준 32D 압축 디스크립터에 비선형 커널을 씌워 선형 Ridge readout을 대체하는 CA-04 경계 안 구성의 변형이라는 것이다.
+- **무엇이 참이면 이 주장이 무너지는가**: LSAK가 (a) 선형 Ridge readout을 유지하지 않고 커널 Gram 또는 비선형 특징으로 readout을 대체하거나, (b) `K̃_L`·`K̃_S`의 입력이 기존 32D 압축 디스크립터의 비선형 변환이며 기존 7-branch와 독립적 정보를 만들지 못하거나, (c) §199의 "범용 비선형 커널 readout"과 동일한 실패 구조를 공유하는 것으로 확인되면, 경계 밖 판단이 틀린다.
+- **이 반론의 한계**: LSAK가 사전 정의된 유한차원 상호작용 특징을 만들어 기존 7-branch에 선형 readout으로 추가하는 단일 마진 브랜치이고, 커널 Gram으로 readout을 대체하지 않는다면 이 반론은 적용되지 않는다.
+
+## 반론 2
+- **공격 대상**: "LSAK의 단일 설계를 사전 등록으로 확정할 수 있다"는 과제 전제.
+- **더 단순한 설명**: 문서에는 LSAK의 커널 정의, 차원, bandwidth, 정규화, readout 경로가 문서에 없음으로 남아 있다. 따라서 "단일 설계 확정"이 아니라, 결과를 보기 전에 채워야 할 미지수가 아직 존재한다는 것이 더 단순한 설명이다. 같은 "설계 확정" 관측을 낳는 더 단순한 설명은, 실제 실행 시 bandwidth·차원·정규화를 fold별·과제별로 조정해 게이트 ①을 통과시키는 선택이 가능하다는 것이다.
+- **무엇이 참이면 이 주장이 무너지는가**: LSAK의 bandwidth, 차원, 정규화, readout 경로 중 하나가 실행 단계에서 fold·과제·성능 신호에 따라 변경되거나, `branch_screen.py`가 측정하는 마진이 그 미확정 파라미터에 따라 max |r| 0.6 또는 eff.rank 4.02 임계값을 넘나들면, 사전 등록은 선택 편향 제거 기능을 상실한다.
+- **이 반론의 한계**: 실행 전에 LSAK의 모든 파라미터와 readout 경로를 코드/설정 단위로 고정하고, 실행 중 변경이 불가능한 로그로 증명할 수 있다면, 이 반론은 기각된다.
+
+## 반론 3
+- **공격 대상**: "게이트 ①의 max |r| > 0.6 기각과 eff.rank ≥ 4.02 통과선만 고정하면 LSAK의 직교성 판정이 유효하다"는 주장.
+- **더 단순한 설명**: LSAK가 단일 스칼라 마진 브랜치가 아니라 커널 기반 다중 계수·다중 특징·차원 선택을 포함하면, 상관계수와 유효 랭크는 LSAK의 정보 독립성이 아니라 정규화·bandwidth·차원·readout 경로라는 더 단순한 실행 변수에 의해 결정될 수 있다. 0.6 임계값의 통계적 근거는 문서에 없음으로, LSAK의 null 분포를 고려하지 않은 임계값일 수도 있다.
+- **무엇이 참이면 이 주장이 무너지는가**: LSAK 마진이 bandwidth 또는 정규화 변화에 따라 max |r|이 0.6을 넘나들거나, 8-branch 유효 랭크가 4.02를 넘나들고, 그 변동이 LSAK의 개념적 독립성과 무관하게 재현되면, 게이트 ①은 LSAK의 본질적 직교성이 아니라 설계 선택을 측정한다.
+- **이 반론의 한계**: LSAK가 `branch_screen.py`가 전제하는 단일 브랜치 마진으로 구현되고, `SCREEN_ONLY=1`에서 기존 7-branch 마진에 영향을 주지 않으며, §3.4 오염 검사를 통과하는 한, 이 반론은 약화된다.
+
+## 반론 4
+- **공격 대상**: "게이트 ① 탈락 시 성능을 조회하지 않고 종료하는 중단 규칙이 LSAK의 기각으로 기능한다"는 주장.
+- **더 단순한 설명**: LSAK fit의 라벨 무관 범위와 오염 검사 절차가 문서에 없으므로, 탈락 관측은 LSAK의 비직교성보다, 오염 검사 실패, 라벨 누출, fold/context 불일치, GMM/fit 표본과 Primary 7 fold manifest의 ID 수준 disjointness 미확인, 또는 구현 오류라는 더 단순한 실행 무효로 설명될 수 있다. 성능 미조회는 선택 편향을 막지만 실패·반박·판별 불가·실행 무효를 구분하지 못한다.
+- **무엇이 참이면 이 주장이 무너지는가**: (a) §3.4 오염 검사 상수(SMAD4 0.4421, PBRM1 0.5553)가 소수 4자리로 일치하지 않거나, (b) LSAK fit에 라벨이 사용되거나, (c) RU-97 §7의 "GMM 학습·검증 표본과 Primary 7 fold manifest의 ID 수준 disjointness 미확인" 상태가 LSAK fit에도 적용되거나, (d) fold가 §3.1의 공식 50-fold가 아니면, 탈락은 기각이 아니라 실행 무효다.
+- **이 반론의 한계**: fit이 라벨 무관하고, fold가 공식 50-fold 그대로이며, 오염 검사가 4자리 일치하고, ID 수준 disjointness가 확인되면, 중단 규칙은 유효하다.
+
+## 반론 5
+- **공격 대상**: "SCREEN_ONLY=1와 §3.4의 5-branch 앵커 상수만 통과하면 LSAK 게이트 ① 측정이 공식 7-branch 앙상블에 영향을 주지 않았다고 확인된다"는 주장.
+- **더 단순한 설명**: §3.4 상수는 5-branch 기저 경로(`BRANCHES_V121_5`)의 앵커다. LSAK 스크리닝이 7-branch 공식 구성의 SH/SJ 경로를 건드리고 5-branch 앵커만 보존하면, 5-branch 상수만으로는 오염이 검출되지 않을 수 있다. 같은 "오염 검사 통과" 관측은 "5-branch 앵커 불변"이라는 더 단순한 사실로 설명된다.
+- **무엇이 참이면 이 주장이 무너지는가**: 공식 7-branch(`CV,BM,BD,QA,DS,SH,SJ`)의 스크리닝 전후 fold-mean AUROC 중 SH 또는 SJ가 포함된 구성이 4자리 일치하지 않거나, 7-branch 오염 앵커 상수가 문서에 없음으로 인해 7-branch 불변성을 대조할 수 없으면, 5-branch 상수 통과만으로는 LSAK 측정의 무해성을 입증하지 못한다.
+- **이 반론의 한계**: PROJECT.md §3.4가 공식 구성이 7-branch로 바뀌었더라도 5-branch 앵커를 그대로 유지한다고 명시하고, LSAK 스크리닝이 5-branch 기저 경로만 보존하면 되는 것으로 운영상 인정된다면, 이 반론은 적용되지 않는다.
+
+## 반론 6
+- **공격 대상**: `RU-97` §3-4의 "화이트닝이 유효 성분을 4.19~5.74로 올려 기전 목표를 달성했고, 성능이 따라오지 않는 것은 별개 문제"라는 암시, 또는 이를 LSAK/커널 readout 설계의 근거로 쓰는 전제.
+- **더 단순한 설명**: 유효 성분 증가는 GMM 책임 분포의 기하학적 산물일 수 있다. 더 단순한 설명은 (a) 배경 GMM이 Primary 7 patch 분포를 여전히 덮지 못하거나, (b) component alignment artifact, (c) GMM 학습·검증 표본과 Primary 7 fold manifest의 ID 수준 disjointness 미확인, (d) raw/balanced 단일 실행의 불확실성 미측정이다. 성능 미개선은 GMM/whitening이 정보 손실을 일으킨 단순한 설명으로도 가능하다.
+- **무엇이 참이면 이 주장이 무너지는가**: 유효 성분 증가가 라벨/성능과 무관한 학습 표본 편향, component alignment, fold 간 표본 중복/누출에서 비롯되거나, per-fold 대응 구간은 문서에 없음(미수행)이므로 `whiten_d256_m8`의 macro 0.5890과 `m8_raw` 0.5839 차이가 0을 포함하는지 판별 불가 상태로 남으면, "기전 목표 달성"은 기각되고 기전은 미확인으로 남는다.
+- **이 반론의 한계**: GMM 학습·검증 표본과 Primary 7 fold manifest가 ID 수준 disjoint이고, component alignment artifact가 배제되며, per-fold 대응 구간에서 raw/balanced 또는 whitening 효과가 0을 포함하지 않으면, 이 반론은 약화된다.
+
+### A1 (감사)
+
+## 점검 1: LSAK 단일 설계의 사전 고정
+- **확인하려는 것**: LSAK의 `K̃_L`, `K̃_S` 구체적 정의, 위치/형상 입력, 유한차원 크기, bandwidth/γ, 정규화, margin/readout 경로가 실험 전 고정되어 있는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 실행 직전 bandwidth·차원·정규화를 Primary 7 fold, RU-97 관측, 또는 max |r| 결과에 맞춰 바꾸면 게이트 ①이 사전 검정이 아니라 사후 탐색이 된다. 같은 LSAK 명칭으로 다른 커널을 반복 시도해 유리한 상관을 선택할 수 있다.
+- **확인 방법**: `docs/closed_axes.md` CA-04의 `K_int = K̃_L ⊙ K̃_S`만 존재하는지 확인하고, LSAK 구현/설정 파일(경로 문서에 없음)에서 `K_int`, `K̃_L`, `K̃_S`, `bandwidth`, `gamma`, `normalize`, `readout`, `margin`을 검색한다. 예: `rg -n "LSAK|K_int|K̃_L|K̃_S|bandwidth|gamma|normalize|readout" docs/ scripts/` 및 LSAK 구현 파일(경로 문서에 없음) 대조.
+
+## 점검 2: 게이트 ① 일반 임계값 고정
+- **확인하려는 것**: max |r| > 0.6 기각, 8-branch eff.rank ≥ 4.02(50.3% 비하락)가 고정되어 있는지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: 임계값이 LSAK 상관 결과에 따라 조정되면 기각/통과 판정이 사후 판단이 되고, 게이트 ① 실행 무효.
+- **확인 방법**: `docs/PROJECT.md` §5와 `scripts/analysis/branch_screen.py`의 임계값/출력 스펙을 대조한다. 예: `rg -n "0.6|4.02|eff.rank|max.*r" docs/PROJECT.md scripts/analysis/branch_screen.py`.
+
+## 점검 3: LSAK의 게이트 ① 적용 대상 고정
+- **확인하려는 것**: LSAK가 공식 7-branch에 8번째 브랜치로 추가되는지, 기존 브랜치를 대체하는지, 기준 집합이 `CV,BM,BD,QA,DS,SH,SJ`인지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 대체 구성이면 8-branch eff.rank ≥ 4.02 기준이 부적절하고, 브랜치 수/기준 집합을 결과에 맞춰 바꾸면 임계값 선택 편향이 생긴다.
+- **확인 방법**: LSAK 사전 등록 문서, `scripts/analysis/branch_screen.py`의 branch list/`--adopted`, 공식 7-branch 상수, LSAK margin 이름을 확인한다.
+
+## 점검 4: 탈락 시 중단 규칙
+- **확인하려는 것**: 게이트 ① 탈락 시 Primary 7 성능을 조회하지 않고 종료하는지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: 탈락 후 AUROC 조회, “참고” 기록, 후속 성능 비교로 게이트 ①의 라벨 무관·성능 이전 조건이 무효가 된다.
+- **확인 방법**: LSAK 실행 프로토콜/스크립트에 중단 규칙, `scripts/analysis/branch_screen.py` 실패 시 종료 동작, 성능 조회 명령 부재를 확인한다.
+
+## 점검 5: CA-04 경계 밖 판단이 틀릴 조건
+- **확인하려는 것**: LSAK가 “32D 압축 디스크립터에 범용 비선형 커널을 씌워 선형 Ridge readout을 대체”하는 것으로 변질되지 않는지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: LSAK가 실제로 RBF/Cosine 등 범용 커널을 32D 디스크립터에 적용하거나 nonlinear/learned readout을 쓰면 CA-04 경계 안 저촉이다.
+- **확인 방법**: `docs/closed_axes.md` CA-04 경계 안/밖 문구와 LSAK 코드를 대조한다. LSAK 구현 파일(경로 문서에 없음)에서 `RBF`, `cosine`, `poly`, `gamma`, `32`, `Ridge`, `readout`, `learn`을 검색한다.
+
+## 점검 6: 라벨 무관 fit 범위
+- **확인하려는 것**: LSAK의 정규화·bandwidth·통계량이 어떤 데이터 범위에서 fit되고, 라벨을 쓰지 않는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: Primary 7 전체 fold의 마진/분포로 fit하면 성능 조회 이전이라도 평가 자료에 조건화된다. 라벨을 쓰면 게이트 ① 위반이다.
+- **확인 방법**: LSAK 설정에서 fit source(Primary 7 fold, context only, external cohort, fixed analytic), label 사용, `fit`, `mean`, `std`, `bandwidth` search 여부를 확인한다.
+
+## 점검 7: 오염 검사 절차
+- **확인하려는 것**: `SCREEN_ONLY=1`로 LSAK가 앙상블/기저 경로에 영향을 주지 않고, §3.4 상수와 4자리까지 일치하는지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: LSAK margin 계산이 기저 앙상블 상태를 바꾸면 오염 검사 실패이고, 게이트 ① 결과는 실행 무효다.
+- **확인 방법**: LSAK 실행 환경에 `SCREEN_ONLY=1`, `scripts/analysis/branch_screen.py` 출력, 오염 검사 스크립트, SMAD4 `0.4421`·PBRM1 `0.5553` 대조 여부를 확인한다.
+
+## 점검 8: fold/manifest 고정
+- **확인하려는 것**: PathoBench 공식 50-fold를 그대로 쓰고, fold 수 증대/재분할하지 않는지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: LSAK 전용 재분할로 상관/랭크 효율을 유리하게 만들 수 있다.
+- **확인 방법**: fold manifest(파일명 문서에 없음)와 LSAK 실행이 같은 fold ID를 쓰는지 확인한다. 예: `rg -n "fold|manifest|PathoBench" docs/ scripts/`.
+
+## 점검 9: LSAK 전용 manifest와 중복
+- **확인하려는 것**: context/query 슬라이드 ID, fold 간 중복, context-query overlap, duplicate slide가 없는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: query가 context에 포함되거나 fold 간 중복 슬라이드가 있으면 상관/마진의 독립성 가정 위반으로 max |r|이 과대 또는 과소될 수 있다.
+- **확인 방법**: fold manifest에서 context/query ID 교차, duplicate ID count, LSAK margin 산출 코드의 슬라이드 단위를 확인한다.
+
+## 점검 10: 상관 계산 단위
+- **확인하려는 것**: max |r|의 표본 단위가 slide, fold, task, macro 중 무엇인지, fold/과제 내 종속성을 반영하는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: fold/과제 내 반복 관측을 독립 표본으로 처리하면 0.6 임계값의 통계적 의미가 불명하고, 설계 효과가 상관에 새어 들어온다.
+- **확인 방법**: `scripts/analysis/branch_screen.py`의 correlation/aggregation 코드와 LSAK margin의 task/fold/slide 구조를 확인한다.
+
+## 점검 11: 평가 독립성과 기준선 고정
+- **확인하려는 것**: 게이트 ①이 성능 조회 이전에 수행되고, 기준선/브랜치 집합이 LSAK 결과를 보지 않고 고정되어 있는지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: LSAK 성능을 보고 기준선 브랜치 집합, 집계, fold를 바꾸면 대응 비교와 게이트 ① 모두 무효가 된다.
+- **확인 방법**: LSAK 실행 순서, `scripts/analysis/branch_screen.py` baseline branch list, 공식 7-branch 상수, 성능 조회 명령 부재를 확인한다.
+
+## 점검 12: 기존 Primary 7 관측에 의한 조건화
+- **확인하려는 것**: LSAK 설계가 RU-97의 Primary 7 macro, 유효 성분 붕괴, raw/balanced 차이 등 이미 기록된 관측에 조건화되지 않았는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: RU-97 수치를 보고 LSAK bandwidth/차원/정규화를 선택하면 탐색 선택이 게이트 ①에 새어 들어오고, 사전 등록이 무효가 된다.
+- **확인 방법**: LSAK 사전 등록 문서의 선택 이력, RU-97 수치 인용 여부, 변경 로그, `talks/reports/2026-09-17_ru97_gf_primary7.md`와 LSAK 설계 간 의존성을 확인한다.
+
+## 점검 13: SEAL 10 hold-out 비사용
+- **확인하려는 것**: LSAK 설계·게이트 ①에 SEAL 10을 fit, 선택, 임계값 설정에 사용하지 않는지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: SEAL 10에 접근하면 최종 hold-out 오염이고, 이후 hold-out 판정은 실행 무효다.
+- **확인 방법**: LSAK 코드/설정/로그에서 SEAL 10 manifest, `seal_univ2_baseline_17tasks.csv`, hold-out 경로 접근 부재를 확인한다.
+
+## 점검 14: 이번 회차의 성능 조회 금지
+- **확인하려는 것**: 이번 설계 회차에서 Primary 7 성능을 조회하지 않고 설계만 고정하는지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: 설계 단계에서 Primary 7 AUROC를 조회하면 LSAK 설계가 결과에 조건화되어 게이트 ①의 사전성이 상실된다.
+- **확인 방법**: 이번 회차 산출물에서 LSAK 설계 문서만 존재하고, Primary 7 성능 조회 명령/결과 파일/로그가 없는지 확인한다.
+
+## 점검 15: LSAK 파라미터의 학습 파라미터 0개 정체성
+- **확인하려는 것**: LSAK의 커널 파라미터·정규화 통계가 fold context에서 닫힌 형태로 결정되거나 사전 고정 상수인지, 경사하강 학습 파라미터를 쓰지 않는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 외부 학습 파라미터를 활성 경로에 넣으면 CA-14 경계 안 저촉이고, 프로젝트 정체성 위반이다.
+- **확인 방법**: LSAK 코드/설정에서 `train`, `learn`, `optimizer`, `epoch`, external parameter file, `fit` source를 확인하고 `docs/closed_axes.md` CA-14와 대조한다.
+
+## 점검 16: rank efficiency 계산 범위
+- **확인하려는 것**: 8-branch eff.rank가 LSAK 포함 8개 브랜치의 margin에서, 공식 7-branch와 같은 fold/과제 범위에서 계산되는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: rank efficiency를 다른 fold/과제/브랜치 집합에서 계산하면 4.02 기준과 비교가 불가능해진다.
+- **확인 방법**: `scripts/analysis/branch_screen.py`의 eff.rank 산출 코드, LSAK margin matrix, fold/task scope를 확인한다.
+
+## 점검 17: max |r| = 0.6 임계값의 근거
+- **확인하려는 것**: 0.6이 LSAK 이전의 고정 기준인지, RM 0.690 등 사후 관측에서 유래했는지, 통계적/운영적 근거가 문서화되었는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 0.6이 LSAK/RM 결과를 보고 정해졌다면 임계값 선택 편향이 있고, 게이트 ① 판정 근거가 약해진다.
+- **확인 방법**: `docs/PROJECT.md`, `docs/closed_axes.md`, `history/archive.md`(경로 문서에 링크 있음)에서 `0.6`, `RM`, `0.690`, 결정 이력을 검색한다. 예: `rg -n "0.6|RM|0.690" docs/ history/`.
+
+## 점검 18: 외부 자료/GMM 재사용 시 disjointness
+- **확인하려는 것**: LSAK가 RU-97의 배경 GMM, `COMET`·`MUT-HET-RCC`·`PANDA` 코호트, 또는 Primary 7 fold와 ID 수준 중복되는 자료를 fit에 쓰지 않는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: GMM/코호트와 Primary 7 fold가 ID 수준으로 겹치면 LSAK 정규화/커널이 평가 자료에 조건화된다.
+- **확인 방법**: LSAK 설정에서 fit source, RU-97 GMM 파일, fold manifest ID 교차, duplicate slide ID를 확인한다.
+
+### T1 (이론)
+
+## 이론적 병목 1
+- **가정**: LSAK의 단일 설계가 문서만으로 유일하게 고정된다. 즉 `K_int = K̃_L ⊙ K̃_S`의 `K̃_L`, `K̃_S` 정의, 커널 차원, bandwidth, 정규화, readout 경로가 이미 결정되어 있고, 게이트 ①은 그 고정 설계의 margin만 측정한다.
+- **이 가정이 깨지는 조건**: `K̃_L`/`K̃_S`의 구체적 정의, 차원, bandwidth, 정규화, readout 경로가 문서에 없거나 여러 허용 구현이 존재한다. 이 경우 “단일 설계 확정”은 아직 실행 무효다.
+- **깨질 때 나타나는 관측 가능한 증상**: 사전 등록 전에 측정 대상이 불명확해진다. 같은 LSAK 명칭으로 다른 커널·차원·bandwidth·정규화·readout가 실행될 수 있고, `branch_screen.py`의 max |r|·eff.rank 결과가 재현·비교 불가가 된다.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: `closed_axes.md` CA-04는 LSAK를 `K_int = K̃_L ⊙ K̃_S`로만 기술한다. 커널 차원, bandwidth, 정규화, readout 경로 수치는 문서에 없음. 먼저 LSAK 제안서·`scripts/analysis/branch_screen.py`·LSAK 구현에서 `K̃_L`, `K̃_S`, 차원, bandwidth, 정규화, readout 경로를 확인해야 한다.
+
+## 이론적 병목 2
+- **가정**: 게이트 ①의 `max |r| ≤ 0.6`과 8-branch `eff.rank ≥ 4.02`는 LSAK의 정보적 비중복성을 충분히 판정한다.
+- **이 가정이 깨지는 조건**: Pearson 상관계수와 effective rank가 2차/선형적 중복성만 잡을 때. LSAK가 기존 7-branch margin의 고차 비선형 함수이거나, 같은 위치·형상 입력을 공유하면서 pairwise r은 낮지만 정보적으로 중복될 수 있다. `eff.rank ≥ 4.02`는 현행 `3.52/7 = 50.3%`의 비하락 조건이지, LSAK가 실제로 새 정보를 가진다는 증명은 아니다.
+- **깨질 때 나타나는 관측 가능한 증상**: 게이트 ①은 통과하되 max |r|가 0.6 임계값에 근접하거나 eff.rank가 4.02 임계값에 근접하는 경우; LSAK margin이 기존 branch margin의 단순 스케일·비선형 변환으로 설명 가능하게 보이는 경우; LSAK 추가 후 rank 효율이 기존 7-branch 대비 실질적 증가 없이 임계값만 넘는 경우. 이 경우 LSAK의 정보 기여는 판별 불가다.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: LSAK의 max |r|·eff.rank 실측은 문서에 없음. `PROJECT.md` §5는 임계값만 두고, `CA-09`는 위치 계열의 상호 상관 0.25~0.93과 `BM·QA·DS` 유효 랭크 `1.29/3`을 보여 상관계수/랭크가 계열 내 중복을 드러낼 수 있음을 기록한다. LSAK 특화 충돌 관측은 해당 관측 없음.
+
+## 이론적 병목 3
+- **가정**: 사전 고정된 LSAK 1건의 게이트 ① 탈락은 LSAK 후보 전체에 대해 성능 조회 없이 종료해도 되는 종결적 기각이다.
+- **이 가정이 깨지는 조건**: LSAK가 하나의 단일 설계가 아니라 bandwidth·차원·정규화·readout에 따라 여러 사전 정의 변형이 허용되는 후보군일 때. 또는 게이트 ①이 채택의 필요조건이 아니라 단순 선별 절차일 때. 이 경우 1건 탈락은 그 설계의 실패이지 LSAK 축 전체의 반박이 아니다.
+- **깨질 때 나타나는 관측 가능한 증상**: 같은 `K_int = K̃_L ⊙ K̃_S` 형식에서 다른 고정 하이퍼파라미터가 max |r|/eff.rank 임계값을 넘거나, 탈락 설계의 margin이 기존 branch와 높은 상관을 보이는 반면 다른 정규화/차원에서는 상관 구조가 달라지는 경우. 그러나 현재 실행이 단일 설계로 사전 등록됐다면 이 증상은 후속 설계 변경의 근거가 될 뿐, 현재 탈락과 성능 조회 금지 규칙을 무효화하지 않는다.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: `PROJECT.md` §5는 게이트 ① 탈락 시 성능 조회 없이 종료한다고 두고, `CA-04`는 LSAK의 성능·과적합을 미검증으로 둔다. LSAK 변형 간 상관/랭크 실측은 문서에 없음. 먼저 LSAK 후보가 단일 설계로 고정되었는지, 아니면 후보군으로 남아 있는지 확인해야 한다.
+
+## 이론적 병목 4
+- **가정**: LSAK가 CA-04 경계 밖이라는 판정은 LSAK가 (a) 이미 32차원으로 압축된 디스크립터에 RBF·Cosine 등 범용 비선형 커널을 씌운 것이 아니고, (b) 선형 Ridge readout을 대체하지 않으며, (c) 커널 파라미터가 평가 자료에서 튜닝되지 않는다는 것을 전제한다.
+- **이 가정이 깨지는 조건**: `K̃_L`/`K̃_S`가 32D descriptor 위의 범용 RBF/Cosine kernel로 구현되거나, bandwidth/차원/정규화가 Primary 7 fold·과제·라벨·성능에 따라 선택되거나, readout 경로가 선형 Ridge 계열이 아닌 학습·비선형 readout으로 바뀌거나, LSAK가 기존 branch readout을 대체하는 구성으로 쓰일 때. 이 경우 CA-04 경계 안 저촉이고, 게이트 ① 결과는 이 후보에 대해 실행 무효다.
+- **깨질 때 나타나는 관측 가능한 증상**: 구현에서 LSAK margin이 §199의 범용 커널과 동일한 32D 입력을 RBF/Cosine으로 변환해 계산하는 경우; bandwidth/정규화 값이 fold별 또는 과제별로 달라지는 경우; readout이 closed-form linear가 아닌 경우. 이 관측은 성능 조회 없이 코드/설계 검토로 확인 가능하다.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: `closed_axes.md` CA-04는 경계 안을 “이미 32차원으로 압축된 디스크립터에 RBF·Cosine 등 범용 비선형 커널을 씌워 선형 Ridge readout을 대체”로, 경계 밖을 “사전 정의된 위치×형상 유한차원 상호작용 커널”로 구분한다. 그러나 LSAK의 실제 커널 종류·bandwidth·정규화·readout 수치는 문서에 없음. 먼저 LSAK 구현이 범용 커널인지, 파라미터가 사전 고정인지, readout이 선형인지 확인해야 한다.
+
+## 이론적 병목 5
+- **가정**: 라벨 무관 fit 범위가 고정되어 있고, LSAK margin은 라벨·성능·과제/fold 선택 없이 생성된다.
+- **이 가정이 깨지는 조건**: LSAK fit에 Primary 7 fold·과제 선택, 라벨, 성능, 과거 탐색 결과가 사용되거나, 그 접근 이력이 기록되지 않을 때. 또는 LSAK readout 경로가 context/query 라벨이나 클래스 분리도를 요구할 때. 이 경우 게이트 ①의 “라벨 무관, 성능 조회 이전” 조건이 깨진다.
+- **깨질 때 나타나는 관측 가능한 증상**: margin 계산 코드가 라벨 파일을 읽거나, fold/과제별 fit 범위가 달라지거나, bandwidth/정규화/차원이 margin을 본 뒤 선택되는 경우. 이 경우 게이트 ① 결과는 실행 무효다.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: `PROJECT.md` §3.1은 Primary 7 fold를 고정하고, §5는 게이트 ①을 라벨 무관·성능 조회 이전으로 둔다. 그러나 LSAK의 fit 범위와 readout 경로 수치는 문서에 없음. 먼저 `branch_screen.py`와 LSAK 구현에서 fit에 쓰이는 fold·과제·slide 범위, 라벨 사용 여부, 성능 조회 여부를 확인해야 한다.
+
+## 이론적 병목 6
+- **가정**: `SCREEN_ONLY=1`과 §3.4 오염 검사가 LSAK screening이 공식 앙상블에 영향을 주지 않았음을 충분히 보증한다.
+- **이 가정이 깨지는 조건**: 오염 검사 anchor가 5-branch 기저 경로(`SMAD4 0.4421`, `PBRM1 0.5553`)만 검사하는 반면 공식 비교 기준은 7-branch(`CV,BM,BD,QA,DS,SH,SJ`)일 때. 5-branch anchor가 일치해도 `SH`/`SJ` 또는 7-branch 경로가 전역 상태 변경으로 바뀔 수 있다.
+- **깨질 때 나타나는 관측 가능한 증상**: `SMAD4` fold-mean AUROC가 `0.4421`에서, `PBRM1`이 `0.5553`에서 소수 4자리라도 불일치하면 실행 무효다. anchor가 일치해도 공식 7-branch margin이 바뀌면 공식 구성 오염은 판별 불가다. 7-branch anchor 상수는 문서에 없음.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: `PROJECT.md` §3.4는 오염 검사 상수를 5-branch 기저 경로 anchor로 고정하고, §3.2는 공식 비교 기준을 7-branch로 두고 있다. 이 격차는 LSAK screening이 7-branch 공식 구성에 무해함을 5-branch anchor만으로 보증하지 못할 수 있음을 보여준다. 먼저 7-branch 공식 구성의 SCREEN_ONLY 전후 margin anchor를 사전 고정할 수 있는지, `branch_screen.py`가 7-branch 경로를 건드릴 수 있는지 확인해야 한다.
+
+---
+
+## Phase 2 — 교차
+
+### R1 (반증)
+
+## 반론 1
+- **공격 대상**: P1의 "L=BM, S=SH로 고정된 `K_int = K̃_L ⊙ K̃_S` 단일 설계가 CA-04의 LSAK 후보에 대한 게이트 ① 사전 등록을 완성한다"는 주장.
+- **더 단순한 설명**: LSAK 마진은 BM·SH라는 기존 공식 브랜치의 디스크립터로 만든 Gram Hadamard이므로, 게이트 ①에서 관찰될 `max |r|`와 `eff.rank`는 "LSAK라는 새 후보가 직교 정보를 가졌는가"보다 "BM×SH라는 기존 브랜치의 결정론적 상호작용이 BM/SH 마진과 구조적으로 중복되는가"로 설명될 수 있다. 탈락이면 부모 브랜치 재조합의 중복, 통과이면 우연한 비선형 재조합이 상관을 피한 것일 수 있다. 이 설명은 LSAK의 기전보다 더 단순하다.
+- **무엇이 참이면 이 주장이 무너지는가**:
+  1. CA-04/D-022의 LSAK 후보가 BM×SH로 확정되지 않았다면, P1는 LSAK가 아니라 공식 브랜치 두 개의 범용 상호작용을 테스트한다. 문서에는 LSAK의 L/S 원출이 없으므로 BM/SH 고정은 추측이다. 이 경우 게이트 ① 결과는 LSAK 후보의 통과/탈락이 아니라 다른 후보에 대한 실행 무효 또는 판별 불가다.
+  2. `D_L`, `D_S`, margin 정의, `r`의 종류, effective rank 산출식, std 0 처리, `K̃` 관례가 문서에 없고 P1도 "기존 정의가 다르면 기존 정의 우선"으로 미루면, `max |r| ≤ 0.6`과 `eff.rank ≥ 4.02`는 실제로 고정된 단일 판정 규칙이 아니다. 특히 margin에 라벨이 들어가거나 기존 7-branch margin과 스케일·중심화가 다르면 같은 임계값도 다른 관측을 낳는다.
+  3. P1의 margin `m_q = K_int(q,C) − mean_c K_int(q,c)`가 BM/SH 유사도의 곱 또는 그 context 중심화로 환원되면, LSAK와 BM/SH의 상관은 구조적으로 0이 아닐 수 있다. 이 경우 `max |r| > 0.6` 또는 `eff.rank < 4.02`는 LSAK의 기전 실패가 아니라 부모 브랜치 상호작용의 기하적 중복으로 설명된다.
+  4. P1는 bandwidth를 "불필요"로 두고, 실제 구현이 RBF를 요구하면 `gamma = 1/dims`로 전환한다. 이는 단일 설계가 아니라 조건부 설계다. RBF가 필요한 순간 bandwidth는 문서에 없는 `dims`에 의존하게 되고, 사전 등록의 단일성이 깨진다.
+  5. 오염 검사가 `SMAD4 = 0.4421`, `PBRM1 = 0.5553` 두 fold-mean만 소수 4자리로 대조한다면, `SCREEN_ONLY=1`이 7-branch 전체 margin이나 공유 정규화 상태를 건드리지 않았음을 보증하지 못한다. 두 앵커만 일치하고 다른 fold/과제/브랜치가 바뀌면 게이트 ①의 `r`/`eff.rank`는 오염된 margin에서 나온 값이다.
+- **이 반론의 한계**:
+  - 코드 또는 결정 기록이 LSAK를 BM×SH로 명시하고, `branch_screen.py`의 margin/`r`/effective rank가 라벨 무관이며 기존 7-branch margin과 대응 가능하게 고정되어 있다면, "다른 후보를 테스트한다"는 공격은 성립하지 않는다.
+  - 게이트 ①의 목적이 LSAK의 성능 기전을 입증하는 것이 아니라, 성능 조회 전에 후보를 거르는 절차만이라면, 더 단순한 중복 설명이 있어도 사전 등록 절차 자체는 유효할 수 있다.
+  - BM×SH 상호작용이 기존 BM/SH margin과 구조적으로 독립임을 보여주는 통제(예: 무작위 브랜치 쌍 또는 shuffle된 S)가 같은 관측을 낳지 않는다면, 구조적 중복 설명은 약해진다.
+
+### A1 (감사)
+
+## 점검 1: LSAK의 `L`/`S` 원출이 사전 정의된 것인지
+- **확인하려는 것**: 제안이 `L=BM`, `S=SH`로 고른 것이 CA-04의 LSAK 원출인지, 아니면 이번 설계에서 공식 7-branch 구성을 보고 새로 고른 것인지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: `BM`·`SH`가 이미 공식 기준선에 포함된 상태에서 후보가 기준선 성분의 상호작용으로 만들어지면, 게이트 ①이 “새 브랜치”가 아니라 기존 브랜치의 재조합을 심사하는 것이 된다. 또한 `BM`·`SH` 선택에 과거 성능·승격 이력이 개입했다면 선택 편향이 게이트 ① 이전부터 들어온다.
+- **확인 방법**: `docs/closed_axes.md`, `docs/PROJECT.md`, `history/archive.md`, `research_directions.md`, `src/models`, `scripts/analysis/branch_screen.py`에서 `LSAK`, `K_int`, `K̃_L`, `K̃_S`, `BM`, `SH`를 검색하고, `D-022`·`D-027`에서 LSAK의 `L`/`S`가 명시됐는지 확인한다. 명시 없으면 `BM`/`SH` 선택 근거를 성능 조회 없이 기록해야 한다.
+
+## 점검 2: query-context 커널 공식이 실제로 고정됐는지
+- **확인하려는 것**: 제안은 context Gram 정규화만 쓰고, 실제 마진에 쓸 `K_int(q, c)`의 query-context 공식을 생략하고 있다. query 정규화, context 정규화, 자기 유사도 제외가 고정됐는지 확인한다.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: `q`가 `C`에 포함되면 자기 유사도가 마진에 들어간다. query norm을 test/query 쪽에서 fit하면 라벨 무관 fit 범위가 깨진다. context-context Gram만 정규화하고 query-context는 별도 행렬로 계산하면 제안의 `K̃_L ⊙ K̃_S`와 다른 커널이 된다.
+- **확인 방법**: `scripts/analysis/branch_screen.py`와 `src/models`에서 LSAK 후보 마진 함수를 읽고, `q ∈ C` 여부, `K_int(q,c)` 계산식, query/context norm fit 범위를 확인한다. 가능하면 작은 합성 context/query로 dry-run하여 `q`가 `C`에 없음을 assert하는 테스트를 먼저 둔다.
+
+## 점검 3: feature-wise standardization과 `std=0` 처리가 고정됐는지
+- **확인하려는 것**: `L`, `S`를 context만으로 feature-wise standardization한다고 했지만, `std=0` 처리와 기존 `BM`/`SH` 디스크립터의 정규화 상태가 고정되지 않았다.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: `std=0`을 1로 치환하든, 해당 차원을 제거하든, NaN으로 두든 Gram과 마진이 달라진다. `BM`/`SH` 디스크립터가 이미 내부 정규화를 거쳤다면 이중 정규화로 커널 스케일이 바뀐다.
+- **확인 방법**: `scripts/analysis/branch_screen.py`, `src/models`, 관련 테스트에서 standardization 코드와 `std=0` 분기를 확인한다. `BM`/`SH` 디스크립터 생성 경로에서 이미 mean/std 정규화가 있는지 확인하고, 이번 LSAK에서 추가할 정규화 단계를 코드 경로로 고정한다.
+
+## 점검 4: 후보 마진 정의가 라벨 무관인지
+- **확인하려는 것**: 제안은 `m_q = K_int(q,C) - mean_{c∈C} K_int(q,c)`를 쓰되, `branch_screen.py` 기존 후보 마진 정의가 다르면 기존 정의를 우선한다고 했다. 기존 정의가 라벨을 쓰는지 확인해야 한다.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 기존 후보 마진이 query label, context label, Dual Ridge 계수, AUROC 관련 양을 쓰면 게이트 ①이 더 이상 “성능 조회 이전 라벨 무관” 게이트가 아니다. 제안의 `m_q`와 기존 마진이 다르면 어떤 마진을 상관에 쓸지도 고정되지 않는다.
+- **확인 방법**: `scripts/analysis/branch_screen.py`의 candidate margin 함수 시그니처와 호출부를 확인한다. `y`, `label`, `target`, `readout`, `ridge`, `auroc` 같은 입력이 마진 계산에 들어가는지 정적 확인한다. 라벨 입력이 있으면 이 설계는 실행 무효 조건으로 고정해야 한다.
+
+## 점검 5: 공식 7-branch 기준선 마진이 라벨 무관이고 고정됐는지
+- **확인하려는 것**: 게이트 ①은 LSAK 마진과 공식 7-branch 각 브랜치 마진의 상관을 측정한다. 그 기준선 마진이 라벨 무관 경로에서 나왔는지, 그리고 코드·manifest 고정 상태인지 확인한다.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 공식 7-branch 마진이 Dual Ridge readout이나 라벨 기반 마진에서 나왔다면, 게이트 ①이 라벨을 간접 사용한다. 기준선 마진이 실행마다 바뀌면 `max |r|`과 `eff.rank`가 비교 불가능하다.
+- **확인 방법**: `scripts/analysis/branch_screen.py`에서 baseline margin 생성 경로를 확인한다. `current_architecture.md`와 `src/models`에서 `CV,BM,BD,QA,DS,SH,SJ` 마진이 label-free로 정의되는지 확인한다. 가능하면 baseline margin의 해시 또는 per-fold 저장물을 고정하고, LSAK 실행 전후로 변경되지 않는지 대조한다.
+
+## 점검 6: `r`과 `eff.rank`의 집계 단위·표본 단위가 고정됐는지
+- **확인하려는 것**: `max |r| ≤ 0.6`과 `eff.rank ≥ 4.02`가 어떤 표본에서 계산되는지. fold별, task별, query-slide별, 350 쌍 전체 중 어디에서 max를 취하는지, `eff.rank` 입력 행렬이 무엇인지 확인한다.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: task별 `r`의 max인지, fold-query 쌍 전체 `r`인지에 따라 탈락 여부가 바뀐다. fold 내 중복 query-slide가 있으면 상관 표본이 독립이 아니다. `eff.rank`를 마진 행렬, 디스크립터 행렬, Gram 행렬 중 다른 것에 계산하면 `4.02` 기준이 다른 추정 대상에 적용된다.
+- **확인 방법**: `scripts/analysis/branch_screen.py`에서 correlation과 effective rank 계산 함수를 확인한다. 입력 행렬의 행이 fold인지 query-slide인지, task가 어떻게 집계되는지 확인한다. manifest에서 slide ID 중복과 fold 간 중복을 검사한다.
+
+## 점검 7: fold manifest와 context/query slide-level disjointness
+- **확인하려는 것**: “PathoBench 공식 50-fold”라고만 했지, 실제 manifest 파일, fold ID, context/query slide 목록, slide-level 중복 배제가 고정되지 않았다.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: query slide가 같은 fold context에 들어가면 자기 유사도 또는 동일 슬라이드 정보가 마진에 새어 들어간다. 같은 slide가 여러 fold에 중복되면 `r`과 `eff.rank` 표본이 독립이 아니다. manifest가 실행마다 바뀌면 사전 등록이 무효다.
+- **확인 방법**: PathoBench fold manifest 파일을 특정하고 해시를 고정한다. `context`와 `query` slide ID 교집합이 비어 있는지, fold 간 query 중복이 없는지, task별 50-fold가 누락 없는지 스크립트로 assert한다. RU-97 기록의 “manifest ID 수준 disjointness 미확인”과 같은 문제가 LSAK에도 적용될 수 있으므로 먼저 확인해야 한다.
+
+## 점검 8: 오염 검사와 “AUROC 계산하지 않는다”의 모순
+- **확인하려는 것**: 제안은 게이트 ① 측정에서 AUROC를 계산하지 않는다고 하면서, 오염 검사로 `SMAD4=0.4421`, `PBRM1=0.5553` fold-mean AUROC를 대조한다. 이 AUROC가 후보 성능이 아니라 5-branch 기저 앵커인지, 그리고 7-branch 기준선까지 오염이 없는지 확인해야 한다.
+- **문서에서 확인되는가**: 모순됨
+- **샌다면 나타날 증상**: 후보 LSAK의 AUROC를 계산하면 게이트 ① 이전 성능 조회가 된다. 5-branch 앵커만 대조하면 `SH`·`SJ`가 포함된 7-branch 기준선 마진이 오염돼도 통과할 수 있다. 그러면 `max |r|`과 `eff.rank`가 고정된 기준선이 아니라 오염된 기준선과 비교된다.
+- **확인 방법**: `SCREEN_ONLY=1` 경로에서 어떤 AUROC가 계산되는지 확인한다. 후보 LSAK AUROC가 계산되면 안 된다. 5-branch 앵커 외 7-branch baseline margin 또는 저장 예측이 변경되지 않는지 대조할 수 있는지 확인한다. 문서에 7-branch 오염 상수가 없으므로, 먼저 margin 해시 또는 per-fold margin 저장물 대조가 가능한지 확인해야 한다.
+
+## 점검 9: RBF fallback이 CA-04 경계를 깨는지
+- **확인하려는 것**: 제안은 “실제 LSAK 구현이 RBF Gram을 요구하면 `gamma=1/dims`를 쓴다”고 했다. CA-04의 경계 밖은 `K_int = K̃_L ⊙ K̃_S`이고, 경계 안은 압축 디스크립터에 RBF·Cosine 등 범용 비선형 커널을 씌우는 것이다.
+- **문서에서 확인되는가**: 모순됨
+- **샌다면 나타날 증상**: RBF fallback을 허용하면 LSAK가 CA-04 경계 밖의 “사전 정의된 위치×형상 유한차원 상호작용 커널”이 아니라 범용 비선형 커널로 환원될 수 있다. 그러면 게이트 ① 결과가 LSAK에 대한 것이 아니라 닫힌 축에 저촉되는 구성에 대한 결과가 된다.
+- **확인 방법**: `src/models`, `scripts/analysis/branch_screen.py`에서 LSAK 경로에 `RBF`, `Cosine`, `gamma`, `rbf_kernel`, `cosine_similarity`가 들어가는지 확인한다. 들어간다면 이 단일 설계는 실행 무효 또는 CA-04 경계 저촉으로 처리해야 한다. `gamma=1/dims` fallback을 사전 등록에서 제거해야 한다.
+
+## 점검 10: 코드·설정·manifest의 실행 전 고정
+- **확인하려는 것**: 제안은 여러 지점에서 “`branch_screen.py` 기존 관례를 따른다”, “문서에 없으면 코드에서 확인”이라고 했다. 실행 전 코드 버전, 설정, manifest, 디스크립터 캐시가 고정되지 않으면 사전 등록이 아니다.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 설계 승인 후 코드 수정, 캐시 재생성, manifest 변경, 디스크립터 버전 변경이 일어나면 `r`, `eff.rank`, 오염 검사 결과가 다른 시스템에서 나온 것이 된다. “결과 보기 전에 고정”이 성립하지 않는다.
+- **확인 방법**: 실행 전 `git rev-parse HEAD`, 관련 파일 해시, manifest 해시, 설정 파일 해시, `BM`/`SH` 디스크립터 생성 코드 경로를 기록한다. `tests/test_docs_consistency.py` 또는 관련 테스트로 문서 수치 일치를 확인하고, LSAK 실행 스크립트가 해당 커밋에서 결정론적으로 실행되는지 확인한다.
+
+## 점검 11: `BM`/`SH` 선택과 과거 LSAK 탐색의 선택 이력
+- **확인하려는 것**: 이번이 LSAK에 대한 첫 Primary 7 접촉인지, 아니면 과거 LSAK 후보에서 `BM`/`SH` 조합을 성능 또는 상관으로 보고 고른 것인지 확인한다.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 과거에 여러 `L`/`S` 조합을 Primary 7 margin이나 성능으로 탐색했다가 `BM`/`SH`만 남겼다면, 이번 게이트 ①은 첫 시도가 아니라 선택 후 확인이 된다. `max |r|`과 `eff.rank`가 선택된 조합에 유리하게 적용될 수 있다.
+- **확인 방법**: `history/archive.md`, `research_directions.md`, 과거 RU 기록, 실행 로그에서 LSAK 관련 후보, `L`/`S` 조합, margin 또는 AUROC 조회 이력을 검색한다. 성능 조회 이력이 있으면 이번 설계는 “사전 등록 단일 설계”가 아니라 선택 이력을 반영한 재설계로 명시해야 한다.
+
+## 점검 12: `eff.rank ≥ 4.02` 기준의 계산 정의와 현재성
+- **확인하려는 것**: `4.02`는 `3.52 / 7 = 50.3%` 비하락에서 유도됐다. 이 `3.52`와 `eff.rank` 계산식이 현재 공식 7-branch, 현재 manifest, 현재 코드에서 그대로 재현되는지 확인한다.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: `eff.rank`가 다른 행렬, 다른 fold, 다른 마진 정의에서 계산되면 `4.02`는 현재 LSAK 8-branch에 적용할 수 있는 기준이 아니다. 과거 `3.52`가 다른 코드 버전에서 나온 값이면 임계값이 stale다.
+- **확인 방법**: `scripts/analysis/branch_screen.py`에서 effective rank 계산식을 확인한다. 공식 7-branch만 두고 LSAK 없이 `eff.rank`를 재계산해 `3.52`와 일치하는지 확인한다. 일치하지 않으면 `4.02`를 사용할 수 없고, 먼저 `eff.rank` 정의와 기준선 재현을 고정해야 한다.
+
+### T1 (이론)
+
+**이론적 병목 N**
+
+- **가정**: 제안은 LSAK 후보의 게이트 ①이 (1) BM/SH를 L/S로, (2) context-only 정규화 Gram Hadamard로, (3) `m_q`를 후보 margin으로, (4) 기존 7-branch margin과의 선형 `r`과 8-branch `eff.rank`로 측정할 수 있다고 두고 있다. 이 가정은 `m_q`가 기존 branch margin과 대응하는 잘 정의된 단일 스칼라 신호이며, 그 선형 상관/랭크가 LSAK의 직교성을 판정하는 유효한 라벨 무관 대리가 된다는 것을 포함한다. BM/SH가 LSAK의 원출 L/S이고, 문서에 없는 `branch_screen.py` 관례가 이 단일 설계로 확정된다는 가정도 포함된다.
+
+- **이 가정이 깨지는 조건**:
+  - `K_int(q,C)`가 context 벡터라면 `m_q`는 중심화 벡터이고, 스칼라 margin으로 환원하는 규칙(평균·노름·극값 등)이 고정되지 않는다. 평균 환원은 0이 되어 상관 측정 자체가 불가능하다.
+  - `branch_screen.py`의 기존 margin이 라벨·가중치·readout 계수를 쓰거나 제안의 `m_q`와 다르면, 제안이 측정하는 것은 LSAK margin이 아니라 다른 proxy다.
+  - LSAK의 readout 기여가 context label을 쓰는 Dual Ridge 계수나 BM/SH margin의 곱·비선형 함수에 의존하면, 단일 선형 margin의 `r`/`eff.rank`는 직교성을 판정하지 못한다.
+  - BM/SH가 LSAK의 L/S가 아니거나 `D_L`·`D_S`가 코드에서 유일하지 않으면, 이 설계는 문서의 LSAK가 아니라 BM×SH라는 다른 후보를 테스트한다.
+  - 구현이 RBF/gamma를 요구하면 “bandwidth 불필요” 고정과 충돌한다.
+
+- **깨질 때 나타나는 관측 가능한 증상**:
+  - 코드 확인에서 `m_q`가 벡터로 반환되거나 스칼라 환원이 없으면 게이트 ①의 `r`/`eff.rank`는 정의되지 않아 실행 무효다.
+  - 스칼라 환원을 임의로 추가해야 하고, 환원 방식에 따라 `max |r|` 또는 `eff.rank`가 0.6/4.02 임계값을 넘나들면, 제안은 단일 설계가 아니라 환원 규칙 선택 문제다.
+  - margin 계산에 context/query label이 들어가면 게이트 ① 실행 무효다.
+  - gate ① 통과해도 LSAK margin이 BM/SH margin의 곱·다항·비선형 함수로 잘 설명되거나 BM/SH를 조건부화하면 분산이 크게 줄면, 선형 게이트 결과는 직교성 반증이 아니라 판별 불가다.
+  - gate ① 탈락해도 LSAK margin의 분포가 std-0 처리, context 표준화, fold context size에 따라 크게 변하고 선형 `r`만 높으면, 탈락이 LSAK 정보 부재의 반증이 아니다.
+  - `D_L`·`D_S`·`K̃` 공식·`r`/`eff.rank` 산출식이 코드에서 제안과 다르면 실행 무효 또는 설계 대상 오류다.
+
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: 해당 관측 없음. 다만 `PROJECT.md` §5는 `branch_screen.py`로 상관을 측정하고 `max |r| > 0.6`, `eff.rank` 기준만 선언하며, `closed_axes.md` CA-04는 LSAK를 `K̃_L⊙K̃_S`로만 지칭하고 “게이트와 승격에서 비교하는 구성의 일치”를 남은 검증으로 둔다. LSAK의 L/S, 차원, 정규화 공식, margin의 스칼라 환원, `r`/`eff.rank` 산출식은 문서에 없으므로 제안의 BM/SH·`m_q`·선형 rank 환원은 문서에 의해 확정되지 않은 추가 가정이다.
+
+---
+
+## Phase 2b — 제안 좌석 응답
+
+### P1 (제안)
+
+### R1
+- **판정**: (3) 판별 불가
+- **이유**: R1의 전제 "LSAK 마진은 BM·SH 기존 공식 브랜치 디스크립터로 만든 Gram Hadamard"는 P1의 BM/SH 고정에 기반한다. 그러나 `closed_axes.md` CA-04는 LSAK를 "사전 정의된 위치×형상 유한차원 상호작용 커널(`K_int = K̃_L ⊙ K̃_S`)"로만 지칭하고 L/S 원출을 특정하지 않으며, `PROJECT.md` §5도 LSAK의 L/S를 명시하지 않는다. 따라서 BM/SH가 LSAK의 L/S인지, P1가 공식 7-branch를 보고 새로 고른 것인지는 문서로 판별 불가하다. R1의 "더 단순한 설명"(BM×SH 구조적 중복)은 BM/SH가 L/S일 때만 유효한 대안 기전이고, LSAK 기전은 문서상 미확인이다. R1가 지적한 RBF fallback과 단일 설계 문제는 P1의 수정 대상이지만, R1 전체의 주장(LSAK 기전보다 BM×SH 중복 설명이 더 단순)은 LSAK 원출 미확정 상태에서 판별 불가하다.
+
+### A1-1
+- **판정**: (3) 판별 불가
+- **이유**: LSAK의 L/S 원출이 사전 정의된 것인지 문서에 없음. `closed_axes.md` CA-04와 `PROJECT.md` §5 모두 LSAK의 L/S를 특정하지 않는다. BM/SH가 원출인지, P1가 공식 7-branch 구성을 보고 새로 고른 것인지는 문서로 판별 불가하다. 확인 전까지 P1의 BM/SH 고정은 추측이며, 게이트 ① 결과가 LSAK 후보의 통과/탈락인지, 아니면 다른 후보에 대한 실행 무효 또는 판별 불가인지 판별 불가하다.
+
+### A1-2
+- **판정**: (1) 수용하고 수정
+- **이유**: P1는 context Gram 정규화만 고정하고, query-context 커널 공식(`K_int(q, c)`), 자기 유사도 제외, query 정규화 fit 범위를 생략했다. `q ∈ C` 여부, query norm fit 범위가 고정되지 않으면 라벨 무관 fit 범위가 깨질 수 있다. 문서에 query-context 커널 공식이 없으므로, P1는 실행 전 `scripts/analysis/branch_screen.py`와 `src/models`에서 `K_int(q, c)` 계산식, `q ∈ C` assert, query/context norm fit 범위를 코드 경로로 고정해야 한다.
+
+### A1-3
+- **판정**: (1) 수용하고 수정
+- **이유**: feature-wise standardization의 `std=0` 처리와 BM/SH 디스크립터의 기존 정규화 상태가 문서에 없음. `std=0`을 1로 치환하든, 해당 차원을 제거하든, NaN으로 두든 Gram과 마진이 달라진다. BM/SH 디스크립터가 이미 내부 정규화를 거쳤다면 이중 정규화로 커널 스케일이 바뀐다. P1는 실행 전 `scripts/analysis/branch_screen.py`, `src/models`, 관련 테스트에서 standardization 코드와 `std=0` 분기, BM/SH 디스크립터 생성 경로의 정규화 상태를 확인하고 고정해야 한다.
+
+### A1-4
+- **판정**: (1) 수용하고 수정
+- **이유**: P1는 `branch_screen.py` 기존 후보 마진 정의가 다르면 기존 정의를 우선한다고 했다. 그러나 기존 마진이 query label, context label, Dual Ridge 계수, AUROC 관련 양을 쓰는지 문서에 없음. 기존 마진이 라벨을 쓰면 게이트 ①이 더 이상 "성능 조회 이전 라벨 무관" 게이트가 아니다. P1는 실행 전 `branch_screen.py`의 candidate margin 함수 시그니처와 호출부를 확인하고, `y`, `label`, `target`, `readout`, `ridge`, `auroc` 같은 입력이 마진 계산에 들어가는지 정적 확인해야 한다. 라벨 입력이 있으면 실행 무효 조건으로 고정.
+
+### A1-5
+- **판정**: (3) 판별 불가
+- **이유**: 공식 7-branch 기준선 마진이 라벨 무관 경로에서 나왔는지, 그리고 코드·manifest 고정 상태인지 문서에 없음. `PROJECT.md` §5는 `branch_screen.py`로 상관을 측정한다고 했지만, 기준선 마진이 label-free로 정의되는지 명시하지 않았다. `current_architecture.md`와 `src/models`에서 `CV,BM,BD,QA,DS,SH,SJ` 마진이 label-free로 정의되는지 확인해야 한다. 확인 전까지 P1의 게이트 ①이 라벨을 간접 사용하는지 판별 불가하다.
+
+### A1-6
+- **판정**: (3) 판별 불가
+- **이유**: `max |r| ≤ 0.6`과 `eff.rank ≥ 4.02`가 어떤 표본에서 계산되는지 문서에 없음. task별 `r`의 max인지, fold-query 쌍 전체 `r`인지, `eff.rank` 입력 행렬이 마진 행렬인지 디스크립터 행렬인지 Gram 행렬인지 문서에 명시되지 않았다. `PROJECT.md` §5는 "max |r| > 0.6"과 "eff.rank ÷ 브랜치 수"만 선언하고, 집계 단위와 표본 단위를 특정하지 않았다. 따라서 P1의 임계값이 실제로 고정된 단일 판정 규칙인지 판별 불가하다.
+
+### A1-7
+- **판정**: (1) 수용하고 수정
+- **이유**: P1는 "PathoBench 공식 50-fold"라고만 했고, 실제 manifest 파일, fold ID, context/query slide 목록, slide-level 중복 배제를 고정하지 않았다. RU-97 기록은 "GMM 학습·검증 표본과 `Primary 7` fold manifest의 ID 수준 disjointness 미확인"을 미해결로 명시했다. query slide가 같은 fold context에 들어가면 자기 유사도 또는 동일 슬라이드 정보가 마진에 새어 들어간다. P1는 실행 전 PathoBench fold manifest 파일을 특정하고 해시를 고정하며, context와 query slide ID 교집합이 비어 있는지, fold 간 query 중복이 없는지, task별 50-fold가 누락 없는지 스크립트로 assert해야 한다.
+
+### A1-8
+- **판정**: (3) 판별 불가
+- **이유**: P1는 게이트 ① 측정에서 AUROC를 계산하지 않는다고 하면서, 오염 검사로 `SMAD4 = 0.4421`, `PBRM1 = 0.5553` fold-mean AUROC를 대조한다. `PROJECT.md` §3.4은 이 두 값을 5-branch 기저 앵커로 규정하고, 공식 구성이 7-branch로 바뀐 뒤에도 이 앵커를 그대로 유지한다고 했다. 그러나 7-branch 기준선 마진이 오염되는지 대조할 상수나 절차는 문서에 없음. 5-branch 앵커만 일치하고 `SH`·`SJ`가 포함된 7-branch 기준선 마진이 바뀌면, `max |r|`과 `eff.rank`가 오염된 기준선과 비교된다. 문서에 7-branch 오염 상수가 없으므로, margin 해시 또는 per-fold margin 저장물 대조가 가능한지 확인 전까지 판별 불가하다.
+
+### A1-9
+- **판정**: (1) 수용하고 수정
+- **이유**: P1는 "실제 LSAK 구현이 RBF Gram을 요구하면 `gamma=1/dims`를 쓴다"고 했다. 그러나 `closed_axes.md` CA-04의 경계 밖은 "선형 그람 행렬만 쓰는 통합(`QJF`)과 사전 정의된 위치×형상 유한차원 상호작용 커널(`LSAK`, `K_int = K̃_L ⊙ K̃_S`)"이고, 경계 안은 "이미 32차원으로 압축된 디스크립터에 RBF·Cosine 등 범용 비선형 커널을 씌워 선형 Ridge readout을 대체하는 것"이다. RBF fallback을 허용하면 LSAK가 CA-04 경계 밖의 "사전 정의된 위치×형상 유한차원 상호작용 커널"이 아니라 범용 비선형 커널로 환원될 수 있다. P1는 RBF fallback을 사전 등록에서 제거해야 한다.
+
+### A1-10
+- **판정**: (1) 수용하고 수정
+- **이유**: P1는 여러 지점에서 "`branch_screen.py` 기존 관례를 따른다", "문서에 없으면 코드에서 확인"이라고 했다. 그러나 실행 전 코드 버전, 설정, manifest, 디스크립터 캐시가 고정되지 않으면 사전 등록이 아니다. 설계 승인 후 코드 수정, 캐시 재생성, manifest 변경, 디스크립터 버전 변경이 일어나면 `r`, `eff.rank`, 오염 검사 결과가 다른 시스템에서 나온 것이 된다. P1는 실행 전 `git rev-parse HEAD`, 관련 파일 해시, manifest 해시, 설정 파일 해시, BM/SH 디스크립터 생성 코드 경로를 기록하고, `tests/test_docs_consistency.py` 또는 관련 테스트로 문서 수치 일치를 확인해야 한다.
+
+### A1-11
+- **판정**: (3) 판별 불가
+- **이유**: 이번이 LSAK에 대한 첫 Primary 7 접촉인지, 아니면 과거 LSAK 후보에서 BM/SH 조합을 성능 또는 상관으로 보고 고른 것인지 문서에 없음. 과거에 여러 L/S 조합을 Primary 7 margin이나 성능으로 탐색했다가 BM/SH만 남겼다면, 이번 게이트 ①은 첫 시도가 아니라 선택 후 확인이 된다. `history/archive.md`, `research_directions.md`, 과거 RU 기록, 실행 로그에서 LSAK 관련 후보, L/S 조합, margin 또는 AUROC 조회 이력을 검색해야 한다. 성능 조회 이력이 있으면 이번 설계는 "사전 등록 단일 설계"가 아니라 선택 이력을 반영한 재설계로 명시해야 한다.
+
+### A1-12
+- **판정**: (3) 판별 불가
+- **이유**: `eff.rank ≥ 4.02` 기준의 계산 정의와 현재성이 문서에 없음. `PROJECT.md` §5는 `3.52 / 7 = 50.3%` 비하락에서 `4.02`를 유도했지만, `3.52`가 현재 공식 7-branch, 현재 manifest, 현재 코드에서 그대로 재현되는지 명시하지 않았다. `eff.rank`가 다른 행렬, 다른 fold, 다른 마진 정의에서 계산되면 `4.02`는 현재 LSAK 8-branch에 적용할 수 있는 기준이 아니다. `branch_screen.py`에서 effective rank 계산식을 확인하고, 공식 7-branch만 두고 LSAK 없이 `eff.rank`를 재계산해 `3.52`와 일치하는지 확인해야 한다.
+
+### T1
+- **판정**: (3) 판별 불가
+- **이유**: T1의 "이론적 병목 N"은 P1의 가정이 깨지는 조건을 열거했다. T1도 "문서의 어떤 관측이 이 가정과 충돌하는가: 해당 관측 없음"이라고 명시했다. `PROJECT.md` §5는 `branch_screen.py`로 상관을 측정하고 `max |r| > 0.6`, `eff.rank` 기준만 선언하며, `closed_axes.md` CA-04는 LSAK를 `K̃_L⊙K̃_S`로만 지칭한다. LSAK의 L/S, 차원, 정규화 공식, margin의 스칼라 환원, `r`/`eff.rank` 산출식은 문서에 없으므로, P1의 BM/SH·`m_q`·선형 rank 환원은 문서에 의해 확정되지 않은 추가 가정이다. T1가 지적한 `m_q`의 스칼라 환원, 기존 margin의 라벨 사용, LSAK readout 기여, BM/SH 원출, RBF/gamma 요구는 모두 문서로 판별 불가하다.
+
+---
+
+## Phase 3 — 종합
+
+### S1 (종합)
+
+## 지지 (증거가 뒷받침함)
+- **게이트 ①의 운영 임계값과 중단 규칙은 문서상 고정 가능하다.** `PROJECT.md` §5는 `max |r| > 0.6`이면 성능과 무관하게 기각하고, 8-branch 기준 `eff.rank ≥ 4.02`(현행 `3.52 / 7 = 50.3%` 비하락)를 요구하며, `SCREEN_ONLY=1`과 §3.4 오염 검사를 통과해야 하고, 게이트 ① 탈락 시 성능을 조회하지 않고 종료한다고 명시한다.
+- **LSAK의 CA-04 경계 밖 성립 조건은 문서상 고정 가능하다.** `closed_axes.md` CA-04는 `K_int = K̃_L ⊙ K̃_S` 형태의 사전 정의된 위치×형상 유한차원 상호작용 커널을 경계 밖(비저촉)으로 두고, 이미 32차원으로 압축된 디스크립터에 RBF·Cosine 등 범용 비선형 커널을 씌워 선형 Ridge readout을 대체하는 것을 경계 안(저촉)으로 둔다.
+- **5-branch 오염 앵커 상수는 문서상 사용 가능하다.** `PROJECT.md` §3.4는 `SMAD4 = 0.4421`, `PBRM1 = 0.5553`을 소수 4자리 일치 기준으로 고정한다.
+- **fold와 holdout 제약은 문서상 고정 가능하다.** `PROJECT.md` §3.1은 Primary 7의 PathoBench 공식 50-fold를 고정하고, fold 수 증대·재분할을 금지하며, SEAL 10은 최종 hold-out으로 유보한다고 명시한다.
+- **RU-97의 미해결 항목은 실행 유효성 점검의 필요성을 뒷받침한다.** RU-97 §7은 GMM 학습·검증 표본과 Primary 7 fold manifest의 ID 수준 disjointness 미확인, 기전 미확인, 단일 실행 불확실성 미측정을 명시한다. 이는 LSAK에 직접 적용되는 증거는 아니지만, fit·manifest·slide ID 중복 결함이 실행 무효로 이어질 수 있음을 보여준다.
+
+## 반박 (증거가 반박함)
+- **“LSAK 단일 설계가 문서만으로 확정됐다”는 주장은 반박된다.** `closed_axes.md` CA-04는 LSAK를 `K_int = K̃_L ⊙ K̃_S`로만 지칭한다. `L`/`S` 원출, `D_L`/`D_S`, bandwidth, 정규화 공식, `std=0` 처리, query-context 커널 공식, margin의 스칼라 환원, `r`의 종류, `eff.rank` 산출식과 집계 단위는 문서에 없다. 따라서 `L=BM`, `S=SH` 고정은 문서가 뒷받침한 확정이 아니라 추측이다.
+- **RBF/Cosine fallback을 허용하는 조건부 설계는 반박된다.** CA-04의 경계 밖은 선형 그람/유한차원 상호작용 커널이고, 경계 안은 32D 압축 디스크립터에 RBF·Cosine 등 범용 비선형 커널을 씌우는 것이다. “실제 구현이 RBF를 요구하면 `gamma = 1/dims`를 쓴다”는 fallback은 LSAK를 범용 비선형 커널로 환원할 수 있어 비저촉 LSAK 사전 등록에 포함할 수 없다.
+- **“게이트 ① 탈락은 LSAK 후보 전체 또는 CA-04 축의 기각”이라는 확대는 반박된다.** `PROJECT.md` §5는 채택 게이트와 승격을 분리하고, 게이트 ① 탈락 시 성능 미조회 종료를 요구할 뿐이다. `closed_axes.md` CA-04는 LSAK의 성능·과적합을 미검증으로 둔다. 단일 설계의 게이트 ① 탈락은 그 설계의 실패/종료이지, LSAK 축 전체의 반박이나 축 폐쇄 근거가 아니다.
+- **RU-97의 유효 성분 증가는 기전 입증으로 사용할 수 없다.** RU-97 §3·§4는 유효 성분 붕괴의 기전을 `미확인`으로 두고, 화이트닝 후에도 성능이 따라오지 않았으며, `raw`/`balanced` 차이의 불확실성 폭은 미측정이라고 명시한다. 따라서 이를 LSAK 또는 커널 readout의 기전 근거로 쓰는 것은 관측을 기전 입증으로 바꾸는 것이다.
+
+## 판별 불가 (증거가 가르지 못함)
+- **LSAK의 `L`/`S` 원출이 `BM`/`SH`인지 문서로 판별 불가하다.** `closed_axes.md`, `PROJECT.md`에 LSAK의 `L`/`S` 특정 수치가 없다. `BM`/`SH`가 사전 정의된 LSAK 원출인지, 이번 설계에서 공식 7-branch를 보고 새로 고른 것인지는 문서에 없다.
+- **LSAK의 차원과 정규화 상태는 문서로 판별 불가하다.** `D_L`, `D_S`, 기존 디스크립터의 정규화 여부, `std=0` 처리, 이중 정규화 가능성은 문서에 없다.
+- **query-context 커널 공식과 자기 유사도 처리는 문서로 판별 불가하다.** `K_int(q, c)`의 정확한 계산식, `q ∈ C` 여부, query 정규화 fit 범위, 자기 유사도 제외 규칙은 문서에 없다.
+- **후보 margin이 라벨 무관 단일 스칼라인지 문서로 판별 불가하다.** `branch_screen.py`의 기존 candidate margin 정의, 라벨 입력 여부, 스칼라 환원 규칙은 문서에 없다. `m_q = K_int(q,C) - mean_c K_int(q,c)`가 벡터로 끝나면 `max |r|`과 `eff.rank`는 정의되지 않는다.
+- **공식 7-branch 기준선 margin이 라벨 무관이고 고정됐는지 문서로 판별 불가하다.** `CV,BM,BD,QA,DS,SH,SJ` margin이 label-free 경로에서 나오는지, 실행마다 고정되는지는 문서에 없다.
+- **`max |r|`과 `eff.rank`의 집계 단위는 문서로 판별 불가하다.** task별 max인지, fold-query 쌍 전체인지, slide 단위인지, fold/과제 내 종속성을 어떻게 처리하는지는 문서에 없다.
+- **`eff.rank ≥ 4.02`의 현재성은 문서로 판별 불가하다.** `3.52`가 현재 공식 7-branch, 현재 manifest, 현재 코드, 현재 margin 정의에서 그대로 재현되는지는 문서에 없다.
+- **5-branch 오염 앵커만으로 공식 7-branch 무오염을 보증할 수 있는지 문서로 판별 불가하다.** `PROJECT.md` §3.4는 5-branch 앵커만 고정한다. 7-branch margin 또는 저장 예측의 불변성을 대조할 상수·해시·절차는 문서에 없다.
+- **LSAK fold manifest의 slide-level disjointness는 문서로 판별 불가하다.** context/query slide ID 교차, fold 간 중복, task별 50-fold 완전성은 문서에 없다. RU-97의 disjointness 미확인은 GF/GMM 관련이지 LSAK를 직접 확인한 것이 아니다.
+- **과거 LSAK 선택 이력이 있는지 문서로 판별 불가하다.** 과거에 여러 `L`/`S` 조합을 Primary 7 margin, 상관, 성능으로 탐색한 뒤 `BM`/`SH`를 남겼는지는 문서에 없다.
+- **LSAK margin이 기존 `BM`/`SH` margin과 구조적으로 중복되는지 문서로 판별 불가하다.** `BM`/`SH`가 L/S라고 해도, 그 Gram Hadamard가 부모 브랜치 마진의 비선형 함수인지, 새 정보를 가지는지는 실측이 없다.
+- **LSAK의 성능·과적합은 문서로 판별 불가하다.** CA-04는 LSAK의 성능·과적합을 미검증으로 둔다. 이번 회차에서는 성능 조회가 금지된다.
+- **CA-04 과거 성능 하락의 기전은 문서로 판별 불가하다.** CA-04는 성능 하락 기전을 `미확인`으로 둔다.
+- **선형 `r`과 `eff.rank`가 LSAK의 직교성 판정에 충분한지 문서로 판별 불가하다.** LSAK margin이 기존 margin의 고차 비선형 함수일 때, pairwise `r`과 effective rank가 정보 중복을 충분히 잡는지 문서에 근거가 없다.
+- **코드·설정·manifest·디스크립터 캐시의 실행 전 고정 상태는 문서로 판별 불가하다.** commit, 파일 해시, manifest 해시, 디스크립터 버전, `branch_screen.py` 버전은 문서에 없다.
+
+## 실행 무효 (실행·계측 결함으로 판단 불가)
+- **fit, 정규화, margin, readout, 브랜치 선택에 context/query 라벨이 사용되면 실행 무효다.** 게이트 ①은 라벨 무관이어야 한다.
+- **게이트 ① 결과 전에 Primary 7 성능을 조회하거나 SEAL 10에 접근하면 실행 무효다.** 성능 조회는 게이트 이후 절차이며, SEAL 10은 hold-out이다.
+- **PathoBench 공식 50-fold가 아니거나 fold를 재분할·증대하면 실행 무효다.**
+- **query slide가 같은 fold context에 포함되거나 slide ID 중복이 있으면 실행 무효다.** 자기 유사도 또는 동일 슬라이드 정보가 margin에 새어 들어간다.
+- **`SCREEN_ONLY=1`이 아니거나 앙상블/기저 경로가 변경되면 실행 무효다.**
+- **오염 검사 상수가 소수 4자리로 불일치하면 실행 무효다.** `SMAD4 = 0.4421`, `PBRM1 = 0.5553` 중 하나라도 불일치하면 `SCREEN_ONLY` 실행의 무해성을 주장할 수 없다.
+- **LSAK가 RBF·Cosine 등 범용 비선형 커널로 구현되거나, 32D 압축 디스크립터 위에 범용 커널을 씌워 선형 Ridge readout을 대체하면 LSAK 비저촉 후보에 대한 판단은 실행 무효다.** 이는 CA-04 경계 안 저촉이다.
+- **경사하강으로 학습되는 파라미터를 활성 readout에 넣으면 실행 무효다.** CA-14와 학습 파라미터 0개 정체성에 저촉된다.
+- **margin이 스칼라로 환원되지 않거나, 스칼라 환원 규칙을 결과 확인 후에 고르면 실행 무효다.**
+- **`max |r|` 또는 `eff.rank`의 집계 단위·입력 행렬·산출식이 사전 고정되지 않거나, 결과 확인 후 변경되면 실행 무효다.**
+- **`eff.rank ≥ 4.02`를 적용하기 전에 현재 공식 7-branch에서 `eff.rank = 3.52`를 같은 코드·manifest·margin 정의에서 재현하지 못하면 실행 무효다.**
+- **사전 등록 후 코드, 설정, manifest, 디스크립터 캐시가 변경되면 실행 무효다.**
+- **공식 7-branch 기준선 margin의 불변성을 확인할 수 없다면, 5-branch 앵커 통과만으로 공식 7-branch 무오염을 주장하는 것은 실행 무효다.** 7-branch margin 해시 또는 per-fold 저장물 대조가 없으면 기준선 오염 여부를 판단할 수 없다.
+
+## 좌석 공백 (기권·실패로 빠진 관점)
+- 없음. 기권·실패로 빠진 좌석은 없다.
+
+## 다음 행동 (권한 등급과 함께)
+- **권한 등급 정의**: `G0 사용자 결정`, `G1 연구 좌석 승인`, `G2 실행자 확인`.
+- **[G0 사용자] LSAK의 `L`/`S` 원출을 확정하라.** 문서·결정 기록·코드에 `L`/`S`가 없으면, `BM`/`SH`를 LSAK 원출로 지정할지, 아니면 공식 7-branch를 보고 새로 고른 별도 후보로 등록할지 사용자 결정이 필요하다. 확정 전에는 “LSAK 단일 설계”로 사전 등록할 수 없다.
+- **[G1 좌석] RBF/Cosine/gamma fallback을 설계에서 제거하라.** LSAK는 `K_int = K̃_L ⊙ K̃_S`의 선형 그람/유한차원 상호작용으로만 고정한다. 구현이 RBF를 요구하면 CA-04 경계 저촉 또는 실행 무효로 종료한다.
+- **[G1 좌석] margin과 정규화를 실행 전 고정하라.** query-context 커널 공식, `q ∈ C` 금지 assert, 자기 유사도 제외, context-only fit 범위, feature-wise standardization, `std=0` 처리, margin의 스칼라 환원, 라벨 무관 여부를 코드 경로로 고정한다. 기존 `branch_screen.py` margin이 라벨을 쓰면 이 설계는 실행 무효 조건으로 고정한다.
+- **[G1 좌석] `r`과 `eff.rank`의 산출식을 실행 전 고정하라.** 상관 종류, 표본 단위, task/fold/query-slide 집계, `max |r|`의 max 범위, `eff.rank` 입력 행렬과 공식을 고정한다. 공식 7-branch에서 `eff.rank = 3.52`를 같은 조건으로 재현하기 전에는 `4.02`를 적용하지 않는다.
+- **[G2 실행자] 실행 전 고정물을 기록하라.** 코드 commit, 관련 파일 해시, 설정 해시, fold manifest 해시, 디스크립터 캐시 버전, `SCREEN_ONLY=1` 상태를 기록한다. context/query slide ID 교차, fold 간 중복, task별 50-fold 완전성을 assert한다.
+- **[G0 사용자] 7-branch 오염 검사 기준을 결정하라.** 현재 문서에는 5-branch 앵커만 있다. 공식 7-branch margin 또는 per-fold 저장물의 불변성을 확인하기 위한 7-branch 해시/상수/절차를 요구할지 사용자 결정이 필요하다. 없으면 5-branch 앵커 통과만으로 공식 7-branch 무오염을 주장하지 않는다.
+- **[G1 좌석] 중단 규칙을 기록하라.** 게이트 ① 탈락 또는 실행 무효이면 Primary 7 성능 조회 없이 종료하고, SEAL 10을 열지 않으며, CA-04 축을 닫지 않는다.
+
+## 하지 말 것 (이유와 함께)
+- **Primary 7 성능을 조회하지 말 것.** 이번 회차는 설계만 하며, 게이트 ①은 성능 조회 이전 라벨 무관 게이트다.
+- **SEAL 10을 열지 말 것.** SEAL 10은 최종 hold-out이며, 선택·튜닝·설계 단계에서 사용 금지다.
+- **LSAK `L`/`S`, 코드, manifest, margin 정의가 고정되기 전에 실험을 착수하지 말 것.** 단일 설계가 확정되지 않으면 게이트 ①은 사전 검정이 아니라 사후 탐색이 된다.
+- **RBF/Cosine fallback을 유지하지 말 것.** CA-04 경계 밖 LSAK를 범용 비선형 커널로 환원할 수 있다.
+- **결과 확인 후 bandwidth, 차원, 정규화, margin 환원, 임계값을 바꾸지 말 것.** 선택 편향이 게이트 ①에 새어 들어온다.
+- **게이트 ① 통과를 승격이나 기전 입증으로 쓰지 말 것.** 게이트 ①은 라벨 무관 선별 절차일 뿐이며, LSAK의 성능 개선 기전은 미확인이다.
+- **게이트 ① 탈락을 CA-04 축 폐쇄로 쓰지 말 것.** 단일 설계의 실패이지, LSAK 후보 전체 또는 축 전체의 반박이 아니다.
+- **5-branch 오염 앵커만으로 공식 7-branch 무오염을 주장하지 말 것.** 7-branch 기준선 margin 불변성을 확인할 상수·해시·절차가 문서에 없다.
+- **RU-97의 성능·유효 성분 관측을 LSAK 기전 증거로 쓰지 말 것.** RU-97은 GF 단독 탐색 기록이며, 기전은 미확인이고 성능은 따라오지 않았다.
+- **문서에 없는 수치를 지어내지 말 것.** 없는 값은 `문서에 없음`으로 두고, 먼저 확인해야 할 코드·manifest·결정 기록을 명시한다.
+- **좌석 동의 수를 근거로 쓰지 말 것.** 표결은 증거가 아니다.

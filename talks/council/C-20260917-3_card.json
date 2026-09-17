@@ -1,0 +1,79 @@
+{
+  "round_id": "C-20260917-3",
+  "question": "이 회차는 설계만 한다. 어떤 실험도 착수하지 않으며 Primary 7 성능을 조회하지 않는다. 과제: closed_axes.md의 CA-04가 경계 밖(비저촉)으로 둔 LSAK 후보에 대해, 게이트 ① (직교성) 실행을 위한 '사전 등록 설계안'을 작성하라. 반드시 결과를 보기 전에 고정해야 하는 것만 담는다: (1) LSAK의 단일 설계를 구체적으로 확정하라 - 커널 정의, 차원, bandwidth, 정규화, readout 경로. (2) 게이트 ① 통과/탈락 임계값과 그 근거. (3) 탈락 시 성능을 조회하지 않고 종료한다는 중단 규칙. (4) 이 설계가 CA-04 경계 밖이라는 판단이 틀릴 조건. (5) 라벨 무관 fit 범위와 오염 검사 절차. 문서에 없는 수치를 지어내지 말고, 없으면 '문서에 없음'과 함께 무엇을 먼저 확인해야 하는지 써라.",
+  "ru_type": "탐색",
+  "prefixed_criteria": "",
+  "composition_rationale": "설계 회차다. 실행이 아니라 사전 등록 문서를 만드는 것이 목적이며, 2회차 종합이 'LSAK를 새 RU와 사전 등록 없이 착수하지 말 것'이라고 한 제약을 지키면서 그 사전 등록 자체를 준비한다. 제안(P)이 설계를 내고, 반증(R)이 '이 설계가 게이트를 통과하도록 편의적으로 짜였는지'를 공격한다. 감사(A)는 라벨 무관 fit 범위와 오염 검사를 본다 - LSAK 설계에서 가장 새기 쉬운 지점이다. 이론(T)은 CA-04 경계 판단이 틀릴 조건을 맡는다. 일반화(G)와 실측(M)은 제외했다: 아직 실행 대상이 없어 전이도 비용도 논할 수 없고, GPU 4는 초기화 artifact 검사에 쓰고 있다.",
+  "max_authority": "T1",
+  "convener": "Claude Code (claude-opus-5)",
+  "state_documents": [
+    "docs/PROJECT.md",
+    "docs/closed_axes.md",
+    "talks/reports/2026-09-17_ru97_gf_primary7.md"
+  ],
+  "max_tokens_per_seat": 32000,
+  "max_total_calls": 14,
+  "seats": [
+    {
+      "name": "P1",
+      "archetype": "P",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.8,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md"
+      ]
+    },
+    {
+      "name": "R1",
+      "archetype": "R",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.5,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md"
+      ]
+    },
+    {
+      "name": "A1",
+      "archetype": "A",
+      "endpoint": "http://127.0.0.1:8003/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md"
+      ]
+    },
+    {
+      "name": "T1",
+      "archetype": "T",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.4,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md"
+      ]
+    },
+    {
+      "name": "S1",
+      "archetype": "S",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md"
+      ]
+    }
+  ],
+  "note": "설계 전용 회차. 실행 승인 아님. SEAL 10 수치 미입력 (D-047)."
+}

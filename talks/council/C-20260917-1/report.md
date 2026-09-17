@@ -1,0 +1,631 @@
+# ICF Council — C-20260917-1
+
+- **연구 질문**: 최종 목표는 SEAL 10 과제에서 ABMIL(macro 0.7266)을 넘어서는 것이다. 단 모델 개선의 근거로 쓸 수 있는 결과는 Primary 7 뿐이며, SEAL 10 결과를 기준으로 개선 방향을 고르는 것은 부정행위다. 이 제약 아래에서, 지금 무엇을 해야 목표에 가까워지는가? 현재 문서가 보여주는 증거만으로 판단하라.
+- **RU 유형**: 탐색
+- **최대 권한 등급**: T1
+- **소집자**: Claude Code (claude-opus-5)
+- **좌석**: P1(P, temp 0.9, http://127.0.0.1:8000/v1/chat/completions), R1(R, temp 0.5, http://127.0.0.1:8001/v1/chat/completions), A1(A, temp 0.2, http://127.0.0.1:8003/v1/chat/completions), G1(G, temp 0.3, http://127.0.0.1:8000/v1/chat/completions), T1(T, temp 0.4, http://127.0.0.1:8001/v1/chat/completions), S1(S, temp 0.2, http://127.0.0.1:8003/v1/chat/completions)
+- **호출**: 11/16 · **소요**: 872.9초
+
+> 이 문서는 로컬 모델이 생성한 것이며 **검증되지 않았습니다.** 좌석이 인용한 수치는
+> 정본 문서와 대조하기 전에는 결론에 넣지 마십시오. 좌석 수와 동의 수는 증거가 아닙니다.
+
+## 편성 근거 (결과 전 기록)
+
+탐색 유형이며 방향이 미확정이라 제안(P) 좌석이 필요하다. 이 프로젝트의 주된 실패 위험은 Primary 7에 대한 과적합과 선택 편향이므로 감사(A)와 일반화(G)를 반드시 넣었다. 닫힌 축을 다시 제안하는 것을 막기 위해 이론(T) 좌석으로 암묵 가정을 드러내게 했다. 실측(M) 좌석은 제외했다 — 지금은 구현 비용이 아니라 방향이 쟁점이고, 실측은 별도 실험(RU-97)이 GPU 4에서 병행 중이다. 반증(R)과 종합(S)은 규범상 필수다.
+
+---
+
+## Phase 1 — 독립
+
+### P1 (제안)
+
+## 제안 1: GF 고정 GMM을 라벨 무관 robustness 규칙으로 고정
+- **바꾸는 것**: GF 배경 GMM을 “자연 비율 Raw가 기본”으로 두지 않고, 사전 라벨 무관 규칙으로 고정을 바꾼다. 규칙은 두 GMM 모두 수렴하면 dataset별 validation log-likelihood의 최선–최악 gap을 최소화하는 쪽을 선택하고, tie이면 natural-ratio overall log-likelihood가 높은 Raw를 사용한다. 현재 파일럿 값이면 Raw gap은 COMET `-598.05` vs MUT-HET-RCC `-296.22`로 301.83, Balanced gap은 PANDA `-573.51` vs MUT-HET-RCC `-367.73`로 205.78이므로 Balanced가 선택된다. 이후 RU-97 `M=8·16·32` 단독 탐색은 공식 승격이 아니라 탐색 기록으로만 유지하고 SEAL 10은 열지 않는다.
+- **바꾸는 전제**: 지금 “자연 비율 GMM이 실제 patch 분포를 더 잘 대표하므로 고정 배경 GMM으로 더 유리하다”는 전제를 뒤집는다. 대신 “과제·dataset가 섞여 있는 고정 기저에서는 majority dataset의 component 지배를 줄이는 편차가 더 안전하다”고 둔다.
+- **기대하는 차이**: Primary 7 단독 margin의 dataset 간 편차가 줄고, `M`별 component 점유율과 단독 AUROC가 해석 가능해질 수 있다. 구체적으로 볼 수 있는 지표는 dataset-wise validation log-likelihood gap, component responsibility 점유율, M별 단독 AUROC 0.5 초과율이다. Primary 7 macro AUROC나 승격 기준 `+0.3%p` 달성 여부는 정량 예측 불가이며, 모든 결과는 `hold-out 미검증`이다.
+- **기전**: Balanced 표본화는 `MUT-HET-RCC` 68.7% 지배를 줄이고, Raw에서 나타난 COMET의 단일 component 몰림(1.000)과 PANDA 공유(0.317)를 완화해 고정 GMM의 component를 dataset 간에 더 고르게 만들 수 있다. 다만 파일럿은 단일 seed·단일 초기화 1회 실행이므로 이 경로가 실제 단독 판별 정보로 이어지는지는 기전 미확인이다.
+- **실패 조건**: 가장 그럴듯한 실패는 Primary 7의 과제·dataset 분포가 자연 비율에 가깝거나, GF margin이 GMM dataset 균형보다 patch 전체 통계에 민감해 Balanced가 이득을 내지 못하는 경우다. 이 경우 Raw가 여전히 우월할 수 있다. 단일 seed GMM 적합 차이, 수렴 경로 차이, component 정렬 차이만이면 판별 불가에 머무른다. GF 단독 AUROC가 전 과제 0.5 근처에서 M에 따라 흔들리면 탐색 기록만 남고 공식 후보로 되돌릴 근거가 없다.
+
+## 제안 2: LSAK를 8-branch 후보로 넣고 gate ①만 먼저 실행
+- **바꾸는 것**: 공식 7-branch(`CV, BM, BD, QA, DS, SH, SJ`)에 CA-04 경계 밖으로 명시된 LSAK(`K_int = K̃_L ⊙ K̃_S`)를 후보 브랜치로 추가한다. 다만 성능을 조회하지 않고 `SCREEN_ONLY=1`로 §3.4 오염 검사와 함께 gate ①만 실행한다. 측정 대상은 공식 7-branch와의 max |r|, 후보 통합 effective rank, 그리고 기존 효율 대비 하락 여부다. readout은 기존 closed-form/linear 체계를 유지하고, LSAK는 마진·브랜치로만 삽입한다.
+- **바꾸는 전제**: 지금 “위치 계열과 형상 계열은 이미 별도 브랜치로 충분히 분리되어 있고, 두 계열의 상호작용 항은 중복 정보일 것이다”는 전제를 뒤집는다. 대신 “유한차원 사전 정의 상호작용은 위치·형상 마진의 변분에는 없는 직교 정보를 가질 수 있다”고 둔다.
+- **기대하는 차이**: gate ① 통과 조건은 max |r| ≤ 0.6이고, 8-branch 기준 effective rank가 기존 효율 50.3%를 하회하지 않아야 하므로 eff.rank ≥ 4.02다. 통과 시에만 gate ② 단독 정보량과 Primary 7 50-fold 대응 Δ로 넘어갈 수 있다. 실제 Δ_macro는 정량 예측 불가이며, 승격 기준은 `+0.3%p` 이상이어야 한다. SEAL 10은 이 과정에서 열지 않으며, 모든 판정은 `hold-out 미검증`이다.
+- **기전**: LSAK은 위치 descriptor와 형상 descriptor의 곱적 상호작용을 유한차원 커널로 만들어, 개별 마진에는 보이지 않는 slide-level 공동 변동을 읽을 수 있다. 이 경로가 기존 7-branch의 Dual Ridge 결합보다 새로운 정보를 제공하는지는 기전 미확인이다.
+- **실패 조건**: 가장 그럴듯한 실패는 LSAK가 `BM·BD·QA·DS` 등 위치 계열 또는 `SH·SJ` 형상 계열과 높게 상관되어 gate ①에서 max |r| > 0.6이나 eff.rank 하락으로 기각되는 경우다. 이 경우 성능을 조회하지 않고 종료해야 한다. 다음으로, LSAK가 단독 AUROC gate ②를 못 통과하거나, Primary 7 대응 Δ가 `+0.3%p` 미만이면 반박이다. 구현 단계에서 범용 비선형 커널이 선형 Ridge readout을 대체하는 CA-04 경계 안으로 벗어나면 실행 무효다.
+
+## 제안 3: CA-R1 다중 강도 동시 투입 후보의 gate ① 저비용 반증
+- **바꾸는 것**: CA-R1의 과제별 강도 이득을 외부 선택 신호를 찾아서 쓰려는 대신, 문서 §3-J에 있는 6개 강도 변형을 동시에 브랜치 후보로 넣고 `SCREEN_ONLY=1`으로 gate ①만 실행한다. 측정 대상은 6개 변형끼리의 상호 상관계수, 공식 7-branch와의 max |r|, 통합 effective rank다. gate ①에서 탈락하면 성능을 조회하지 않고 §3-J에 부정 증거로 기록한다. 통과해도 즉시 채택하지 않고, CA-09·Oracle 경계에 대한 사용자 판정을 먼저 받는다.
+- **바꾸는 전제**: 지금 “과제별 최적 강도를 쓰려면 라벨 없는 외부 선택 신호가 필요하다”는 전제를 뒤집는다. 대신 “여러 강도 브랜치를 함께 넣으면 기존 Dual Ridge가 context 라벨만으로 closed-form 계수를 정해, 외부 oracle 없이 강도를 결합할 수 있다”고 둔다.
+- **기대하는 차이**: gate ① 실패 시 비용은 낮고, CA-R1 활용 불가의 원인이 “강도 정보 없음”이 아니라 “강도 변형 간 중복”인지를 판정할 수 있다. gate ① 통과 시에는 CA-R1의 단조 용량반응을 Primary 7에서 재검토할 후보가 생긴다. 실제 Primary 7 Δ_macro나 SEAL 10 이득은 정량 예측 불가이며, 승격은 대응 Δ `+0.3%p`와 §4 불확실성 보고를 거쳐야 한다. SEAL 10은 열지 않고, 모든 결과는 `hold-out 미검증`이다.
+- **기전**: Dual Ridge는 fold context 라벨을 사용해 6개 강도 브랜치의 계수를 closed-form으로 결정하므로, 라벨을 미리 보고 최댓값을 고르는 oracle과 선택 시점이 다를 수 있다. 그러나 이 경로가 실제로 CA-09의 재가중 축이나 Oracle 금지를 우회하지 않는지, 그리고 context 규모 90~261장에서 강도 계수가 안정적으로 결정되는지는 기전 미확인이다.
+- **실패 조건**: 가장 그럴듯한 실패는 6개 강도 변형이 서로 또는 기존 `DS`·위치 계열과 높게 상관되어 gate ①에서 max |r| > 0.6이나 eff.rank 하락으로 기각되는 경우다. 이 경우 CA-R1 다중 강도 동시 투입은 저비용으로 반박된다. 경계 판정에서 CA-09 재가중 축 또는 Oracle 우회로 인정되면 실행 무효다. gate ①를 통과해도 context 라벨만으로 강도 계수를 안정적으로 못 정해 Primary 7 Δ가 `+0.3%p` 미만이면, CA-06·CA-07과 같은 context 규모·분포 이동 문제가 재현된 것으로 볼 수 있다.
+
+### R1 (반증)
+
+## 반론 1
+- **공격 대상**: GF 배경 GMM 파일럿에서 Raw/Balanced 차이를 “고정 GMM 정책을 고르는 데 유의미한 진단 신호”로 쓰는 주장.
+- **더 단순한 설명**: 같은 관측(overall validation log-likelihood Raw −389.37 vs Balanced −425.65, COMET −598.05 vs −438.07, MUT-HET-RCC −296.22 vs −367.73, PANDA −594.49 vs −573.51; Raw에서 COMET responsibility 1.000, Balanced에서 COMET 0.521/0.460; 정렬 후 weight max 0.062, mean L2 0.26~12.57, diagonal covariance L2 0.09~2.33)은 더 단순한 효과로 설명될 수 있다. validation 표본이 자연 비율이므로 Raw 표본과 일치하는 overall log-likelihood 우위는 기계적으로 기대되는 것이며, MUT-HET-RCC가 전체 patch의 68.7%를 차지해 overall을 지배한다. 또한 단일 seed·단일 초기화 1회 실행이고, 문서에 반복 실행 불확실성 폭은 없음(미측정)이다.
+- **무엇이 참이면 이 주장이 무너지는가**: 독립 seed/초기화 반복에서 overall·dataset별 log-likelihood 순위, dataset별 responsibility 점유율, component 분할이 불안정하거나, dataset별 validation 차이만으로 표본 구성 효과와 GMM 적합 산물을 분리하지 못하면, “차이가 유의미하다”는 주장은 무너진다.
+- **이 반론의 한계**: 여러 seed/초기화에서 같은 방향의 차이가 재현되고, dataset별 validation과 responsibility 점유율 차이가 초기화·정렬 인자를 통제해도 유지되며, 그 차이가 GF margin의 Primary 7 paired Δ로 전이됨을 사전 설계로 확인하면 이 반론은 틀린다.
+
+## 반론 2
+- **공격 대상**: “RU-97 GF 단독 Fisher Vector 탐색을 진행하면 ABMIL 초과에 가까워진다”는 암묵적 주장.
+- **더 단순한 설명**: 같은 관측(공식 7-branch Primary 7 0.6227, 직전 5-branch 0.6171 대비 +0.56%p, 그러나 과제 군집 95% CI [−1.15%p, +2.28%p], sign agreement 4/7, 3개 과제 악화)은 “새 브랜치 추가가 목표에 가깝게 한다”는 것보다, 기존 shape 계열 편입에 따른 fold/task 표본 변동과 과제별 개선·악화 상쇄로 설명될 수 있다. GF의 게이트 ①·② 실측은 문서에 없음이며, 기존 선례(RM max |r| 0.690)와 같이 직교성에서 종료될 수 있다.
+- **무엇이 참이면 이 주장이 무너지는가**: GF가 SCREEN_ONLY에서 max |r| > 0.6 또는 8-branch eff.rank < 4.02로 게이트 ① 탈락하거나, 채택돼도 공식 7-branch 대비 8-branch 대응 Δ_macro < +0.003이면, 이 탐색은 목표에 가까워지지 않는다.
+- **이 반론의 한계**: GF가 게이트 ①·②를 통과하고, §4의 대응 비교에서 Δ_macro ≥ +0.003이며 악화된 과제를 전량 보고해도 승격 기준을 충족하면, 이 반론은 GF 경로 자체를 틀린 것으로 만들지 못한다.
+
+## 반론 3
+- **공격 대상**: “7-branch 승격(0.6171→0.6227)은 공식 기준선 교체를 안정적으로 지지한다”는 주장.
+- **더 단순한 설명**: +0.56%p는 점추정일 뿐, 과제 군집 95% CI가 0을 포함하고 sign agreement 4/7이며 Histologic_Grade −1.08%p, progression_regression −1.13%p, PBRM1 −1.44%p가 악화됐다. 같은 점추정은 fold/task 표본 변동과 일부 과제 개선·악화의 상쇄로 생길 수 있다.
+- **무엇이 참이면 이 주장이 무너지는가**: Δ의 불확실성이 0을 포함하는 한 “개선”을 확인한 것으로 쓰는 것은 과다주장이다. 저장된 350-fold margin에서 사전 고정된 민감도 재집계가 Δ를 0 근처로 만들거나, 악화 과제가 SH/SJ 편입의 구조적 효과임을 보여주는 대응 비교가 없으면, 이 승격은 ‘지지’가 아니라 ‘판별 불가’에 가깝다.
+- **이 반론의 한계**: 프로젝트 승격 기준이 CI 하한을 요구하지 않고 점추정 +0.3%p만 요구하며, D-042가 이미 운영 승격으로 확정했다면, 이 반론은 기준 충족 자체를 부정하지 못하고 불확실성 보고만 문제 삼는다.
+
+## 반론 4
+- **공격 대상**: “GF의 고정 외부 GMM은 학습 파라미터 0개 정체성과 CA-14 경계에 저촉되지 않는다”는 전제.
+- **더 단순한 설명**: GMM은 3M patch에서 적합된 weight/mean/covariance 매개변수 집합이다. fold마다 재학습하지 않아도 활성 경로에 고정된 적합 파라미터를 쓴다는 점에서 “학습 파라미터 0개”의 경계는 문서상 미판정(open issue)이다.
+- **무엇이 참이면 이 주장이 무너지는가**: CA-14/프로젝트 정체성이 fold context에서 닫힌 형태로 풀리는 계수만 허용하고, 외부에서 적합된 GMM 매개변수를 활성 경로에 쓰는 것을 학습 파라미터로 본다면 GF는 범위 밖이다.
+- **이 반론의 한계**: CA-14가 경사하강으로 학습되는 파라미터만 금지하고 GMM 적합이 그 범위에 들지 않는다고 판정되거나, 사용자 결정이 고정 외부 GMM을 허용하면 이 반론은 틀린다. 문서에는 현재 미판정일 뿐 저촉 확정 기록은 없음.
+
+### A1 (감사)
+
+## 점검 1: SEAL 10 hold-out slide/fold가 GMM 학습·검증 표본에 포함되는가
+- **확인하려는 것**: `GMM-Raw`·`GMM-Balanced`·공통 validation 30,000 patch가 SEAL 10의 slide/fold와 겹치지 않는지. 겹치면 현재 GMM 진단은 hold-out 독립성이 깨진다.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: validation log-likelihood·component 점유율이 SEAL 10 분포를 이미 본 값이 되어, 이후 GF margin과 hold-out 성능이 낙관 편향된다. SEAL 10 결과·라벨을 열지 않아도 slide ID만 겹치면 `PROJECT.md` §3.1의 “어떤 형태로도 사용 금지”에 저촉된다.
+- **확인 방법**: `docs/PROJECT.md` §3.1, `docs/current_status.md`의 “Primary 7·SEAL 10과 라벨은 사용하지 않는다”만으로는 slide 단위 disjointness를 확인 못 함. `gf_background/index.json`, `fixed_gmm/X_raw.npz`, `X_balanced.npz`, `val.npz`에 slide/file ID가 있는지 확인하고, PathoBench 공식 fold 매니페스트의 SEAL 10 slide ID 집합과 교집합을 계산한다. AUROC·라벨·SEAL 10 결과는 열지 않고 ID 교차만 한다. 매니페스트가 감사용으로 제공되지 않으면 `판별 불가`로 둔다. 교집합이 비어 있지 않으면 해당 GMM 산출물은 `실행 무효`다.
+
+## 점검 2: GMM 학습 patch와 validation patch의 중복
+- **확인하려는 것**: `val.npz` 30,000이 `X_raw.npz`·`X_balanced.npz` 3,000,000과 patch/slide 단위에서 중복되지 않는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: validation log-likelihood가 학습 표본의 재측정이 되어 Raw/Balanced 차이를 과대 추정한다. component responsibility 점유율도 동일 patch의 EM responsibility에 의해 왜곡될 수 있다.
+- **확인 방법**: `fixed_gmm/summary.json`과 `val.npz`, `X_raw.npz`, `X_balanced.npz`의 sample ID·slide ID·HDF5 offset을 비교한다. ID가 없으면 `scripts/data/build_gf_background_gmm.py`의 validation 추출 로직에서 학습 풀과 validation이 disjoint인지 확인하고, 필요하면 slide-level exclusion을 넣어 재실행한다. patch ID 교집합 또는 slide 교집합이 있으면 해당 log-likelihood 비교는 `실행 무효`다.
+
+## 점검 3: dataset 불균형이 GMM 정책 선택을 왜곡하는가
+- **확인하려는 것**: overall validation log-likelihood가 `MUT-HET-RCC` 68.7%에 지배되어, dataset 크기 차이로 GMM 정책을 고르는 선택 편향이 없는지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: Raw가 overall에서 우세한 것이 task 정보 우위가 아니라 `MUT-HET-RCC` patch 수 우위일 수 있다. dataset별 log-likelihood는 Raw가 COMET·PANDA에서 열세, Balanced가 COMET·MUT-HET-RCC에서 우세하므로, overall 기준으로 고르면 dataset identity를 성능 신호로 오용한다.
+- **확인 방법**: `fixed_gmm/summary.json`의 overall·dataset별 log-likelihood를 대조하고, GMM 정책 선택 규칙이 사전에 dataset-weighted 또는 task-neutral 기준으로 고정되었는지 확인한다. 현재 문서에 선택 규칙이 없으므로, overall log-likelihood만으로 Raw/Balanced를 선택하면 `선택 편향`이다. dataset별 지표와 responsibility 점유율을 함께 보고, 선택 규칙을 Primary 7 성능 조회 전에 고정해야 한다.
+
+## 점검 4: dataset 식별자를 사용한 balanced sampling이 domain 정보를 주입하는가
+- **확인하려는 것**: `GMM-Balanced`가 COMET·MUT-HET-RCC·PANDA 각각 1,000,000을 뽑는 과정에서 dataset 이름이라는 메타데이터를 사용해, task 라벨은 아니지만 domain/dataset artifact를 GMM에 주입하는지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: GMM이 dataset별 염색·스캐너·배경 차이를 component로 학습하면, 이후 margin은 task 판별이 아니라 dataset/domain artifact를 읽을 수 있다. COMET 단일 component 집중과 dataset별 responsibility 분리는 이 가능성을 배제하지 못한다. 기전은 `기전 미확인`이다.
+- **확인 방법**: `scripts/data/build_gf_background_gmm.py`의 sampling 분기에서 dataset 이름이 어떻게 쓰이는지 확인한다. `summary.json`의 component weight·dataset responsibility를 dataset별 log-likelihood와 함께 해석한다. dataset artifact 배제를 주장하려면 stain normalization 또는 dataset-invariance 진단이 필요하며, 현재 문서에는 없음.
+
+## 점검 5: 단일 seed·단일 초기화 변동과 GMM 차이 혼동
+- **확인하려는 것**: weight 차 0.062, mean L2 0.26~12.57, diagonal covariance L2 0.09~2.33이 GMM 최적화 변동일 수 있는지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: 단일 실행의 component 정렬 후 차이가 표본·초기화 노이즈일 수 있어, Raw/Balanced 중 하나를 “더 좋은 고정 GMM”으로 고르면 평가 설계에서 새어 나온 차이를 모델 개선 근거로 쓴다.
+- **확인 방법**: `summary.json`의 converged·n_iter만으로는 불확실성을 확인 못 함. 최소한 동일 데이터에서 seed/초기화 여러 번을 돌려 weight·mean·covariance·validation log-likelihood의 분포를 재야 한다. 현재 문서에는 불확실성 폭이 미측정이라고 명시되어 있으므로, 단일 실행 차이로 GMM 정책을 확정하면 `판별 불가`다.
+
+## 점검 6: GMM 수렴·responsibility·sklearn 불일치 검증
+- **확인하려는 것**: 두 GMM이 `converged`뿐 아니라 responsibility 합 오차 `1e-4` 이하, sklearn 대비 component 불일치 없음, NaN/Inf 없음 등 중단 조건을 통과했는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 미수렴·불일치 GMM으로 margin을 만들면 이후 Primary 7 Δ와 SEAL 10 목표 거리 모두 `실행 무효`가 된다. `converged=True`만으로는 수치 유효성을 확인하지 못한다.
+- **확인 방법**: `fixed_gmm/summary.json`, `logs/gf_gmm/run_20260916_0929.log`, `tests/test_gf_background_gmm.py`에서 responsibility 합 오차, sklearn 재계산 비교, NaN/Inf 검사가 기록되었는지 확인한다. 기록이 없으면 해당 GMM 기반 판정은 `판별 불가`로 두고, 검증을 통과한 후에만 다음 단계로 넘어간다.
+
+## 점검 7: 데이터 매니페스트 고정과 byte-level 검증
+- **확인하려는 것**: 11,966 HDF5·28,405,044 patch·166 GiB가 어떤 버전으로 고정되어 있고, GMM 실행이 그 매니페스트를 정확히 사용했는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 원본 체크섬 목록이 없어 byte-for-byte 비교 미수행이면, 데이터 버전 변경·패치 누락·중복이 GMM 분포와 이후 margin에 스며들 수 있다. `index.json` 집계 일치만으로는 원본 무결성을 확인하지 못한다.
+- **확인 방법**: `gf_background/index.json`의 hash·생성 시각·파일 목록을 고정하고, HDF5 파일별 checksum 또는 content hash manifest를 만든다. `fixed_gmm/*_ckpt.json`에 사용된 index hash·파일 수·patch 수를 기록했는지 확인한다. checksum이 없으면 데이터 무결성은 `판별 불가`이며, GMM 기반 성능 주장은 보류해야 한다.
+
+## 점검 8: 전처리·정규화·feature fit 범위
+- **확인하려는 것**: GMM이 UNI2 1536차원 raw feature에 직접 적합되는지, stain normalization·whitening·scaling·fold별 fit이 없는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: UNI2 feature의 dataset별 scale·염색·배경 차이가 GMM component에 잡히면, log-likelihood와 responsibility 차이는 task 정보가 아니라 전처리 artifact일 수 있다. fold별 또는 task별 fit이 숨어 있으면 평가 독립성이 깨진다.
+- **확인 방법**: `scripts/data/build_gf_background_gmm.py`와 feature 생성 코드를 확인해 GMM 입력 전 단계의 normalization·whitening·scaling·imputation을 나열한다. `summary.json`에 feature mean/std 또는 전처리 버전이 기록되어 있는지 확인한다. 전처리 버전이 없으면 GMM 차이의 해석 범위는 `판별 불가`다.
+
+## 점검 9: 기준선이 후보를 보고 재계산되지 않았는가
+- **확인하려는 것**: 내부 공식 기준선 `0.6227`과 외부 ABMIL/MeanMIL 기준선이 고정 fold·고정 프로토콜로 고정되고, 후보 GF에 맞춰 재계산되지 않는지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: fold ID 불일치, 기준선 재계산, 집계 함수 변경, 외부 baseline 재측정이 Δ_macro나 목표 거리에 스며들면 승격 판정과 SEAL 10 목표 거리가 데이터 설계에서 새어 나온다.
+- **확인 방법**: `docs/PROJECT.md` §3.2·§4의 `ru90_shape_triple`, 50-fold, per-fold paired Δ, trimmed mean 규정을 확인한다. 원시 margin 파일의 fold ID·task ID·branch 구성이 후보와 기준선에서 동일한지, `tests/test_docs_consistency.py`와 회귀 테스트가 기준선 태그를 고정하는지 확인한다. 외부 기준선은 §1의 SEAL 고정 프로토콜(50-fold, 20 epoch)과 `seal_univ2_baseline_17tasks.csv` 참조값이 후보에 맞춰 재계산되지 않았는지 확인한다. 기준선 raw margin이 후보 실행에서 다시 생성되면 `실행 무효`다.
+
+## 점검 10: SCREEN_ONLY와 오염 검사로 평가 독립성 유지
+- **확인하려는 것**: GF 후보를 `SCREEN_ONLY=1`으로 넣을 때 기존 5-branch 기저 앵커가 4자리까지 불변인지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: SCREEN_ONLY가 실제로 앙상블·margin·fold 집계를 건드리면, 후보 스크리닝이 기준선을 오염시켜 이후 paired Δ가 독립 비교가 아니다.
+- **확인 방법**: `scripts/analysis/branch_screen.py`를 `SCREEN_ONLY=1`로 실행하고, `docs/PROJECT.md` §3.4의 SMAD4 `0.4421`, PBRM1 `0.5553`과 소수 4자리까지 비교한다. 불일치가 있으면 후보 스크리닝은 `실행 무효`다. GF GMM이 margin 계산에 들어가기 전 이 오염 검사를 먼저 통과해야 한다.
+
+## 점검 11: 게이트·승격 임계값의 관측 후 선택
+- **확인하려는 것**: 게이트 ① max |r| 0.6, eff.rank 4.02, 게이트 ② 0.5/40 of 50/p<0.01, 승격 +0.3%p가 후보 관측 후 조정되지 않았는지. 특히 게이트 ②b가 §219 결과를 본 뒤 신설된 이력이 후보 판정에 반영되는지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: 임계값이 특정 후보를 통과시키도록 조정됐다면 채택 판정이 평가 설계에서 새어 나온다. ②b는 결과 후 신설이라는 사실이 문서에 있으므로, ②b 통과 후보는 “사전 고정”이라 주장할 때 이 이력을 함께 보고해야 한다.
+- **확인 방법**: `docs/PROJECT.md` §5·§5.1, `history/archive.md`의 `D-041`·`D-042`·§219 기록을 대조한다. 임계값 변경 시점이 후보 성능 조회 이전인지, 변경 사유가 후보별 결과가 아닌 독립 논거인지 확인한다. ②b는 §219 결과를 본 뒤 2026-09-04 신설로 문서에 기록되어 있으므로, 이 이력을 숨긴 채 ②b 통과를 사전 고정 판정으로 쓰면 `선택 편향`이다.
+
+## 점검 12: RU-97 M 탐색의 Primary 7 이중 사용
+- **확인하려는 것**: M=8·16·32를 Primary 7 50-fold 결과로 고른 뒤, 같은 Primary 7에서 8-branch 승격을 판정하는 선택 편향이 방지되는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: RU-97이 “탐색 기록으로만 종료”한다고 해도, M 선택에 Primary 7을 썼다면 이후 승격 비교는 같은 자료에서 고르고 판정하는 §214식 선택 편향이다. M별 component 점유율도 Primary 7 margin에서 나오므로 탐색 신호가 승격 신호로 스며들 수 있다.
+- **확인 방법**: `docs/PROJECT.md` §2의 D-045·RU-97 완료 조건과 `history/archive.md`의 후속 승격 규칙을 확인한다. M 선택 규칙이 사전 고정되었는지, M 선택에 쓴 fold·과제·지표가 기록되는지, 후속 승격에서 선택 이력을 반영한 유효 설계가 있는지 확인한다. 없으면 M 기반 후보는 `판별 불가` 또는 `선택 편향`으로 처리해야 한다.
+
+## 점검 13: 외부 고정 GMM의 학습 파라미터 0개·CA-14 경계
+- **확인하려는 것**: EM으로 적합된 GMM 파라미터가 “학습 파라미터 0개” 정체성과 CA-14(학습 파라미터 기반 readout/head) 경계에 저촉되는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: GMM이 데이터로 적합된 고정 파라미터라면, fold context만으로 닫힌 형태를 푸는 현행 baseline과 성격이 다르다. 이 경계가 미판정인데 GF margin을 공식 후보로 올리면, 평가 설계가 아니라 프로젝트 정체성 위반으로 실행이 무효해질 수 있다.
+- **확인 방법**: `docs/PROJECT.md` §1, `docs/closed_axes.md` CA-14, `docs/current_status.md` 미해결 항목을 대조한다. GMM 파라미터가 active path에 직접 들어가는지, fold별 재학습 없이 고정되는지, CA-14의 “경사하강으로 학습되는 파라미터”에 해당하는지 사용자 결정을 확인한다. 사용자 결정 전에는 GF를 공식 7-branch 비교 후보로 승격 심사하지 않아야 한다.
+
+## 점검 14: 현재 다음 행동 — GMM 정책 선택 전 누출 차단
+- **확인하려는 것**: 현재 문서만으로 Raw/Balanced 중 하나를 고정 GMM으로 선택하거나 GF branch 성능 측정에 들어가는 것이 타당한지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: hold-out slide 중복, validation 중복, 매니페스트 미고정, 전처리 미기록, 단일 seed 변동, M 선택 편향 중 하나라도 있으면, 이후 Primary 7 Δ와 SEAL 10 목표 거리가 데이터·평가 설계에서 새어 나온 값이 된다.
+- **확인 방법**: 점검 1·2·6·7·12·13을 먼저 닫는다. (1) GMM 학습·validation이 Primary 7/SEAL 10 slide와 disjoint인지 ID 교차로 확인, (2) val과 train patch/slide 중복 제거, (3) index/checksum 매니페스트 고정, (4) 전처리 버전 기록, (5) M 선택 규칙 사전 고정, (6) CA-14 경계 사용자 판정. 이 전까지 GMM 정책 선택과 GF 성능 주장은 `보류`다. 통과한 경우에만 `SCREEN_ONLY=1` 게이트 ①으로 직교성만 측정하고, 성능은 게이트 통과 후에만 조회한다.
+
+### G1 (일반화)
+
+## 일반화 위험 N
+- **위험**: 지금의 새 증거는 GF 배경 GMM의 Raw/Balanced 표본 구성 비교 파일럿이며, 이 결과는 `COMET`·`MUT-HET-RCC`·`PANDA` 3개 dataset의 patch pool과 같은 자연 비율 common validation에서만 나왔다. 따라서 분포 밖에서 깨질 수 있는 것은: Primary 7 과제·fold, unseen dataset·staining/scanner·patch 비율, SEAL 10 hold-out, `M=16/32`, seed/초기화 반복, 그리고 `m_gf`가 공식 7-branch 대비 실제 AUROC를 개선하는지 여부다. Raw GMM이 `MUT-HET-RCC` 68.7%에 지배되고 `COMET`이 단일 component에 몰린다는 관측은 해당 pool 내 진단일 뿐, 다른 분포에서 같은 component 구조가 유지된다는 증거가 아니다. 단일 seed·단일 초기화 1회 실행이므로 Raw/Balanced 차이의 일반화 우열은 현재 판별 불가이며, 기전은 미확인이다.
+- **현재 증거가 말할 수 있는 범위**: 두 GMM은 지정된 3M 표본에서 수렴했고(Raw `n_iter=41`, Balanced `n_iter=36`), 같은 validation에서 log-likelihood·component 점유율·정렬 후 파라미터 차이를 보였다. 이는 “표본 구성이 학습된 GMM을 다르게 만든다”는 해당 pool 내 진단만 말한다. GF 파일럿은 라벨을 쓰지 않았고 Primary 7·SEAL 10 성능을 조회하지 않았으므로 채택·승격·성능 일반화 근거가 아니다. 공식 7-branch의 Primary 7 macro `0.6227`과 5-branch 대비 대응 Δ `+0.56%p`, 95% CI `[-1.15%p, +2.28%p]`, sign agreement `4/7`은 Primary 7 고정 fold에서만 유효하며, 모든 판정은 hold-out 미검증이다. 절대 macro를 과제 모집단의 기대 성능으로 일반화하지 않는다.
+- **현재 증거가 말할 수 없는 것**: Raw 또는 Balanced GMM이 Primary 7 전 과제·50 fold에서 더 나은 고정 배경이 되는지; `m_gf`가 게이트 ① 직교성·게이트 ② 정보량을 통과하는지; 8-branch 대응 Δ가 `+0.3%p`를 넘는 지; Primary 7 개선이 SEAL 10 ABMIL `0.7266` 초과로 전이되는지; 단일 seed/초기화에서 본 GMM 차이가 반복 실행에서 유지되는지; `M=16/32`에서 같은 표본 정책 효과가 유지되는지; component 점유율 차이의 기전. SEAL 10 일반화는 보류 자료 개봉 전 확인 불가이며, 개봉 결과도 개선 방향 선택에 사용할 수 없다.
+- **확인하려면 무엇이 필요한가**: 먼저 GF 파일럿의 불확실성을 줄이기 위해 사전 고정된 seed/초기화 반복 또는 bootstrap으로 log-likelihood·occupancy·파라미터 차이의 변동 폭을 측정해야 한다. dataset 밖 일반화를 보려면 GMM 학습에 쓰지 않은 dataset 또는 Primary 7 fold에서 사전 고정된 validation/평가로 비교해야 한다. 3개 dataset 밖의 일반화는 현재 자료로 불가하며, 3개 dataset 내 leave-one-out은 현재 자료로 가능하지만 사전 설계가 필요하다. 성능 일반화는 GF branch를 구현해 Primary 7에서 `SCREEN_ONLY` 게이트 ①을 먼저 통과시키고, 통과 시 게이트 ②와 공식 7-branch 대비 50-fold 대응 Δ를 측정해야 한다. SEAL 10까지의 일반화는 현재 자료로 불가; 최종 hold-out은 목표 달성 판정용일 뿐 후보 선택·튜닝에 사용할 수 없다.
+
+### T1 (이론)
+
+## 이론적 병목 N
+- **가정**: GF는 고정 외부 GMM을 “학습 파라미터 0개/CA-14와 양립하는, dataset composition·표본화 방식에 대해 안정한 무감독 배경”으로 두고 있다.
+- **이 가정이 깨지는 조건**: 고정 GMM이 활성 경로에서 허용되지 않는 학습 파라미터로 판정되거나, GMM의 component weight/responsibility·mean·covariance가 표본 구성에 따라 달라지고 그 차이가 slide-level Fisher vector의 mean/variance margin에 남아, 과제별 판별 신호 대신 dataset composition·염색·스캐너 등 task-unrelated variance를 읽게 된다.
+- **깨질 때 나타나는 관측 가능한 증상**: (i) GF가 CA-14 저촉 또는 정체성 위반으로 후보 자격 상실/실행 무효; (ii) Raw와 Balanced GMM 선택에 따라 M=8·16·32의 margin 분포·component 점유율·단독 AUROC가 달라지고, 기존 7-branch 대비 max |r| > 0.6 또는 eff.rank < 4.02, Primary 7 paired Δ의 95% CI가 0 포함·sign agreement 낮음·과제별 악화 전량 발생.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: current_status는 “GF의 고정 외부 GMM이 PROJECT.md의 학습 파라미터 0개 정체성과 CA-14 경계 밖인지 미판정”이라고 명시한다. 파일럿은 Raw GMM에서 COMET이 단일 component에 1.000 몰리고 PANDA와 0.317 공유, MUT-HET-RCC는 6개 component에 퍼지며, Balanced에서는 COMET 2·MUT 3·PANDA 4로 나뉜다. overall log-likelihood는 자연 비율 표본이라 MUT-HET-RCC에 지배되고, 정렬 후 weight max 0.062, mean L2 0.26~12.57, diagonal covariance L2 0.09~2.33이며 단일 seed·초기화 1회라 불확실성 미측정이다. 이는 “composition에 안정한 단일 고정 GMM” 부분과 충돌한다. 다만 GF margin의 실제 직교성·정보량·성능 관측은 문서에 없고, GMM 차이와 성능 차이의 인과/기전은 미확인이며, 두 GMM 차이의 유의미성은 현재 판별 불가다.
+
+---
+
+## Phase 2 — 교차
+
+### R1 (반증)
+
+## 반론 1
+- **공격 대상**: 제안 1의 "dataset별 validation log-likelihood gap을 최소화하는 라벨 무관 robustness 규칙으로 Balanced GMM을 고정하면, GF 단독 탐색의 dataset 간 편차가 줄고 해석 가능성이 높아진다"는 주장.
+- **더 단순한 설명**: Balanced의 gap 205.78이 Raw 301.83보다 작은 것은 balanced 표본 구성과 단일 GMM 적합의 직접 결과일 수 있다. 파일럿 설계에 사전 고정된 것은 두 표본 정책과 측정 항목이지, gap 최소화 선택 규칙이 파일럿 이전부터 고정됐다는 기록은 문서에 없음. 따라서 "Balanced가 더 안전하다"는 관측은, 더 단순하게는 파일럿 결과를 본 뒤 gap이 작은 쪽을 고르는 규칙을 만든 선택으로 설명될 수 있다. validation log-likelihood gap은 분포 적합 지표이지 Primary 7 단독 AUROC/margin 개선의 증거가 아니다. COMET 1.000, PANDA 공유 0.317 같은 component 점유율 차이도 단일 seed·단일 초기화, component 정렬, 수렴 경로 차이로 같은 관측을 낳을 수 있다. Primary 7 과제와 dataset 분포의 관계는 문서에 없음.
+- **무엇이 참이면 이 주장이 무너지는가**: gap 최소화 규칙이 파일럿 이전부터 고정된 것이 아니라 관측된 gap을 근거로 도입된 것이라면, 또는 dataset별 val log-likelihood gap과 Primary 7 단독 margin/AUROC 간 관련이 없다면, 또는 Primary 7의 관련 patch 분포가 자연 비율에 가깝거나 GF margin이 dataset 균형보다 전체 patch 통계에 민감하다면, 또는 GMM 차이가 단일 seed/정렬/수렴 경로에서 비롯된 것이라면, Balanced 고정 근거는 반박되거나 판별 불가에 머문다.
+- **이 반론의 한계**: gap 최소화 규칙이 Primary 7 성능 조회 이전의 라벨 무관 설계 결정으로 인정되고 선택 이력이 기록된다면, 또는 고정 GMM 정책이 성능이 아니라 분포 robustness 자체를 목적으로 한다면, 또는 후속 RU-97에서 Balanced가 M별 단독 AUROC/component 점유율을 실제로 더 안정적으로 만드는 것이 사전 진단 기준으로 확인된다면, 이 반론은 약해진다. 확인 전까지 성능·기전 주장은 할 수 없다.
+
+## 반론 2
+- **공격 대상**: 제안 2의 "CA-04 경계 밖인 LSAK는 위치·형상 상호작용으로 기존 7-branch에 직교 정보를 줄 수 있으므로 8-branch 후보로 gate ①을 실행해야 한다"는 주장.
+- **더 단순한 설명**: LSAK는 기존 위치·형상 descriptor를 곱해 만든 변형이므로, 기존 계열의 낮은 유효 랭크와 정보량 병목(CA-09: 위치 계열 상호 상관 0.25~0.93, BM·QA·DS 유효 랭크 1.29/3; CA-10: 형상 계열 병목은 정보량)을 재조합하는 것일 수 있다. CA-04 경계 밖이라는 사실은 금지가 아니라는 운영 판정이지, LSAK가 실제로 새로운 정보를 가진다는 증거가 아니다. LSAK의 실제 max |r|, eff.rank, 단독 AUROC는 문서에 없음.
+- **무엇이 참이면 이 주장이 무너지는가**: LSAK가 기존 7-branch와 max |r| > 0.6으로 상관되거나, 8-branch eff.rank가 4.02 미만으로 효율이 하락하거나, gate ② 단독 정보량을 통과하지 못하거나, Primary 7 대응 Δ가 +0.3%p 미만이면 직교 정보 주장은 반박된다. 구체적 구현이 32D 압축 디스크립터 위에 범용 비선형 커널을 씌워 선형 Ridge readout을 대체하는 CA-04 경계 안에 들어간다면 실행 무효다.
+- **이 반론의 한계**: LSAK가 gate ①을 실제로 통과(max |r| ≤ 0.6, eff.rank ≥ 4.02)하고, 이후 gate ②와 Primary 7 대응 Δ에서 독립 정보를 보인다면 이 반론은 틀린다. 또한 LSAK 구현이 D-022의 경계 밖으로 확정되고 선형 readout 체계를 유지한다면 실행 무효 우려는 사라진다.
+
+## 반론 3
+- **공격 대상**: 제안 3의 "6개 강도 변형을 동시에 브랜치로 넣고 Dual Ridge가 context 라벨로 closed-form 계수를 정하면, 외부 라벨 무관 선택 신호 없이 CA-R1 강도 정보를 결합할 수 있으며 gate ① 실행이 그 필요성의 저비용 반증이다"는 주장.
+- **더 단순한 설명**: 6개 강도 변형은 같은 살리언스/재가중 계열의 변형이므로, CA-09에서 확인된 위치 계열의 수렴·저유효랭크(상관 0.25~0.93, 유효 랭크 1.29/3)와 동일한 중복으로 gate ①에서 떨어질 수 있다. gate ① 실패는 "강도 정보 없음"이 아니라 "기존 DS·위치 계열과 공선성"이라는 더 단순한 설명으로도 성립한다. Dual Ridge의 closed-form 계수는 외부 oracle이 아니라 context 라벨에 맞춘 선형 결합일 수 있고, context 규모 90~261과 context↔query 분포 이동(CA-06·CA-07) 아래에서 계수가 불안정하거나 query에 전이되지 않을 수 있다. 6개 변형의 실제 상호 상관은 문서에 없음.
+- **무엇이 참이면 이 주장이 무너지는가**: 6개 변형끼리 또는 기존 7-branch와 max |r| > 0.6, eff.rank 하락으로 gate ① 탈락하면 직교성 주장은 반박된다. 경계 판정에서 CA-09 재가중 축 또는 Oracle 우회로 인정되면 실행 무효다. context 라벨만으로 강도 계수가 안정적으로 결정되지 않아 Primary 7 대응 Δ가 +0.3%p 미만이면, closed-form 결합이 선택 신호 문제를 해결한다는 주장은 반박된다. gate ① 실패가 중복만 보여 강도 정보 자체의 부재를 판정하지 못하면, "저비용 반증"이라는 진단적 주장도 약해진다.
+- **이 반론의 한계**: 6개 변형이 gate ①을 통과하고, CA-09·Oracle 경계 밖으로 사용자 판정을 받아, Primary 7 대응 Δ +0.3%p와 불확실성 보고를 충족하면 이 반론은 틀린다. 또한 context 라벨 기반 계수의 안정성이 사전 진단으로 확인되고, gate ① 실패가 강도 정보 부재와 중복을 판별할 수 있는 설계로 인정되면 반론의 한계가 줄어든다.
+
+### A1 (감사)
+
+## 점검 1: P1 — GMM 선택 규칙의 사전 고정 여부
+- **확인하려는 것**: P1의 “dataset별 validation log-likelihood 최선–최악 gap 최소화, tie 시 Raw overall” 규칙이 파일럿 결과 확인 전에 고정되었는가.
+- **문서에서 확인되는가**: 모순됨
+- **샌다면 나타날 증상**: 파일럿 validation gap을 보고 규칙을 만들고, 같은 파일럿 값으로 Balanced를 선택하면 선택 편향이 생긴다. 이후 Primary 7 단독 AUROC는 독립 검증이 아니라 선택된 GMM의 후속 관측이 된다.
+- **확인 방법**: `docs/history/archive.md`, `docs/current_status.md`, `docs/PROJECT.md`에서 `gap`, `robustness`, `fixed GMM policy`, `validation log-likelihood` 검색. `git log -p -- scripts/data/build_gf_background_gmm.py`로 규칙 추가 시점이 `logs/gf_gmm/run_20260916_0929.log` 이전인지 확인.
+
+## 점검 2: P1 — validation set의 중복·독립성
+- **확인하려는 것**: 공통 validation 30,000개가 `X_raw`·`X_balanced`와 patch/slide ID 수준에서 중복되지 않고, Primary 7 평가 단위를 포함하지 않는가. SEAL 10은 열지 않고 exclusion 설정만 확인한다.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: validation이 GMM fit 표본 또는 Primary 7 평가 patch/slide와 겹치면 dataset별 log-likelihood gap이 in-sample 값이 된다. 이후 Primary 7 단독 margin도 같은 데이터 접촉으로 오염된다.
+- **확인 방법**: `scripts/data/build_gf_background_gmm.py`, `index.json`, `val.npz`, `X_raw.npz`, `X_balanced.npz`에서 patch/slide ID를 추출해 set intersection 수행. Primary 7 fold manifest와 대조. build script의 exclusion flag·manifest 메타데이터만 확인하고 SEAL 10 보류 자료는 열지 않는다.
+
+## 점검 3: P1 — dataset identity가 task/hold-out 프록시가 되는지
+- **확인하려는 것**: dataset별 validation log-likelihood gap에서 `COMET`·`MUT-HET-RCC`·`PANDA` 식별자가 Primary 7 task 또는 hold-out identity의 프록시로 작동하지 않는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: dataset이 Primary 7 task와 대응하면 “dataset별 fit 차이”를 근거로 GMM을 고르는 것이 평가 분포를 보고 고르는 것과 같다. 라벨을 쓰지 않아도 task/hold-out 구조가 새어 나온다.
+- **확인 방법**: PathoBench manifest, task-dataset mapping, fold manifest를 대조. dataset slide ID와 Primary 7 task slide ID의 겹침을 확인.
+
+## 점검 4: P1 — 단일 seed·단일 초기화 불확실성
+- **확인하려는 것**: 파일럿의 단일 seed·단일 초기화 1회 실행에서 Raw/Balanced gap 차이가 EM 수렴 경로·초기화·component 정렬 불확실성보다 큰가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: Balanced 선택이 GMM 최적화 노이즈일 수 있다. 이 경우 M별 단독 AUROC 차이도 GMM 적합 불안정에서 비롯되어 기전 미확인과 판별 불가가 섞인다.
+- **확인 방법**: multiple seed·multiple initialization 재실행, validation bootstrap, dataset별 log-likelihood와 gap의 CI 산출. `summary.json`, `*_ckpt.json`, 두 GMM pickle의 component weight·mean·covariance 분산 확인.
+
+## 점검 5: P1 — M=8 파일럿 선택을 M=16·32에 확장하는 문제
+- **확인하려는 것**: M=8 파일럿에서 선택한 표본 정책이 M=16·32에도 동일하게 유효하게 고정되는지, M별 재선택·재적합이 발생하는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: M=8 validation gap으로 Balanced를 고른 뒤 M=16·32 GMM을 동일 정책으로 재적합하면, M sweep 결과가 “M 효과”와 “M=8에서 선택된 표본 정책 효과”가 혼동된다.
+- **확인 방법**: RU-97 카드, `PROJECT.md` §2, `scripts/data/build_gf_background_gmm.py`의 M argument, M별 GMM pickle·summary 존재 여부, M별 재적합 로그 확인.
+
+## 점검 6: P1 — RU-97용 GMM manifest 고정 여부
+- **확인하려는 것**: RU-97에서 사용할 GMM manifest가 파일럿 선택과 독립적으로 사전 고정되었는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: M별 단독 margin이 파일럿 validation 선택에 의존하면 baseline이 고정되지 않는다. 같은 M이라도 GMM manifest가 바뀌면 결과 비교가 무효가 된다.
+- **확인 방법**: `D-045`, RU-97 카드, `summary.json`, GMM pickle hash, `X_raw.npz`·`X_balanced.npz` manifest hash, build script default 확인.
+
+## 점검 7: P1 — component occupancy의 정렬 artifact
+- **확인하려는 것**: Raw에서 COMET 단일 component 몰림, PANDA 공유, Balanced에서 더 고른 점유율 등이 post-hoc component alignment artifact가 아닌가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: GMM component는 label이 없으므로 정렬 방식에 따라 점유율이 바뀐다. “Balanced가 더 고르다”는 관찰이 alignment 선택에서 새어 나온 것일 수 있다.
+- **확인 방법**: `scripts/data/build_gf_background_gmm.py`의 alignment 코드, responsibility matrix, `summary.json` 확인. 다른 alignment 규칙으로 재계산해 occupancy가 유지되는지 확인.
+
+## 점검 8: P1 — GMM 데이터 출처와 학습 파라미터 0개 경계
+- **확인하려는 것**: GMM fit 데이터가 Primary 7 평가 patch/slide를 포함하지 않고, GMM 파라미터가 승인된 고정 외부 artifact로 취급되는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: GMM이 Primary 7 patch를 포함하면 Primary 7 평가가 독립이 아니다. GMM 파라미터가 승인 없이 활성 경로에 들어가면 학습 파라미터 0개 정체성과 `CA-14` 경계가 흐려진다.
+- **확인 방법**: `PROJECT.md` §1, `closed_axes.md` `CA-14`, GMM pickle provenance, data root index, Primary 7 fold manifest intersection, 사용자 결정 기록 확인. SEAL 10은 열지 않는다.
+
+## 점검 9: P2 — LSAK 하이퍼파라미터 사전 고정
+- **확인하려는 것**: LSAK의 position descriptor, shape descriptor, 차원, bandwidth, 정규화, fold context/query 구성이 gate ① 실행 전에 고정되었는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: LSAK 하이퍼파라미터를 gate ① 통과 또는 Primary 7 AUROC 향상에 맞게 고르면 gate ①이 독립 선별이 아니다. max |r|과 effective rank가 설계 선택에서 새어 나온다.
+- **확인 방법**: LSAK config, RU 카드, `git log -p -- src/models/` 또는 LSAK 구현 파일, `scripts/analysis/branch_screen.py` 입력 manifest 확인. Primary 7 성능 조회 전후 config 변경 이력 확인.
+
+## 점검 10: P2 — LSAK가 CA-04 경계 밖으로 구현되는지
+- **확인하려는 것**: LSAK가 `K_int = K̃_L ⊙ K̃_S` 형태의 유한차원 사전 정의 상호작용 커널이고, 범용 비선형 커널로 선형 Ridge readout을 대체하지 않는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: RBF·Cosine 등 범용 비선형 커널이 readout을 대체하면 `CA-04` 경계 안으로 들어가 실행 무효가 된다. 문서상 LSAK 비저촉 선언만으로는 구현 독립성이 확인되지 않는다.
+- **확인 방법**: LSAK 구현 코드, kernel matrix 생성 함수, readout 경로, `closed_axes.md` `CA-04` 경계 문구 대조. Gram 대각·off-diagonal 구조와 linear/closed-form readout 유지 여부 확인.
+
+## 점검 11: P2 — gate ①의 라벨 무관 구현
+- **확인하려는 것**: `scripts/analysis/branch_screen.py`가 max |r|과 effective rank를 라벨·AUROC·성능 조회 없이 계산하는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: gate ①이 내부적으로 AUROC나 task label을 쓰면 “성능 조회 이전”이 성립하지 않는다. 기준선이 후보의 성능을 보고 선택되는 선택 편향이 된다.
+- **확인 방법**: `scripts/analysis/branch_screen.py` 소스, 실행 로그, 입력 파일에서 label/AUROC/task ID 사용 여부 grep. `SCREEN_ONLY=1` 경로와 성능 계산 경로 분리 확인.
+
+## 점검 12: P2 — SCREEN_ONLY 오염 검사 요구 사항
+- **확인하려는 것**: 문서가 `SCREEN_ONLY=1` 실행이 앙상블에 영향을 주지 않도록 고정 오염 검사 상수를 요구하는가.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: `SCREEN_ONLY`가 기저 앙상블을 바꾸면 공식 7-branch baseline이 후보를 보고 변한다. 이후 대응 Δ와 effective rank가 모두 무효가 된다.
+- **확인 방법**: `SCREEN_ONLY=1` 실행 후 SMAD4 fold-mean AUROC `0.4421`, PBRM1 fold-mean AUROC `0.5553`과 소수 4자리 일치 확인. `scripts/analysis/branch_screen.py`의 base ensemble 경로 확인.
+
+## 점검 13: P2 — 공식 7-branch baseline 고정
+- **확인하려는 것**: 공식 7-branch baseline margin이 고정 태그로 저장되어 있고, 후보 추가 시 재계산·재정규화되지 않는가.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: baseline margin이 후보 실행마다 바뀌면 paired Δ가 성립하지 않는다. 승격 비교의 기준선이 정답을 보는 구조가 된다.
+- **확인 방법**: `ru90_shape_triple` 저장 margin, per-fold AUROC, `max|diff|` 기록, 오염 검사 상수 대조. 후보 실행 전후 baseline margin hash 비교.
+
+## 점검 14: P3 — 현재 목표·경계 판정 없이 실행 가능한지
+- **확인하려는 것**: P3가 현재 목표인 RU-97 GF 탐색 범위 안에 있고, `closed_axes.md` §3-J 사용자 판정 없이 gate ① 실행이 가능한가.
+- **문서에서 확인되는가**: 모순됨
+- **샌다면 나타날 증상**: 현재 목표가 하나인 RU-97에서 벗어나면 Primary 7 접근과 계산 예산이 승인 없이 사용된다. 경계 미확정 후보를 먼저 실행하면 선택 이력이 문서화되지 않은 채 평가 자료에 접촉한다.
+- **확인 방법**: `PROJECT.md` §2, `current_status.md`, `closed_axes.md` §3-J, 결정 이력에서 P3 관련 RU 카드·예산·사용자 승인 확인.
+
+## 점검 15: P3 — 6개 강도 변형의 사전 고정
+- **확인하려는 것**: 6개 강도 변형이 과거 task-specific gain이나 §225 sweep 결과로 선택된 것이 아니라 사전 고정된 후보 집합인가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 강도 변형이 과거 Primary 7 성능으로 골라졌다면 gate ①의 max |r|·effective rank도 선택된 변형의 성질이다. 이후 통과 여부가 새로운 정보인지 판별 불가가 된다.
+- **확인 방법**: §225, RU-88, CA-R1 관련 기록, 강도 변형 config, `git log`, 선택 이력 로그 확인. 변형 목록이 성능 조회 전에 고정됐는지 확인.
+
+## 점검 16: P3 — 6개 변형 동시 시험의 선택 절차
+- **확인하려는 것**: 6개 강도 변형을 동시에 gate ①에 넣을 때 family-level pass/fail 규칙과 선택 이력 기록이 사전 고정되었는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 6개 중 하나라도 통과하면 그 하나만 후속으로 살리면 multiple testing 선택 편향이 생긴다. gate ① 통과가 우연일 수 있고, 이후 Primary 7 대응 Δ는 같은 자료에서 확증하는 것이 된다.
+- **확인 방법**: 사전 등록된 변형 목록, gate ① 출력 전체, 통과/탈락 변형 모두의 margin 저장, 선택 이력 로그 확인. `scripts/analysis/branch_screen.py` 출력에서 변형별 max |r|·effective rank 전량 확인.
+
+## 점검 17: 공통 — Primary 7 접근·선택 이력 기록
+- **확인하려는 것**: P1·P2·P3 모두 Primary 7 margin에 접근할 때 데이터 접근과 선택 이력이 기록되는가.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: gate ①, GMM 선택, 변형 선택이 Primary 7 margin에 반복 접촉해도 이력이 없으면 선택 편향을 감사할 수 없다. 이후 성능 확증이 같은 자료에서 이루어졌는지 판별 불가가 된다.
+- **확인 방법**: RU 로그, `git log`, `scripts/analysis/branch_screen.py` 출력, GMM 선택 로그, Primary 7 margin 파일 접근 기록, 선택된 후보/변형/GMM manifest의 선택 시점 기록 확인.
+
+### G1 (일반화)
+
+## 일반화 위험 1 — GF 고정 GMM 라벨 무관 robustness 규칙
+
+- **위험**:
+  - 파일럿은 단일 seed·단일 초기화 1회 적합이다. GMM은 비볼록 최적화이므로 다른 seed·초기화에서 다른 local minimum에 수렴할 수 있다. "gap 최소화" 규칙은 이 단일 적합의 dataset별 validation log-likelihood(Raw gap 301.83, Balanced gap 205.78)에 의존하므로, 다른 seed에서 선택 결과가 바뀔 수 있다. 현재 증거는 이 규칙의 선택이 seed·초기화에 불변임을 말하지 못한다.
+  - dataset별 validation log-likelihood gap은 patch 분포의 적합도 차이이다. 이것이 Primary 7 단독 AUROC의 dataset 간 편차로 전이되는 메커니즘은 문서에 없다. validation log-likelihood가 낮다는 관측을 "slide-level 분류에서 dataset 편차가 줄어든다"는 기전으로 전환할 근거가 없다.
+  - Primary 7 과제가 COMET·MUT-HET-RCC·PANDA 3개 dataset에 어떻게 분포하는지 문서에 없다. balanced GMM은 dataset별 균등 표본화(각 1M)이므로, Primary 7 과제가 특정 dataset에 집중되면 해당 dataset의 patch 분포가 과소대표될 수 있다. "dataset 간 편차 최소화"가 Primary 7 과제 분포에서 실제로 편차 최소화가 되는지는 확인되지 않았다.
+  - UNI2 1536차원 feature가 3개 dataset에서 동일하게 분포하는지(스테인·스캐너 불변성) 문서에 없다. feature 분포가 dataset별로 달라지면 GMM component의 dataset 간 공유 구조(Raw에서 COMET·PANDA 공유 0.317)가 변한다.
+  - "gap 최소화" 규칙은 dataset 수(3개)에 의존한다. dataset 구성이 바뀌면 규칙의 의미가 변한다. 이 규칙이 3개 dataset 외의 구성에서 동일한 robustness 성질을 가지는지는 확인되지 않았다.
+
+- **현재 증거가 말할 수 있는 범위**:
+  - 단일 seed에서 두 GMM이 수렴하고, dataset별 validation log-likelihood와 component responsibility 점유율이 다름.
+  - Balanced가 dataset별 validation log-likelihood gap을 더 작게 만듦(205.78 < 301.83).
+  - Raw에서 COMET이 단일 component에 1.000 몰림, PANDA와 공유 0.317. Balanced에서 COMET 2개, MUT-HET-RCC 3개, PANDA 4개로 분산.
+  - 정렬 후 weight 차 최대 0.062, mean L2 차 0.26~12.57, diagonal covariance L2 차 0.09~2.33.
+  - 위 차이의 불확실성 폭은 미측정(단일 seed·단일 초기화 1회).
+
+- **현재 증거가 말할 수 없는 것**:
+  - 다른 seed·초기화에서 gap 최소화 규칙의 선택이 유지되는지.
+  - dataset별 validation log-likelihood gap이 Primary 7 단독 AUROC의 dataset 간 편차로 전이되는지.
+  - Primary 7 과제의 dataset 분포.
+  - UNI2 feature의 dataset 간 불변성.
+  - GF 단독 AUROC가 gate ②(전 과제 0.5 초과 또는 40/50 fold 0.5 초과)를 통과하는지.
+  - SEAL 10에서의 성능.
+
+- **확인하려면 무엇이 필요한가**:
+  - 다중 seed·초기화 GMM 적합으로 gap 최소화 규칙의 선택 안정성 측정. 현재 자료로 불가(파일럿은 단일 seed 1회).
+  - Primary 7에서 GF 단독 AUROC 측정(SCREEN_ONLY). 현재 자료로 불가(RU-97 미착수).
+  - Primary 7 과제의 dataset 분포 확인. 현재 자료에 없음.
+  - UNI2 feature의 dataset 간 분포 비교. 현재 자료에 없음.
+
+## 일반화 위험 2 — LSAK 8-branch 후보 gate ①
+
+- **위험**:
+  - LSAK는 위치 descriptor와 형상 descriptor의 곱적이다. 이 곱적이 Primary 7 fold에서 의미 있는 slide-level 변동을 읽는지, 그리고 다른 fold·dataset에서 동일하게 의미 있는지 미확인. CA-04의 기각 기전("범용 비선형 커널 구성에서 성능 악화")이 LSAK에 적용되지 않는다는 판정(§3-D)은 "사전 정의된 유한차원 상호작용"이라는 형식적 구분에 기반한다. 이 구분이 다른 분포에서 유지되는지 확인되지 않았다.
+  - gate ① 기준(max |r| ≤ 0.6, eff.rank ≥ 4.02)은 Primary 7 fold에서 측정된다. LSAK와 기존 7-branch의 상관이 다른 fold·dataset에서 달라질 수 있다. Primary 7 fold에서 gate ①을 통과하더라도 다른 분포에서 max |r| > 0.6이 될 수 있다.
+  - §3-D의 "남은 검증: Gram 대각 지배·과적합 여부"는 미해결이다. RU-84가 반박한 것은 RBF 커널의 Gram 대각 지배(D-029)이고, LSAK의 Gram 구조는 미측정이다. LSAK의 유한차원 상호작용 차원이 Primary 7 fold에서 과적합되지 않더라도, 다른 fold·dataset에서 과적합될 수 있다.
+  - Dual Ridge readout이 LSAK 마진을 기존 7-branch와 결합할 때, LSAK의 계수가 context 규모(90~261장)에서 안정적으로 결정되는지 미확인. CA-06·CA-07에서 확인된 context↔query 분포 이동 문제가 LSAK 계수에 재현될 수 있다.
+
+- **현재 증거가 말할 수 있는 범위**:
+  - LSAK는 CA-04 경계 밖(비저촉)으로 판정됨(§3-D, D-022).
+  - gate ① 실행은 SCREEN_ONLY로 저비용.
+  - CA-04의 RBF Gram 대각 지배는 RU-84가 반박(D-029). cosine·poly 커널은 미측정.
+  - LSAK의 성능·과적합은 미검증.
+
+- **현재 증거가 말할 수 없는 것**:
+  - LSAK와 기존 7-branch의 max |r|.
+  - LSAK 통합 effective rank.
+  - LSAK 단독 AUROC(gate ②).
+  - Primary 7 대응 Δ_macro.
+  - LSAK의 Gram 대각 지배·과적합 여부.
+  - SEAL 10에서의 성능.
+
+- **확인하려면 무엇이 필요한가**:
+  - gate ① 실행(SCREEN_ONLY, §3.4 오염 검사 포함). 현재 자료로 불가(실행 필요).
+  - LSAK의 Gram 대각 지배·과적합 진단. 현재 자료로 불가(실행 필요).
+  - gate ② 단독 정보량 측정. 현재 자료로 불가(gate ① 통과 후).
+  - Primary 7 50-fold 대응 Δ. 현재 자료로 불가(gate ② 통과 후).
+
+## 일반화 위험 3 — CA-R1 다중 강도 동시 투입 gate ①
+
+- **위험**:
+  - 6개 강도 변형의 상호 상관은 미측정이다. §3-J는 "6개 강도 변형은 상호 상관이 높을 것으로 예상된다"고 기록하지만, 이는 예측이지 실측이 아니다. Primary 7 fold에서 측정된 상관이 다른 fold·dataset에서 달라질 수 있다.
+  - CA-R1의 단조 용량반응(|ρ| = 1.000, 4개 과제)은 특정 강도 스윕에서 관측된 것이다. 이 단조성이 다른 dataset·scanner에서 유지되는지 확인되지 않았다. CA-R1의 이득이 전역이 아니라 과제별(ARID1A +2.97%p vs PBRM1 −6.64%p)이므로, 6개 강도 변형을 동시에 넣으면 Dual Ridge가 과제별 계수를 결정해야 하는데, 이 계수가 Primary 7 fold에서 안정적으로 결정되는지 미확인이다.
+  - Dual Ridge가 context 라벨만으로 6개 강도 브랜치의 계수를 closed-form으로 결정한다. 이 계수의 안정성은 context 규모(90~261장)에 의존한다. CA-06(라벨 사용 기저, −0.0556·6/7 하락)과 CA-07(context↔query 분포 이동)에서 확인된 문제가 6개 강도 계수에 재현될 수 있다.
+  - §3-J의 경계 미확정: CA-09 재가중 축 또는 Oracle 우회로 인정될 수 있다. 이 경계 판정이 다른 분포에서 어떻게 적용되는지 확인되지 않았다. "Dual Ridge는 context 라벨만으로 closed-form 해를 푸는 이미 승인된 readout"이라는 논거는 Primary 7 fold의 context 규모(90~261장)에서 성립하는지 확인되지 않았다.
+
+- **현재 증거가 말할 수 있는 범위**:
+  - CA-R1은 REOPENED but 활용 불가.
+  - §3-J는 경계 미확정(사용자 판정 대기).
+  - 6개 강도 변형의 상호 상관은 미측정.
+  - gate ① 실행은 SCREEN_ONLY로 저비용.
+  - CA-R1의 단조 용량반응은 4개 과제에서 |ρ| = 1.000.
+  - CA-R1의 이득은 과제별(ARID1A +2.97%p vs PBRM1 −6.64%p).
+
+- **현재 증거가 말할 수 없는 것**:
+  - 6개 강도 변형의 상호 상관.
+  - 6개 강도 변형과 기존 7-branch의 max |r|.
+  - 통합 effective rank.
+  - Dual Ridge 계수의 context 규모 의존성.
+  - Primary 7 대응 Δ_macro.
+  - SEAL 10에서의 성능.
+
+- **확인하려면 무엇이 필요한가**:
+  - gate ① 실행(SCREEN_ONLY, §3.4 오염 검사 포함). 현재 자료로 불가(실행 필요).
+  - §3-J 경계 판정(사용자). 현재 자료로 불가(사용자 결정 필요).
+  - Dual Ridge 계수의 context 규모 의존성 진단. 현재 자료로 불가(실행 필요).
+  - Primary 7 50-fold 대응 Δ. 현재 자료로 불가(gate ①·② 통과 후).
+
+### T1 (이론)
+
+## 제안 1
+
+### 이론적 병목 1
+- **가정**: dataset별 validation log-likelihood의 최선–최악 gap이 작은 GMM이 고정 배경 GMM으로 더 안전하고, 그 안전성이 Primary 7 GF 단독 margin의 dataset 간 편차 감소로 이어진다는 것이 참이다.
+- **이 가정이 깨지는 조건**: GF margin이 dataset 균형보다 Primary 7의 실제 과제·dataset 분포, patch 스케일, GMM component의 판별 기하에 의존한다. validation log-likelihood 차이가 dataset 고유 분산·스케일만 반영한다. 단일 seed GMM 차이가 초기화 불확실성 안에 있다.
+- **깨질 때 나타나는 관측 가능한 증상**: Balanced와 Raw의 M별 단독 AUROC·component 점유율·margin 분포가 거의 같거나, seed/초기화 재실행에서 gap 순위가 뒤집힌다. dataset gap이 작은 쪽이 Primary 7에서 특정 dataset 편향에 민감한 과제를 악화시킨다. dataset gap과 단독 AUROC 0.5 초과율 사이에 일관된 관계가 없다. 이 경우 GMM 선택은 판별 불가 또는 실패다.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: current_status는 단일 seed·단일 초기화 1회 실행이라 불확실성 폭이 미측정이고, overall validation log-likelihood는 MUT-HET-RCC에 지배되며, 파일럿은 진단일 뿐 성능·기전 주장을 금지한다. 또한 MUT-HET-RCC가 전체 patch의 68.7%를 차지한다.
+
+### 이론적 병목 2
+- **가정**: 파일럿 값을 확인한 뒤 만든 gap/tie 규칙을 “사전 라벨 무관 규칙”으로 취급할 수 있다는 것이 참이다.
+- **이 가정이 깨지는 조건**: 규칙이 파일럿의 특정 값, 즉 Balanced gap이 더 작다는 관측에 맞춰 선택됐고, 다른 seed·초기화·데이터에서 사전에 고정되지 않았다.
+- **깨질 때 나타나는 관측 가능한 증상**: 다른 초기화에서 Raw/Balanced gap 차이가 작아 tie에 의존하거나 순위가 바뀐다. RU-97에서 GMM 선택이 파일럿 관측에 의존해 기록된다. gap 규칙이 Primary 7·SEAL 10 성능 조회와 무관하게 사전 적용됐는지 선택 이력이 없다.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: current_status는 “두 표본 정책의 차이를 유의미한 차이로 볼지, 그렇다면 고정 배경 GMM으로 어느 쪽을 쓸지”를 아직 판정할 대상으로 둔다. PROJECT §4.1은 탐색·후보 선별과 성능 확증을 분리하고 선택 이력을 기록할 것을 요구한다.
+
+### 이론적 병목 3
+- **가정**: GMM 표본 구성을 Raw에서 Balanced로 고정이 RU-97의 “GF 단독 Fisher Vector 탐색” 범위 안에 있다는 것이 참이다.
+- **이 가정이 깨지는 조건**: D-045와 PROJECT §2가 “기존 3M 표본”과 “M=8·16·32 단독 성질 측정”만 허용하고, GMM 정책 변경은 새 사용자 결정·사전 설계가 필요하다면.
+- **깨질 때 나타나는 관측 가능한 증상**: RU-97 완료 조건은 M별 Primary 7 50-fold 결과와 component 점유율 저장뿐인데, GMM 선택 규칙·선택 근거가 추가 산출물이 된다. “GF를 공식 후보로 되돌리려면 새 사용자 결정과 사전 설계가 필요하다”는 문구와 충돌한다.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: PROJECT §2는 “배경 GMM은 기존 3M 표본, CPU thread 8, max_iter=100 범위만 사용한다”고 하고, “GF를 공식 후보로 되돌리려면 새 사용자 결정과 사전 설계가 필요하다”고 한다. current_status는 후속 연구 방향이 미확정이라고 한다.
+
+## 제안 2
+
+### 이론적 병목 1
+- **가정**: LSAK(`K_int = K̃_L ⊙ K̃_S`)는 CA-04 경계 밖이고, CA-09의 평균 재사영·재가중도 아니며, 기존 closed-form/linear readout을 유지한 채 마진 브랜치로 삽입할 수 있다는 것이 참이다.
+- **이 가정이 깨지는 조건**: `K̃_L`이 slide 1차 모멘트/mean의 새로운 사영·재가중·필터링이거나, LSAK가 32차원 디스크립터에 범용 비선형 커널을 씌워 선형 Ridge readout을 대체하거나, readout/head가 closed-form linear에서 벗어나면.
+- **깨질 때 나타나는 관측 가능한 증상**: CA-04/CA-09 경계 심사 실행 무효. readout 변경으로 학습 파라미터 0개·seed std 0.00000 정체성이 훼손된다. LSAK margin이 기존 7-branch margin과 같은 fold에서 짝짓기 불가해진다.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: closed_axes CA-04 경계 안은 “이미 32차원으로 압축된 디스크립터에 RBF·Cosine 등 범용 비선형 커널을 씌워 선형 Ridge readout을 대체하는 것”이다. CA-09 경계 안은 “슬라이드 1차 모멘트(평균)를 다시 사영·재가중·필터링해 새 브랜치를 만드는 것”이다. 문서에는 LSAK의 `K̃_L`·`K̃_S` 구체적 정의, 커널 종류, readout 연결이 없다.
+
+### 이론적 병목 2
+- **가정**: LSAK의 max |r|≤0.6과 8-branch eff.rank≥4.02는 LSAK가 기존 7-branch에 직교 정보를 더할 가능성을 충분히 판정한다는 것이 참이다.
+- **이 가정이 깨지는 조건**: LSAK margin의 scale·normalization에 따라 Pearson r가 변하거나, nonlinear/multivariate 중복이 pairwise r와 eff.rank로 잡히지 않거나, gate ① 통과해도 gate ②·승격에서 정보량이 부족하면.
+- **깨질 때 나타나는 관측 가능한 증상**: gate ① 통과 후 gate ② 단독 AUROC 0.5 초과 미달, Primary 7 대응 Δ_macro < +0.3%p, 95% CI 0 포함, sign agreement 낮음, 특정 과제 악화. 또는 gate ①에서 max |r|>0.6 또는 eff.rank<4.02로 기각.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: PROJECT §5는 gate ①을 “직교성 — 라벨 무관, 성능 조회 이전”으로만 정의한다. PROJECT §4는 승격을 +0.3%p 대응 Δ로 분리한다. CA-04는 LSAK 성능·과적합이 미검증이라고 하고, CA-10은 형상 계열 병목이 정보량이라고 기록한다.
+
+### 이론적 병목 3
+- **가정**: LSAK 후보 실행은 현재 RU-97 범위 또는 이미 승인된 후속 방향이라는 것이 참이다.
+- **이 가정이 깨지는 조건**: 후속 방향이 미확정이고 사용자·Reasoning 판정, RU 카드, 사전 고정 LSAK 파라미터, 예산이 없으면.
+- **깨질 때 나타나는 관측 가능한 증상**: current_status의 “후속 연구 방향 미확정”이 유지되고, LSAK 착수가 새 사용자 결정을 요구한다. LSAK 구현·예산·사전 설계가 없어 실행 무효가 된다.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: current_status는 “후속 연구 방향은 아직 미확정”이고 사용자·Reasoning 판정이 필요하다고 한다. PROJECT §2의 현재 목표는 RU-97 GF 단독 Fisher Vector 탐색이다. closed_axes는 “모든 후보의 착수는 RU 절차”를 따른다고 한다.
+
+### 이론적 병목 4
+- **가정**: LSAK 구현에 필요한 차원·스케일·정규화 파라미터가 사전 고정되어 Primary 7에서 선택하지 않는다는 것이 참이다.
+- **이 가정이 깨지는 조건**: gate ① 통과 여부를 보며 LSAK 변형·파라미터를 바꾸거나, 여러 LSAK 변형 중 gate ①에 유리한 것만 남기면.
+- **깨질 때 나타나는 관측 가능한 증상**: LSAK 변형별 max |r|·eff.rank 비교 기록이 생기거나, gate ① 통과 후 같은 Primary 7에서 성능 확증이 선택된 변형으로만 수행된다. 선택 이력이 없으면 탐색·확증 분리 위반이다.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: PROJECT §4.1은 “탐색·후보 선별과 성능 확증을 분리한다”고 한다. CA-08 경계 안은 “선택에 쓴 평가자료의 최댓값을 그대로 확증 성과로 사용하는 절차”를 포함한다.
+
+## 제안 3
+
+### 이론적 병목 1
+- **가정**: §3-J 경계가 사용자 판정 대기여도 gate ① 진단은 허용되고, 그 결과가 CA-R1 다중 강도 후보의 반박·채택 근거가 된다는 것이 참이다.
+- **이 가정이 깨지는 조건**: closed_axes 규칙 5가 “판단이 갈리면 미확정 목록에 올리고, 심사자가 임의로 한쪽을 채택하지 않는다”고 하고, 경계 안이면 성능·점수와 무관하게 기각해야 한다.
+- **깨질 때 나타나는 관측 가능한 증상**: CA-09/Oracle 경계 판정에서 실행 무효. gate ① 결과가 사용자 결정 없이 착수된 것으로 기록된다. RU-88이 이 후보를 넣지 않고 진행한 선례와 충돌한다.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: closed_axes §3-J는 “상태: 사용자 판정 대기. RU-88은 이 후보를 넣지 않고 진행했다”고 한다. closed_axes 규칙 5는 경계 판단이 갈리면 심사자가 임의로 한쪽을 채택하지 않는다고 한다.
+
+### 이론적 병목 2
+- **가정**: Dual Ridge가 context 라벨만으로 6개 강도 계수를 closed-form으로 정하면, Oracle 금지를 우회하지 않는 비-선택 결합이라는 것이 참이다.
+- **이 가정이 깨지는 조건**: context 라벨이 query/task와 강하게 연관되어 계수가 사실상 과제별 최적 강도를 선택하거나, context 90~261장에서 계수 변동이 크거나, context↔query 분포 이동이 계수를 불안정하게 하면.
+- **깨질 때 나타나는 관측 가능한 증상**: fold/context별 강도 계수 분산이 크고, 특정 과제에서 한 강도 계수가 지배한다. Primary 7 Δ가 과제별 편차가 크고 +0.3%p 미만이다. CA-07의 context↔query 분포 이동과 같은 양상이 나타난다. 이 경로가 실제로 Oracle 우회인지 기전 미확인이다.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: closed_axes §3-J 저촉 근거는 “결과적으로 사실상 최선이 골라지므로 Oracle과 같은 것을 우회한다”고 한다. CA-07은 context↔query 분포 이동을 기전으로 기록한다. CA-R1은 “과제별 이득, 선택 신호 없음”을 현재 상태로 둔다.
+
+### 이론적 병목 3
+- **가정**: 6개 강도 변형이 gate ①에서 탈락하면 CA-R1 다중 강도 동시 투입이 반박된다는 것이 참이다.
+- **이 가정이 깨지는 조건**: gate ①은 현재 7-branch 기준의 선형 margin 상관·유효 랭크만 판정하므로, 다른 readout·비선형 결합·새 정보에서는 성립할 수 있다.
+- **깨질 때 나타나는 관측 가능한 증상**: max |r|>0.6 또는 eff.rank<4.02로 기각되지만, 강도 변형 단독 AUROC가 일부 과제에서 0.5 초과하거나, 다른 결합에서 Δ가 달라진다. 또는 gate ① 통과 후 Δ<+0.3%p로 반박 불가·판별 불가가 된다.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: PROJECT §5는 gate ① 탈락 시 “성능을 조회하지 않고 종료”한다고 한다. 이는 기각이지 반박이 아니다. CA-R1은 REOPENED이되 “활용 불가” 사유가 선택 신호 부재이지 중복 반박이 아니다.
+
+### 이론적 병목 4
+- **가정**: 6개 강도 변형은 CA-09 경계 밖이라는 것이 참이다.
+- **이 가정이 깨지는 조건**: 강도 변형이 DS/살리언스 재가중, slide mean의 재가중·필터링, 위치 계열 평균 변형이면 CA-09 경계 안이다.
+- **깨질 때 나타나는 관측 가능한 증상**: CA-09 경계 심사 실행 무효. DS 또는 위치 계열과 max |r|이 높고, eff.rank가 하락한다.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: CA-09 경계 안은 “슬라이드 1차 모멘트(평균)를 다시 사영·재가중·필터링해 새 브랜치를 만드는 것”이다. §3-J는 다중 강도 동시 투입이 CA-09 경계 안인지 질문으로 열어둔 상태다.
+
+### 이론적 병목 5
+- **가정**: CA-R1 gate ① 실행이 현재 RU-97 종료 전·후 허용된 다음 행동이라는 것이 참이다.
+- **이 가정이 깨지는 조건**: 현재 목표가 RU-97이고, 후속 방향 미확정, 사용자·Reasoning 판정이 필요하다.
+- **깨질 때 나타나는 관측 가능한 증상**: RU-97 완료 조건 미충족 상태에서 CA-R1 착수. 예산 4 GPU-hour 범위 밖. 새 RU 카드 없음.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: PROJECT §2의 현재 목표는 RU-97이고, “다음 목표 슬롯”은 RU-97 종료 뒤 후속 연구 방향을 별도로 정하는 것이다. current_status는 후속 연구 방향이 미확정이라고 한다.
+
+---
+
+## Phase 2b — 제안 좌석 응답
+
+### P1 (제안)
+
+- **R1-1**: (1) 수용·수정. 파일럿의 Raw gap 301.83과 Balanced gap 205.78은 단일 seed·단일 초기화 1회 실행의 진단 관측일 뿐이다. “Balanced가 더 안전하다”는 기전적·성능적 주장은 문서상 근거가 없으므로 삭제한다. Balanced를 고정 배경 GMM으로 쓰려면 파일럿 이전부터 고정된 선택 규칙의 결정 이력, 다중 seed/초기화 재실행, dataset-Primary 7 task mapping, GMM manifest 고정이 선행해야 한다. 이 요건이 없으면 같은 파일럿 값으로 고른 뒤 Primary 7에서 확인하는 방식은 승격 근거로 실행 무효이며, 탐색 기록으로만 남기려면 선택 이력을 명시해야 한다.
+
+- **R1-2**: (1) 수용·수정. LSAK가 CA-04 §3-D에서 경계 밖으로 언급됐다는 사실은 금지가 아니라는 운영 판정이지, LSAK가 실제로 직교 정보나 성능 이득을 가진다는 증거가 아니다. 현재 문서에는 LSAK의 max |r|, 8-branch effective rank, 단독 AUROC, Primary 7 대응 Δ가 없다. 따라서 제안은 “LSAK가 직교 정보를 준다”가 아니라 “gate ①에서 저비용으로 기각 가능한지 먼저 본다”로 한정한다. gate ① 실패 시 성능을 조회하지 않고 종료해야 한다.
+
+- **R1-3**: (1) 수용·수정. 6개 강도 변형의 상호 상관은 미측정이므로, CA-R1의 문제 원인이 “선택 신호 부재”인지 “변형 간 중복”인지 현재 문서만으로 판별 불가다. gate ① 실패는 현재 공식 7-branch 대비 선형 margin screen 기준의 기각이지, CA-R1 다중 강도 접근 전체의 반박이 아니다. 제안을 수정하되, §3-J 사용자 경계 판정과 6개 변형의 family-level 사전 등록이 없으면 착수하지 않는다.
+
+- **A1-1**: (1) 수용·수정. “dataset별 validation log-likelihood gap 최소화” 규칙이 파일럿 결과 확인 전에 고정됐는지 주어진 문서만으로 확인되지 않는다. `docs/current_status.md`는 오히려 파일럿 이후 “어느 쪽을 쓸지” 판정을 미착수로 둔다. 따라서 P1에서 “사전 라벨 무관 규칙”이라는 표현을 삭제하고, 파일럿 이전 결정 이력이 없으면 같은 파일럿 값으로 Balanced를 선택하지 않는 것으로 수정한다. 새 사용자 결정과 사전 등록이 없으면 Primary 7 탐색으로도 선택 근거로 쓰지 않는다.
+
+- **A1-2**: (1) 수용·수정. 공통 validation 30,000개가 `X_raw`·`X_balanced` 또는 Primary 7 평가 patch/slide와 patch/slide ID 수준에서 중복되지 않는다는 증거는 문서에 없다. 중복이 확인되면 dataset별 validation log-likelihood는 독립 적합도 비교가 아니라 in-sample 또는 평가 자료 접촉값이 된다. 따라서 GMM 정책 선택에 이 validation 값을 쓰기 전 ID-level disjointness 검증을 필수 전제로 추가한다.
+
+- **A1-3**: (1) 수용·수정. `COMET`·`MUT-HET-RCC`·`PANDA` dataset 식별자가 Primary 7 task 또는 SEAL 10 hold-out identity의 프록시로 작동할 수 있다는 우려는 문서상 확인되지 않았다. dataset별 fit 차이로 GMM을 고르는 것이 사실은 task/hold-out 분포를 보고 고르는 것일 수 있다. 따라서 dataset-task-slide mapping과 Primary 7 fold manifest 대조를 선행하지 않고는 GMM 선택을 독립적 robustness 근거로 취급하지 않는다.
+
+- **A1-4**: (3) 판별 불가. 단일 seed·단일 초기화 1회 실행에서 Raw와 Balanced의 gap 차가 GMM 최적화 노이즈, EM 수렴 경로, component 정렬 차보다 큰지는 문서에 불확실성 폭이 없어 판별 불가다. 따라서 P1은 단일 적합의 gap 값을 선택 근거로 쓰지 않는다. 다중 seed·다중 초기화 재실행 또는 bootstrap로 gap 순위의 안정성을 재기 전까지는 Balanced 고정 주장은 기전 미확인 상태로 둔다.
+
+- **A1-5**: (1) 수용·수정. M=8 파일럿에서 선택된 표본 정책이 M=16·32에도 동일하게 유효한지는 문서에 없다. M=8에서 gap으로 정책을 고른 뒤 M=16·32에서 동일 정책을 재적합하면, M sweep 결과가 “M 효과”와 “M=8에서 선택된 표본 정책 효과”가 혼동된다. 따라서 RU-97에서는 M=8·16·32에 공통으로 적용할 표본 정책을 사전 고정하거나, M별 재선택을 하지 않는 설계로 한정해야 한다.
+
+- **A1-6**: (1) 수용·수정. RU-97에서 사용할 GMM manifest가 파일럿 선택과 독립적으로 사전 고정됐는지는 문서에 없다. GMM pickle, `X_raw.npz`·`X_balanced.npz`, validation manifest, seed, `max_iter`, component alignment 규칙의 hash 또는 버전이 사전 기록되지 않으면 M별 단독 margin 비교가 무효해질 수 있다. 따라서 RU-97 실행 전 GMM manifest 고정과 hash 기록을 필수 전제로 추가한다.
+
+- **A1-7**: (1) 수용·수정. GMM component는 unlabeled이므로 “Raw에서 COMET 1.000 몰림”이나 “Balanced가 더 고르다”는 관찰이 component alignment 규칙의 결과일 수 있다. 주어진 문서에는 alignment sensitivity 결과가 없다. 따라서 component 점유율을 GMM 정책 선택의 독립 증거로 쓰지 않고, 다른 alignment 규칙으로 재계산해 점유율 패턴이 유지되는지 확인하기 전까지는 진단적 관찰로만 둔다.
+
+- **A1-8**: (1) 수용·수정. GMM fit 데이터가 Primary 7 평가 patch/slide를 포함하지 않는다는 증거와, 고정 외부 GMM이 “학습 파라미터 0개” 정체성과 `CA-14` 경계에 부합한다는 사용자 판정은 문서에 없다. `current_status.md`도 이 문제를 미해결로 둔다. 따라서 GMM provenance와 CA-14 경계 판정이 해결되기 전에는 GF를 공식 후보로 승격 심사하지 않고, 경계 저촉이 확인되면 실행 무효로 처리한다.
+
+- **A1-9**: (1) 수용·수정. LSAK의 position descriptor, shape descriptor, 차원, bandwidth, 정규화, fold context/query 구성이 gate ① 이전부터 고정됐는지는 문서에 없다. gate ① 통과 여부를 보며 LSAK 변형을 고르면 max |r|과 effective rank가 설계 선택에서 새어 나온다. 따라서 LSAK는 단일 후보 설계를 사전 등록한 뒤 `SCREEN_ONLY=1`로 gate ①만 실행하는 것으로 한정한다.
+
+- **A1-10**: (1) 수용·수정. 문서상 LSAK는 CA-04 경계 밖으로 언급되지만, 실제 구현이 `K_int = K̃_L ⊙ K̃_S` 형태의 유한차원 상호작용인지, 범용 비선형 커널이 선형 Ridge readout을 대체하지 않는지는 확인되지 않았다. `K̃_L`이 슬라이드 1차 모멘트 재가중이거나 readout이 closed-form linear에서 벗어나면 CA-04/CA-09/CA-14 중 하나와 충돌할 수 있다. 따라서 코드 감사와 readout 경로 확인을 gate ① 실행 전 필수 전제로 추가한다.
+
+- **A1-11**: (1) 수용·수정. `scripts/analysis/branch_screen.py`가 실제로 라벨·AUROC·성능 조회 없이 max |r|과 effective rank만 계산하는지는 문서에 없다. gate ①가 내부적으로 Primary 7 성능을 접촉하면 “성능 조회 이전”이 성립하지 않는다. 따라서 P2는 label-free screen의 코드 경로, 입력 manifest, 실행 로그 검증을 전제로 해야 한다. 검증 전에는 gate ① 결과를 독립 선별 증거로 쓰지 않는다.
+
+- **A1-12**: (2) 반박. `SCREEN_ONLY=1` 오염 검사 상수 요구는 `PROJECT.md` §3.4에 이미 확정되어 있고, P2도 이를 포함해 실행한다고 명시했다. SMAD4 `0.4421`, PBRM1 `0.5553` 일치 확인은 후보 실행의 필수 검증이지 P2의 취약점이 아니다. 따라서 이 점검은 P2를 약화시키는 반론으로 성립하지 않는다.
+
+- **A1-13**: (2) 반박. 공식 7-branch baseline은 `ru90_shape_triple` 태그, Primary 7 macro `0.6227`, per-fold 결정성 기록으로 고정되어 있다. P2는 이 고정 baseline과 후보를 같은 fold에서 짝지어 비교하는 §4 구조를 전제로 한다. 따라서 baseline이 후보 실행마다 재계산된다는 우려는 문서와 맞지 않으며, 반론으로 성립하지 않는다.
+
+- **A1-14**: (1) 수용·수정. `PROJECT.md` §2의 현재 목표는 RU-97 GF 단독 Fisher Vector 탐색이며, `current_status.md`는 후속 연구 방향을 미확정으로 둔다. CA-R1 다중 강도 후보는 `closed_axes.md` §3-J에서 사용자 판정 대기 상태다. 따라서 P3는 RU-97 범위 안에서 착수할 수 없고, 새 RU 카드와 사용자 경계 결정이 선행되어야 한다.
+
+- **A1-15**: (1) 수용·수정. 6개 강도 변형이 과거 task-specific gain이나 §225 sweep 결과로 이미 성능 정보에 접촉해 선택됐는지는 문서에 없다. 만약 변형 목록이 과거 Primary 7 성능으로 골라졌다면, gate ① 결과도 선택된 변형의 성질이 되어 독립 선별이 아니다. 따라서 6개 변형 목록과 선택 근거를 사전 등록하고, 성능 조회 이전 고정임을 기록해야 한다.
+
+- **A1-16**: (1) 수용·수정. 6개 강도 변형을 동시에 넣을 때 “하나라도 통과하면 그 하나만 살린다”는 절차는 multiple testing과 선택 편향을 만든다. 따라서 family-level pass/fail 규칙, 6개 변형 전체의 max |r|·effective rank 출력, 통과/탈락 변형 모두의 margin 저장, 선택 이력 기록을 사전 고정해야 한다. 이 기록이 없으면 gate ① 통과도 독립 근거가 아니다.
+
+- **A1-17**: (1) 수용·수정. P1·P2·P3 모두 Primary 7 margin에 접근할 수 있는 단계가 있다. 데이터 접근, GMM 선택, LSAK 파라미터 고정, 강도 변형 선택, screen 실행의 시점과 선택 이력이 기록되지 않으면 탐색과 성능 확증이 같은 자료에서 분리되지 않는다. 따라서 세 제안 모두에 Primary 7 접촉 로그와 선택 이력 기록을 공통 필수 조건으로 추가한다.
+
+- **G1-1**: (1) 수용·수정. dataset별 validation log-likelihood gap이 Primary 7 단독 AUROC의 dataset 간 편차로 전이된다는 메커니즘은 문서에 없다. UNI2 feature의 dataset 간 불변성, Primary 7 과제의 dataset 분포, 다중 seed 적합 안정성도 미확인이다. 따라서 P1은 “Balanced가 편차를 줄인다”는 기대 차이를 삭제하고, gap과 component 점유율은 GMM 진단 지표로만 취급한다. 성능·기전 주장은 RU-97 단독 margin 결과가 사전 규칙에 따라 나와도 `hold-out 미검증`으로만 둔다.
+
+- **G1-2**: (1) 수용·수정. LSAK의 Gram 구조, 과적합 여부, Dual Ridge 계수 안정성은 미측정이다. CA-04 §3-D의 경계 밖 판정은 LSAK의 성능을 보증하지 않는다. 따라서 P2는 LSAK가 새로운 정보를 가진다는 예측이 아니라, CA-04 경계 밖 구현을 전제로 gate ①에서 저비용으로 기각 가능한지 보는 절차로 한정한다. gate ① 통과 후에도 gate ②, Primary 7 대응 Δ, Gram/과적합 진단이 남으며, 그 전에는 어떤 성능 주장도 하지 않는다.
+
+- **G1-3**: (1) 수용·수정. 6개 강도 변형의 상호 상관, 기존 7-branch와의 max |r|, 통합 effective rank, Dual Ridge 계수의 context 규모 의존성은 문서에 없다. CA-R1의 단조 용량반응도 4개 과제 관측이며, 이득은 과제별로 갈린다. 따라서 P3는 “외부 선택 신호 없이 강도를 결합한다”는 주장을 삭제하고, §3-J 경계 판정 전에는 착수하지 않는 저비용 screen 후보로만 둔다.
+
+- **T1-1**: (1) 수용·수정. dataset별 validation log-likelihood gap이 GF margin의 dataset 간 편차 감소로 이어진다는 가정은 현재 문서에서 입증되지 않았다. overall log-likelihood가 `MUT-HET-RCC`에 지배되고, 파일럿은 진단 실험이며 성능·기전 주장을 금지한다. 따라서 P1은 gap 최소화가 Primary 7 margin 편차를 줄인다고 주장하지 않고, gap은 GMM 적합 진단 지표로만 사용한다.
+
+- **T1-2**: (1) 수용·수정. 파일럿 값을 확인한 뒤 gap/tie 규칙을 만든 것을 “사전 라벨 무관 규칙”으로 취급할 수 있다는 가정은 `current_status.md`와 충돌한다. 파일럿 이후 판정이 미착수로 기록되어 있고, `PROJECT.md` §4.1은 선택 이력 기록과 탐색·확증 분리를 요구한다. 따라서 P1은 사전 규칙 존재를 입증하지 못하면 동일 파일럿 값으로 GMM을 고르지 않는 것으로 수정한다.
+
+- **T1-3**: (1) 수용·수정. `PROJECT.md` §2는 RU-97을 M=8·16·32 단독 성질 탐색으로 한정하고, 배경 GMM은 기존 3M 표본 범위로만 사용하도록 한다. GMM 표본 정책 변경은 GF를 공식 후보로 되돌리는 새 사용자 결정과 사전 설계를 필요로 할 수 있다. 따라서 P1은 RU-97 내부의 자동 선택 규칙이 아니라, 후속 사용자 결정과 사전 등록이 필요한 독립 설계 제안으로 수정한다.
+
+- **T1-4**: (1) 수용·수정. LSAK가 CA-04 경계 밖이고, CA-09도 아니며, closed-form/linear readout을 유지하는지는 문서상 선언만으로 확인되지 않는다. `K̃_L`이 슬라이드 평균의 재가중이거나, LSAK가 32D 디스크립터 위에 범용 비선형 커널을 씌워 Ridge readout을 대체하면 경계 안으로 들어간다. 따라서 P2는 LSAK 구현 감사와 readout 경로 확인을 gate ① 전 필수 조건으로 추가한다.
+
+- **T1-5**: (1) 수용·수정. gate ①의 max |r|과 effective rank는 LSAK가 실제로 직교 정보를 가진다는 충분 증거가 아니다. scale, normalization, nonlinear 중복, gate ② 정보량, Primary 7 Δ는 모두 별도로 확인해야 한다. 따라서 P2는 gate ① 통과 가능성을 “직교 정보 존재”로 해석하지 않고, 통과해도 gate ②와 승격 기준 `+0.3%p` 대응 Δ가 남는다는 것으로 한정한다.
+
+- **T1-6**: (1) 수용·수정. LSAK 착수가 현재 RU-97 범위 또는 이미 승인된 후속 방향이라는 근거는 문서에 없다. `current_status.md`는 후속 연구 방향을 미확정으로 두고, `closed_axes.md`는 모든 후보 착수가 RU 절차를 따른다고 한다. 따라서 P2는 RU-97 종료 후 새 RU 카드, 사용자 승인, LSAK 사전 설계가 마련된 후에만 실행 가능한 제안으로 수정한다.
+
+- **T1-7**: (1) 수용·수정. LSAK 변형·파라미터를 gate ① 통과 여부를 보며 바꾸면 탐색과 확증이 같은 Primary 7 자료에서 섞인다. `PROJECT.md` §4.1과 CA-08의 선택 편향 금지와 충돌할 수 있다. 따라서 P2는 LSAK 후보를 하나만 사전 고정하고, gate ① 실행 전후 파라미터 변경을 허용하지 않는 것으로 수정한다.
+
+- **T1-8**: (1) 수용·수정. `closed_axes.md` §3-J는 CA-R1 다중 강도 동시 투입의 경계를 사용자 판정 대기 상태로 둔다. 규칙 5는 판단이 갈리면 심사자가 임의로 한쪽을 채택하지 않는다고 한다. RU-88도 이 후보를 넣지 않고 진행했다. 따라서 P3는 사용자 경계 판정 전에는 gate ① 착수조차 하지 않는 것으로 수정한다.
+
+- **T1-9**: (3) 판별 불가. Dual Ridge가 context 라벨만으로 6개 강도 계수를 closed-form으로 정하는 것이 Oracle 금지를 우회하지 않는 비-선택 결합인지, context 규모 90~261에서 계수가 안정적으로 결정되는지는 현재 문서만으로 판별 불가다. context 라벨과 query/task 연관성, context↔query 분포 이동, fold별 계수 분산이 확인되어야 한다. 따라서 P3는 “외부 oracle 없이 결합된다”는 주장을 확정하지 않고, 계수 안정성 진단과 경계 판정이 선행되어야 하는 미확정 상태로 둔다.
+
+- **T1-10**: (1) 수용·수정. gate ① 탈락은 CA-R1 다중 강도 동시 투입 전체의 반박이 아니다. gate ①은 현재 공식 7-branch 대비 선형 margin screen 기준이며, 다른 readout, 비선형 결합, 새 정보에서는 성립하지 않을 수 있다. 따라서 P3에서 gate ① 실패를 “반박”이 아니라 “현재 screen 기준의 기각”으로 기록하고, 강도 정보 부재 자체의 판정으로는 쓰지 않는다.
+
+- **T1-11**: (1) 수용·수정. 6개 강도 변형이 DS/살리언스 재가중, 슬라이드 평균의 재가중, 위치 계열 평균 변형이면 CA-09 경계 안으로 들어간다. §3-J도 이 가능성을 열어둔 상태다. 따라서 P3는 강도 변형의 정의가 CA-09 경계 밖인지 코드와 수식 수준에서 확인되기 전에는 실행하지 않는 것으로 수정한다.
+
+- **T1-12**: (1) 수용·수정. CA-R1 gate ① 실행이 현재 RU-97 종료 전·후의 허용된 다음 행동이라는 근거는 문서에 없다. 현재 목표는 RU-97이고, 다음 목표 슬롯은 RU-97 종료 후 별도 결정으로 되어 있다. 따라서 P3는 RU-97 완료, 후속 방향 결정, §3-J 사용자 판정, 새 RU 카드와 예산 승인 전에는 착수하지 않는 것으로 수정한다.
+
+---
+
+## Phase 3 — 종합
+
+### S1 (종합)
+
+## 지지 (증거가 뒷받침함)
+- **공식 7-branch 기준선과 승격 절차는 문서상 지지된다.** `PROJECT.md` §3.2·§4에 따르면 현행 공식 7-branch(`CV, BM, BD, QA, DS, SH, SJ`)의 Primary 7 macro는 `0.6227`, 직전 5-branch `0.6171` 대비 대응 per-fold Δ_macro는 `+0.56%p`이며, 승격 기준 `+0.3%p`를 충족한다. 태그 `ru90_shape_triple`, 50-fold, per-fold 결정성 기록도 문서에 있다. 다만 이는 **공식 기준 교체 절차가 충족됐다는 지지**이지, SEAL 10 ABMIL `0.7266` 초과에 가까워졌다는 지지는 아니다. 모든 판정은 `hold-out 미검증`이다.
+- **모델 개선 근거는 Primary 7 대응 Δ여야 한다는 평가 체계가 문서상 지지된다.** `PROJECT.md` §3.1·§4.1은 Primary 7만 하이퍼파라미터 튜닝·모델 선택에 사용하고, SEAL 10은 최종 hold-out으로 어떤 형태로도 선택·튜닝에 사용 금지한다고 고정한다. 추정 대상도 절대 macro가 아니라 고정 fold에서 짝지은 후보−기준선 Δ의 기댓값이다.
+- **GF 파일럿은 “표본 구성이 GMM fit을 바꾼다”는 pool 내 진단만 지지한다.** `current_status.md`에 따르면 Raw·Balanced 두 GMM 모두 수렴했고, dataset별 validation log-likelihood, component responsibility 점유율, 정렬 후 weight·mean·covariance 차이가 실측됐다. Raw gap `301.83`, Balanced gap `205.78`은 파일럿 pool 내 적합 진단 값이다. 이는 **GMM 표본 구성이 학습된 GMM을 다르게 만든다**는 진단만 지지하며, Primary 7 성능 개선이나 기전 입증은 지지하지 않는다.
+- **LSAK는 `CA-04`로 인해 닫힌 축이 아니라는 운영적 지지가 있다.** `closed_axes.md` `CA-04`는 LSAK(`K_int = K̃_L ⊙ K̃_S`)를 경계 밖(비저촉)으로 명시한다. 따라서 LSAK에 대한 `SCREEN_ONLY=1` gate ① 실행 자체가 닫힌 축 위반으로 자동 기각되지는 않는다. 다만 LSAK의 성능·직교성·과적합은 미검증이다.
+- **CA-R1 다중 강도 동시 투입은 아직 승인된 실행 대상이 아니라는 지지가 있다.** `closed_axes.md` §3-J는 이 후보의 경계를 사용자 판정 대기 상태로 두고, RU-88은 해당 후보를 넣지 않고 진행했다. 따라서 현재 문서가 지지하는 것은 “즉시 착수”가 아니라 “경계 판정 전 보류”다.
+- **현재 목표인 RU-97은 탐색 기록으로만 한정된다는 지지가 있다.** `PROJECT.md` §2는 D-045에 따라 GF 단독 Fisher Vector 탐색에서 `M=8·16·32`의 과제별 단독 성질만 측정하고, 공식 7-branch 비교·채택 주장은 범위 밖이며 SEAL 10은 열지 않는다고 고정한다.
+- **후보 스크리닝의 독립성을 검증할 절차가 문서에 있다.** `PROJECT.md` §3.4는 `SCREEN_ONLY` 실행이 기저 앙상블을 건드리지 않았는지 확인하는 오염 검사 상수(SMAD4 `0.4421`, PBRM1 `0.5553`)를 고정한다. 이는 후보 스크리닝이 기준선을 오염시키지 않는지 계측적으로 확인할 수 있는 근거다.
+
+## 반박 (증거가 반박함)
+- **“파일럿 gap을 사전 라벨 무관 규칙으로 보고 Balanced GMM을 고정한다”는 주장은 현재 증거로 반박된다.** `current_status.md`는 파일럿 이후 “두 표본 정책의 차이를 유의미한 차이로 볼지, 그렇다면 어느 쪽을 쓸지”를 아직 판정하지 않은 상태로 둔다. 주어진 문서에는 gap 최소화 규칙이 파일럿 이전부터 고정됐다는 결정 이력이 없다. 또한 파일럿은 단일 seed·단일 초기화 1회 실행이고, 불확실성 폭은 미측정이며, validation은 자연 비율 표본이라 overall log-likelihood가 `MUT-HET-RCC` 68.7%에 지배된다. 따라서 Raw gap `301.83`과 Balanced gap `205.78`만으로 “Balanced가 더 안전하다”는 성능·기전 주장은 현재 증거로 성립하지 않는다.
+- **“RU-97 GF 단독 탐색만 수행하면 ABMIL 초과에 가까워진다”는 주장은 현재 문서로 반박된다.** GF의 gate ① 직교성, gate ② 정보량, 공식 7-branch 대비 8-branch 대응 Δ, Primary 7 단독 AUROC는 문서에 없다. `PROJECT.md` §2는 RU-97을 탐색 기록으로만 종료하도록 한정하고, GF를 공식 후보로 되돌리려면 새 사용자 결정과 사전 설계가 필요하다고 한다. 또한 Primary 7 개선이 hold-out 개선을 보장하지 않는다고 명시되어 있다.
+- **“7-branch 승격은 개선이 안정적으로 확인됐다”는 과다주장은 반박된다.** `PROJECT.md` §3.2는 승격 기준 충족과 함께 과제 군집 95% CI `[-1.15%p, +2.28%p]`, SE `0.70%p`, sign agreement `4/7`, 그리고 `Histologic_Grade -1.08%p`, `progression_regression -1.13%p`, `PBRM1 -1.44%p` 악화를 함께 보고한다. CI가 0을 포함하므로, 승격 기준 충족은 지지되지만 “부호가 확정된 개선” 또는 “hold-out 도달”로 해석하는 것은 증거 범위를 넘는다.
+- **“LSAK가 기존 7-branch에 직교 정보를 준다”는 주장은 현재 증거로 반박된다.** LSAK의 max |r|, 8-branch effective rank, 단독 AUROC, Primary 7 대응 Δ는 문서에 없다. `closed_axes.md`의 경계 밖 판정은 금지가 아니라는 운영 결정이지, LSAK가 실제로 새로운 정보를 가진다는 실증 증거가 아니다.
+- **“CA-R1 다중 강도 동시 투입이 외부 선택 신호 부재를 해결한다”는 주장은 현재 증거로 반박된다.** 6개 강도 변형의 상호 상관, 기존 7-branch와의 max |r|, 통합 effective rank, Dual Ridge 계수의 context 규모 의존성, Primary 7 대응 Δ는 문서에 없다. `CA-R1`은 REOPENED이되 “활용 불가” 상태이며, 과제별 이득은 존재하지만 선택 신호가 없다는 것이 문서의 현재 상태다.
+- **SEAL 10 결과를 개선 방향 선택에 쓰는 것은 평가 규칙상 반박된다.** `PROJECT.md` §3.1은 SEAL 10을 최종 hold-out으로 두고 선택·튜닝에 어떤 형태로도 사용 금지한다. 따라서 SEAL 10 관측을 근거로 후보·GMM·강도·브랜치를 고르는 실행은 현재 평가 체계에서 무효한 방향 선택이다.
+
+## 판별 불가 (증거가 가르지 못함)
+- **Raw GMM과 Balanced GMM 중 어느 쪽이 Primary 7 또는 SEAL 10에서 더 나은 고정 배경인지 가르지 못한다.** 파일럿은 단일 seed·단일 초기화 1회 실행이고, gap·log-likelihood·occupancy 차이의 불확실성 폭은 미측정이다. Primary 7 성능 조회도 아직 없다.
+- **GMM 학습 표본, validation 표본, Primary 7 평가 patch/slide, SEAL 10 slide/fold가 ID 수준에서 disjoint인지 가르지 못한다.** `current_status.md`에는 Primary 7·SEAL 10과 라벨을 사용하지 않는다고만 있고, patch/slide ID 교차 검증 결과는 문서에 없다.
+- **GMM의 수치 유효성이 `converged=True`만으로 충분한지 가르지 못한다.** `PROJECT.md` §2의 중단 조건에는 NaN/Inf, responsibility 합 오차 `1e-4` 초과, sklearn 대비 component 불일치, 입력 누락, OOM 등이 포함되지만, 파일럿 로그에서 이들이 모두 통과했는지는 문서에 없다.
+- **데이터 매니페스트·체크섬·전처리 버전이 고정되어 있는지 가르지 못한다.** `current_status.md`는 원본 체크섬 목록이 없어 byte-for-byte 비교는 미수행이라고 한다. UNI2 feature의 stain normalization·whitening·scaling·fold별 fit 여부도 문서에 없다.
+- **고정 외부 GMM이 “학습 파라미터 0개” 정체성과 `CA-14` 경계에 저촉되는지 가르지 못한다.** `current_status.md` 미해결 항목과 `closed_axes.md` `CA-14`는 이 문제를 미판정으로 둔다. 사용자 결정 전에는 GF를 공식 후보로 승격 심사할 수 없다.
+- **GF가 gate ①·gate ②를 통과하는지, 공식 7-branch 대비 8-branch 대응 Δ가 `+0.3%p`를 넘는지는 가르지 못한다.** GF margin, max |r|, effective rank, 단독 AUROC, paired Δ는 문서에 없다.
+- **M=8 파일럿에서 본 표본 정책 차이가 M=16·32에도 유지되는지 가르지 못한다.** M별 GMM 재적합, M별 component 점유율, M별 단독 AUROC는 아직 문서에 없다.
+- **component occupancy 차이가 component alignment artifact인지 가르지 못한다.** GMM component는 unlabeled이므로 정렬 규칙에 따라 점유율 표현이 바뀔 수 있고, 다른 alignment 규칙으로 재계산한 민감성 결과는 문서에 없다.
+- **LSAK 구현이 실제로 `CA-04` 경계 밖인지 가르지 못한다.** `K̃_L`, `K̃_S`의 구체적 정의, 커널 종류, 차원, bandwidth, 정규화, readout 경로가 문서에 없다. 범용 비선형 커널이 선형 Ridge readout을 대체하지 않는지도 코드 수준에서 확인되지 않았다.
+- **LSAK가 gate ①·gate ②를 통과하는지, Primary 7 대응 Δ가 `+0.3%p`를 넘는지는 가르지 못한다.** LSAK의 max |r|, effective rank, 단독 AUROC, paired Δ, Gram 구조·과적합 진단은 문서에 없다.
+- **CA-R1 6개 강도 변형이 사전 고정된 후보 집합인지, `CA-09` 경계 밖인지, Dual Ridge 계수가 context 규모 90~261에서 안정적으로 결정되는지는 가르지 못한다.** 6개 변형의 상호 상관, family-level 선택 규칙, 경계 판정, 계수 분산, Primary 7 paired Δ는 문서에 없다.
+- **Primary 7 개선이 SEAL 10 ABMIL `0.7266` 초과로 전이되는지는 가르지 못한다.** `PROJECT.md` §1은 Primary 7 개선이 hold-out 개선을 보장하지 않는다고 명시하고, SEAL 10은 현재 유보 상태다.
+
+## 실행 무효 (실행·계측 결함으로 판단 불가)
+- 현재 문서에서 **이미 확정된 실행 무효는 없다.** 다만 다음 실행은 계측·설계 결함으로 인해 판단 불가 또는 무효가 된다.
+- **파일럿 gap을 사전 규칙 없이 선택 근거로 써서 Balanced GMM을 고정하고, 같은 파일럿 값으로 GF margin을 해석하는 실행은 무효다.** 단일 seed·단일 초기화, 불확실성 미측정, validation 자연 비율 지배, 선택 규칙 사전 고정 미확인, train/val/Primary 7 disjointness 미확인이 결합하면, 그 선택은 독립 검증이 아니라 선택된 GMM의 후속 관측이 된다.
+- **`CA-14`·학습 파라미터 0개 경계가 사용자 결정되지 않은 상태에서 GF를 공식 7-branch 승격 후보로 올리는 실행은 무효다.** 고정 외부 GMM이 활성 경로에 허용되는지 미판정인 상태에서 승격 심사를 하면, 프로젝트 정체성 위반 가능성으로 판단 자체가 성립하지 않는다.
+- **LSAK 또는 CA-R1 다중 강도 후보를 새 RU 카드·사전 등록·경계 판정 없이 착수하는 실행은 무효다.** 현재 목표는 RU-97이고, 후속 방향은 미확정이며, CA-R1 §3-J는 사용자 판정 대기 상태다. 예산·선택 이력·경계 승인 없이 Primary 7 margin에 접촉하면 탐색과 확증이 분리되지 않는다.
+- **`SCREEN_ONLY=1` 오염 검사 상수 불일치, 공식 baseline 재계산, fold mismatch, GMM responsibility/sklearn/NaN 검증 미통과 상태에서 후보 성능을 판단하는 실행은 무효다.** `PROJECT.md` §3.4·§4의 고정 기준과 paired Δ 설계가 깨지면 승격 비교가 독립 비교가 아니다.
+- **SEAL 10 결과·라벨·성능을 후보 선택에 쓰는 실행은 무효다.** SEAL 10은 최종 hold-out이며, 방향 선택에 사용되면 `PROJECT.md` §3.1의 hold-out 금지를 위반한다.
+
+## 좌석 공백 (기권·실패로 빠진 관점)
+- 없음.
+
+## 다음 행동 (권한 등급과 함께)
+1. **[사용자 결정] GF 고정 외부 GMM의 `CA-14`·학습 파라미터 0개 경계를 결정한다.**  
+   - 허용되면 GF 탐색은 사전 등록된 GMM manifest와 함께 진행할 수 있다.  
+   - 허용되지 않으면 GF는 공식 후보 경로에서 제외되고, Primary 7 GF margin 실행은 중단해야 한다.
+2. **[사용자 결정] 현재 목표 슬롯을 확정한다.**  
+   - GF가 허용되면 현재 목표인 RU-97 GF 단독 Fisher Vector 탐색을 유지한다.  
+   - GF가 허용되지 않으면, 다음 후보로 LSAK gate ①을 새 RU로 전환하는지 사용자 승인을 받는다. LSAK는 `CA-04` 경계 밖이고 gate ①이 라벨 무관·저비용이므로 문서상 저촉이 적은 후보다.  
+   - CA-R1 다중 강도 후보는 §3-J 사용자 경계 판정 전에는 착수 대상에서 제외한다.
+3. **[Reasoning 확정] Primary 7 성능 조회 전에 선택 규칙을 사전 등록한다.**  
+   - GF를 계속하면: GMM 정책 선택 규칙, M=8·16·32에 공통 적용할 표본 정책, seed/초기화, `max_iter`, component alignment, GMM pickle·`X_raw.npz`·`X_balanced.npz`·`val.npz` manifest hash, 중단 조건을 Primary 7 margin 접근 전에 고정한다.  
+   - 파일럿 gap `301.83` vs `205.78`을 보고 만든 규칙을 “사전 규칙”으로 소급 적용하지 않는다.  
+   - LSAK를 선택하면: 단일 LSAK 설계(`K̃_L`, `K̃_S`, 차원, bandwidth, 정규화, readout 경로)를 사전 등록하고, gate ① 실행 전후 파라미터 변경을 금지한다.  
+   - CA-R1를 나중에 선택하면: 6개 강도 변형 목록, family-level pass/fail 규칙, 선택 이력 기록 방식을 사전 등록한다.
+4. **[실행자] 평가 무결성 검증을 먼저 수행한다.**  
+   - GMM 학습 표본과 validation 30,000 patch가 patch/slide ID 수준에서 중복되지 않는지 확인한다.  
+   - GMM 학습·검증 데이터가 Primary 7 fold manifest와 겹치지 않는지 확인한다.  
+   - SEAL 10 slide ID 교차 감사는 결과·라벨·성능을 열람하지 않고, 사용자 승인된 무결성 감사 절차로만 수행한다.  
+   - HDF5 매니페스트·파일 수·patch 수·checksum 또는 content hash, 전처리 버전, UNI2 feature 정규화·whitening·scaling 여부를 기록한다.  
+   - GMM의 responsibility 합 오차 `1e-4` 이하, sklearn 대비 component 불일치 없음, NaN/Inf 없음을 확인한다.  
+   - `SCREEN_ONLY=1` 실행 후 SMAD4 `0.4421`, PBRM1 `0.5553`과 소수 4자리까지 일치하는지 확인한다.
+5. **[실행자] 승인된 경로만 실행한다.**  
+   - GF 경로: RU-97 범위에서 `M=8·16·32` 단독 성질만 측정하고, 원시 margin과 component 점유율을 누락 없이 저장한다. 채택·승격·성능 향상 주장은 하지 않고 탐색 기록으로만 종료한다.  
+   - LSAK 경로: `SCREEN_ONLY=1`로 gate ①만 실행한다. max |r| > 0.6 또는 8-branch effective rank < 4.02이면 성능을 조회하지 않고 종료한다. 통과 시에만 gate ②와 Primary 7 50-fold 대응 Δ로 넘어간다.  
+   - 승격 판단은 공식 7-branch 대비 paired Δ_macro `+0.3%p` 이상, 과제 군집 CI·SE·sign agreement·악화 과제 전량 보고를 함께 수행한다.
+6. **[보류] SEAL 10 개봉과 최종 목표 판정은 보류한다.**  
+   - SEAL 10은 최종 hold-out 한 번의 개봉으로만 사용한다. 현재 후보 선택·GMM 선택·강도 선택·브랜치 선택에 SEAL 10을 쓰지 않는다.
+
+## 하지 말 것 (이유와 함께)
+- **SEAL 10 결과를 개선 방향 선택에 쓰지 말 것.** `PROJECT.md` §3.1은 SEAL 10을 최종 hold-out으로 고정하고 선택·튜닝에 어떤 형태로도 사용 금지한다.
+- **파일럿 Raw/Balanced gap을 보고 만든 규칙으로 Balanced GMM을 고정하지 말 것.** 단일 seed·단일 초기화, 불확실성 미측정, validation 자연 비율 지배, 선택 규칙 사전 고정 미확인으로 인해 같은 파일럿 값으로 고른 뒤 Primary 7에서 확인하는 방식은 선택 편향이 된다.
+- **GMM disjointness·매니페스트·전처리·수치 검증 전 GF margin 성능 주장을 하지 말 것.** 학습·검증·평가 자료 중복이나 데이터 무결성 결함이 있으면 이후 Primary 7 Δ와 SEAL 10 목표 거리 판단이 모두 오염된다.
+- **`CA-14` 사용자 결정 전 GF를 공식 후보 승격 심사에 올리지 말 것.** 고정 외부 GMM이 학습 파라미터 0개 정체성에 허용되는지 미판정인 상태에서 승격 심사는 프로젝트 경계 위반 가능성이 있다.
+- **gate ① 실패 후 성능을 조회하지 말 것.** `PROJECT.md` §5는 gate ① 탈락 시 성능을 조회하지 않고 종료하도록 고정한다.
+- **LSAK 또는 CA-R1를 새 RU·사전 등록·경계 판정 없이 착수하지 말 것.** 현재 목표는 RU-97이고, 후속 방향은 미확정이며, CA-R1 §3-J는 사용자 판정 대기 상태다.
+- **7-branch 승격의 CI 0 포함, sign agreement `4/7`, 악화 과제 3건을 무시하고 hold-out 도달로 해석하지 말 것.** 승격 기준 충족과 통계적 확인·hold-out 전이는 별개다.
+- **M=8 파일럿에서 고른 표본 정책을 M=16·32에서 다시 성능을 보며 재선택하지 말 것.** M sweep에서 “M 효과”와 “M=8에서 선택된 표본 정책 효과”가 혼동되면 선택 편향이 된다.
+- **Primary 7 margin에 접근하면서 선택 이력을 기록하지 않는 실행을 하지 말 것.** `PROJECT.md` §4.1은 탐색·후보 선별과 성능 확증을 분리하고, 자료 접근과 선택 이력을 기록할 것을 요구한다.
+- **좌석 동의 수를 근거로 쓰지 말 것.** 표결은 증거가 아니며, 판단은 문서에 있는 수치·절차·결정 이력·계측 결함으로만 한다.

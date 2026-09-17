@@ -1,0 +1,79 @@
+{
+  "round_id": "C-20260917-2",
+  "question": "새 Primary 7 실측이 나왔다. 배경 코호트에서 적합한 GMM에 대해 Primary 7 patch의 유효 성분이 약 1.0으로 붕괴하며, 성분 수를 8→16→32로 늘려도 거의 오르지 않는다. 코호트 표준화+PCA 화이트닝(d256)은 이 붕괴를 해소했으나(4.19~5.74) macro는 0.5890으로 0.5839와 사실상 같았다. 질문: (1) 이 붕괴는 무엇을 뜻하는가, 기전은 무엇인가. (2) 기전 지표가 고쳐졌는데 성능이 안 움직인 것은 무엇을 시사하는가. (3) 이것이 SEAL 10에서 ABMIL 0.7266을 넘는 목표에 대해 알려주는 바는 무엇인가. 개선 근거로 쓸 수 있는 결과는 Primary 7 뿐이다.",
+  "ru_type": "진단",
+  "prefixed_criteria": "",
+  "composition_rationale": "진단 유형이다. 쟁점이 '무엇을 할까'가 아니라 '이 관측이 무엇을 뜻하는가'이므로 이론(T) 좌석을 핵심으로 두고 temp를 낮췄다. 유효 성분 붕괴가 실제 현상이 아니라 component alignment artifact이거나 계측 결함일 가능성이 가장 큰 대안 설명이므로 감사(A)를 넣었다. 일반화(G)는 제외했다 — 이번 질문은 분포 밖 전이가 아니라 현재 관측의 해석이고, 1회차에서 이미 hold-out 전이 미확인을 반박 항목으로 정리했다. 실측(M)도 제외했다: 해당 실험이 GPU 4에서 진행 중이라 좌석에 추정을 시키는 것보다 실제 결과를 기다리는 편이 낫다. 1회차와 달리 좌석을 5개로 줄여 비용을 낮췄다.",
+  "max_authority": "T1",
+  "convener": "Claude Code (claude-opus-5)",
+  "state_documents": [
+    "docs/PROJECT.md",
+    "talks/reports/2026-09-17_ru97_gf_primary7.md",
+    "docs/closed_axes.md"
+  ],
+  "max_tokens_per_seat": 32000,
+  "max_total_calls": 14,
+  "seats": [
+    {
+      "name": "P1",
+      "archetype": "P",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.9,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md",
+        "docs/closed_axes.md"
+      ]
+    },
+    {
+      "name": "R1",
+      "archetype": "R",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.5,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md",
+        "docs/closed_axes.md"
+      ]
+    },
+    {
+      "name": "T1",
+      "archetype": "T",
+      "endpoint": "http://127.0.0.1:8003/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.4,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md",
+        "docs/closed_axes.md"
+      ]
+    },
+    {
+      "name": "A1",
+      "archetype": "A",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md",
+        "docs/closed_axes.md"
+      ]
+    },
+    {
+      "name": "S1",
+      "archetype": "S",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "talks/reports/2026-09-17_ru97_gf_primary7.md",
+        "docs/closed_axes.md"
+      ]
+    }
+  ],
+  "note": "SEAL 10 결과 수치 미입력 (D-047). ABMIL 0.7266은 공개 기준선이며 목표 사양이다."
+}
