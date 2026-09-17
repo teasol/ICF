@@ -1,0 +1,91 @@
+{
+  "round_id": "C-20260918-8",
+  "question": "절차 논의를 세 회차 연속했다. 이번에는 연구 질문으로 돌아간다.\n\n문서에 기록된 사실: 공식 7-branch의 유효 랭크는 3.52 / 7 (50.3%)다. 즉 7개 브랜치가 만드는 정보는 실질적으로 3.5개 차원에 불과하다. Primary 7 macro는 0.6227이고, 목표인 SEAL 10 ABMIL은 0.7266이다. 7-branch 승격 시 과제 군집 95% 구간은 [-1.15%p, +2.28%p]로 0을 포함했고 sign agreement는 4/7이었으며, Histologic_Grade -1.08%p, progression_regression -1.13%p, PBRM1 -1.44%p 세 과제가 악화됐다.\n\n질문: (1) 유효 랭크 3.52/7이라는 중복 구조는 현재 접근의 성능 상한에 대해 무엇을 말하는가? 브랜치를 더 붙이는 방향이 왜 수확 체감을 보이는지 이 수치로 설명되는가, 아니면 설명되지 않는가? (2) 세 과제가 일관되게 악화되는 것은 무엇을 시사하는가 - 집계 방식의 문제인가, 브랜치 자체의 문제인가, 과제 특이성인가? (3) 남은 격차 약 0.10을 메우려면 무엇이 달라져야 하는가. 브랜치 추가로 메울 수 있는 크기인가? (4) 유효 랭크를 올리는 것과 성능을 올리는 것은 같은 문제인가? RU-97에서 유효 성분을 1.0에서 10.9로 올렸지만 macro는 움직이지 않았다는 실측이 있다.\n\n문서에 없는 수치를 지어내지 말라. 성능 관측을 기전 입증으로 바꾸지 말라. SEAL 10 결과는 개선 방향 선택에 쓸 수 없다(D-047).",
+  "ru_type": "탐색",
+  "prefixed_criteria": "",
+  "composition_rationale": "5·6·7회차가 연속으로 통계 절차를 다뤘다. 절차는 필요하지만 그것만으로는 목표에 가까워지지 않으므로 연구 질문으로 되돌린다. 제안(P)을 다시 높은 온도(0.9)로 두고, 일반화(G)를 넣었다 - 질문이 '남은 격차를 무엇이 메우는가'이고 그 답은 분포 밖 전이와 직결된다. 이론(T)은 유효 랭크와 성능 상한의 관계라는 이 회차의 핵심을 맡는다. 감사(A)는 유효 랭크 3.52와 악화 과제 3건의 계측 근거가 실제로 문서에 있는지 점검한다 - 이 회차는 문서 수치를 해석하는 회차라 인용 오류가 가장 큰 위험이다. 실측(M)은 제외: GPU 4가 5-branch 앵커 검증에 쓰이고 있다.",
+  "max_authority": "T1",
+  "convener": "Claude Code (claude-opus-5)",
+  "state_documents": [
+    "docs/PROJECT.md",
+    "docs/closed_axes.md",
+    "docs/current_status.md"
+  ],
+  "max_tokens_per_seat": 32000,
+  "max_total_calls": 18,
+  "seats": [
+    {
+      "name": "P1",
+      "archetype": "P",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.9,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "R1",
+      "archetype": "R",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.5,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "T1",
+      "archetype": "T",
+      "endpoint": "http://127.0.0.1:8003/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.4,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "G1",
+      "archetype": "G",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.3,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "A1",
+      "archetype": "A",
+      "endpoint": "http://127.0.0.1:8003/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "S1",
+      "archetype": "S",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    }
+  ],
+  "note": "연구 질문 회차. SEAL 10 수치 미입력 (D-047). ABMIL 0.7266은 공개 목표 사양."
+}
