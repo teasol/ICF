@@ -335,7 +335,7 @@ $PYTHON scripts/docs/ru.py close --id RU-xx
 # 1. 환경 로드
 source scripts/node_env.sh && echo "$PYTHON / NGPU=$NGPU"
 
-# 2. 회귀 스위트 (159 tests, ~35s, CPU) — nexgem에서는 sbatch로 node1~5에, s1에서는 직접
+# 2. 회귀 스위트 (189 tests, ~35s, CPU) — nexgem에서는 sbatch로 node1~5에, s1에서는 직접
 bash scripts/run_tests.sh
 
 # 3. 단일 모듈
