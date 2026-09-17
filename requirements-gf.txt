@@ -1,0 +1,4 @@
+# Optional GF(GMM-based Fisher Vector) dependency.
+# Installed into ICF/.venv on 2026-09-16 for the background-GMM sampling comparison:
+#   VIRTUAL_ENV=$PWD/.venv uv pip install -r requirements-gf.txt
+scikit-learn==1.8.0

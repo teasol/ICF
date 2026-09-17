@@ -35,6 +35,21 @@ if [[ $# -lt 2 ]]; then
     exit 1
 fi
 
+resolve_project_dir() {
+    # Project roots differ per host (D-030). Resolve the first existing candidate
+    # instead of trusting a hard-coded absolute path.
+    local name="$1"
+    local cand
+    for cand in "$HOME/$name" "/home/kimds/$name" "/NHNHOME/WORKSPACE/kimds/$name"; do
+        if [[ -d "$cand" ]]; then
+            echo "$cand"
+            return 0
+        fi
+    done
+    echo "Error: project directory for '$name' not found on this host." >&2
+    return 1
+}
+
 RAW_TARGET="$1"
 shift
 PROMPT="$*"
@@ -67,7 +82,7 @@ ENGINE="claude"
 case "$TARGET" in
     # ---- ICF Project ----
     orca)
-        PROJECT_DIR="/home/kimds/ICF"
+        PROJECT_DIR="$(resolve_project_dir ICF)"
         ENGINE="codex"
         SESSION_ID="01a09b39-5d49-71a2-a71d-456a9745badc"
         MODEL="gpt-6-astra"
@@ -75,7 +90,7 @@ case "$TARGET" in
         TOKEN_FILE="$HOME/.gittoken_icf"
         ;;
     owl)
-        PROJECT_DIR="/home/kimds/ICF"
+        PROJECT_DIR="$(resolve_project_dir ICF)"
         ENGINE="claude"
         SESSION_ID="87f23128-4c12-4bb8-ab44-7a0c5657c881"
         MODEL="claude-sonnet-5"
@@ -83,7 +98,7 @@ case "$TARGET" in
         TOKEN_FILE="$HOME/.gittoken_icf"
         ;;
     lime)
-        PROJECT_DIR="/home/kimds/ICF"
+        PROJECT_DIR="$(resolve_project_dir ICF)"
         ENGINE="claude"
         SESSION_ID="a63a3b5d-ac45-4c84-8ff4-d75872ac585b"
         MODEL="claude-sonnet-5"
@@ -93,7 +108,7 @@ case "$TARGET" in
 
     # ---- TIRANOS Project ----
     kite)
-        PROJECT_DIR="/home/kimds/TIRANOS"
+        PROJECT_DIR="$(resolve_project_dir TIRANOS)"
         ENGINE="claude"
         SESSION_ID="797e15f4-b8e4-44a2-a27f-6694096c842c"
         MODEL="claude-sonnet-5"
@@ -101,7 +116,7 @@ case "$TARGET" in
         TOKEN_FILE="$HOME/.gittoken_tiranos"
         ;;
     pear)
-        PROJECT_DIR="/home/kimds/TIRANOS"
+        PROJECT_DIR="$(resolve_project_dir TIRANOS)"
         ENGINE="claude"
         SESSION_ID="71385ef1-b993-4bd6-a39f-3fa24bd39b80"
         MODEL="claude-sonnet-5"

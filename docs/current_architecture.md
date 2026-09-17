@@ -1,6 +1,6 @@
 # Current Architecture Specification
 
-**Last updated**: `2026-09-09`
+**Last updated**: `2026-09-16`
 
 > **정본 분리.** 이 문서는 **브랜치 정의와 수식**의 정본이다. 성능 수치·비교 기준·승격 기준은
 > 여기서 선언하지 않는다 — [`PROJECT.md`](PROJECT.md)를 본다.
@@ -182,6 +182,32 @@ $q_{10}/q_{50}$ · $q_{90}/q_{50}$ · $q_{99}/q_{50}$ · $\text{IQR}/q_{50}$** 8
 - BS는 척도 통계라 백색화·표준화를 쓰지 않으므로 SH·SJ와 달리 **fp32 강제 계약이 없다**.
   단일 토큰 슬라이드(N = 1)에서도 NaN을 내지 않는다.
 
+### 2.9. GF — 고정 배경 GMM Fisher Vector (단독 탐색 전용)
+
+GF는 공식 집계 pool에 연결하지 않는 독립 실험 브랜치다. `COMET`·`MUT-HET-RCC`·`PANDA`의
+UNI2 feature로 한 번 적합한 diagonal-covariance GMM을 모든 fold에서 같은 상수로 사용한다.
+세 배경 cohort는 Primary 7 및 SEAL 10과 분리되어 있고, GMM 적합에는 label을 쓰지 않는다.
+슬라이드별 descriptor만 고정 GMM으로 한 번 계산하며 fold마다 context label로 class-balanced
+linear ridge readout만 다시 푼다.
+
+component `k`의 responsibility를 `gamma_nk`, weight를 `pi_k`, 평균·표준편차를
+`mu_k`·`sigma_k`라 하면 mean 및 variance Fisher gradient는 다음과 같다.
+
+$$G_{\mu,k}=\frac{1}{N\sqrt{\pi_k}}\sum_n\gamma_{nk}\frac{x_n-\mu_k}{\sigma_k}$$
+
+$$G_{\sigma,k}=\frac{1}{N\sqrt{2\pi_k}}\sum_n\gamma_{nk}
+\left(\frac{(x_n-\mu_k)^2}{\sigma_k^2}-1\right)$$
+
+두 block을 이어 `2MD`차원 벡터로 만든 뒤 signed power normalization
+`sign(z)|z|^alpha`(기본 `alpha=0.5`)와 전역 L2 normalization을 적용한다. 구현은
+`src/models/branches/gf.py`, 배경 GMM 빌더는 `scripts/data/build_gf_background_gmm.py`, 단독
+평가는 `scripts/run_gf_standalone.py`다. `(N,M,D)` tensor를 만들지 않고 `S0`·`S1`·`S2`
+충분통계를 patch chunk 단위로 누적하며, bf16 autocast 밖의 fp32에서 계산한다.
+
+**사용자 결정(`D-045`, 2026-09-16)**: GF는 게이트와 승격 심사를 건너뛴 단독 탐색이다.
+따라서 이 경로의 결과는 공식 7-branch와 비교하거나 채택·승격을 주장하는 근거로 쓸 수 없다.
+SEAL 10은 열지 않으며 기전은 별도 증거 전까지 `기전 미확인`이다.
+
 ---
 
 ## 3. Head 마진 결합: Trimmed Mean Voting
@@ -264,4 +290,3 @@ src/models/
 4. **골든 참조 보존**: 기존 레거시 `ru90_shape_triple` 예측값(`predictions/pathobench_*_ru90_shape_triple_official50_bf16.pt`)은 역사적 영구 참조 파일로 보존된다.
 
 [작성자: Platform Agent / Gemini 3.8 Flash (effort: high) · 2026-09-12 17:55 KST]
-

@@ -2122,3 +2122,33 @@ F3(대조군)만 유의: 새 지문의 기여가 없다는 뜻이므로 Task-Geo
 - **확인 필요 사항 및 한계 (Uncertainties)**: ① 층 2는 단일 과제(progression_regression) 50 fold, 공식 trimmed_mean 1종에서 확인했다. 등가성은 정확 산술이므로 과제 확대가 증거력을 더하지 않지만, 나머지 4개 집계(soft_voting·hard_gated·adaptive_trimmed·context_loo)에서 형상 계열이 pool에 들어가는 것은 회귀 테스트로만 고정됐고 실측 평가로는 확인되지 않았다. ② m_sh의 세대 간 차이(max|diff| 6.5e-2)의 기전은 미확인이다. 집계량에는 전파되지 않았으나 개별 과제 Δ는 최대 0.0033 달랐다. 상관이 낮다는 것과 집계량이 안정적이라는 것은 별개 사실이며 전자가 후자를 함의한다고 주장하지 않는다. ③ AUROC 추정기가 두 개다 — test_pathobench 내부와 branch_diagnostics.auroc가 동일 입력에서 +8.55e-05 차를 낸다. 짝지은 Δ에서 상쇄되므로 판정에는 영향이 없으나, 절대 AUROC를 두 출처에서 섞어 인용하면 소수 4자리에서 어긋난다. 어느 쪽이 옳은지는 판정하지 않았다. ④ 모든 판정은 hold-out 미검증이다(PROJECT.md §3.1). ⑤ Trimmed Mean은 최저·최고 1개씩 절사하므로 브랜치 수가 5에서 6·7로 늘면 절사 비율이 바뀐다. 이 집계 규칙 변화가 Δ에 기여한 몫은 RU-89와 마찬가지로 분리하지 않았다. ⑥ Histologic_Grade·progression_regression·PBRM1 3과제에서 형상 계열이 일관되게 해로운 이유는 기전 미확인이다. RU-89와 동일한 3과제이며 방향도 같다.
 
 ---
+
+### RU-97. GF 단독 Fisher Vector의 과제별 성질 탐색
+
+- **일자 (Date)**: `2026-09-16` ~ `2026-09-16`
+- **커밋 범위**: - (`b3928268` ... `b3928268`)
+- **작업 유형**: `exploratory`
+- **질문 (Question)**: 고정 외부 배경 GMM에 대한 improved Fisher Vector를 단독 closed-form ridge branch로 읽을 때 Primary 7의 과제별 AUROC와 component 점유 양상은 어떠하며, M=8·16·32에서 그 양상이 어떻게 달라지는가? 이 결과는 GF 내부 탐색에만 쓰고 공식 7-branch와 비교하거나 채택·승격 근거로 쓰지 않는다.
+- **가설 (Hypothesis)**: Balanced 배경 GMM을 쓰면 Primary 7 cohort가 단일 component로 완전히 붕괴하지 않고 둘 이상의 component를 사용하며, GF 단독 AUROC는 과제별로 이질적일 것이다. M 증가가 AUROC를 단조 개선할 것이라고 사전 가정하지 않는다. 기전은 미확인으로 둔다.
+- **판정 기준 (Criteria, 사전 고정)**: 탐색 완료의 실행 유효 조건은 (1) sklearn과 torch responsibility argmax 일치 및 유한값, (2) 모든 slide descriptor 유한값·L2 정규화, (3) 각 유효 fold의 두 클래스 존재, (4) M별 Primary 7 전 과제 50-fold 결과와 component 점유율을 누락 없이 저장하는 것이다. 이는 성공 컷이나 채택 기준이 아니다. 먼저 M=8 한 과제·1 fold smoke를 통과한 뒤 M=8·16·32 Balanced GMM을 각각 단독 평가한다.
+- **예산 / 중단 조건**: NEXGEM 직접 실행: B200 GPU 1장(cuda:4), GF 평가 합계 최대 4 GPU-hour. 이미 시작된 M=16·32 CPU GMM 적합은 OMP/MKL/OpenBLAS 각 8 threads, 기존 3M 표본과 max_iter=100 범위에서만 계속한다. SEAL 10 접근 금지. / NaN/Inf descriptor 또는 margin, responsibility 합 오차가 1e-4 초과, sklearn 대비 component argmax 불일치, 입력 feature/공식 fold 누락, GPU OOM, 단일 M 평가가 2시간 또는 총 4 GPU-hour를 넘으면 즉시 중단하고 해당 실행을 무효로 기록한다. M=16·32 GMM이 수렴하지 않으면 그 M의 GF 평가는 시작하지 않는다.
+- **실험 및 변경 (Experiment)**: NEXGEM에서 Balanced fixed GMM별로 scripts/run_gf_standalone.py를 cuda:4에서 실행했다. 각 slide의 full UNI2 feature로 improved Fisher Vector를 한 번 계산하고 공식 50 fold마다 class-balanced linear ridge를 풀었다. M=8 smoke(ARID1A 1 fold) 뒤 M=8·16·32를 각각 Primary 7 전 과제 50 folds로 실행했다. M=16 GMM은 Raw 39/Balanced 32 iterations, M=32는 Raw 84/Balanced 55 iterations에서 수렴했다. descriptor 계산 실측 합은 M=8 339.0초, M=16 86.1초, M=32 418.9초였고 전체 GPU 예산 4시간 이내였다.
+- **관측 결과 (Observations)**: M=8 macro 0.5755116225, 과제별 ARID1A 0.3281 / Grade 0.6462 / KEAP1 0.6368 / KRAS 0.7826 / SMAD4 0.4332 / progression 0.6975 / PBRM1 0.5042. M=16 macro 0.5866248370, 과제별 0.3625 / 0.6562 / 0.6563 / 0.7062 / 0.5079 / 0.7509 / 0.4664. M=32 macro 0.5878334391, 과제별 0.3477 / 0.6735 / 0.6722 / 0.7134 / 0.4839 / 0.7671 / 0.4571. 각 실행 350 folds 전량을 원시 margin에서 독립 재계산해 summary와 1e-7 이내 일치했다. M=16 대비 M=32 개선은 4/7 과제이며 ARID1A·SMAD4·PBRM1은 낮아졌다. effective components 범위는 M=8 1.03~1.75, M=16 1.10~2.50, M=32 1.17~2.53으로 대부분 component가 사용되지 않았다. 기전 미확인.
+- **결정 (Decision)**: 탐색 완료. GF 단독은 과제별 방향이 크게 이질적이고 component 수 증가가 과제별 AUROC를 단조 개선하지 않았다. M=16에서 M=32로 descriptor 차원은 두 배가 됐지만 macro 차이는 +0.0012086021이며, 이는 탐색 관측이지 효과 판정이 아니다. D-045에 따라 공식 7-branch와 비교하거나 채택·승격을 주장하지 않는다. SEAL 10은 미열람·미검증이다.
+- **결과별 후속 행동**: 유효 실행이면 M별 과제별 fold-mean AUROC·50개 fold 전량·fold>0.5 수·component 점유/effective components를 GF 내부 탐색 기록으로 남기고, 공식 7-branch 비교·채택 주장은 하지 않는다. smoke 또는 유효성 검사가 실패하면 본실행을 보류하고 사양을 바꾸지 않은 구현 오류만 수정·재검증한다. GMM 미수렴이나 예산 초과면 해당 M은 판별 불가로 종료한다.
+- **원문 근거 (Evidence)**:
+  - predictions/gf_standalone/gf_m8_balanced_per_fold.pt
+  - predictions/gf_standalone/gf_m8_balanced_summary.json
+  - predictions/gf_standalone/gf_m16_balanced_per_fold.pt
+  - predictions/gf_standalone/gf_m16_balanced_summary.json
+  - predictions/gf_standalone/gf_m32_balanced_per_fold.pt
+  - predictions/gf_standalone/gf_m32_balanced_summary.json
+  - logs/gf_standalone/m8_balanced.log
+  - logs/gf_standalone/m16_balanced.log
+  - logs/gf_standalone/m32_balanced.log
+  - /NHNHOME/BASE/kimds/Data/PathoBench/gf_background/fixed_gmm_m16/summary.json
+  - /NHNHOME/BASE/kimds/Data/PathoBench/gf_background/fixed_gmm_m32/summary.json
+- **선행·후속 관계 (Relations)**: 사용자 결정(2026-09-16): PROJECT.md §4~§5 게이트·승격 심사를 건너뛰고 GF 단독 탐색으로 한정. 선행 GF 배경 GMM Raw/Balanced 진단 및 fixed_gmm 산출물.
+- **확인 필요 사항 및 한계 (Uncertainties)**: 외부 고정 GMM이 0-parameter 정체성 및 CA-14 경계 밖인지 미판정이다. 단일 seed GMM이며 GMM 적합 불확실성은 측정하지 않는다. Primary 7은 탐색에 사용되므로 독립 성능 확증이 아니며 SEAL 10은 미열람·미검증이다.
+
+---
