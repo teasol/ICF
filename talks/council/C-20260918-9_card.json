@@ -1,0 +1,79 @@
+{
+  "round_id": "C-20260918-9",
+  "question": "계측 결함이 확인됐다. 이 회차는 그 파급 범위를 정한다.\n\n확인된 사실(첨부 보고서 §3~§6): (1) ICF_SHAPE_SCREEN_ONLY 환경변수는 비테스트 코드 어디에서도 읽히지 않는다. (2) ICF_FIXED_HEAD_{BS,SH,SJ}_WEIGHT를 1.0에서 0.0으로 바꿔도 SMAD4 0.4661, PBRM1 0.5408로 소수 4자리까지 출력이 동일하다. 두 실행은 결정론적으로 같으므로 잡음이 아니다. (3) 문서에 고정된 5-branch 오염 검사 앵커 SMAD4 0.4421, PBRM1 0.5553은 현재 코드로 재현되지 않는다. (4) 재생성 macro 0.6226은 5-branch 0.6171이 아니라 7-branch 0.6227에 맞는다.\n\n질문: (1) 이 결함이 과거 결과 중 무엇을 무효화하는가? PROJECT.md가 기록한 승격 판정(D-042, 7-branch 채택)과 게이트 1 스크리닝 결과 중 어디까지 영향을 받는가? (2) 무효화되지 않고 살아남는 것은 무엇인가? 무엇을 근거로 살아남는다고 말하는가? (3) 이 결함을 확정하려면 코드에서 무엇을 확인해야 하는가 - 확인 항목을 구체적으로 나열하라. (4) 오염 검사를 다시 세운다면 무엇을 검사 대상으로 삼아야 하는가. 값 앵커(AUROC 4자리 일치)가 애초에 적절한 검사였는가? (5) 앵커가 재현되지 않는 원인이 'knob이 무효'가 아니라 다른 것일 가능성은 무엇인가.\n\n주의: 보고서 §6의 '러너가 항상 7-branch를 산출한다'는 추론이지 확인된 사실이 아니다. 확인된 것과 추론을 섞지 말라. 문서에 없는 수치를 지어내지 말라.",
+  "ru_type": "진단",
+  "prefixed_criteria": "",
+  "composition_rationale": "계측 결함의 파급 범위 판정이므로 감사(A)를 첫 좌석에 두고 온도를 최저로 했다. 이 회차의 핵심 위험은 결함을 과대 해석해 과거 결과를 전부 무효라고 선언하거나, 반대로 축소해 승격 판정을 그대로 두는 것이다. 반증(R)이 양쪽을 다 공격하게 한다. 이론(T)은 '값 앵커가 애초에 적절한 검사였는가'라는 설계 질문을 맡는다. 제안(P)은 대체 검사 설계를 내되 온도를 0.7로 낮췄다 - 창의성보다 실행 가능성이 중요하다. 일반화(G)와 실측(M)은 제외: 질문이 내부 계측 정합성이고 GPU는 유휴지만 확인 항목이 정해지기 전에는 실행할 것이 없다.",
+  "max_authority": "T1",
+  "convener": "Claude Code (claude-opus-5)",
+  "state_documents": [
+    "docs/PROJECT.md",
+    "docs/current_status.md",
+    "talks/reports/2026-09-18_ru90_baseline_regen.md"
+  ],
+  "max_tokens_per_seat": 32000,
+  "max_total_calls": 14,
+  "seats": [
+    {
+      "name": "A1",
+      "archetype": "A",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/current_status.md",
+        "talks/reports/2026-09-18_ru90_baseline_regen.md"
+      ]
+    },
+    {
+      "name": "R1",
+      "archetype": "R",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.5,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/current_status.md",
+        "talks/reports/2026-09-18_ru90_baseline_regen.md"
+      ]
+    },
+    {
+      "name": "T1",
+      "archetype": "T",
+      "endpoint": "http://127.0.0.1:8003/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.4,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/current_status.md",
+        "talks/reports/2026-09-18_ru90_baseline_regen.md"
+      ]
+    },
+    {
+      "name": "P1",
+      "archetype": "P",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.7,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/current_status.md",
+        "talks/reports/2026-09-18_ru90_baseline_regen.md"
+      ]
+    },
+    {
+      "name": "S1",
+      "archetype": "S",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/current_status.md",
+        "talks/reports/2026-09-18_ru90_baseline_regen.md"
+      ]
+    }
+  ],
+  "note": "계측 결함 파급 범위 진단. SEAL 10 수치 미입력 (D-047)."
+}

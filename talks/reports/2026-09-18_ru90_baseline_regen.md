@@ -113,3 +113,52 @@
 `hold-out 미검증` 상태로만 기술한다.
 
 [작성자: Claude Code / 소집자 / claude-opus-5 (effort: 미확인) · 2026-09-18 03:15 KST]
+
+## 8. 코드 확인 결과 — §6의 추론은 틀렸고, 실제 결함은 더 넓다 (2026-09-18 03:30)
+
+§6은 "러너가 항상 7-branch를 산출할 가능성"을 추론으로 적었다. **코드를 읽어 확인한 결과
+그 추론은 틀렸다.** 실제는 반대다.
+
+### 확인된 사실 (모두 코드 대조)
+
+1. **`src/`는 환경변수를 하나도 읽지 않는다.** `grep -rln "os.environ\|getenv" --include="*.py" src/`
+   결과가 **0개 파일**이다.
+2. **`scripts/eval_seal_tasks.sh`에 `ICF_` 참조가 0건이다.**
+3. **`scripts/evaluate_pure.py`의 `ICF_SHAPE_SCREEN_ONLY` 언급은 독스트링 1줄뿐**(223행)이며
+   코드에서 읽지 않는다.
+4. **`scripts/eval_v121.sh`는 정의상 5-branch arm**이다(머리말: `CV + BM + BD + QA + DS, CT=OFF`).
+   `icf_arm_v121()`은 `icf_arm_v120` 호출 뒤 `ICF_FIXED_HEAD_CT_WEIGHT=0.0`을 export할 뿐이다.
+5. **`src/models/config.py` 기본값이 `weight_sh = 0.0`, `weight_sj = 0.0`, `weight_bs = 0.0`** 이고,
+   사용된 YAML(`train_v98_p1_reverse_1536_1gpu.yaml`)은 브랜치 가중치를 설정하지 않는다.
+
+### 따라서
+
+**실행 스크립트가 export하는 모든 `ICF_*` 환경변수는 평가 코드에 도달하지 않는다.**
+설정 표면 전체가 무효다. `eval_v121.sh`를 거치는 모든 실행은 호출 스크립트가 무엇을
+export하든 **5-branch 구성**이다.
+
+이로부터 세 가지가 따라온다.
+
+- **`run_ru90_shape_triple.sh`는 shape margin을 만들 수 없다.** 이번에 생성한
+  `predictions/pathobench_*_ru90_shape_triple_official50_bf16.pt` 7건은 **공식 7-branch가 아니라
+  5-branch 산출물이며, 공식 태그로 잘못 이름 붙었다.** macro `0.6226`이 7-branch `0.6227`에
+  가까운 것은 **우연**이다.
+- **공식 7-branch 기준선(`0.6227`)을 재현할 경로가 현재 없다.** `SH`/`SJ`를 켜는 문서화된
+  수단이 동작하지 않는다.
+- **5-branch 앵커도 재현되지 않는다.** 현재 5-branch는 SMAD4 `0.4661`, PBRM1 `0.5408`,
+  macro `0.6226`이고 기록값은 `0.4421`, `0.5553`, `0.6171`이다. 이는 설정 표면 결함과
+  **별개의 두 번째 드리프트**다.
+
+### 즉시 따라오는 차단
+
+회차 `C-20260918-6`의 사전 등록 후보는 **공식 7-branch score를 입력으로 요구**한다.
+그 입력을 만들 수 없으므로 **후보는 현재 실행 불가**다. 후보 설계의 결함이 아니다.
+
+### 아직 확인하지 않은 것
+
+- 과거 `ru90_shape_triple` 실행이 **당시에는** shape margin을 포함했는지. 그렇다면 그 뒤에
+  설정 표면이 끊어진 것이고, 언제·어느 커밋에서 끊어졌는지 미확인이다.
+- 5-branch 드리프트의 원인(코드 변경 / 매니페스트 / 전처리 / 수치 정밀도). 미확인.
+- 이 결함이 `D-042` 승격 판정(`+0.56%p`, 7-branch 채택)에 미치는 영향. **판정하지 않았다.**
+
+[작성자: Claude Code / 소집자 / claude-opus-5 (effort: 미확인) · 2026-09-18 03:30 KST]
