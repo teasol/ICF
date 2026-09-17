@@ -89,3 +89,6 @@ results/*
 .harness/
 
 *.pdf
+talks/ops/ticks.jsonl
+talks/ops/state.md
+talks/ops/done/
