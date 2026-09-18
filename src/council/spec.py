@@ -163,6 +163,14 @@ ROUND_ID_RE = re.compile(r"^C-\d{8}-\d+$")
 # nested or renamed path under the same name is still caught.
 WITHHELD_MARKERS = ("seal10", "seal_10", "seal-10")
 
+#: A prior round's report may not be a seat input. Feeding one in made round 11
+#: reproduce round 10's top recommendation almost verbatim, despite the prompt
+#: telling the seats to attack it. Phase 1 isolation only prevents anchoring
+#: *within* a round; across rounds the convener's choice of inputs decides it,
+#: so the rule has to be enforced where cards are validated rather than left in
+#: prose that will be forgotten.
+PRIOR_REPORT_RE = re.compile(r"talks/council/C-[\d-]+/(report|blackboard)\.")
+
 
 @dataclass
 class Seat:
@@ -299,10 +307,15 @@ def validate_card(card: RoundCard) -> list[str]:
 
 
 def _withheld_violations(card: RoundCard) -> list[str]:
-    """Reject any document path that looks like the withheld hold-out set."""
+    """Reject withheld hold-out paths and prior council reports."""
     errors: list[str] = []
     candidates = list(card.state_documents) + [p for s in card.seats for p in s.data_slice]
     for path in candidates:
+        if PRIOR_REPORT_RE.search(path.replace("\\", "/")):
+            errors.append(
+                f"앞선 회차의 보고서를 좌석 입력에 넣을 수 없다: '{path}' "
+                "(회차 간 앵커링 — 쟁점은 소집자가 자기 말로 다시 쓴다)")
+            continue
         lowered = path.lower().replace(" ", "")
         for marker in WITHHELD_MARKERS:
             if marker in lowered:

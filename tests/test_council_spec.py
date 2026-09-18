@@ -141,3 +141,30 @@ class TestVoidRound(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCrossRoundAnchoring(unittest.TestCase):
+    """A prior round's report may not be a seat input.
+
+    Round 11 was given round 10's report with an explicit instruction to attack
+    it, and reproduced its top recommendation almost verbatim. Prose in AGENTS.md
+    did not prevent that; the card validator has to.
+    """
+
+    def test_prior_report_is_rejected(self):
+        card = _card(state_documents=["talks/council/C-20260918-10/report.md"])
+        errors = validate_card(card)
+        self.assertTrue(any("앞선 회차의 보고서" in e for e in errors), errors)
+
+    def test_prior_blackboard_is_rejected_too(self):
+        seats = [_seat("P1", "P"), _seat("R1", "R"), _seat("S1", "S")]
+        seats[0].data_slice = ["talks/council/C-20260917-5/blackboard.json"]
+        card = _card(seats=seats)
+        errors = validate_card(card)
+        self.assertTrue(any("앞선 회차의 보고서" in e for e in errors), errors)
+
+    def test_round_card_of_a_prior_round_is_allowed(self):
+        # The card states the question and composition, not the synthesis, so it
+        # carries no conclusion to anchor on.
+        card = _card(state_documents=["talks/council/C-20260918-10_card.json"])
+        self.assertEqual(validate_card(card), [])
