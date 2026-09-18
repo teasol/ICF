@@ -20,6 +20,7 @@ from src.council.spec import (  # noqa: E402
     SeatResult,
     classify_response,
     count_dissent,
+    count_dissent_declared,
     harvest_hypotheses,
     lexical_overlap,
     round_invalid_reason,
@@ -259,3 +260,23 @@ def test_brainstorm_seats_are_separate_from_council_seats():
     })
     assert [s.name for s in card.brainstorm_seats()] == ["B1", "B2"]
     assert [s.name for s in card.seats] == ["P1"]
+
+
+def test_brainstorm_seats_do_not_inherit_the_proposal_mandate():
+    """Round 17's failure: brainstorm seats got the P mandate and wrote reports."""
+    card = RoundCard.from_dict({
+        "round_id": "C-1", "question": "q", "ru_type": "탐색",
+        "composition_rationale": "r", "state_documents": [], "seats": [],
+        "brainstorm": {"turns": 2, "seats": [{"name": "B1", "endpoint": "e"}]},
+    })
+    prompt = card.brainstorm_seats()[0].system_prompt()
+    assert "바꾸는 전제" not in prompt
+    assert "보고서를 쓰는 자리가 아닙니다" in prompt
+    assert "이견:" in prompt
+
+
+def test_declared_dissent_is_not_fooled_by_the_word_appearing_in_prose():
+    loose = ["그것이 아니라 이것이다. 반대로 보면 다르다."]
+    assert count_dissent(loose) == 0          # keyword form: no marker present
+    assert count_dissent_declared(loose) == 0  # declared form: no 이견 line
+    assert count_dissent_declared(["이견: 전제가 틀렸다"]) == 1

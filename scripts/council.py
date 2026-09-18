@@ -48,6 +48,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.council.spec import (  # noqa: E402
     count_dissent,
+    count_dissent_declared,
     harvest_hypotheses,
     harvest_questions,
     lexical_overlap,
@@ -243,16 +244,11 @@ def run_brainstorm(card: RoundCard, base: str, timeout: int,
     if not seats or turns < 1:
         return [], [], 0
 
-    rule = (
-        "\n\n# 이 단계의 규칙\n"
-        "- 자유롭게 말하십시오. 다른 좌석의 아이디어 위에 얹어도 됩니다.\n"
-        "- 동의만 하지 마십시오. 동의할 수 없는 부분이 있으면 명시적으로 말하십시오.\n"
-        "- 근거가 완전하지 않아도 됩니다. 이 단계의 산출은 검증이 아니라 후보입니다.\n"
-        "- 문서에 없는 수치는 지어내지 마십시오.\n"
-        "- 발언 끝에 이번에 새로 떠올린 것을 `가설: <한 줄>` 형식으로 적으십시오. "
-        "여러 줄이어도 됩니다. **협의체로 넘어가는 것은 이 한 줄들뿐이며 "
-        "나머지 대화는 폐기됩니다.**\n"
-    )
+    # The method lives in the system prompt (BRAINSTORM_MANDATE). Repeating it
+    # here only crowds the turn; what belongs here is what this turn is for.
+    rule = ("\n\n짧게, 대화하듯 말하십시오. 보고서를 쓰지 마십시오. "
+            "동료의 말을 이어받고, 동의할 수 없는 곳에는 `이견:` 줄을 다십시오. "
+            "끝에 `가설:` 줄을 다십시오.")
     transcript: list[str] = []
     print(f"\n[Phase B] 자유 대화 — {len(seats)}좌석 × {turns}턴 "
           f"(대화록은 폐기, 가설 한 줄만 협의체로)", flush=True)
@@ -271,8 +267,12 @@ def run_brainstorm(card: RoundCard, base: str, timeout: int,
               flush=True)
 
     titles = harvest_hypotheses(transcript)
-    dissent = count_dissent(transcript)
-    print(f"  가설 {len(titles)}건 추출 · 명시적 이견 {dissent}턴", flush=True)
+    dissent = count_dissent_declared(transcript)
+    # A brainstorm seat that reverts to the proposal template is not talking.
+    # Round 17 produced 18 such blocks, so this is watched rather than assumed.
+    templated = sum(turn.count("바꾸는 전제") for turn in transcript)
+    print(f"  가설 {len(titles)}건 · 선언된 이견 {dissent}턴 "
+          f"(암시적 {count_dissent(transcript)}턴) · 제안서화 {templated}건", flush=True)
     return titles, transcript, dissent
 
 
@@ -387,7 +387,11 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not spend(len(phase1_seats), "Phase 1"):
         return 1
     phase1 = run_phase(
-        [(s, base + "\n위 상태를 당신의 좌석 임무에 따라 분석하십시오.") for s in phase1_seats],
+        [(s, base + "\n위 상태를 당신의 좌석 임무에 따라 분석하십시오.\n\n"
+                    "분석 중 **문서에 있어야 하는데 당신에게 주어지지 않은 사실**이 있으면, "
+                    "끝에 `질문: <무엇을 알고 싶은가>` 형식으로 적으십시오. "
+                    "문서에서 인용으로 답을 받게 됩니다. 추측으로 메우지 마십시오.")
+         for s in phase1_seats],
         card.max_tokens_per_seat, args.timeout,
     )
 
@@ -491,6 +495,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         "brainstorm_turns": int(card.brainstorm.get("turns", 0)) if card.brainstorm else 0,
         "hypotheses_harvested": len(hypotheses),
         "brainstorm_dissent_turns": bs_dissent,
+        "brainstorm_templated_blocks": (
+            sum(x.count("바꾸는 전제") for x in bs_transcript) if bs_transcript else 0),
         "questions_raised": len(questions),
         "questions_answered": len(answers),
         "quotes_dropped": quotes_dropped,

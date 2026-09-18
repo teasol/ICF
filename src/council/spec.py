@@ -200,8 +200,12 @@ class Seat:
     model: str
     temperature: float
     data_slice: list[str] = field(default_factory=list)
+    #: Set for brainstorm seats, which must NOT receive an archetype mandate.
+    mandate_override: str = ""
 
     def system_prompt(self) -> str:
+        if self.mandate_override:
+            return self.mandate_override
         return COMMON_PREAMBLE + "\n\n" + ARCHETYPES[self.archetype]["mandate"]
 
 
@@ -252,7 +256,8 @@ class RoundCard:
         return [
             Seat(name=s["name"], archetype="P", endpoint=s["endpoint"],
                  model=s.get("model", ""), temperature=float(s.get("temperature", 0.8)),
-                 data_slice=list(s.get("data_slice", [])))
+                 data_slice=list(s.get("data_slice", [])),
+                 mandate_override=BRAINSTORM_MANDATE)
             for s in self.brainstorm.get("seats", [])
         ]
 
@@ -511,3 +516,38 @@ def lexical_overlap(a: str, b: str) -> float:
     if not ta or not tb:
         return 0.0
     return len(ta & tb) / len(ta | tb)
+
+
+#: Brainstorm seats must not receive an archetype mandate. Round 17 gave them
+#: the proposal archetype's, and they produced 18 fully-formatted proposals with
+#: 바꾸는 것 / 바꾸는 전제 / 기대하는 차이 / 기전 / 실패 조건 blocks and only 3
+#: cross-references between the two seats. That is not a conversation, it is
+#: Phase 1 run twice with the isolation removed -- which is strictly worse than
+#: Phase 1, since it costs calls and adds anchoring without adding dialogue.
+BRAINSTORM_MANDATE = """당신은 연구 협의체에 들어가기 전, 동료와 편하게 이야기하는 자리에 있습니다.
+보고서를 쓰는 자리가 아닙니다.
+
+이 자리의 방식:
+- 짧게 말하십시오. 한 번에 여러 문단을 쓰지 마십시오.
+- 제안서 형식을 쓰지 마십시오. '바꾸는 것', '실패 조건' 같은 항목을 만들지 마십시오.
+- 근거가 완전하지 않아도 말하십시오. 여기서는 검증하지 않습니다.
+- 동료가 한 말을 이어받으십시오. '그 방향이라면 이것도 되겠다'가 이 자리의 목적입니다.
+- **동의만 하지 마십시오.** 동의할 수 없는 부분이 있으면 반드시 `이견: <무엇에 왜>` 형식으로
+  한 줄 적으십시오. 한 턴에 이견이 하나도 없다면 당신은 이 자리에 기여하지 않은 것입니다.
+- 문서에 없는 수치는 지어내지 마십시오.
+
+발언 끝에, 이번 턴에 **새로** 떠올린 것을 적으십시오:
+  `가설: <한 줄>`
+여러 줄이어도 됩니다. 협의체로 넘어가는 것은 이 한 줄들뿐이며 나머지 대화는 폐기됩니다.
+
+한국어로 쓰십시오."""
+
+#: Counted instead of fuzzy keyword matching: a seat that disagrees is required
+#: to say so in a fixed form, so the metric measures a declaration rather than
+#: the presence of a word like "아니라" inside an unrelated sentence.
+DISSENT_RE = re.compile(r"^\s*(?:[-*]\s*)?이견\s*[:：]\s*(.+?)\s*$", re.MULTILINE)
+
+
+def count_dissent_declared(transcript: list[str]) -> int:
+    """Turns carrying at least one explicit `이견:` line."""
+    return sum(1 for turn in transcript if DISSENT_RE.search(turn))
