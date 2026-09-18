@@ -62,6 +62,11 @@ HEARTBEAT = OPS / "heartbeat"
 #: including the checking script's own -- that self-match has already killed
 #: three shells in this repository's history.
 PIDFILE = OPS / "supervisor.pid"
+#: An exclusive lock, so a second instance cannot start no matter how it is
+#: launched. Two supervisors each see an idle node and each dispatch, which is
+#: how two chores went out 11 seconds apart on 2026-09-18 -- the pid file alone
+#: could not prevent it, because whichever started last simply overwrote it.
+LOCKFILE = OPS / "supervisor.lock"
 KST = timezone(timedelta(hours=9))
 
 # Processes that count as "the node is working". Bracketed first character so
@@ -220,7 +225,17 @@ def main() -> None:
 
     for d in (QUEUE, DONE):
         d.mkdir(parents=True, exist_ok=True)
+    import fcntl
     import os
+    lock = LOCKFILE.open("w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        holder = PIDFILE.read_text(encoding="utf-8").strip() if PIDFILE.exists() else "미상"
+        print(f"이미 감독자가 돌고 있다 (pid {holder}). 중복 기동하지 않는다.", flush=True)
+        raise SystemExit(0)
+    # Held for the process lifetime; released by the kernel on exit.
+    globals()["_LOCK_HANDLE"] = lock
     PIDFILE.write_text(str(os.getpid()), encoding="utf-8")
     window: list[dict[str, Any]] = []
     child: subprocess.Popen | None = None

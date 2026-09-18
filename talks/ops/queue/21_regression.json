@@ -1,1 +1,0 @@
-{"kind":"routine","label":"regression-suite","cmd":"bash scripts/run_tests.sh"}
