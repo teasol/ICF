@@ -13,5 +13,15 @@
   "abstentions": 0,
   "calls_used": 20,
   "elapsed_s": 564.8,
-  "supported_claims_recounted": "파서 수정 후 재집계 (원래 0으로 잘못 셌다)"
+  "supported_claims_recounted": "파서 수정 후 재집계 (원래 0으로 잘못 셌다)",
+  "phase3_counts": {
+    "지지": 7,
+    "반박": 7,
+    "판별": 9,
+    "실행": 6,
+    "좌석": 5,
+    "다음": 13,
+    "하지": 15
+  },
+  "recount_note": "21·22를 같은 파서로 재집계했다. 두 회차는 서로 다른 시점의 council.py로 돌았다."
 }
