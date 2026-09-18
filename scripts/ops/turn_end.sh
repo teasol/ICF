@@ -37,4 +37,30 @@ fi
 if [ "$COUNCIL" = "no" ] && [ "$EXPERIMENT" = "no" ]; then
   echo "   (참고) 회차도 실험도 돌지 않는다. 주기 잡무만으로는 연구가 진전되지 않는다." >&2
 fi
+
+# Chore failures used to vanish: the card moved to done/ whether the command
+# worked or not. The supervisor now logs non-zero exits; surface them here so
+# a turn cannot end while failures sit unread.
+FAILLOG="talks/ops/failures.jsonl"
+if [ -s "$FAILLOG" ]; then
+  NFAIL=$(wc -l < "$FAILLOG")
+  echo "잡무 실패 누적: ${NFAIL}건 · 최근:"
+  tail -3 "$FAILLOG" | .venv/bin/python -c "
+import json,sys
+for line in sys.stdin:
+    r = json.loads(line)
+    print(f\"   {r['t']}  {r['label']}  rc={r['rc']}  {r['log']}\")
+"
+fi
+
+# The supervisor holds its code in memory. If supervisor.py is newer than the
+# running process, the fix just written is not the code that is running.
+if [ -f talks/ops/supervisor.pid ]; then
+  SPID=$(cat talks/ops/supervisor.pid)
+  if [ -d "/proc/$SPID" ] \
+     && [ scripts/ops/supervisor.py -nt "/proc/$SPID" ]; then
+    echo "!! supervisor.py가 실행 중인 감독자보다 새롭다. 재시작이 필요하다." >&2
+    RC=1
+  fi
+fi
 exit "$RC"

@@ -55,6 +55,7 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OPS = PROJECT_ROOT / "talks/ops"
 QUEUE, DONE = OPS / "queue", OPS / "done"
+FAILURES = OPS / "failures.jsonl"
 #: Templates that re-enter the queue on a period. A chore that runs once and
 #: lands in done/ stops being a chore -- on 2026-09-18 the queue drained in one
 #: minute and then nothing ran for half an hour, because every item was
@@ -142,6 +143,17 @@ def next_item() -> Path | None:
     """Queue order is filename order, so callers control priority by name."""
     items = sorted(QUEUE.glob("*.json"))
     return items[0] if items else None
+
+
+def snap_time() -> str:
+    return f"{datetime.now(KST):%Y-%m-%d %H:%M:%S}"
+
+
+def failure_count() -> int:
+    """How many chores have failed since the log began. Zero is worth seeing."""
+    if not FAILURES.exists():
+        return 0
+    return sum(1 for _ in FAILURES.open(encoding="utf-8"))
 
 
 def launch(item: Path) -> tuple[dict[str, Any], subprocess.Popen | None]:
@@ -279,7 +291,7 @@ def main() -> None:
     #: server and nothing else. Items without "parallel" still demand an idle
     #: node, because an experiment sharing a GPU with another job is how the
     #: idle-GPU rule gets broken quietly.
-    children: list[subprocess.Popen] = []
+    children: list[tuple[str, str, subprocess.Popen]] = []
     tick = 0
     print(f"supervisor 시작 · 틱 {args.interval}s · 요약 {args.summarise_every}틱마다", flush=True)
 
@@ -293,11 +305,33 @@ def main() -> None:
 
         # Jobs we started ourselves count as busy even when no pattern matches
         # them, so an unrecognised command cannot be dispatched over.
-        children = [c for c in children if c.poll() is None]
+        # Reap finished children and record their exit codes. Until 2026-09-18
+        # this line just dropped anything that had finished, so a chore that
+        # failed was indistinguishable from one that worked: the card moved to
+        # done/ either way and nothing recorded the returncode. Five literature
+        # digests failed on a bad argument and left no trace anywhere.
+        still: list[tuple[str, str, subprocess.Popen]] = []
+        for label, log, c in children:
+            if c.poll() is None:
+                still.append((label, log, c))
+                continue
+            if c.returncode != 0:
+                tail = ""
+                lf = PROJECT_ROOT / log
+                if lf.exists():
+                    tail = lf.read_text(encoding="utf-8", errors="replace")[-400:]
+                fail = {"t": snap_time(), "label": label, "rc": c.returncode,
+                        "log": log, "tail": tail}
+                with FAILURES.open("a", encoding="utf-8") as fh:
+                    fh.write(json.dumps(fail, ensure_ascii=False) + "\n")
+                print(f"[{snap_time()}] 잡무 실패 {label} rc={c.returncode} · {log}",
+                      flush=True)
+        children = still
         if children:
             snap["running"]["launched"] = True
             snap["busy"] = True
         snap["parallel_running"] = len(children)
+        snap["failures_total"] = failure_count()
 
         # Dispatch before logging so the tick records the launches it caused.
         if not args.no_dispatch:
@@ -325,7 +359,8 @@ def main() -> None:
                     break
                 rec, handle = launch(item)
                 if handle is not None:
-                    children.append(handle)
+                    children.append((rec.get("launch", "?"),
+                                     rec.get("log", ""), handle))
                     snap["running"]["launched"] = True
                     snap["busy"] = True
                 launched.append(rec)
