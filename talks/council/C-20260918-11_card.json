@@ -1,65 +1,65 @@
 {
   "round_id": "C-20260918-11",
-  "question": "D-049로 CA-R1 다중 강도 브랜치 동시 투입이 비저촉으로 확정됐다. 경계는 브랜치 구성이 아니라 선택의 주체와 시점에 있다 - 승인된 ensemble readout이 context 라벨만으로 계수를 정하는 것은 허용되고, 결과 AUROC를 보고 나서 강도를 고르는 것은 Oracle로 금지된다.\n\n이 회차는 CA-R1 게이트 1의 사전 등록안을 설계한다. 실행 승인이 아니며 성능을 조회하지 않는다. 계측 경로가 현재 무효라 실행은 복구 뒤로 미뤄져 있다(D-050).\n\n설계할 것: (1) 강도 집합을 결과 전에 고정하라 - 몇 개, 어떤 값, 왜 그 값인가. (2) 게이트 1 임계값(max |r|, eff.rank)과 그 집계 단위를 명시하라. 6개 변형은 상호 상관이 높을 것으로 예상되는데, 상관이 높다는 것이 기각 사유가 되는 근거는 무엇인가. (3) Dual Ridge가 계수를 정하는 경로에서 라벨이 쓰이는 지점을 전부 나열하고, 그것이 context 라벨만인지 확인할 방법을 적어라. (4) 이 설계가 Oracle 경계를 넘는 조건을 구체적으로 쓰라 - 무엇을 하면 위반인가. (5) 탈락 시 성능을 조회하지 않고 종료하는 규칙과 그 강제 방법.\n\n문서에 없는 수치를 지어내지 말라. closed_axes.md의 CA-R1 항목과 §3-J를 근거로 삼아라.",
-  "ru_type": "탐색",
+  "question": "직전 회차(C-20260918-10)가 provenance v1 스키마를 냈고, 핵심은 requested와 effective를 분리해 기록하고 불일치 플래그를 두는 것이다. 이 회차는 그 스키마의 가장 약한 고리를 공격한다.\n\n문제: effective_branch_list를 기록하는 주체는 결국 같은 실행 코드다. 그런데 이번에 드러난 결함은 바로 그 코드가 요청을 무시했다는 것이다(src/가 환경변수를 하나도 읽지 않아 ICF_* export가 전부 무효였고, 가중치를 0으로 바꿔도 출력이 소수 4자리까지 동일했다). 버그의 당사자가 자기 상태를 보고하게 하는 구조다.\n\n질문: (1) effective 기록을 신뢰할 수 있는 조건은 무엇인가? 자기 보고가 아니라 외부에서 검증 가능한 신호는 무엇인가. (2) '가중치 0이 branch 제외와 동등한가'를 기록이 아니라 실행으로 확인하는 방법은? 서로 다른 구성이 서로 다른 출력을 내는지 검사하는 최소 실험을 설계하라. (3) 지금 같은 결함 - 설정이 무시되는데 출력은 정상으로 보이는 - 을 잡아낼 수 있는 불변식은 무엇인가. sidecar 존재만으로는 왜 부족한가. (4) 이 검사를 회귀 스위트에 넣는다면 어떤 형태여야 하는가? GPU 없이 도는가? (5) 과거 산출물에는 requested도 effective도 없다. 소급 귀속이 가능한 최대 범위는 어디까지인가.\n\n문서에 없는 수치를 지어내지 말라. 첨부된 10회차 보고서의 스키마 제안을 근거로 삼되 그것을 방어하지 말라.",
+  "ru_type": "진단",
   "prefixed_criteria": "",
-  "composition_rationale": "D-049 직후 첫 설계다. 제안(P)이 사전 등록안을 내고, 반증(R)은 설계가 게이트를 통과하도록 편의적으로 짜였는지 공격한다 - 3회차에서 제안 좌석이 RBF fallback으로 경계를 넘으려 한 전례가 있다. 감사(A)는 라벨 사용 지점 열거를 맡는다. 이론(T)은 '상관이 높다는 것이 기각 사유가 되는 근거'라는 질문을 맡는다 - 게이트 1의 전제 자체를 검토한다. 일반화(G)와 실측(M)은 제외: 실행이 계측 복구 대기라 비용도 전이도 아직 논할 수 없다.",
+  "composition_rationale": "10회차 산출물의 약한 고리를 공격하는 회차다. 감사(A)를 첫 좌석에 두고 온도를 최저로 했다 - '자기 보고를 신뢰할 조건'이 정확히 감사 좌석의 질문이다. 이론(T)은 '설정이 무시되는데 출력은 정상인 상태'를 잡는 불변식 설계를 맡는다. 반증(R)은 스키마가 형식만 늘리고 검증력이 없는 경우를 공격한다. 제안(P)은 최소 실험을 설계하되 온도를 0.7로 낮췄다 - 창의성보다 실행 가능성이 중요하다. 일반화(G)와 실측(M)은 제외: 질문이 내부 계측 신뢰성이고, GPU는 별도 잡무가 쓰고 있다. 10회차 보고서를 좌석 입력에 넣었으므로 자기 방어 편향이 있을 수 있고, 그래서 프롬프트에 '그것을 방어하지 말라'를 명시했다. 한계로 결론에 적는다.",
   "max_authority": "T1",
   "convener": "Claude Code (claude-opus-5)",
   "state_documents": [
     "docs/PROJECT.md",
-    "docs/closed_axes.md",
-    "talks/reports/2026-09-18_ru90_baseline_regen.md"
+    "talks/reports/2026-09-18_ru90_baseline_regen.md",
+    "talks/council/C-20260918-10/report.md"
   ],
   "max_tokens_per_seat": 32000,
   "max_total_calls": 14,
   "seats": [
     {
-      "name": "P1",
-      "archetype": "P",
-      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
-      "model": "Qwen3.8-27B",
-      "temperature": 0.9,
-      "data_slice": [
-        "docs/PROJECT.md",
-        "docs/closed_axes.md",
-        "talks/reports/2026-09-18_ru90_baseline_regen.md"
-      ]
-    },
-    {
-      "name": "R1",
-      "archetype": "R",
-      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
-      "model": "Qwen3.8-27B",
-      "temperature": 0.5,
-      "data_slice": [
-        "docs/PROJECT.md",
-        "docs/closed_axes.md",
-        "talks/reports/2026-09-18_ru90_baseline_regen.md"
-      ]
-    },
-    {
       "name": "A1",
       "archetype": "A",
-      "endpoint": "http://127.0.0.1:8003/v1/chat/completions",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
       "model": "Qwen3.8-27B",
       "temperature": 0.2,
       "data_slice": [
         "docs/PROJECT.md",
-        "docs/closed_axes.md",
-        "talks/reports/2026-09-18_ru90_baseline_regen.md"
+        "talks/reports/2026-09-18_ru90_baseline_regen.md",
+        "talks/council/C-20260918-10/report.md"
       ]
     },
     {
       "name": "T1",
       "archetype": "T",
-      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
       "model": "Qwen3.8-27B",
       "temperature": 0.4,
       "data_slice": [
         "docs/PROJECT.md",
-        "docs/closed_axes.md",
-        "talks/reports/2026-09-18_ru90_baseline_regen.md"
+        "talks/reports/2026-09-18_ru90_baseline_regen.md",
+        "talks/council/C-20260918-10/report.md"
+      ]
+    },
+    {
+      "name": "R1",
+      "archetype": "R",
+      "endpoint": "http://127.0.0.1:8003/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.5,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "talks/reports/2026-09-18_ru90_baseline_regen.md",
+        "talks/council/C-20260918-10/report.md"
+      ]
+    },
+    {
+      "name": "P1",
+      "archetype": "P",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.7,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "talks/reports/2026-09-18_ru90_baseline_regen.md",
+        "talks/council/C-20260918-10/report.md"
       ]
     },
     {
@@ -70,10 +70,10 @@
       "temperature": 0.2,
       "data_slice": [
         "docs/PROJECT.md",
-        "docs/closed_axes.md",
-        "talks/reports/2026-09-18_ru90_baseline_regen.md"
+        "talks/reports/2026-09-18_ru90_baseline_regen.md",
+        "talks/council/C-20260918-10/report.md"
       ]
     }
   ],
-  "note": "SEAL 10 수치 미입력 (D-047)."
+  "note": "10회차 산출물 공격 회차. SEAL 10 수치 미입력 (D-047)."
 }

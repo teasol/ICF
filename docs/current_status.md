@@ -71,9 +71,16 @@
 GPU 가동률을 올리지 않는다. 대신 쉬는 시간에는 **회차와 무관한 짧은 일상 업무**를 돌린다.
 
 ```bash
-bash scripts/ops/check_supervisor.sh    # 회차 종료 시·턴 종료 시 반드시 실행
+bash scripts/ops/run_round.sh talks/council/<회차>_card.json   # 회차는 반드시 이것으로
+bash scripts/ops/check_supervisor.sh    # 턴 종료 시 실행 (run_round.sh는 내부에서 이미 호출)
 cat talks/ops/state.md                  # 노드 상태 (감독자가 유지, 이 파일만 읽으면 된다)
 ```
+
+**회차는 `run_round.sh`를 백그라운드 작업으로 띄운다. `nohup`·`&`로 분리하지 않는다.**
+이 스크립트는 회차가 끝날 때까지 블록하므로, 작업 완료 알림이 곧 회차 종료 알림이 된다.
+따로 감시를 걸 필요가 없고, 따라서 거는 것을 잊을 수도 없다. 2026-09-18에 회차가 09:12에
+끝났는데 09:40까지 아무것도 돌지 않은 것은 시간별 깨어남만 남기고 회차별 감시를 없앴기
+때문이다.
 
 - 감독자는 60초마다 스냅샷하고, **아무것도 안 돌 때만** `talks/ops/queue/`의 `routine`
   항목을 발사한다. `kind: "council"` 항목은 설계상 거부한다.
