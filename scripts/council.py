@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -46,6 +47,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.council.spec import (  # noqa: E402
+    count_dissent,
+    harvest_hypotheses,
+    harvest_questions,
+    lexical_overlap,
+    verified_quotes,
     ARCHETYPES,
     RoundCard,
     Seat,
@@ -219,6 +225,109 @@ def cmd_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_brainstorm(card: RoundCard, base: str, timeout: int,
+                   spend) -> tuple[list[str], list[str], int]:
+    """Free dialogue among proposal seats, ahead of the council.
+
+    The seats see one another and may build on each other -- that is the whole
+    point; the council has no way to co-construct. What does NOT survive is the
+    transcript. Only bare hypothesis titles cross into Phase 1, harvested by
+    regex, because round 11 showed that inherited text gets adopted rather than
+    examined even when the card says to attack it.
+
+    Returns (titles, transcript, dissent_turns). The transcript is returned only
+    so it can be written to disk for audit; it is never put in a council prompt.
+    """
+    seats = card.brainstorm_seats()
+    turns = int(card.brainstorm.get("turns", 2))
+    if not seats or turns < 1:
+        return [], [], 0
+
+    rule = (
+        "\n\n# 이 단계의 규칙\n"
+        "- 자유롭게 말하십시오. 다른 좌석의 아이디어 위에 얹어도 됩니다.\n"
+        "- 동의만 하지 마십시오. 동의할 수 없는 부분이 있으면 명시적으로 말하십시오.\n"
+        "- 근거가 완전하지 않아도 됩니다. 이 단계의 산출은 검증이 아니라 후보입니다.\n"
+        "- 문서에 없는 수치는 지어내지 마십시오.\n"
+        "- 발언 끝에 이번에 새로 떠올린 것을 `가설: <한 줄>` 형식으로 적으십시오. "
+        "여러 줄이어도 됩니다. **협의체로 넘어가는 것은 이 한 줄들뿐이며 "
+        "나머지 대화는 폐기됩니다.**\n"
+    )
+    transcript: list[str] = []
+    print(f"\n[Phase B] 자유 대화 — {len(seats)}좌석 × {turns}턴 "
+          f"(대화록은 폐기, 가설 한 줄만 협의체로)", flush=True)
+    for turn in range(turns):
+        if not spend(len(seats), f"Phase B turn {turn + 1}"):
+            break
+        so_far = ("\n\n# 지금까지의 대화\n" + "\n\n".join(transcript)) if transcript else ""
+        results = run_phase(
+            [(s, base + so_far + rule) for s in seats],
+            card.max_tokens_per_seat, timeout,
+        )
+        for r in results:
+            if r.ok():
+                transcript.append(f"## {r.seat} (턴 {turn + 1})\n{r.text}")
+        print(f"  턴 {turn + 1}: {sum(1 for r in results if r.ok())}/{len(seats)}좌석",
+              flush=True)
+
+    titles = harvest_hypotheses(transcript)
+    dissent = count_dissent(transcript)
+    print(f"  가설 {len(titles)}건 추출 · 명시적 이견 {dissent}턴", flush=True)
+    return titles, transcript, dissent
+
+
+def answer_questions(card: RoundCard, questions: list[str], corpus: str,
+                     timeout: int, spend) -> tuple[list[tuple[str, list[str]]], int]:
+    """Answer seats' factual questions out of the state documents only.
+
+    Seats kept filing `판별 불가` items of the form "X is not in the documents"
+    when X sometimes was, just not in that seat's slice. A peer answering would
+    reintroduce exactly the agreement-seeking this design is trying to avoid, so
+    the answer comes from the documents: the model may only quote, and every
+    quote it returns is checked against the corpus as a substring in code.
+    Anything unverifiable is dropped and counted.
+    """
+    if not questions:
+        return [], 0
+    seat = next((s for s in card.seats if s.archetype == "A"), card.seats[0])
+    if not spend(1, "Phase Q"):
+        return [], 0
+    print(f"\n[Phase Q] 문서 질의 — {len(questions)}건 (답은 문서 인용만, 코드가 검증)",
+          flush=True)
+    numbered = "\n".join(f"{i + 1}. {q}" for i, q in enumerate(questions))
+    prompt = (
+        f"# 상태 문서\n\n{corpus}\n\n# 좌석들이 제기한 사실 질문\n{numbered}\n\n"
+        "각 질문에 대해 **문서에 있는 줄을 그대로 옮겨 적는 것으로만** 답하십시오. "
+        "요약하거나 바꿔 쓰지 마십시오. 한 글자도 바꾸지 마십시오. "
+        "문서에 없으면 그 질문 아래에 아무것도 쓰지 마십시오. "
+        "형식: `[번호]` 줄 다음에 인용 줄들."
+    )
+    res = run_phase([(seat, prompt)], card.max_tokens_per_seat, timeout)
+    if not res or not res[0].ok():
+        return [], 0
+
+    blocks: dict[int, list[str]] = {}
+    current: int | None = None
+    for line in res[0].text.splitlines():
+        m = re.match(r"^\s*\[?(\d{1,2})\]?[.)\s]", line)
+        if m and 1 <= int(m.group(1)) <= len(questions):
+            current = int(m.group(1)) - 1
+            blocks.setdefault(current, [])
+            continue
+        if current is not None:
+            blocks[current].append(line)
+
+    answered: list[tuple[str, list[str]]] = []
+    dropped_total = 0
+    for idx, lines in sorted(blocks.items()):
+        kept, dropped = verified_quotes("\n".join(lines), corpus)
+        dropped_total += dropped
+        if kept:
+            answered.append((questions[idx], kept[:6]))
+    print(f"  검증 통과 {len(answered)}건 · 인용 폐기 {dropped_total}줄", flush=True)
+    return answered, dropped_total
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     card = _load(args.card)
     errors = validate_card(card)
@@ -255,6 +364,17 @@ def cmd_run(args: argparse.Namespace) -> int:
         return True
 
     t0 = time.time()
+
+    # Phase B -- optional free dialogue. Only bare hypothesis titles cross into
+    # the council; the transcript is written to disk for audit and nowhere else.
+    hypotheses, bs_transcript, bs_dissent = run_brainstorm(card, base, args.timeout, spend)
+    if hypotheses:
+        base += ("\n# 자유 대화에서 나온 가설 목록\n"
+                 "아래는 제목뿐이며 근거도 출처도 없습니다. 어느 좌석이 냈는지도 기록하지 "
+                 "않았습니다. **채택된 것이 아니라 후보일 뿐이며, 쓰려면 근거를 처음부터 "
+                 "직접 세워야 합니다.** 무시해도 됩니다.\n"
+                 + "\n".join(f"- {h}" for h in hypotheses) + "\n")
+
     proposers = [s for s in card.seats if s.archetype == "P"]
     synths = [s for s in card.seats if s.archetype == "S"]
     reviewers = [s for s in card.seats if s.archetype not in ("P", "S")]
@@ -275,10 +395,23 @@ def cmd_run(args: argparse.Namespace) -> int:
     proposal_texts = [r.text for r in phase1 if r.archetype == "P" and r.ok()]
     phase2: list[SeatResult] = []
     phase2b: list[SeatResult] = []
+    questions: list[str] = []
+    answers: list[tuple[str, list[str]]] = []
+    quotes_dropped = 0
 
     if void:
         print(f"\n[회차 무효] {void}", flush=True)
     else:
+        # Phase Q -- answer seats' factual questions from the documents before
+        # they are attacked for gaps that were never really gaps.
+        questions = harvest_questions([r.text for r in phase1 if r.ok()])
+        answers, quotes_dropped = answer_questions(
+            card, questions, state_text, args.timeout, spend)
+        if answers:
+            base += ("\n# 문서 질의 응답 (좌석 질문에 대한 문서 인용, 코드가 검증함)\n"
+                     + "\n".join("- **" + q + "**\n" + "\n".join("  > " + k for k in ks)
+                                  for q, ks in answers) + "\n")
+
         proposals = "\n\n".join(f"## 제안 ({r.seat})\n{r.text}" for r in phase1
                                 if r.archetype == "P" and r.ok())
         print(f"\n[Phase 2] 교차 — {len(reviewers)}좌석이 제안을 공격", flush=True)
@@ -336,6 +469,46 @@ def cmd_run(args: argparse.Namespace) -> int:
     all_results = phase1 + phase2 + phase2b + phase3
     void = void or round_invalid_reason(all_results)
     elapsed = round(time.time() - t0, 1)
+
+    # Whether free dialogue helps is a question we can answer with numbers, so
+    # we record them instead of arguing. Every one of these is computed from
+    # text by code -- no seat scores its own round. The comparison that matters
+    # is the same question run with and without Phase B.
+    p_texts = [r.text for r in phase1 if r.archetype == "P" and r.ok()]
+    pairs = [lexical_overlap(a, b)
+             for i, a in enumerate(p_texts) for b in p_texts[i + 1:]]
+    supported = 0
+    if phase3 and phase3[0].ok():
+        in_block = False
+        for line in phase3[0].text.splitlines():
+            if line.startswith("## "):
+                in_block = line.startswith("## 지지")
+            elif in_block and line.strip().startswith("- "):
+                supported += 1
+    metrics = {
+        "round_id": card.round_id,
+        "brainstorm_used": bool(hypotheses),
+        "brainstorm_turns": int(card.brainstorm.get("turns", 0)) if card.brainstorm else 0,
+        "hypotheses_harvested": len(hypotheses),
+        "brainstorm_dissent_turns": bs_dissent,
+        "questions_raised": len(questions),
+        "questions_answered": len(answers),
+        "quotes_dropped": quotes_dropped,
+        "proposer_overlap_mean": round(sum(pairs) / len(pairs), 4) if pairs else None,
+        "supported_claims": supported,
+        "abstentions": len(abstentions),
+        "calls_used": budget["used"],
+        "elapsed_s": elapsed,
+    }
+    (out_dir / "metrics.json").write_text(
+        json.dumps(metrics, ensure_ascii=False, indent=2), encoding="utf-8")
+    if bs_transcript:
+        # Kept for audit, never for a prompt.
+        (out_dir / "brainstorm_transcript.md").write_text(
+            "\n\n".join(bs_transcript), encoding="utf-8")
+    print(f"\n[지표] 가설 {metrics['hypotheses_harvested']}건 · 이견 {bs_dissent}턴 · "
+          f"P좌석 중복도 {metrics['proposer_overlap_mean']} · "
+          f"지지 {supported}건 · 질의응답 {metrics['questions_answered']}건", flush=True)
 
     blackboard = {
         "round_card": json.loads((PROJECT_ROOT / args.card).read_text(encoding="utf-8"))

@@ -221,6 +221,9 @@ class RoundCard:
     max_total_calls: int = 32
     convener: str = ""
     note: str = ""
+    #: Optional free-dialogue phase before Phase 1. See harvest_hypotheses for
+    #: why only bare titles cross into the council.
+    brainstorm: dict[str, Any] = field(default_factory=dict)
 
     @staticmethod
     def from_dict(raw: dict[str, Any]) -> "RoundCard":
@@ -242,6 +245,16 @@ class RoundCard:
             if k in RoundCard.__dataclass_fields__ and k != "seats"
         }
         return RoundCard(seats=seats, **known)
+
+    def brainstorm_seats(self) -> list[Seat]:
+        """Seats for the free-dialogue phase. Separate from council seats so a
+        brainstormer's own text never returns to it as council input."""
+        return [
+            Seat(name=s["name"], archetype="P", endpoint=s["endpoint"],
+                 model=s.get("model", ""), temperature=float(s.get("temperature", 0.8)),
+                 data_slice=list(s.get("data_slice", [])))
+            for s in self.brainstorm.get("seats", [])
+        ]
 
     def archetypes(self) -> list[str]:
         return [s.archetype for s in self.seats]
@@ -403,3 +416,98 @@ def round_invalid_reason(results: list[SeatResult]) -> str:
         if present and not any(r.ok() for r in present):
             return why
     return ""
+
+
+# --- Free dialogue: what crosses into the council, and what does not ----------
+#
+# Round 11 reproduced round 10's top recommendation near-verbatim even though
+# its card told the seats to attack it. Phase 1 isolation did not prevent that,
+# because isolation stops seats seeing *each other* within a round -- it does
+# nothing about text handed down from outside. The danger is not the phase, it
+# is the moment text crosses a boundary.
+#
+# So free dialogue is allowed, but its transcript never enters the council.
+# Only one-line hypothesis titles cross: no justification, no attribution, no
+# reasoning to inherit. Anchoring needs text to anchor on. A bare line leaves
+# the council nothing to adopt, so it has to build the case from scratch.
+
+#: Seats are told to end each brainstorm turn with lines in this form.
+HYPOTHESIS_RE = re.compile(r"^\s*(?:[-*]\s*)?가설\s*[:：]\s*(.+?)\s*$", re.MULTILINE)
+QUESTION_RE = re.compile(r"^\s*(?:[-*]\s*)?질문\s*[:：]\s*(.+?)\s*$", re.MULTILINE)
+
+#: Explicit disagreement in a brainstorm turn. If a free channel never produces
+#: one of these, it is an echo chamber and should be retired -- that is the
+#: cheapest sycophancy check available to us.
+DISSENT_MARKERS = ("동의하지 않", "반대한다", "반대합니다", "그건 아니",
+                   "틀렸다", "틀렸습니다", "아니라고 본다", "동의할 수 없")
+
+
+def harvest_hypotheses(transcript: list[str], limit: int = 24) -> list[str]:
+    """Pull bare hypothesis titles out of a brainstorm transcript.
+
+    Extraction is regex, not a model. A model asked to summarise would restore
+    exactly the justification this boundary exists to strip, and its summary
+    would carry the framing of whichever turn it liked most.
+    """
+    seen: list[str] = []
+    for turn in transcript:
+        for m in HYPOTHESIS_RE.findall(turn):
+            line = " ".join(m.split())
+            # A title long enough to carry an argument is not a title.
+            if len(line) > 160:
+                line = line[:160].rstrip() + "…"
+            if line and line not in seen:
+                seen.append(line)
+    return seen[:limit]
+
+
+def harvest_questions(texts: list[str], limit: int = 20) -> list[str]:
+    """Factual questions seats raised, for the document-answer channel."""
+    seen: list[str] = []
+    for text in texts:
+        for m in QUESTION_RE.findall(text):
+            line = " ".join(m.split())
+            if line and line not in seen:
+                seen.append(line)
+    return seen[:limit]
+
+
+def count_dissent(transcript: list[str]) -> int:
+    """Turns containing an explicit disagreement marker."""
+    return sum(1 for turn in transcript
+               if any(marker in turn for marker in DISSENT_MARKERS))
+
+
+def verified_quotes(answer: str, corpus: str) -> tuple[list[str], int]:
+    """Keep only quoted lines that actually occur in the state documents.
+
+    The answering model is told to reply in quotes, but being told is not a
+    guarantee. Every line it offers is checked against the corpus as a
+    substring; anything that is not there is dropped. Returns the surviving
+    quotes and the number discarded, so the discard count can be reported
+    rather than hidden.
+    """
+    kept: list[str] = []
+    dropped = 0
+    for raw in answer.splitlines():
+        line = raw.strip().lstrip("-*> ").strip()
+        if len(line) < 12:
+            continue
+        if line in corpus:
+            kept.append(line)
+        else:
+            dropped += 1
+    return kept, dropped
+
+
+def lexical_overlap(a: str, b: str) -> float:
+    """Jaccard overlap of token sets. Rises when two seats converge in wording.
+
+    This is the metric that tells us whether the free channel bought diversity
+    or destroyed it, and it is computed from text alone -- no model scores it.
+    """
+    ta = {w for w in re.findall(r"[0-9A-Za-z가-힣_]{2,}", a)}
+    tb = {w for w in re.findall(r"[0-9A-Za-z가-힣_]{2,}", b)}
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
