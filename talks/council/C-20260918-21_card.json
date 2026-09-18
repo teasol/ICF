@@ -1,0 +1,130 @@
+{
+  "round_id": "C-20260918-21",
+  "question": "최종 목표는 Primary 7에서 얻은 근거만으로 모델을 개선해 SEAL 10에서 ABMIL을 이기는 것이다. 이 회차는 아직 시도되지 않은 축을 찾는다.\n\n현재 구조(확인된 사실): slide의 patch feature에서 7개의 branch가 각각 closed-form ridge로 증거를 만들고, trimmed mean voting으로 집계한다. branch는 cv(공분산 비대각), bm(PCA-32 bag mean), bd(스펙트럼 엔트로피 ordered typicality), qa(분위수/극값), ds(salience denoised bag mean), sh, sj다. 학습되는 파라미터가 없다.\n\n실측된 제약:\n- branch 간 중복이 크다. 유효 랭크가 7 중 3.52다.\n- 같은 구성을 seed만 바꿔 재적합하면 표준편차 0.0021~0.0083이 나온다. 승격 임계는 +0.0030이다. 즉 단일 적합의 차이는 대부분 뽑기다.\n- 여섯 개의 실행 러너가 전부 같은 하나의 설정으로 수렴해 있었다. 따라서 과거의 branch 조합 비교 결과는 구성 차이가 없는 실행들의 비교였고, 근거로 쓸 수 없다.\n- 예산은 GPU 1장, 합계 4 GPU-hour. fold 적합 1회의 소요 시간은 측정된 적이 없다.\n\n규칙: SEAL 10 결과를 보고 모델을 고르는 것은 금지다. Primary 7 결과만 개선에 쓸 수 있다.\n\n질문:\n(1) 유효 랭크 3.52는 branch를 더 넣는 방향이 막혀 있다는 뜻인가, 아니면 서로 다른 것을 재는 branch를 아직 못 만들었다는 뜻인가? 두 해석을 가르는 관측은 무엇인가.\n(2) 집계(trimmed mean voting)를 바꾸는 축은 아직 거의 탐색되지 않았다. 학습 파라미터를 도입하지 않으면서 집계를 바꾸는 방법에는 무엇이 있는가?\n(3) 적합 분산이 승격 임계보다 큰 상황에서, 분산 자체를 줄이는 것이 성능을 올리는 것보다 나은 투자인가? 분산을 줄이는 수단을 제시하고, 그것이 성능 개선과 어떻게 다른지 밝혀라.\n(4) 지금까지 아무도 건드리지 않은 축이 있다면 무엇인가. 건드리지 않은 이유가 타당한 것인지, 아니면 그냥 생각이 안 난 것인지 구분하라.\n(5) 위 후보들 중 4 GPU-hour 안에서 판별 가능한 것은 무엇인가.\n\n문서에 없는 수치를 지어내지 마라. 특히 fold 적합 시간과 branch별 기여도는 측정된 적이 없다.",
+  "ru_type": "탐색",
+  "prefixed_criteria": "",
+  "composition_rationale": "탐색 질문이므로 제안(P) 둘을 온도 0.7·0.8로 두어 서로 다른 방향을 뽑는다. 이론(T)은 질문 1의 유효 랭크 해석을, 실측(M)은 질문 3·5의 분산과 비용을 맡는다. 반증(R)은 '새 축이 있다'는 낙관과 '다 막혔다'는 비관을 둘 다 공격한다. 감사(A)는 제안이 과거의 무효한 비교 결과에 기대고 있지 않은지 본다. 앞선 회차 보고서는 입력에 넣지 않았다(회차 간 앵커링 금지). 좌석 엔드포인트는 deepseek-v4.1-flash 단일 서버다 — Qwen 3대가 죽고 그 자리에 올라왔다. 19·20회차는 Qwen에서 돌았으므로 이 쌍과 섞어 비교하지 않는다.",
+  "max_authority": "T1",
+  "convener": "Claude Code (claude-opus-5)",
+  "state_documents": [
+    "docs/PROJECT.md",
+    "docs/closed_axes.md",
+    "docs/current_status.md"
+  ],
+  "max_tokens_per_seat": 32000,
+  "max_total_calls": 26,
+  "seats": [
+    {
+      "name": "P1",
+      "archetype": "P",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.7,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "P2",
+      "archetype": "P",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.8,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "T1",
+      "archetype": "T",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.4,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "M1",
+      "archetype": "M",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.3,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "R1",
+      "archetype": "R",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.5,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "A1",
+      "archetype": "A",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "S1",
+      "archetype": "S",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    }
+  ],
+  "note": "A/B 재시도(deepseek) 처리군: Phase B 있음. 22회차와 질문·좌석 동일. 19·20은 모델이 달라 대조 불가.",
+  "brainstorm": {
+    "turns": 3,
+    "seats": [
+      {
+        "name": "B1",
+        "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+        "model": "deepseek-v4.1-flash",
+        "temperature": 0.85,
+        "data_slice": [
+          "docs/PROJECT.md",
+          "docs/closed_axes.md",
+          "docs/current_status.md"
+        ]
+      },
+      {
+        "name": "B2",
+        "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+        "model": "deepseek-v4.1-flash",
+        "temperature": 0.85,
+        "data_slice": [
+          "docs/PROJECT.md",
+          "docs/closed_axes.md",
+          "docs/current_status.md"
+        ]
+      }
+    ]
+  }
+}

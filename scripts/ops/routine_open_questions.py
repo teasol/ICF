@@ -20,12 +20,16 @@ import json
 import re
 import urllib.request
 from datetime import datetime, timedelta, timezone
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import llm_env  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 COUNCIL = PROJECT_ROOT / "talks/council"
 OUT = PROJECT_ROOT / "talks/ops/open_questions.md"
-ENDPOINT = "http://127.0.0.1:8001/v1/chat/completions"
+ENDPOINT = llm_env.endpoint()
 KST = timezone(timedelta(hours=9))
 MARKERS = ("문서에 없음", "미확인", "판별 불가", "실행 무효", "미측정", "미수행")
 PATTERN = re.compile("|".join(map(re.escape, MARKERS)))
@@ -52,7 +56,7 @@ def group(lines: list[str]) -> str | None:
         "규칙: 원문에 없는 내용을 더하지 마라. 해결책을 제안하지 마라. 각 항목은 한 줄로 쓰고 "
         "'- '로 시작하라. 서론과 맺음말을 쓰지 마라.\n\n" + "\n".join(f"- {l}" for l in lines)
     )
-    body = json.dumps({"model": "Qwen3.8-27B", "temperature": 0.2, "max_tokens": 32000,
+    body = json.dumps({"model": llm_env.model(), "temperature": 0.2, "max_tokens": 32000,
                        "messages": [{"role": "user", "content": prompt}]}).encode("utf-8")
     req = urllib.request.Request(ENDPOINT, data=body,
                                  headers={"Content-Type": "application/json"})

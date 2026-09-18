@@ -27,17 +27,17 @@ import argparse
 import json
 import urllib.request
 from datetime import datetime, timedelta, timezone
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import llm_env  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LIT = PROJECT_ROOT / "talks/lit"
 RAW = LIT / "raw"
 KST = timezone(timedelta(hours=9))
-ENDPOINTS = [
-    "http://127.0.0.1:8000/v1/chat/completions",
-    "http://127.0.0.1:8001/v1/chat/completions",
-    "http://127.0.0.1:8003/v1/chat/completions",
-]
+ENDPOINTS = llm_env.endpoints()
 MAX_CHARS = 200000  # the servers carry 262144 tokens; this leaves room for the answer
 
 PROMPT = """당신은 ICF 연구팀에 외부 문헌을 공급하는 역할이다. 아래 논문 전문을 읽고 브리프를 쓴다.
@@ -89,7 +89,7 @@ def digest(slug: str, endpoint: str, timeout: int) -> str | None:
         raise SystemExit(f"원문이 없다: {raw}")
     text = raw.read_text(encoding="utf-8")[:MAX_CHARS]
     body = json.dumps({
-        "model": "Qwen3.8-27B", "temperature": 0.2, "max_tokens": 32000,
+        "model": llm_env.model(), "temperature": 0.2, "max_tokens": 32000,
         "messages": [{"role": "user", "content": PROMPT + text}],
     }).encode("utf-8")
     req = urllib.request.Request(endpoint, data=body,
@@ -141,7 +141,7 @@ def main() -> None:
     out.write_text(
         f"# 문헌 브리프 — {args.slug} (로컬 모델 요약)\n\n"
         f"```\n{meta}\n```\n\n"
-        f"- 요약: Qwen3.8-27B @ `{endpoint.split('//')[1].split('/')[0]}` · {stamp}\n"
+        f"- 요약: {llm_env.model()} @ `{endpoint.split('//')[1].split('/')[0]}` · {stamp}\n"
         "- **오케스트레이터는 원문을 읽지 않았다.** 이 브리프는 로컬 모델의 요약이며 검증되지 않았다.\n"
         "- **외부 주장이지 우리의 관측이 아니다.** 어떤 수치도 우리 게이트·승격의 근거가 될 수 없다\n"
         "  (`D-047`). 여기서 나오는 것은 가설뿐이며, 우리 결론이 되려면 `Primary 7`에서 직접 측정한다.\n\n"

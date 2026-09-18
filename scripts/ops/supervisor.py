@@ -46,10 +46,14 @@ import argparse
 import json
 import shlex
 import subprocess
+import sys
 import time
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import llm_env  # noqa: E402
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -260,8 +264,8 @@ def write_state(ticks: list[dict[str, Any]], narrative: str | None, stale: bool)
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--endpoint", default="http://127.0.0.1:8000/v1/chat/completions")
-    ap.add_argument("--model", default="Qwen3.8-27B")
+    ap.add_argument("--endpoint", default=None)
+    ap.add_argument("--model", default=None)
     ap.add_argument("--interval", type=int, default=60, help="tick seconds")
     ap.add_argument("--summarise-every", type=int, default=10, help="ticks per model call")
     ap.add_argument("--timeout", type=int, default=600)
@@ -382,7 +386,8 @@ def main() -> None:
         window = window[-args.summarise_every:]
 
         if tick % args.summarise_every == 0:
-            narrative = ask_model(args.endpoint, args.model, window,
+            narrative = ask_model(args.endpoint or llm_env.endpoint(),
+                                  args.model or llm_env.model(), window,
                                   STATE.read_text(encoding="utf-8") if STATE.exists() else "",
                                   args.timeout)
             write_state(window, narrative, stale=narrative is None)

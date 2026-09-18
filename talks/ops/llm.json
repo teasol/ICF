@@ -1,0 +1,5 @@
+{
+  "model": "deepseek-v4.1-flash",
+  "endpoints": ["http://127.0.0.1:8000/v1/chat/completions"],
+  "note": "2026-09-18 16:xx: Qwen 3대가 죽고 GPU 4-7에 deepseek 단일 서버가 올라왔다. 엔드포인트가 하나이므로 좌석들이 같은 서버를 공유한다 (vLLM이 큐잉한다)."
+}

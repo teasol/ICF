@@ -36,7 +36,11 @@ import re
 import subprocess
 import urllib.request
 from datetime import datetime, timedelta, timezone
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import llm_env  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 NOTEBOOKS = PROJECT_ROOT / "talks/ops/notebooks"
@@ -46,11 +50,11 @@ KST = timezone(timedelta(hours=9))
 #: Only the seats whose job is to doubt. A standing proposer notebook would be
 #: a machine for generating unfalsifiable ideas nobody asked for.
 SEATS = {
-    "R": ("반증", "http://127.0.0.1:8001/v1/chat/completions", 0.5,
+    "R": ("반증", llm_env.endpoint(0), 0.5,
           "이 프로젝트의 현재 주장 중 무엇이 틀릴 수 있는지, 더 단순한 설명이 무엇인지 본다."),
-    "A": ("감사", "http://127.0.0.1:8003/v1/chat/completions", 0.2,
+    "A": ("감사", llm_env.endpoint(1), 0.2,
           "데이터·평가·계측이 새는 지점을 본다. 기록과 실행이 어긋나는 경로를 찾는다."),
-    "T": ("이론", "http://127.0.0.1:8000/v1/chat/completions", 0.4,
+    "T": ("이론", llm_env.endpoint(2), 0.4,
           "현재 접근이 암묵적으로 참이라고 두는 가정을 드러낸다."),
 }
 TAG_RE = re.compile(r"^-\s*(관측|추론|질문):")
@@ -81,7 +85,7 @@ def facts_digest() -> str:
 def ask(seat: str, prompt: str, timeout: int) -> str | None:
     label, endpoint, temp, _ = SEATS[seat]
     body = json.dumps({
-        "model": "Qwen3.8-27B", "temperature": temp, "max_tokens": 32000,
+        "model": llm_env.model(), "temperature": temp, "max_tokens": 32000,
         "messages": [{"role": "user", "content": prompt}],
     }).encode("utf-8")
     req = urllib.request.Request(endpoint, data=body,
