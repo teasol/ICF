@@ -1,0 +1,79 @@
+{
+  "round_id": "C-20260918-14",
+  "question": "계측에 대한 우리의 이해가 방금 뒤집혔다. 이 회차는 '무엇을 확인했고 무엇을 추론했는가'를 다시 가른다.\n\n새로 확인된 사실(전부 실행으로 검증): (1) YAML 설정의 branch 가중치는 정확히 파싱된다 — 7-branch 설정에서 weight_sh=1.0, weight_sj=1.0이 읽힌다. (2) 합성 데이터에서 sh/sj를 1.0에서 0.0으로 바꾸면 margin이 max|diff|=0.25로 달라진다. 즉 코드는 설정을 지킨다. (3) 5-branch로 알고 있던 산출물과 7-branch로 지정해 실행한 산출물의 확률이 비트 단위로 동일하다(max|Δprob|=0.000e+00, 2459개 값). (4) 원인은 eval_seal_tasks.sh가 넘겨받은 설정에 'model:' 블록이 있으면 공식 7-branch 설정으로 교체하는 폴백을 갖고 있기 때문이다. (5) 5-branch 설정 파일은 configs/baseline/v121_active.yaml로 존재한다.\n\n여전히 사실인 것: ICF_* 환경변수를 읽는 비테스트 코드가 없다.\n\n질문: (1) 이 사실들로부터 무엇이 확정되고 무엇이 여전히 미확인인가? 앞서 '계측이 복구 불가'라고 분류했던 항목 중 되살아나는 것과 여전히 막혀 있는 것을 나눠라. (2) 설정이 조용히 교체되는 폴백은 그 자체로 결함인가, 아니면 안전장치인가? 어느 쪽이든 무엇을 기록해야 하는가. (3) 이런 종류의 오진 — 코드 네 겹이 정상인데 출력이 같아서 '원인 미확인'으로 멈춘 것 — 을 더 빨리 끝내려면 어떤 검사를 먼저 했어야 하는가? 일반 규칙으로 쓸 수 있게 답하라. (4) 지금 상태에서 오염 검사를 수행할 수 있는가? 수행 가능하다면 무엇을 비교하는 것인가. (5) provenance 기록의 필요성은 이 정정으로 줄어드는가, 그대로인가, 오히려 커지는가.\n\n문서에 없는 수치를 지어내지 마라. 위 사실들은 소집자가 실행으로 확인한 것이며 출처는 실행 로그와 저장된 예측 파일이다.",
+  "ru_type": "진단",
+  "prefixed_criteria": "",
+  "composition_rationale": "오진의 사후 분석이므로 감사(A)를 첫 좌석에 둔다. 이론(T)은 질문 3 — 어떤 검사를 먼저 했어야 하는가를 일반 규칙으로 — 을 맡는다. 이것이 이 회차에서 가장 값어치 있는 산출이다. 반증(R)은 '이제 다 괜찮다'는 과잉 정정과 '그래도 계측을 못 믿는다'는 과잉 보수를 둘 다 공격한다. 제안(P)은 온도 0.7로 기록 절차를 낸다. 외부(E)·일반화(G)·실측(M)은 제외 — 질문이 내부 계측 인식론이다. 앞선 회차 보고서는 입력에 넣지 않았다(회차 간 앵커링 금지). 사실은 소집자가 자기 말로 다시 썼다.",
+  "max_authority": "T1",
+  "convener": "Claude Code (claude-opus-5)",
+  "state_documents": [
+    "docs/PROJECT.md",
+    "docs/closed_axes.md",
+    "docs/current_status.md"
+  ],
+  "max_tokens_per_seat": 32000,
+  "max_total_calls": 14,
+  "seats": [
+    {
+      "name": "A1",
+      "archetype": "A",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "T1",
+      "archetype": "T",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.4,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "R1",
+      "archetype": "R",
+      "endpoint": "http://127.0.0.1:8003/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.5,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "P1",
+      "archetype": "P",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.7,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "S1",
+      "archetype": "S",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    }
+  ],
+  "note": "계측 오진의 사후 분석. SEAL 10 수치 미입력 (D-047)."
+}

@@ -1,0 +1,472 @@
+# ICF Council — C-20260918-13
+
+- **연구 질문**: 세 개의 프로브 설계가 있다. 이 회차는 그것들이 교란돼 있는지 공격한다.
+
+설계 (결과를 보기 전 상태): (1) PCA arm — patch feature를 25차원으로 줄인다. fold별 context에서만 fit하고 query/test/SEAL은 쓰지 않으며 적재 벡터 해시를 기록한다. (2) subsample arm — context slide가 100개를 넘으면 무작위 100개만 쓴다. 라벨은 쓰지 않고 복원추출도 없다. (3) PSW arm — inverse-variance 가중 ridge. 라벨 순열 대조와 seed-only 잡음 대조를 함께 둔다.
+
+이 설계의 출처: 외부 논문이 UNI2 1536차원을 PCA 25차원으로 줄이고 bag을 약 100개로 subsample한 설정에서 좋은 결과를 보고했다. 우리는 1536차원 전체와 50-fold 전체를 쓴다.
+
+질문: (1) 저 외부 설정은 PCA와 subsample을 동시에 적용했다. 우리가 둘을 각각 arm으로 나눈 것이 실제로 두 효과를 분리하는가, 아니면 상호작용 때문에 분리되지 않는가? (2) 'context에서만 fit'이 실제로 지켜지는지 무엇으로 확인하는가? 우리 파이프라인에서 누수가 생길 수 있는 구체적 지점을 짚어라. (3) context를 100개로 줄이면 우리의 closed-form ridge 해 자체가 달라진다. 이때 관측되는 변화를 'subsample 효과'라고 부를 수 있는가, 아니면 다른 것과 혼동되는가? (4) PSW의 라벨 순열 대조와 seed-only 대조가 각각 무엇을 배제하는가? 둘로 충분한가? (5) 세 arm 중 결과를 보기 전에 폐기해야 할 것이 있는가? 있다면 이유와 함께.
+
+주의: 현재 계측이 복구되지 않아 승격 비교는 무효다. 이 프로브들은 탐색 기록이지 채택 근거가 아니다. 외부 수치를 우리 근거로 쓰지 마라. 문서에 없는 수치를 지어내지 마라.
+- **RU 유형**: 진단
+- **최대 권한 등급**: T1
+- **소집자**: Claude Code (claude-opus-5)
+- **좌석**: R1(R, temp 0.5, http://127.0.0.1:8000/v1/chat/completions), A1(A, temp 0.2, http://127.0.0.1:8001/v1/chat/completions), T1(T, temp 0.4, http://127.0.0.1:8003/v1/chat/completions), P1(P, temp 0.7, http://127.0.0.1:8000/v1/chat/completions), S1(S, temp 0.2, http://127.0.0.1:8001/v1/chat/completions)
+- **호출**: 9/14 · **소요**: 704.9초
+
+> 이 문서는 로컬 모델이 생성한 것이며 **검증되지 않았습니다.** 좌석이 인용한 수치는
+> 정본 문서와 대조하기 전에는 결론에 넣지 마십시오. 좌석 수와 동의 수는 증거가 아닙니다.
+
+## 편성 근거 (결과 전 기록)
+
+설계를 공격하는 회차이므로 반증(R)을 첫 좌석에 둔다. 감사(A)가 두 번째다 - 'context에서만 fit'은 말하기 쉽고 지키기 어려우며, 우리는 이미 계측이 문서대로 동작하지 않는 것을 겪었다. 이론(T)은 교란 구조 자체를 맡는다: PCA와 subsample이 동시에 적용된 외부 설정에서 이득이 나왔는데 우리가 나눠서 재면 무엇이 보이는가. 제안(P)은 온도를 0.7로 낮췄다 - 새 설계가 아니라 기존 설계의 수리가 필요하다. E(외부)를 뺐다: 외부 논문은 이미 이 설계의 출처이고, 다시 넣으면 그 설정을 정당화하는 쪽으로 기운다. 일반화(G)와 실측(M)도 제외 - 실행이 계측 복구 대기이고 질문이 내적 정합성이다.
+
+---
+
+## Phase 1 — 독립
+
+### P1 (제안)
+
+## 제안 1: PCA·subsample을 2×2 요인 프로브로 재설계한다
+- **바꾸는 것**: 현재 PCA arm과 subsample arm을 독립 arm으로만 두는 것을 변경한다. baseline(1536차원, full context), PCA-only(25차원, full context), subsample-only(1536차원, context slide >100이면 100개), combined(25차원, context slide >100이면 100개) 네 셀을 같은 fold·같은 subsample seed·같은 context manifest·같은 ridge 설정으로 실행한다. combined에서 PCA fit은 subsample된 context에서만 수행한다. subsample-only와 combined은 동일한 slide draw를 쓴다. 성능 조회 전에 estimand를 per-fold paired Δ의 main effect와 interaction으로 선언하고, fold manifest 해시·context slide ID·subsample seed·PCA 적재 벡터 해시·feature hash·코드 해시를 산출물에 기록한다. subsample 활성화 fold(context slide >100)에서만 subsample main effect와 interaction을 추정하고, 전체 50-fold 평균과 분리해 보고한다.
+- **바꾸는 전제**: "외부 출처가 PCA와 subsample을 함께 썼으므로, 각각 arm으로 나누면 두 효과가 분리된다"는 전제를 뒤집는다. 둘이 함께 적용된 출처라면, 단일 요인 arm만으로는 상호작용을 추정할 수 없다.
+- **기대하는 차이**: 정량 예측 불가. 다만 interaction이 관측되면 PCA arm의 Δ를 독립 효과로 해석할 수 없게 되고, interaction이 0으로 관측되면 additive 가설이 반증되지는 않지만 분리 가능성의 조건은 만족한다. 이 프로브는 탐색 기록이지 승격 근거가 아니다.
+- **기전**: 네 셀의 대응 Δ에서 interaction = Δ_combined − Δ_PCA − Δ_subsample으로 계산되는 설계 경로. 성능이 실제로 바뀌는 기전은 미확인이다.
+- **실패 조건**: combined arm을 추가하지 못하거나, 셀 간 seed·manifest·ridge 설정이 다르면 interaction을 추정할 수 없다. subsample draw 변동이 fold 간 Δ를 지배하면 교란 제거에 실패한다. 활성화 fold가 적으면 interaction은 판별 불가로 남는다. 계측 복구 전이면 산출물 귀속이 불가능해 실행 무효다.
+
+## 제안 2: context-only fit을 canary·provenance 게이트로 강제한다
+- **바꾸는 것**: PCA arm의 성능 조회 전에 context fold에서만 fit됐는지 확인하는 기계적 게이트를 둔다. 기록 대상은 fold manifest 해시, context slide/patch manifest 해시, fit 직전 feature matrix 해시, label mask 해시(라벨이 fit에 들어가지 않았음을 확인), PCA 적재 벡터 해시, 코드 해시다. canary shadow run으로 query/test feature에만 유한한 sentinel 값을 넣고 fit 경로를 재실행한다. PCA 적재 벡터 해시가 context-only run과 동일하면 통과, 다르면 실패다. hold-out은 내용 없이 fold manifest 해시로만 fit pool에서 제외됐는지 확인한다. 구체적 누수 지점으로는 전처리 표준화/스케일링이 fold 전체를 쓰는 경우, feature cache가 dataset 버전만 key로 해 fold를 무시하는 경우, PCA fit 객체가 fold 간 재사용되는 경우, context slide 선택에 라벨이 들어가는 경우, hold-out feature가 context pool에 섞이는 경우, fold manifest 해시가 산출물에 없는 경우를 검사한다. 게이트 실패 시 성능을 조회하지 않고 실행 무효로 종료한다.
+- **바꾸는 전제**: "적재 벡터 해시를 기록하면 context-only가 지켜진 것으로 알 수 있다"는 전제를 뒤집는다. 해시는 산출물을 특정할 뿐, fit에 query/test/hold-out이 들어갔는지를 증명하지 못한다.
+- **기대하는 차이**: 정량 예측 불가. 성능 값이 아니라 유효성이 달라진다: 통과 arm만 탐색 기록으로 남고, 실패 arm은 교란 의심으로 격리된다.
+- **기전**: query/test feature가 fit에 섞이면 PCA 적재 벡터가 바뀌고 canary가 해시 차이로 검출하는 경로. canary가 놓치는 누수는 기전 미확인이다. 성능 개선 기전은 미확인이다.
+- **실패 조건**: sentinel이 전처리 상류·메모리 캐시·precomputed feature 경로에 도달하지 못하면 false pass가 가능하다. label mask 해시나 fold별 feature hash가 없으면 context-only를 입증하지 못한다. canary 통과만으로 누수 없음의 증명은 되지 않는다.
+
+## 제안 3: 현재 명세의 subsample arm을 폐기하고 context-budget/weighting estimand으로 재설계한다
+- **바꾸는 것**: 결과를 보기 전에 현재 명세의 subsample arm을 폐기한다. 폐기 이유는 closed-form ridge에서 context slide 수를 줄이면 ridge 해 자체가 달라지므로, 관측 변화를 "subsample 효과"라고 부를 estimand가 성립하지 않기 때문이다. 이를 "context-budget 100-slide effect on closed-form ridge"로 재명명한다. fold별 활성화 마크(context slide >100 여부)를 기록하고, unconditional 50-fold Δ와 activated fold만 짝지은 Δ를 분리해 보고한다. 동일 fold에서 여러 seed의 random draw를 반복해 draw variance를 기록한다. 파이프라인이 sample weight를 지원하면, 전체 context를 쓰되 ridge 해의 effective sample size가 100-slide draw와 유사하도록 균등 가중을 둔 weighted-full-context 대조를 추가해 content loss와 effective-N 효과를 분리한다. PSW arm에는 같은 입력(차원·context budget)에서 unweighted ridge 대조(가중치 1)를 추가한다. PSW의 라벨 순열 대조는 label association에 의한 변화인지 확인하고, seed-only 잡음 대조는 random seed/draw 변동인지 확인한다. unweighted ridge가 없으면 inverse-variance 가중 효과와 ridge 해 자체의 변화를 분리할 수 없다.
+- **바꾸는 전제**: "context를 100개로 줄이면 관측된 변화가 subsample 효과다"와 "PSW 대조 2종이면 교란이 충분하게 배제된다"는 전제를 뒤집는다. closed-form ridge 해는 context 표본 수와 가중치에 의존하므로, subsampling은 데이터량 감소가 아니라 추정기 변경을 동반한다. PSW에서는 unweighted baseline이 없으면 가중 효과를 분리할 수 없다.
+- **기대하는 차이**: 정량 예측 불가. subsample arm의 Δ는 draw variance·effective-N 효과·content loss 중 하나로 재귀인되며, PSW의 Δ는 unweighted ridge 대비 짝지은 차이에서만 가중 효과 후보로 남는다. 현재 명세의 subsample arm은 채택·승격 근거가 될 수 없다.
+- **기전**: closed-form ridge 해가 context 표본 수·가중치에 따라 바뀌는 경로. 어떤 성능 변화가 실제로 발생하는지 기전은 미확인이다.
+- **실패 조건**: weighted-full-context를 파이프라인이 지원하지 않으면 effective-N 효과를 분리할 수 없고, draw variance만 보고 content loss를 판단하게 된다. activated fold 마크를 기록하지 않으면 unconditional Δ가 희석되어 판별 불가가 된다. PSW unweighted ridge가 다른 fold·seed로 실행되면 짝짓기가 깨진다. 라벨 순열이 inverse-variance 추정을 실제로 깨지 못하면 라벨 순열 대조는 교란을 배제하지 못한다.
+
+### R1 (반증)
+
+## 반론 1
+- **공격 대상**: "PCA arm과 subsample arm을 각각 나누면 두 효과를 분리한다"는 주장 (질문 1)
+- **더 단순한 설명**: 외부 논문의 설정은 PCA 25차원과 bag 약 100개 subsample을 **동시에** 적용한 단일 구성이다. 우리가 각각 arm으로 나누면, PCA arm은 1536→25차원 축소 + context slide 전체(90~261장), subsample arm은 1536차원 + context slide 100개다. 두 arm 모두 외부 설정(25차원 + 100개)을 재현하지 못한다. 즉, 각 arm은 외부 설정의 **하위 집합**이지 전체가 아니다. 외부 설정에서 "좋은 결과"가 PCA와 subsample의 상호작용에서 나온 것이라면, 각 arm의 관측은 그 결과를 분리하지 못한다.
+- **무엇이 참이면 이 주장이 무너지는가**: PCA와 subsample 사이에 상호작용이 없거나 무시할 수 있다면(효과가 가법이라면), 각 arm은 두 효과를 분리한다. 그러나 외부 설정의 관측이 둘 중 하나만 적용한 경우와 둘 다 적용한 경우에서 동일하다면, 상호작용이 없으므로 분리가 가능하다.
+- **이 반론의 한계**: 실제로 PCA와 subsample의 효과가 가법이고, 각 arm의 관측이 외부 설정의 효과를 충분히 예측한다면, 분리는 가능하다. 또한, 외부 논문의 "좋은 결과"가 PCA와 subsample 중 하나에서만 나온 것이라면, 해당 arm은 그 효과를 분리한다.
+
+## 반론 2
+- **공격 대상**: "context에서만 fit"이 실제로 지켜진다는 주장 (질문 2)
+- **더 단순한 설명**: D-050에 따르면, 현재 계측이 복구되지 않았다. "src/가 환경변수를 하나도 읽지 않아 실행 스크립트의 모든 ICF_* export가 무효이며, SH/SJ를 켜는 문서화된 수단이 동작하지 않는다. 저장된 예측 파일에도 branch list·가중치·코드 해시가 기록돼 있지 않아 과거 산출물을 특정 구성에 귀속시킬 수 없다." 즉, "context에서만 fit"을 검증하는 독립적 수단이 현재 존재하지 않는다. 적재 벡터 해시를 기록한다고 하지만, D-050에서 코드 해시가 기록되지 않는다고 명시했다.
+- **무엇이 참이면 이 주장이 무너지는가**: 실제로 query/test/SEAL 데이터가 PCA fit에 유입되었다면, "context에서만 fit" 주장은 무너진다. 구체적 누수 지점: ① fold 분할 오류로 query/test 슬라이드가 context에 포함, ② PCA fit 시 fold manifest 해시가 기록되지 않아 fold 경계 검증 불가, ③ 적재 벡터 해시가 D-050의 결함으로 실제로 기록되지 않음.
+- **이 반론의 한계**: 실제로 fold 분할이 정확하고, PCA fit이 context 데이터만 사용하며, 적재 벡터 해시가 올바르게 기록된다면, 누수는 없다. 그러나 현재 계측이 복구되지 않아 이를 검증할 수 없다는 사실 자체가 "context에서만 fit" 주장을 지지하지도 반박하지도 않는다.
+
+## 반론 3
+- **공격 대상**: "context를 100개로 줄이면 관측되는 변화를 'subsample 효과'라고 부를 수 있다"는 주장 (질문 3)
+- **더 단순한 설명**: context slide 수를 100개로 줄이면, closed-form ridge 해의 입력 표본 수가 감소한다. 이는 "subsample 효과"가 아니라 **표본 수 감소 효과**다. 무작위 subsampling은 살리언스 선택의 이득을 재현하지 못한다. CA-R1에서 재개된 subsampling은 "Salience Anchor Subsampling"으로, 살리언스 기반의 선택적 subsampling이다. 그러나 이 프로브의 subsample arm은 "무작위 100개만 쓴다"고 명시했다. 즉, 살리언스 기반이 아니라 무작위이다. 무작위 subsampling에서 ridge 해의 변화는 표본 수 감소의 일반적 통계적 효과(편차 증가)로 설명되며, "subsample"이라는 명명은 살리언스 선택의 효과를 포함하는 것으로 오해될 수 있다.
+- **무엇이 참이면 이 주장이 무너지는가**: subsample이 살리언스 기반이라면, 표본 수 감소와 살리언스 선택의 효과가 분리된다. 그러나 이 프로브는 무작위 subsampling이므로, 표본 수 감소 효과만이다. "subsample 효과"라는 명명은 CA-R1의 살리언스 기반 subsampling과 혼동된다.
+- **이 반론의 한계**: 무작위 subsampling도 "subsample"의 일종이므로, 명명이 틀렸다고 보기 어렵다. 그러나 "subsample 효과"라는 명명은 살리언스 선택의 효과를 포함하는 것으로 오해될 수 있다. 또한, 표본 수 감소 효과 자체가 새로운 정보를 제공한다면, 명명 변경만으로 폐기할 수는 없다.
+
+## 반론 4
+- **공격 대상**: "PSW의 라벨 순열 대조와 seed-only 대조가 충분하다"는 주장 (질문 4)
+- **더 단순한 설명**: 라벨 순열 대조는 라벨이 우연에 의해 생성된 경우의 분포를 추정하여, PSW의 성능이 라벨 정보에 의존하는지 배제한다. seed-only 대조는 동일 구성에서 seed만 바꾼 경우의 분포를 추정하여, 적합 분산(fitting variance)을 배제한다. 그러나 둘 다 **피처의 구조적 편향**(염색 편향, 스캐너 편향)과 **fold 분할의 편향**을 배제하지 못한다. CA-05에서 "특정 Context 슬라이드의 염색 톤·배경 노이즈가 우연히 일치하는 패치가 상위 K로 오선별된다"는 기전이 확인되었다. PSW의 inverse-variance 가중이 이 구조적 편향을 증폭하거나 완화하는지는 라벨 순열 대조와 seed-only 대조로 배제되지 않는다.
+- **무엇이 참이면 이 주장이 무너지는가**: PSW의 관측이 라벨 순열 대조와 seed-only 대조로 완전히 설명되지 않는다면, 추가 대조가 필요하다. 구체적으로, 염색 편향이나 스캐너 편향이 PSW의 inverse-variance 가중에 영향을 미친다면, 둘로 충분하지 않다.
+- **이 반론의 한계**: 라벨 순열 대조와 seed-only 대조가 PSW의 주요 교란 요인을 포괄한다면, 둘로 충분할 수 있다. 또한, 피처 구조적 편향과 fold 분할 편향이 PSW의 관측에 영향을 미치지 않는다면, 추가 대조는 불필요하다.
+
+## 반론 5
+- **공격 대상**: "세 arm 모두 결과를 보기 전에 유지해야 한다"는 주장 (질문 5)
+- **더 단순한 설명**: subsample arm은 무작위 subsampling이므로, "subsample 효과"가 아니라 **표본 수 감소 효과**를 측정한다. 이는 일반적 통계 이론(소표본에서 ridge 해의 편차 증가)으로 설명되며, 새로운 정보를 제공하지 않는다. CA-R1에서 재개된 subsampling은 살리언스 기반이므로, 이 프로브의 무작위 subsampling은 CA-R1의 재개 조건을 충족하지 못한다. 또한, D-050에 따르면 현재 계측이 복구되지 않아, subsample arm의 관측을 "verified"로 수행할 수 없다.
+- **무엇이 참이면 이 주장이 무너지는가**: 무작위 subsampling이 표본 수 감소의 효과를 측정하는 데 가치가 있고, 이 정보가 다른 arm(PCA arm, PSW arm)의 해석에 도움이 된다면, 폐기하지 않아도 된다. 또한, 계측이 복구되면 subsample arm의 관측을 "verified"로 수행할 수 있다.
+- **이 반론의 한계**: 무작위 subsampling이 표본 수 감소의 효과를 측정하는 데 유용하고, 이 정보가 다른 arm의 해석에 도움이 된다면, 폐기하지 않아도 된다. 또한, "표본 수 감소 효과"는 PCA arm(차원 축소)과 PSW arm(가중 방식)의 효과를 해석하는 데 기준선이 될 수 있다.
+
+### A1 (감사)
+
+## 점검 1: PCA×subsample 상호작용 분리
+- **확인하려는 것**: PCA arm과 subsample arm을 각각 단독으로 분리했을 때, 외부 설정의 PCA 25차원 × bag 100개 subsample 동시 적용이 실제로 두 효과로 분리되는지, 아니면 상호작용 때문에 분리되지 않는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: `icmil_digest.md` §3에 따르면 외부 설정은 "feature dimension이 25를 초과하면 PCA로 25차원으로 줄인다"와 "큰 벤치마크는 약 100 bags로 subsample"을 동시에 적용했다. PCA arm 단독은 subsample 효과를, subsample arm 단독은 PCA 효과를 포함하지 않으므로, 두 arm의 관측값은 외부 설정의 효과를 재현하지 못한다. 특히 PCA 25차원은 1536차원 전체와 비교할 때 ridge 해의 조건수를 근본적으로 바꾸므로, subsample 100개와 결합된 효과와 단독 효과가 동일하지 않을 수 있다. 이 경우 "PCA 효과"로 명명된 arm의 Δ가 실제로는 PCA×subsample 상호작용의 일부일 수 있으며, "subsample 효과"로 명명된 arm의 Δ가 PCA 부재의 효과를 포함할 수 있다. 기전 미확인.
+- **확인 방법**: 2×2 factorial 설계(PCA on/off × subsample on/off)를 사전에 선언하고, 4개 arm의 대응 per-fold Δ를 `PROJECT.md` §4의 방식으로 짝지어 비교한다. 상호작용 항 = Δ(PCA on, sub on) − Δ(PCA on, sub off) − Δ(PCA off, sub on) + Δ(PCA off, sub off)를 계산한다. 이 설계가 문서에 사전 선언되어 있는지 `docs/` 내 RU 카드 또는 설계 문서에서 확인한다.
+
+## 점검 2: context-only fit 누수
+- **확인하려는 것**: PCA fit이 fold별 context slide에서만 이루어지고, query/test/SEAL slide의 patch feature가 fit에 포함되지 않는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: 설계 설명에 "fold별 context에서만 fit하고 query/test/SEAL은 쓰지 않으며 적재 벡터 해시를 기록한다"고 명시되어 있으나, 이 명세가 실제 데이터 흐름에서 지켜지는지 확인하는 절차는 문서에 없다. `PROJECT.md` §3.2 `D-050`에 따르면 "저장된 예측 파일에도 branch list·가중치·코드 해시가 기록돼 있지 않아 과거 산출물을 특정 구성에 귀속시킬 수 없다." PCA 적재 벡터 해시 기록이 실제로 fold별 context slide ID 목록과 대조되는지 확인하는 절차가 없으면, query/test slide가 fit에 포함되었는지 판별 불가. SEAL 10 slide가 fit에 포함되면 `PROJECT.md` §3.1의 "선택·튜닝에 어떤 형태로도 사용 금지"를 위반한다.
+- **확인 방법**: ① PCA fit에 쓰인 slide ID 목록을 fold manifest(`PathoBench` 공식 분할)의 context/query/test/SEAL 집합과 대조. ② 적재 벡터 해시 기록의 slide ID 집합이 fold별 context slide ID 집합과 정확히 일치하는지 확인. ③ `src/` 내 PCA fit 호출 지점에서 입력 tensor의 slide ID가 context fold manifest에서만 가져오는지 코드 경로 추적. `D-050`에 따라 "src/가 환경변수를 하나도 읽지 않아 실행 스크립트의 모든 ICF_* export가 무효"이므로, fit 범위를 통제하는 환경변수 경로가 실제로 동작하는지 단위 테스트로 확인.
+
+## 점검 3: subsample arm의 ridge 해 변화 혼동
+- **확인하려는 것**: context slide를 100개로 줄이면 closed-form ridge 해 자체가 달라지므로, 관측된 AUROC 변화를 'subsample 효과'로 명명할 수 있는지, 아니면 ridge 해의 표본 변동(적합 분산)과 혼동되는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**: `PROJECT.md` §1 `D-048` 이후 "적합 분산 보고"가 필수이며, "단일 적합에 대한 per-fold 구간은 실제 불확실성을 과소평가한다(`RU-97` §8 실측: 동일 구성에서 seed만 바꿔 macro 폭 `0.0200`)." subsample arm은 context slide 집합을 바꾸므로 ridge 해가 달라지고, 이는 subsample 효과와 적합 분산의 합이다. seed-only 대조(동일 subsample 크기, 다른 무작위 seed)가 없으면, 관측된 Δ 중 어느 부분이 subsample 효과이고 어느 부분이 무작위 적합 변동인지 구분 불가. 기전 미확인.
+- **확인 방법**: ① 동일 fold에서 subsample on/off의 ridge 계수 벡터 차이를 기록. ② 동일 subsample 크기(100개)에서 seed를 k회 반복한 seed-only 대조의 AUROC 분포를 산출. ③ subsample arm의 관측 Δ가 seed-only 대조 분포의 어느 위치인지 확인. ④ `PROJECT.md` §4.1의 대응 per-fold Δ 방식으로, subsample on/off를 같은 fold에서 짝지어 Δ를 계산하고, seed-only 대조의 Δ 분포와 비교.
+
+## 점검 4: PSW 대조 설계 충분성
+- **확인하려는 것**: 라벨 순열 대조와 seed-only 대조가 각각 무엇을 배제하는지, 둘로 PSW의 관측된 차이가 데이터·평가 설계에서 새어 나온 것을 배제하는 데 충분한지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: 설계 설명에 "라벨 순열 대조와 seed-only 잡음 대조를 함께 둔다"고 명시되어 있다. 라벨 순열 대조는 context 라벨과 피처의 우연적 결합(과적합)이 PSW의 inverse-variance 가중에 편익을 주는지를 배제한다. seed-only 대조는 무작위 적합 변동이 PSW의 관측값에 기여하는지를 배제한다. 그러나 둘 모두 PSW의 inverse-variance 가중 자체가 fold context의 표본 변동에 민감한지를 배제하지는 않는다. `PROJECT.md` §4.1에 "fold는 과제 내에서 독립이 아니다"이므로, fold 간 상관 구조가 inverse-variance 가중에 편향을 줄 수 있다. 이 경우 라벨 순열과 seed-only 대조 모두 fold 간 상관 구조를 보존하므로, fold 간 상관에 의한 편익을 배제하지 못한다. 기전 미확인.
+- **확인 방법**: ① 라벨 순열 대조의 AUROC 분포와 seed-only 대조의 AUROC 분포를 각각 기록. ② PSW의 관측값이 두 대조 분포의 어느 쪽에 위치하는지 확인. ③ fold 간 상관 구조의 영향을 배제하려면, fold를 군집으로 한 bootstrap 또는 `PROJECT.md` §4.1의 "과제 군집 7" 방식으로 대조 분포를 재계산. ④ `closed_axes.md` `CA-08`에 PSW는 비저촉으로 판정되었으나, "예측분산의 유효성"이 남은 검증으로 명시되어 있으므로, inverse-variance 가중의 fold context 표본 변동 민감성을 사전에 선언된 통계로 확인.
+
+## 점검 5: 계측 무효 상태에서의 프로브 실행
+- **확인하려는 것**: 세 arm 중 결과를 보기 전에 폐기해야 할 것이 있는지, 특히 `D-050`의 계측 결함이 프로브 산출물의 귀속성을 무효화하는지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**: `PROJECT.md` §3.2 `D-050`에 "계측 결함으로 이 기준선을 재현할 경로가 현재 없다. `src/`가 환경변수를 하나도 읽지 않아 실행 스크립트의 모든 `ICF_*` export가 무효이며, `SH`/`SJ`를 켜는 문서화된 수단이 동작하지 않는다. 저장된 예측 파일에도 branch list·가중치·코드 해시가 기록돼 있지 않아 과거 산출물을 특정 구성에 귀속시킬 수 없다." 이 상태에서 세 arm을 실행하면, 산출물에 PCA 적재 벡터 해시·subsample seed·PSW 가중 계수·코드 해시가 기록되지 않아, 관측된 Δ를 특정 arm 구성에 귀속시킬 수 없다. `PROJECT.md` §3.4에 "재설계가 완료될 때까지 오염 검사 통과를 주장하는 실행은 무효다." 따라서 계측 복구 전의 프로브 실행은 `실행 무효`다.
+- **확인 방법**: ① `D-050`의 완료 조건("provenance writer, `SH`/`SJ` branch control 경로, 오염 검사 재설계, 단위 테스트")이 충족되었는지 `docs/current_status.md`에서 확인. ② `tests/test_docs_consistency.py`가 통과하는지 확인. ③ 프로브 실행 산출물에 branch list·가중치·코드 해시·데이터 버전·fold manifest 해시가 기록되는지 `PROJECT.md` §3.4 재설계 방향에 따라 확인. ④ 세 arm 모두 계측 복구 전에는 `실행 무효`로 판정하고, 복구 후 재실행한다.
+
+### T1 (이론)
+
+## 이론적 병목 1
+- **가정**: PCA 25D와 context 100 subsample은 서로 독립적인 단일 인자이고, 각각 arm으로 실행하면 외부 설정의 동시 효과를 두 개의 주효과로 분리할 수 있다. 외부 설정의 bag subsample이 우리 context slide subsample과 동일 estimand이며, 외부 동시 적용이 우리에서 분리 가능하다고 두고 있다.
+- **이 가정이 깨지는 조건**: PCA 적재 벡터가 context 표본 수·구성·패치 분포에 의존하거나, ridge 해가 차원(D)과 context 크기(N)의 조합에 의존하면. 특히 PCA arm의 적재 벡터가 full context와 100 context에서 달라지거나, 25D/1536D ridge의 fold별 Δ가 context 크기별로 달라지면. combined arm이 없으면 상호작용은 판별 불가다.
+- **깨질 때 나타나는 관측 가능한 증상**: 2×2 factorial에서 combined arm이 PCA arm과 subsample arm의 효과 합과 일치하지 않음; fold/task별 부호 반전; PCA hash가 context size에 따라 변동; ridge 계수·condition number·effective rank가 D×N 조합에 따라 체계적 변화; subsample draw별 Δ 변동.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: 해당 관측 없음.
+
+## 이론적 병목 2
+- **가정**: context-only fit은 코드 의도만으로 성립하고, 적재 벡터 해시 기록만으로도 query/test/SEAL/라벨 유입을 배제할 수 있다.
+- **이 가정이 깨지는 조건**: PCA fit, standardization/whitening, ridge fit, inverse-variance weight, subsample selection, RNG seed, cache, fold manifest, data version, code path 중 어느 하나에 query/test/SEAL feature/label 또는 전역 통계가 섞이면. query/test feature를 inference projection에 쓰는 것은 허용하되, fit 통계에 영향을 주면 누수다. 구체적 지점: context feature matrix에 query/test/SEAL slide 포함; 전역 mean/std/whitening; PCA loadings를 query/test/SEAL로 fit; subsample 선택에 라벨·task·query identity 사용; ridge target/λ/weights에 query/test/SEAL 사용; 이전 fold cache 재사용; ICF_* env var가 src에서 읽히지 않아 intended flag 무효; branch list·가중치·코드 해시·데이터 버전·fold manifest 해시 누락.
+- **깨질 때 나타나는 관측 가능한 증상**: context만 재계산한 PCA hash와 기록 hash 불일치; query/test/SEAL 제거 시 적재 벡터·ridge 계수·weights 변화; label permutation 시 fit 계수 변화; fold manifest/data version/code hash/branch list/weights 기록 부재; 실행 스크립트 export가 src에서 읽히지 않아 무효; SH/SJ control 경로가 동작하지 않음; 오염 검사 값 앵커가 재현되지 않거나 폐지 상태.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: D-050과 §3.4: 계측 결함으로 재현 경로가 없고, src가 환경변수를 읽지 않아 export 무효, 저장 예측에 branch list·가중치·코드 해시가 없어 구성 귀속 불가, 오염 검사는 폐지·재설계 상태. 따라서 현재 context-only fit의 verified 확인은 실행 무효다.
+
+## 이론적 병목 3
+- **가정**: context slide를 100개로 줄이면 관측 변화는 'subsample 효과'로 부를 수 있고, closed-form ridge 해의 변화는 그 효과의 일부이거나 무시할 수 있다.
+- **이 가정이 깨지는 조건**: closed-form ridge 해가 context의 X, y, 가중치 W, 정규화 λ의 함수이므로 N을 바꾸면 해 자체가 변할 때. 특히 class balance, empirical covariance, condition number, inverse-variance weights가 draw별로 달라지면. context slide 수가 fold/task마다 90~261로 다르므로 100 threshold는 일부 fold만 줄이고 일부는 그대로 두어 'subsample'이 아니라 'threshold crossing'과 혼동된다.
+- **깨질 때 나타나는 관측 가능한 증상**: full vs 100에서 계수 norm, condition number, effective rank, class prior, weight 분포의 체계적 변화; 같은 100이라도 draw/class balance에 따라 Δ 변동; label permutation에서 N 고정 시 변화; λ 고정 시 N 변화에 따른 bias-variance 변화; task/fold별 부호 반전; context size가 100 미만인 fold에서는 arm이 no-op가 되어 fold 간 개입 강도가 달라짐.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: CA-04/CA-06: 현행 Primary 7 fold의 실측 context 슬라이드 수는 90~261장이다. 이 관측은 'context를 100개로 줄인다'는 단일 개입이 fold/task마다 동일하게 적용된다는 가정과 충돌한다.
+
+## 이론적 병목 4
+- **가정**: PSW의 유효성은 label permutation 대조와 seed-only noise 대조 두 가지로 충분히 배제/검증할 수 있다.
+- **이 가정이 깨지는 조건**: PSW 변화가 실제 label association이 아닌 variance estimation error, context composition, fold/task heterogeneity, leakage, multiple comparisons, numerical instability, inverse-variance weight instability에서 오면. label permutation은 fit에 쓰인 context label의 association만, 그것도 class balance·fold 구조를 보존할 때 배제한다. seed-only는 data/context/subsample를 고정하고 fit randomness만 바꿀 때 seed variance만 배제한다. seed가 subsample draw까지 바꾸면 seed-only가 아니다.
+- **깨질 때 나타나는 관측 가능한 증상**: observed Δ가 seed-only variance보다 작거나 fold cluster CI가 0 포함; task별 sign disagreement; label permutation null과 observed overlap; inverse-variance weights가 seed/subsample/draw에 불안정; feature/context permutation에서 동일 효과; context-only 재계산 불일치; class balance가 permutation에서 보존되지 않아 confound.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: D-048/CA-14와 RU-97 §8: 적합 분산 필수, 동일 구성에서 seed만 바꿔 macro 폭 0.0200. PROJECT §4.1: fold는 과제 내에서 독립이 아니고, 과제 군집 CI·sign agreement를 함께 보고해야 하며, 과거 승격 비교에서 sign agreement 4/7, CI 0 포함. D-050: 계측 무효로 대조 자체의 verified 수행도 현재 불가.
+
+## 이론적 병목 5
+- **가정**: 세 arm 모두 결과 전 폐기 없이 유효한 탐색 기록으로 유지할 수 있고, 현재 계측 상태에서도 verified 비교를 생산할 수 있다.
+- **이 가정이 깨지는 조건**: 계측/provenance 복구 전에는 verified 게이트/승격 비교가 불가하고, PCA/subsample 분리 해석을 유지하려면 combined arm이 필요하다. 즉, 분리 해석을 유지하거나 결과를 verified 근거로 쓰려는 순간 전제가 깨진다.
+- **깨질 때 나타나는 관측 가능한 증상**: 결과 산출물에 branch list·가중치·코드 해시·데이터 버전·fold manifest 해시·적재 벡터 해시가 없거나 독립 재계산이 불가; env var 무효; combined arm 부재로 PCA×subsample 상호작용 판별 불가; fold/task cluster CI와 적합 분산이 보고되지 않음.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: D-050: 계측 복구 전 게이트·승격 비교를 verified로 수행할 수 없고, 산출물을 특정 구성에 귀속시킬 수 없다. 따라서 폐기해야 할 arm 자체는 문서 근거로 지정할 수 없으나, 'PCA arm과 subsample arm으로 두 효과를 분리한다'는 해석과 모든 verified 비교 주장은 결과 전 폐기/보류해야 한다. 현재 실행은 탐색 기록만 유효하고 verified 근거는 실행 무효다.
+
+---
+
+## Phase 2 — 교차
+
+### R1 (반증)
+
+## 반론 1
+- **공격 대상**: 제안 1의 “baseline·PCA-only·subsample-only·combined 네 셀이면 PCA와 subsample의 main effect와 interaction을 분리할 수 있다”는 주장.
+- **더 단순한 설명**: 네 셀의 차이는 PCA×subsample의 체계적 상호작용이 아니라, (a) 같은 100-slide draw가 fold-specific covariance를 바꾸는 draw effect, (b) context slide 수·차원 변화에 따른 closed-form ridge의 effective-N/penalty scaling, (c) context slide >100 fold만 고른 activated subset의 fold/task heterogeneity가 같은 관측을 낳을 수 있다. 특히 PCA-only는 full context에서 fit하고 combined은 subsampled context에서 fit하므로, ‘PCA’ 요인 자체가 context budget에 고정되지 않는다.
+- **무엇이 참이면 이 주장이 무너지는가**: fold당 subsample draw가 1개뿐이고 draw/fit variance를 추정하지 못하면 interaction contrast는 draw-specific 변동과 alias되어 판별 불가다. activated folds가 context slide 90~261 범위에서 >100으로 선택된 비무작위 집합이면, activated Δ는 context size·task 난이도와 혼동된다. ridge λ가 N/dim에 맞춰 재조정되지 않아 effective regularization이 셀마다 다르면, 차이는 PCA/subsample가 아니라 regularization 변화다. D-050 계측 복구 전이면 산출물 귀속이 불가능해 실행 무효다.
+- **이 반론의 한계**: fold당 여러 독립 draw를 반복해 draw variance를 실측하고, 모든 셀을 같은 λ·manifest·code path로 짝짓고, estimand를 “이 고정 draw·activated subset에서의 contrast”로 축소하면 제안 1은 제한된 탐색 기록으로 성립할 수 있다. 일반 효과 분리 주장은 여전히 약하지만, 특정 설정의 기록 목적이라면 공격이 약해진다.
+
+## 반론 2
+- **공격 대상**: 제안 2의 “canary shadow run + 해시로 context-only fit을 강제하고, 통과하면 유효하다”는 주장.
+- **더 단순한 설명**: canary 통과와 적재 벡터 해시 동일은 query/test feature가 fit output에 영향을 주지 않았다는 한 출력을 확인하는 것뿐이다. 더 단순한 설명은 sentinel이 fit이 실제로 소비하는 경로에 도달하지 않아 false pass가 생긴 것이다. precomputed feature cache, 전처리 상류, label/metadata 기반 context 선택, fold manifest 오류는 feature sentinel만으로 검출되지 않는다.
+- **무엇이 참이면 이 주장이 무너지는가**: sentinel이 fit이 실제로 소비하는 feature matrix에 주입되지 않으면(캐시, dead code, shadow run 경로 차이), 누수가 있어도 해시가 동일할 수 있다. query/test가 PCA 적재 벡터에는 영향을 주지 않지만 context slide 선택·라벨 mask·스케일링 상수·코드 경로에 영향을 주면, canary는 통과하고 context-only가 깨진다. fold manifest 해시만으로는 hold-out feature가 context pool에 섞이지 않았음을 증명하지 못한다. D-050처럼 provenance writer가 복구되지 않으면 해시 기록 자체가 구성을 특정하지 못해 실행 무효다.
+- **이 반론의 한계**: canary가 production과 동일한 코드 경로에서 fit이 소비하는 matrix에 충분히 큰 sentinels를 주입하고, feature matrix·label mask·context manifest·code hash를 산출물에 고정하며, shadow run이 그 경로와 동일하다면, feature-level leak에 대해 상당한 검출력을 가진다. 다만 “누수 없음의 증명”은 여전히 아니고, 제안 2의 실패 조건에 이미 한계가 인정되어 있다.
+
+## 반론 3
+- **공격 대상**: 제안 3의 “현재 subsample arm은 폐기해야 하며, weighted-full-context 대조로 content loss와 effective-N 효과를 분리할 수 있다”는 주장.
+- **더 단순한 설명**: 100-slide subsampling의 관측 변화는 ‘subsample 효과’가 아니라 closed-form ridge의 effective sample size/penalty scaling과 random draw variance만으로 설명될 수 있다. weighted-full-context는 모든 context content를 유지하면서 가중치만 바꾸므로, random subsampling의 content loss를 제거하지 못한다. 따라서 weighted-full과 subsample의 차이는 content loss가 아니라 weight/penalty scaling 또는 estimator 차이일 수 있다.
+- **무엇이 참이면 이 주장이 무너지는가**: sample weight가 ridge penalty와 같은 scale로 적용되지 않으면 weighted-full은 다른 regularized estimator다. uniform weight로 full-data Gram을 scale해도 100-slide subset의 Gram과 동일하지 않으므로 effective-N만 맞추는 대조가 되지 않는다. ridge에서 effective sample size는 penalty와 Gram 조건에 의존하는 개념이므로, uniform weight만으로 100-slide draw와 동일한 effective-N을 만드는 대조가 아님. draw variance가 activated-fold Δ보다 크면 content loss/effective-N/weighting 중 어느 것이 원인인지 판별 불가다. 문서에 sample weight 지원 여부 없음이므로, 지원 여부를 확인하기 전 weighted-full은 실행 무효 후보다. 현재 arm을 “random 100-slide context-budget effect on ridge”로 명시한다면 폐기할 필요 없이 이름만 고쳐 탐색 기록으로 쓸 수 있으므로, ‘폐기’라는 강한 주장은 과잉이다.
+- **이 반론의 한계**: 연구 질문이 “context slide 수를 100으로 제한하는 것이 ridge 예측을 어떻게 바꾸는가”라면 현재 arm은 유효한 estimand다. weighted-full이 matched-penalty 방식으로 구현되고, 여러 draw와 unweighted ridge가 같은 fold·context·λ에서 짝지어진다면, 제안 3은 일부 요인(가중 효과 vs unweighted)을 분리하는 데 도움이 될 수 있다.
+
+## 반론 4
+- **공격 대상**: 제안 3의 “PSW에 unweighted ridge를 추가하면 라벨 순열·seed-only 대조와 함께 inverse-variance 가중 효과를 분리할 수 있다”는 주장.
+- **더 단순한 설명**: PSW와 unweighted ridge의 차이는 inverse-variance 가중의 정보적 효과가 아니라, (a) variance estimator의 finite-context bias, (b) label marginal/class balance에 의한 가중치 변화, (c) ridge penalty와 가중치의 상호작용, (d) fold/task heterogeneity가 같은 관측을 낳을 수 있다. 문서에 inverse-variance 가중치의 정확한 계산식·라벨 의존 경로가 없으므로, 라벨 순열이 실제로 어떤 경로를 깨는지 확인 불가다.
+- **무엇이 참이면 이 주장이 무너지는가**: inverse-variance 가중치가 라벨의 여분(marginal)이나 class balance에만 의존하면 라벨 순열은 가중치를 거의 바꾸지 못해 label association을 배제하지 못한다. seed-only 대조가 context draw를 다시 뽑지 않으면 seed noise만 재고 draw variance를 배제하지 못한다. unweighted ridge가 다른 fold·context draw·λ·numerical path로 실행되면 짝짓기가 깨진다. 따라서 2종 대조+unweighted ridge로도 “가중 효과”를 특정할 수 없고, random weights, fixed weights, variance estimator ablation, matched penalty controls가 없으면 판별 불가다.
+- **이 반론의 한계**: 라벨 순열이 실제로 variance estimator의 label-dependent association을 깨도록 설계되고, seed-only가 같은 context draw에서 seed만 바꾸며, unweighted ridge가 같은 fold·context·λ·code path에서 실행된다면, 제안 3은 최소한 “label association”과 “seed noise”를 배제하는 제한된 대조로 성립한다. 단, 가중치 추정 편향과 penalty 상호작용은 여전히 별도 대조가 필요하다.
+
+### A1 (감사)
+
+## 점검 1: P1 2×2 estimand — main effect/interaction 분리 가능성
+- **확인하려는 것**: P1의 4셀(baseline, PCA-only, subsample-only, combined)이 같은 fold에서 PCA 차원과 context budget을 교차시켜, PCA main effect·subsample main effect·interaction을 실제로 분리하는지. 특히 subsample이 `context slide > 100` fold에서만 활성화되어 2×2가 일부 fold에서만 성립할 때, unconditional 50-fold Δ와 activated-fold Δ를 구분하는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**:  
+  1) `context slide ≤ 100` fold에서 subsample/combined가 full context로 수렴하면, 50-fold 평균 main effect는 treatment가 적용되지 않은 fold로 희석되어 subsample 효과를 과소 또는 과대 추정할 수 있다.  
+  2) combined에서 PCA fit이 subsampled context에서만 수행되면, PCA main effect는 full-context PCA와 subsampled-context PCA의 평균이 된다. interaction이 있으면 PCA arm의 Δ를 독립 PCA 효과로 해석할 수 없다.  
+  3) activated fold가 적으면 interaction은 `판별 불가`로 남는다.  
+  4) 성능 변화의 기전은 `기전 미확인`이다.
+- **확인 방법**: fold별 context slide count, activation mask(`>100` 여부), 4셀 per-fold AUROC, baseline pairing, PCA fit input hash, subsample seed, estimand 사전 선언 기록을 대조한다. 파일은 문서에 없으므로 확인 대상 산출물로 `fold_manifest`, `context_slide_count`, `activation_mask`, `per_fold_auroc`, `pca_fit_input_hash`, `subsample_seed`, `estimand_spec`을 요구한다. activated fold에서만 `Δ_combined − Δ_PCA − Δ_subsample`을 계산하고, unconditional Δ와 분리 보고하는지 코드와 산출물로 확인한다.
+
+## 점검 2: P1 동일 subsample draw — 중복·라벨·평가 집합 침범
+- **확인하려는 것**: subsample-only와 combined이 같은 fold에서 동일한 context slide draw를 사용하는지, draw가 무작위 100개인지, 중복 추출이 없는지, 라벨이 draw에 쓰이지 않는지, query/test/SEAL 10 slide가 context pool에 섞이지 않는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**:  
+  1) arm 간 draw가 다르면 subsample 효과와 random draw variance가 혼동된다.  
+  2) 중복 추출(with replacement)이 있으면 effective context slide 수가 100개가 아니고 특정 slide가 과대 가중된다.  
+  3) 라벨이 draw에 쓰이면 선택 편향이 생긴다.  
+  4) query/test/SEAL 10 slide가 context pool에 섞이면 평가 독립성이 깨진다.  
+  5) slide 순서가 고정되지 않으면 같은 seed라도 draw가 달라진다.
+- **확인 방법**: arm·fold별 context slide ID set hash, replacement flag, label mask hash, query/test/holdout manifest disjointness, slide order hash, random seed를 대조한다. 확인 대상 산출물: `context_slide_ids_by_arm_fold`, `subsample_replacement_flag`, `label_mask_hash`, `query_test_holdout_manifest_hash`, `slide_order_hash`, `subsample_seed`. 명령은 slide ID set의 `sha256sum` 또는 동등한 해시 비교, ID set 교집합 검사, label mask와 draw 결정 코드 경로 감사로 확인한다.
+
+## 점검 3: P1 PCA fit 범위 — context-only, fold별 fit, 적재 벡터 재사용
+- **확인하려는 것**: PCA-only는 full context에서만 fit되고, combined은 subsampled context에서만 fit되는지, fold 간 PCA 객체 재사용이 없는지, 전처리 centering/scaling도 fit pool이 context-only인지, 적재 벡터 해시가 fold·draw별로 기록되는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**:  
+  1) PCA fit이 query/test/SEAL 10 feature를 쓰면 적재 벡터가 평가 집합에 의존한다.  
+  2) 전처리 표준화·스케일링이 fold 전체 또는 dataset 전체에서 fit되면 PCA 이전 단계에서 누수가 생긴다.  
+  3) PCA 객체가 fold 간 재사용되면 fold별 context-only fit이 깨진다.  
+  4) combined의 PCA 적재 벡터가 subsample draw에 의존하면 PCA 효과와 draw variance가 혼동된다.  
+  5) 적재 벡터의 부호·스케일 canonicalization이 없으면 해시가 동일 데이터에서도 달라져 false failure 또는 false pass가 생길 수 있다.
+- **확인 방법**: PCA fit 직전 feature matrix hash(context rows only), PCA 적재 벡터 canonicalized hash, fold별 fit 코드 경로, cache key, 전처리 fit 범위를 감사한다. 확인 대상 산출물: `pca_fit_input_matrix_hash`, `pca_loadings_canonical_hash`, `preprocess_fit_scope`, `pca_cache_key`, `code_hash`. fold·draw별로 해시가 달라야 하고, 동일 fold·동일 draw·동일 코드에서는 재현돼야 한다.
+
+## 점검 4: P2 canary — sentinel 전파와 false pass
+- **확인하려는 것**: query/test/SEAL 10 feature에 sentinel을 넣었을 때 fit 경로가 실제로 그 feature를 읽는지, sentinel이 전처리·캐시·precomputed feature 경로까지 전파되는지, PCA 적재 벡터 해시 변화로 검출 가능한지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**:  
+  1) sentinel이 fit 직전 feature matrix에 도달하지 않으면 false pass가 가능하다.  
+  2) precomputed feature cache가 dataset 버전만 key로 하고 fold를 무시하면, query/test/holdout feature가 이미 캐시에 섞여 있어 sentinel이 무력해질 수 있다.  
+  3) sentinel 값이 유한하지만 PCA 해시 변화가 수치 허용 범위 안에 있으면 검출되지 않을 수 있다.  
+  4) feature가 아니라 label·metadata·fold manifest 경로를 통한 누수는 feature sentinel로 검출되지 않는다.  
+  5) canary 통과만으로 context-only fit의 증명은 되지 않는다.
+- **확인 방법**: canary run에서 fit 직전 feature matrix hash를 PCA 적재 벡터 해시보다 먼저 기록한다. sentinel을 context 외 모든 row·feature에 넣고, fit input matrix hash가 반드시 달라지는지 확인한다. cache invalidation, precomputed feature 경로, label/metadata canary, 코드 정적 감사를 함께 수행한다. 확인 대상 산출물: `canary_fit_input_matrix_hash`, `canary_pca_loadings_hash`, `cache_key`, `label_metadata_canary_hash`, `code_hash`.
+
+## 점검 5: P2 label mask hash — 라벨 사용 입증 한계
+- **확인하려는 것**: PCA·subsample·PSW fit 경로에서 라벨이 실제로 사용되지 않는지, 또는 PSW에서 허용된 라벨 사용만 하는지. label mask hash만으로 라벨 미사용을 입증할 수 있는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**:  
+  1) label mask hash는 라벨 배열의 상태를 기록할 뿐, 코드가 라벨을 읽었는지 증명하지 못한다.  
+  2) context slide 선택, subsample draw, feature 선택, weight 추정에 라벨이 쓰이면 선택 편향이 생긴다.  
+  3) PSW의 inverse-variance weight가 query/test 라벨을 쓰면 평가 독립성이 깨진다.  
+  4) label permutation이 weight 추정을 실제로 깨지 못하면 라벨 순열 대조는 교란을 배제하지 못한다.
+- **확인 방법**: 라벨 접근 정적 감사, 런타임 label access trace, label permutation run, label mask hash, 코드 해시를 대조한다. 확인 대상 산출물: `label_access_trace`, `label_permutation_run_id`, `label_mask_hash`, `weight_provenance`, `code_hash`. PSW에서는 weight가 어떤 라벨 집합(context only / query / test)에서 계산됐는지 명시해야 한다.
+
+## 점검 6: P2 hold-out 제외 — manifest hash만으로는 부족
+- **확인하려는 것**: SEAL 10이 fit pool에서 제외되는지, fold manifest hash만으로 그 제외를 확인할 수 있는지, feature cache나 전처리 fit에서 hold-out feature가 쓰이지 않는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**:  
+  1) context slide ID set이 hold-out ID를 제외해도, feature cache에 hold-out feature가 함께 로드되고 전처리 fit이 전체 feature matrix를 쓰면 누수가 생긴다.  
+  2) manifest hash는 ID 목록만 특정할 뿐, fit 직전 feature matrix에 hold-out row가 없는지 증명하지 못한다.  
+  3) SEAL 10 보류 자료의 내용은 추측하지 않고 manifest hash와 ID disjointness로만 확인해야 한다.
+- **확인 방법**: context slide ID set과 hold-out manifest ID set의 교집합이 비어 있는지 확인하고, fit 직전 feature matrix hash가 context rows only인지 확인한다. 확인 대상 산출물: `context_slide_id_hash`, `holdout_manifest_hash`, `fit_input_matrix_hash`, `feature_cache_key`, `code_hash`. hold-out feature가 메모리에 존재하는 것 자체는 문제가 아니지만, fit input matrix에 포함되면 실패다.
+
+## 점검 7: P3 subsample arm estimand — closed-form ridge 해 변화
+- **확인하려는 것**: context slide를 100개로 줄였을 때 관측되는 변화를 “subsample 효과”라고 부를 수 있는지. closed-form ridge 해가 context 표본 수·가중치·regularization 상대 규모에 따라 달라지므로, Δ가 content loss만으로 귀인되는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**:  
+  1) ridge 해는 `X^T W X + λI` 형태에서 context slide 수와 weight에 의존하므로, slide 수 감소는 데이터량 감소만이 아니라 추정기 변경을 동반한다.  
+  2) `λ`가 고정되면 effective regularization이 slide 수에 따라 변한다.  
+  3) Δ는 content loss, effective-N 효과, regularization 상대 변화, draw variance 중 하나로 재귀인되지 않으면 `판별 불가`다.  
+  4) `λ`를 arm별로 Primary 7 결과 보고 후 고르면 기준선이 정답을 본 것과 같은 선택 편향이 된다.  
+  5) 성능 변화의 기전은 `기전 미확인`이다.
+- **확인 방법**: ridge 공식, `λ` 값과 선택 시점, sample weight 지원 여부, activated fold mask, draw variance, per-fold paired Δ를 확인한다. 확인 대상 산출물: `ridge_formula`, `lambda_value`, `lambda_selection_record`, `sample_weight_support`, `activation_mask`, `draw_variance`, `per_fold_delta`. 현재 명세의 subsample arm은 이 분리 없이는 `subsample 효과`로 명명할 수 없다.
+
+## 점검 8: P3 weighted-full-context 대조 — effective-N 분리 가능성
+- **확인하려는 것**: 전체 context를 쓰되 weight로 effective sample size를 100-slide draw와 유사하게 만든 weighted-full-context 대조가 content loss와 effective-N 효과를 분리하는지, 파이프라인이 sample weight를 실제로 지원하는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**:  
+  1) 파이프라인이 sample weight를 지원하지 않으면 effective-N 효과를 분리할 수 없고, draw variance만 보고 content loss를 판단하게 된다.  
+  2) weight가 라벨·query/test·결과 AUROC에서 추정되면 누수가 된다.  
+  3) weight sum 또는 effective-N 정의가 100-slide draw와 일치하지 않으면 대조가 성립하지 않는다.  
+  4) weighted-full-context와 subsample-only가 다른 fold·seed·feature hash로 실행되면 짝짓기가 깨진다.
+- **확인 방법**: sample weight 코드 경로, weight provenance, weight hash, weight sum/effective-N 정의, 동일 fold·seed·feature hash 조건을 확인한다. 확인 대상 산출물: `sample_weight_code_path`, `weight_provenance`, `weight_hash`, `effective_n_definition`, `fold_seed_feature_hash`. sample weight 미지원이면 이 대조는 `실행 무효`다.
+
+## 점검 9: P3 PSW 대조 — 라벨 순열·seed-only의 충분성
+- **확인하려는 것**: PSW의 라벨 순열 대조와 seed-only 잡음 대조가 각각 무엇을 배제하는지, 둘만으로 inverse-variance 가중 효과를 분리할 수 있는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**:  
+  1) 라벨 순열은 라벨 association이 깨졌을 때만 유효하다. inverse-variance weight가 라벨과 무관한 feature covariance나 prediction variance에서 나오면 라벨 순열이 weight를 거의 바꾸지 못할 수 있다.  
+  2) seed-only 대조는 random seed/draw 변동만 측정한다. label leakage, context budget, PCA interaction, weight estimation leakage를 배제하지 못한다.  
+  3) unweighted ridge 대조가 없으면 inverse-variance 가중 효과와 ridge 해 자체의 변화를 분리할 수 없다.  
+  4) feature permutation, context budget control, PCA/subsample interaction control이 없으면 PSW Δ를 가중 효과로 귀인할 수 없다.  
+  5) 따라서 대조 2종만으로는 충분하지 않다.
+- **확인 방법**: PSW run과 함께 unweighted ridge, label permutation, feature permutation, seed/draw variance, weight provenance, 동일 입력 조건을 확인한다. 확인 대상 산출물: `psw_weight_provenance`, `unweighted_ridge_run_id`, `label_permutation_run_id`, `feature_permutation_run_id`, `seed_draw_variance`, `same_input_hash`. unweighted ridge가 다른 fold·seed·feature hash로 실행되면 짝짓기가 깨진다.
+
+## 점검 10: PCA 25·subsample 100·activation >100 — 사전 고정 여부
+- **확인하려는 것**: PCA 차원 25, subsample 크기 100, activation threshold `>100`이 결과를 보기 전에 고정됐는지. 외부 논문 수치인 25/100을 우리 근거로 삼지 않고, local pre-specification으로 고정했는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**:  
+  1) 25/100이 외부 출처에서 가져온 값일 뿐, 우리 fold·과제·context 분포에서 사전 고정되지 않았다면 선택 편향이 생긴다.  
+  2) `>100` threshold가 context slide count 분포를 본 뒤 또는 성능을 본 뒤 정해졌으면 activation fold가 결과에 의존한다.  
+  3) 외부 수치를 우리 근거로 쓰면 `D-047`의 외부 주장 제한에 저촉된다.  
+  4) threshold가 fold별 context count와 상관되어 있으면 subsample main effect가 fold 난이도와 혼동된다.
+- **확인 방법**: 25/100/`>100`의 결정 기록, 사전 선언 문서, 코드 상수, 코드 해시, 결과 조회 이전 시점 기록을 확인한다. 확인 대상 산출물: `hyperparameter_decision_record`, `pre_specification_hash`, `code_constant_hash`, `result_access_log`. 결정 기록이 없으면 임계값 선택은 `문서에 없음`으로 남고, 결과 기반 선택 가능성을 배제할 수 없다.
+
+## 점검 11: 평가 독립성 — paired fold·query/test·AUROC 계산 일치
+- **확인하려는 것**: baseline, PCA-only, subsample-only, combined, PSW, unweighted ridge가 같은 fold, 같은 query/test slide, 같은 AUROC 계산 코드로 평가되는지. context slide가 평가 집합에 포함되지 않는지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**:  
+  1) arm 간 query/test slide가 다르면 paired Δ가 성립하지 않는다.  
+  2) fold 일부가 누락되면 50-fold 또는 350-fold 짝짓기가 깨진다.  
+  3) AUROC 계산 코드 버전이 다르면 fold별 Δ에 구현 차이가 섞인다.  
+  4) context slide가 query/test 평가에 포함되면 평가 독립성이 깨진다.  
+  5) PROJECT.md §4.1은 대응 per-fold Δ와 고정 fold를 요구하지만, 프로브 산출물이 실제로 그렇게 됐는지는 별도 확인이 필요하다.
+- **확인 방법**: fold manifest hash, query/test slide ID hash, AUROC 코드 해시, per-fold AUROC 산출물, context/query/test disjointness를 대조한다. 확인 대상 산출물: `fold_manifest_hash`, `query_test_slide_id_hash`, `auroc_code_hash`, `per_fold_auroc_by_arm`, `disjointness_check`. PROJECT.md §4.1의 paired Δ 요구와 실제 산출물을 비교한다.
+
+## 점검 12: 계측 복구 전 실행 — provenance 귀속과 실행 무효
+- **확인하려는 것**: 현재 계측이 복구되지 않은 상태에서 프로브 산출물을 특정 구성에 귀속시킬 수 있는지, 승격 비교 또는 게이트로 쓰이지는 않는지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**:  
+  1) `D-050`에 따라 provenance writer, `SH`/`SJ` branch control 경로, 오염 검사 재설계, 단위 테스트가 복구 전이면 게이트·승격 비교를 `verified`로 수행할 수 없다.  
+  2) 저장 예측 파일에 branch list·가중치·코드 해시·데이터 버전·fold manifest 해시가 없으면 과거 산출물을 특정 구성에 귀속시킬 수 없다.  
+  3) 프로브가 탐색 기록으로만 종료돼도, provenance가 없으면 구성 귀속이 실패한다.  
+  4) 이 상태에서 승격 근거로 쓰면 `실행 무효`다.
+- **확인 방법**: provenance writer 상태, 코드 해시, fold manifest hash, 데이터 버전, branch list, 가중치, `D-050` 보고서를 대조한다. 확인 대상 산출물: `provenance_writer_status`, `code_hash`, `fold_manifest_hash`, `data_version`, `branch_list`, `weights`, `D-050_report`. 계측 복구 전이면 승격 비교는 `실행 무효`이고, 프로브도 provenance 없이는 검증 가능한 탐색 기록이 아니다.
+
+## 점검 13: 적합 분산 — single seed와 draw variance
+- **확인하려는 것**: P1이 same seed만 사용하는 경우 적합 분산·draw variance를 추정하지 못하는지, P3의 draw variance가 `D-048`의 적합 분산 요구를 충족하는지.
+- **문서에서 확인되는가**: 문서에 없음
+- **샌다면 나타날 증상**:  
+  1) same seed만 쓰면 arm 간 차이를 draw variance와 효과로 분리할 수 없다.  
+  2) `D-048` 이후 단일 적합에 대한 per-fold 구간은 실제 불확실성을 과소평가할 수 있다.  
+  3) seed-only 대조가 없으면 random seed/draw 변동이 Δ에 섞인다.  
+  4) 프로브 결과를 탐색 기록으로만 쓰더라도, 이후 후보 선택에 쓰이면 적합 분산 무시로 선택 편향이 생길 수 있다.
+- **확인 방법**: 동일 fold에서 여러 seed/draw 반복, seed std, draw variance, fit variance, per-fold paired Δ를 확인한다. 확인 대상 산출물: `seed_list`, `draw_variance`, `fit_variance`, `per_fold_delta_by_seed`. 단일 seed 산출물만 있으면 효과와 변동 분리는 `판별 불가`다.
+
+## 점검 14: fold/task clustering — 350-fold 독립 가정
+- **확인하려는 것**: 프로브의 main effect·interaction을 fold 단위로 추정할 때, fold가 과제 내에서 독립이 아니라는 PROJECT.md §4.1의 설계 효과를 반영하는지.
+- **문서에서 확인되는가**: 확인됨
+- **샌다면 나타날 증상**:  
+  1) 7 과제 × 50 fold = 350 fold를 독립 표본으로 보면 SE가 과소평가된다.  
+  2) interaction 또는 main effect를 fold-level p-value만으로 판단하면 검정력이 과대 추정된다.  
+  3) 과제 군집 95% CI(df=6) 또는 동등한 task-cluster 추정 없이 `지지/반박`을 쓰면 증거 범위를 넘는다.  
+  4) 특정 과제에서만 활성화되는 subsample effect는 task-cluster 추정 없이는 희석되거나 과대 해석될 수 있다.
+- **확인 방법**: per-task Δ, task-cluster CI, df=6 또는 동등한 cluster 설계, fold-level p-value와 task-level 판정을 분리 보고하는지 확인한다. 확인 대상 산출물: `per_task_delta`, `task_cluster_ci`, `df`, `fold_level_pvalue`, `estimand_spec`. PROJECT.md §4.1의 과제 군집 요구와 프로브 산출물을 비교한다.
+
+### T1 (이론)
+
+## 이론적 병목 1
+- **가정**: 2×2 프로브가 PCA와 subsample을 서로 독립된 개입으로 취급할 수 있고, PCA는 context slide 집합에 무관하게 동일한 요인이며, per-fold paired Δ의 main effect와 interaction 공식이 두 효과를 분리한다고 둔다. 또한 외부 출처의 25차원·100개 동시 적용이 우리 1536차원·50-fold closed-form ridge 설정에서 의미 있는 interaction 셀을 정의한다고 둔다.
+- **이 가정이 깨지는 조건**: PCA가 fold context에서 fit되므로 subsample draw나 context 크기에 따라 적재 벡터·고유값이 바뀌면 PCA 요인은 subsample draw와 결합된다. context slide가 100 이하인 fold에서 subsample arm은 baseline과 동일해 estimand가 활성화 fold로 좁아지고, 활성화 fold가 전체 fold와 교환 가능하지 않으면 main effect/interaction을 분리할 수 없다.
+- **깨질 때 나타나는 관측 가능한 증상**: canonical sign/order 제거 후에도 PCA-only와 combined의 적재 벡터 해시가 다름; 같은 subsample seed라도 context 크기 변화만으로 interaction 추정치가 seed 간에 부호·크기를 바꾸어 판별 불가; context ≤100 fold에서 subsample arm Δ가 0으로 희석되고 activated-only Δ와 unconditional Δ가 다름; combined 셀의 변화 기전은 미확인이고 PCA basis 변동, draw 변동, 차원 축소 중 어느 것에서 오는지 귀인 불가.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: `closed_axes.md` CA-04/CA-06에 실측 context slide 수 90~261이 있어 100 임계값이 fold마다 다른 개입임을 보여준다. `icmil_digest.md`는 외부 수치가 우리 근거가 아니고 high-dimensional foundation-model embeddings는 future work라고 하여, 외부 25/100 동시 적용이 우리 closed-form ridge의 interaction을 정의한다는 가정과 충돌한다. 활성화 fold의 교환 가능성 자체에는 해당 관측 없음.
+
+## 이론적 병목 2
+- **가정**: PCA 적재 벡터 해시와 canary sentinel이 context-only fit을 증명한다고 둔다. 즉 fit pool에 query/test/SEAL이 섞이면 적재 벡터 해시가 반드시 바뀌고, 해시가 같으면 누수가 없다고, 그리고 provenance 기록이 현재 파이프라인에서 신뢰 가능하다고 둔다.
+- **이 가정이 깨지는 조건**: PCA 고유벡터의 부호·순서·퇴화, sentinel이 전처리·캐시·fit 경로에 도달하지 않음, query/test가 fit에 들어가도 상위 성분을 바꾸지 못함, label이 명시적 label mask 밖으로 context 선택·가중치·캐시 key로 유입, 현재 계측이 무효이면 깨진다.
+- **깨질 때 나타나는 관측 가능한 증상**: 누수가 없어도 해시 불일치, 또는 누수가 있어도 해시 동일; canary pass이면서 scaler/feature cache hash에 query/test가 포함; 산출물에 code hash·branch list·fold manifest hash가 없거나 env var가 무시되어 실행 무효; canary 통과만으로 context-only를 입증하지 못해 교란 의심.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: `PROJECT.md` D-050은 `src/`가 환경변수를 읽지 않아 `ICF_*` export가 무효이고, 저장 예측 파일에 branch list·가중치·코드 해시가 없으며, provenance writer가 복구 전이고, 값 앵커 오염 검사는 구성 변경과 수치 드리프트를 구분할 수 없다고 한다. 이는 canary·provenance 게이트가 현재 신뢰 가능하다는 가정과 충돌한다.
+
+## 이론적 병목 3
+- **가정**: subsample arm의 변화를 "context-budget 100-slide effect"로 재명명하면 estimand이 성립하고, weighted-full-context 균등 가중이 random 100-slide draw의 effective-N 효과를 모방하여 content loss와 effective-N 효과를 분리할 수 있다고 둔다.
+- **이 가정이 깨지는 조건**: context slide가 stain·scanner·patient·task 이질성을 가지면 random subset의 content가 effective-N과 독립 변수가 된다. 전체 context에 균등 가중을 두는 것은 어떤 100-slide subset을 고르는 것이 아니므로, slide 교환 가능성이 성립하지 않으면 content loss를 분리할 수 없다. sample weight 미지원이면 weighted 대조는 실행 무효다.
+- **깨질 때 나타나는 관측 가능한 증상**: weighted-full-context와 subsample-only의 paired Δ가 방향·크기에서 다름; 동일 fold의 draw 반복에서 draw variance가 Δ를 지배; activated fold에서만 효과가 보이나 task·fold 간 부호 불일치; weighted 경로가 없어 effective-N/content loss 판별 불가; 어떤 성능 변화가 content loss인지 effective-N인지 기전 미확인.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: `closed_axes.md` CA-05는 염색 톤·배경 노이즈, CA-06은 염색·스캐너·환자 노이즈, CA-07은 context↔query 분포 이동을, CA-R1은 subsampling 강도 효과가 과제별로 갈린다고 기록한다. 이는 context slide가 교환 가능하고 subsampling 효과가 effective-N만으로 귀인된다는 가정과 충돌한다.
+
+## 이론적 병목 4
+- **가정**: PSW에서 라벨 순열 대조와 seed-only 대조, 그리고 unweighted ridge 대조만 있으면 inverse-variance 가중 효과를 식별할 수 있다고 둔다. 즉 PSW Δ의 교란은 label association과 random seed/draw 변동 두 종류뿐이라고 둔다.
+- **이 가정이 깨지는 조건**: inverse-variance 가중치가 label이 아닌 context feature·fold·task·branch margin·ridge regularization·context budget에서 오면 label permutation이 가중치를 바꾸지 못한다. seed-only 대조는 fold·task·context budget 변동을 커버하지 못한다. unweighted ridge가 다른 fold·seed·context budget로 실행되면 짝짓기가 깨진다.
+- **깨질 때 나타나는 관측 가능한 증상**: label-permuted PSW와 real PSW가 거의 동일해 label association을 배제하지 못함; seed-only 대조의 변동이 PSW Δ와 같은 규모; unweighted ridge 대비 Δ가 fold·task별로 부호 불일치; 대조가 paired되지 않아 판별 불가 또는 실행 무효; PSW Δ의 기전은 미확인.
+- **문서의 어떤 관측이 이 가정과 충돌하는가**: `PROJECT.md` RU-97 §8은 동일 구성에서 seed만 바꿔도 macro 폭 0.0200을 실측해 seed 변동이 무시할 수 없음을 보여준다. D-050은 계측 복구 전 승격 비교가 무효라고 하여, 현재 PSW 대조가 신뢰 가능하다는 가정과 충돌한다. PSW 가중치의 실제 출처에 대한 문서 관측은 해당 관측 없음.
+
+---
+
+## Phase 2b — 제안 좌석 응답
+
+### P1 (제안)
+
+1. **R1-1**: (1) 수용·수정. 4셀은 일반적 main effect·interaction 분리를 주장하지 못한다. PCA fit이 context 집합과 draw에 의존하므로 PCA 요인은 context budget·draw와 결합된다. estimand를 “고정 draw, activated fold(context slide >100), 동일 λ·manifest·code에서의 contrast”로 축소하고, fold당 여러 draw, draw variance, activated/unconditional 분리 보고를 추가한다. context slide 90~261 실측(`closed_axes.md` CA-04/CA-06, `D-026`)은 activated subset이 전체 fold와 동일하지 않을 수 있음을 지지한다. D-050 계측 복구 전에는 실행 무효다.
+
+2. **R1-2**: (1) 수용·수정. canary와 적재 벡터 해시는 context-only fit의 증명이 아니라, sentinel이 fit output에 도달했는지를 확인하는 검출기다. sentinel이 production code path의 fit input matrix에 실제로 도달하는지, cache·precomputed feature·label/metadata 경로를 함께 감사해야 한다. `D-050`으로 provenance writer·코드 해시·branch list가 복구되기 전에는 canary 통과도 verified로 쓰지 않는다.
+
+3. **R1-3**: (1) 수용·수정. weighted-full-context는 전체 content를 유지하므로 random 100-slide draw의 content loss를 제거하지 못한다. weighted-full을 주 대조에서 빼고, sample weight 지원 여부와 matched penalty/effective-N 정의가 문서화될 때만 선택적 대조로 둔다. 현재 subsample arm은 “폐기”보다 “random 100-slide context-budget effect on closed-form ridge”로 재명명하고 activated fold·draw variance를 분리 보고하는 쪽이 적절하다. sample weight 지원 여부는 문서에 없다.
+
+4. **R1-4**: (1) 수용·수정. PSW에서 라벨 순열·seed-only·unweighted ridge만으로는 inverse-variance 가중 효과를 특정할 수 없다. weight provenance, 라벨 순열이 실제로 label-dependent weight를 바꾸는지, seed-only가 같은 context draw에서 seed만 바꾸는지, unweighted ridge가 같은 fold·draw·λ·code path에서 실행되는지 확인해야 한다. inverse-variance 가중 공식과 라벨 의존 경로는 문서에 없으므로, 확인 전에는 판별 불가로 둔다.
+
+5. **A1-1**: (1) 수용·수정. unconditional 50-fold Δ는 subsample이 비활성화된 fold로 희석될 수 있다. estimand를 activated fold에서만 계산하고, activation mask와 unconditional Δ를 분리 보고한다. activated fold 수와 교환 가능성은 문서에 없으므로, activated fold가 부족하거나 context size·task 난이도와 혼동되면 interaction은 판별 불가다.
+
+6. **A1-2**: (1) 수용·수정. subsample-only와 combined은 같은 fold에서 동일한 context slide ID set을 써야 하며, replacement flag, label mask, query/test/SEAL disjointness, slide order, seed를 산출물에 기록해야 한다. 명세는 복원추출 없음이지만 실제 구현 기록이 없으면 draw variance·선택 편향을 배제할 수 없다.
+
+7. **A1-3**: (1) 수용·수정. PCA fit은 fold별 context-only여야 하며, PCA 객체 fold 간 재사용, 전처리 centering/scaling의 fit 범위, cache key를 함께 감사해야 한다. 적재 벡터 해시는 부호·순서·퇴화 성분에 대해 canonicalized된 뒤 기록해야 false pass/false failure를 줄일 수 있다.
+
+8. **A1-4**: (1) 수용·수정. canary는 fit 직전 feature matrix hash를 적재 벡터 해시보다 먼저 기록해야 하며, sentinel이 fit이 실제로 소비하는 matrix에 도달하는지 확인해야 한다. precomputed feature cache, dead code, shadow run 경로 차이는 feature sentinel만으로 검출되지 않으므로 cache invalidation과 코드 경로 감사가 필요하다.
+
+9. **A1-5**: (1) 수용·수정. label mask hash는 라벨 배열 상태만 기록할 뿐, 코드가 라벨을 읽었는지 증명하지 못한다. 라벨 접근 static audit 또는 runtime trace, PSW weight가 어떤 라벨 집합(context only/query/test)에서 나왔는지를 기록해야 한다. context 선택·draw·weight 추정에 라벨이 쓰이면 선택 편향으로 실행 무효다.
+
+10. **A1-6**: (1) 수용·수정. hold-out 제외는 manifest hash만으로 부족하다. context slide ID set과 hold-out manifest ID set의 교집합이 비어 있는지, fit 직전 feature matrix에 hold-out row가 없는지를 확인해야 한다. SEAL 10 보류 자료의 내용은 추측하지 않고 ID disjointness와 fit input hash로만 확인한다.
+
+11. **A1-7**: (1) 수용·수정. context slide를 100개로 줄였을 때의 Δ를 “subsample 효과”로 명명하려면 content loss, effective-N 효과, ridge λ의 상대 규모 변화, draw variance를 분리해야 한다. 현재 명세만으로는 재귀인이 성립하지 않는다. λ 값과 선택 시점을 결과 조회 이전에 기록하지 않으면 선택 편향을 배제할 수 없다.
+
+12. **A1-8**: (1) 수용·수정. weighted-full-context는 sample weight가 ridge penalty와 같은 scale로 적용되고, effective-N 정의가 100-slide draw와 일치할 때만 대조가 된다. uniform weight로 full-data Gram을 scale해도 100-slide subset Gram과 같지 않다. sample weight 미지원이면 이 대조는 실행 무효다.
+
+13. **A1-9**: (1) 수용·수정. PSW 대조 2종은 label association과 seed noise를 제한적으로만 배제한다. unweighted ridge paired run, weight provenance, same input hash, 가능하면 feature permutation 또는 weight ablation이 필요하다. 없으면 inverse-variance 가중 효과와 variance estimator bias·penalty 상호작용을 분리할 수 없어 판별 불가다.
+
+14. **A1-10**: (1) 수용·수정. PCA 25, subsample 100, activation >100은 외부 출처가 아니라 우리 프로브의 사전 고정 상수로 기록돼야 한다. 외부 수치는 가설 출처일 수 있으나 우리 근거가 될 수 없다(`D-047`). 결정 기록·사전 선언 해시·결과 조회 이전 시점 기록이 없으면 선택 편향을 배제할 수 없다.
+
+15. **A1-11**: (2) 반박. `PROJECT.md` §4.1은 승격·판정 대상이 고정 fold에서 짝지은 per-fold Δ이며, fold가 과제 내에서 독립이 아니라고 명시한다. 따라서 같은 fold pairing은 문서상 요구 사항이다. 다만 `D-050`으로 현재 저장 산출물의 구성 귀속이 불가능하므로, 실제 실행 산출물이 그 요구를 만족했는지는 verified로 주장할 수 없다.
+
+16. **A1-12**: (1) 수용·수정. `D-050`은 provenance writer, branch control 경로, 오염 검사 재설계, 단위 테스트 복구 전에는 게이트·승격 비교를 verified로 수행할 수 없다고 한다. 프로브가 탐색 기록으로만 종료돼도 provenance가 없으면 구성 귀속이 실패한다. 복구 전 승격·게이트 사용은 실행 무효다.
+
+17. **A1-13**: (1) 수용·수정. 단일 seed·단일 draw만으로는 effect와 fit/draw variance를 분리할 수 없다. `D-048` 이후 적합 분산 보고가 필수이고, `RU-97` §8은 동일 구성에서 seed만 바꿔도 macro 폭 0.0200을 실측했다. 동일 fold에서 여러 seed/draw 반복 없이는 효과 추정과 변동 분리는 판별 불가다.
+
+18. **A1-14**: (1) 수용·수정. main effect·interaction 추정에도 350-fold 독립 가정을 쓰지 않고, 과제 군집 CI(df=6) 또는 동등한 task-cluster 추정과 함께 보고해야 한다. `PROJECT.md` §4.1이 이미 fold의 과제 내 비독립성을 요구하므로, 제안서에 이를 명시적으로 반영한다.
+
+19. **T1-1**: (1) 수용·수정. PCA는 fold context에서 fit되므로 subsample draw·context 크기에 따라 적재 벡터가 바뀌고, PCA 요인은 subsample draw와 결합된다. 외부 25/100 동시 적용은 우리 closed-form ridge interaction을 정의하지 않으며, 외부 수치는 근거가 아니다. estimand는 고정 draw·activated subset으로만 제한된다.
+
+20. **T1-2**: (1) 수용·수정. PCA 해시와 canary는 부호·순서·퇴화, sentinel 전파 실패, cache·label·metadata 경로, `D-050` 계측 무효 때문에 context-only 증명이 되지 않는다. canonicalized hash, production path sentinel, fit input matrix hash, provenance 복구 없이는 false pass/false failure를 배제할 수 없다.
+
+21. **T1-3**: (1) 수용·수정. context slide는 stain·scanner·patient·task 이질성을 가질 수 있으므로 random 100-slide draw의 효과는 effective-N만으로 귀인되지 않는다. `closed_axes.md` CA-05, CA-06, CA-07, CA-R1은 context 교란과 과제별 subsampling 효과 갈림을 기록한다. weighted-full은 content loss를 제거하지 못하므로, matched control 없이는 판별 불가다.
+
+22. **T1-4**: (1) 수용·수정. PSW의 교란은 label association과 seed noise뿐이 아니다. inverse-variance weight의 실제 출처는 문서에 없으며, `RU-97` §8의 seed-only macro 폭 0.0200은 seed 변동이 무시할 수 없음을 보여준다. `D-050` 전에는 PSW 대조도 verified로 쓸 수 없고, weight provenance와 paired control 없이는 가중 효과 특정은 판별 불가다.
+
+---
+
+## Phase 3 — 종합
+
+### S1 (종합)
+
+## 지지 (증거가 뒷받침함)
+- **Q1 — 외부 설정은 PCA와 subsample의 동시 적용이다**: `icmil_digest.md`는 외부 평가에서 feature dimension이 25를 초과하면 PCA 25차원으로 줄이고, 큰 벤치마크는 약 100 bags로 subsample했다고 기록한다. TCGA UNI2 1,536차원도 PCA 25차원으로 줄인 설정이다. 따라서 외부 보고는 “PCA 단독” 또는 “subsample 단독”의 독립 증거가 아니라 동시 적용 설정의 결과다.
+- **Q1 — 현재 2-arm 설계만으로는 상호작용을 추정할 수 없다**: 주어진 설계에는 baseline, PCA-only, subsample-only만 있고 combined 셀이 없다. PCA fit이 fold별 context에서 수행되므로 PCA 요인은 context 집합·draw와 결합될 수 있다. combined 셀이 없으면 `Δ_combined − Δ_PCA − Δ_subsample` 형태의 interaction contrast를 계산할 수 없다.
+- **Q2 — 현재 계측 상태에서는 context-only fit을 verified로 확인할 수 없다**: `PROJECT.md` D-050은 provenance writer, `SH`/`SJ` branch control 경로, 오염 검사 재설계, 단위 테스트가 복구되기 전에는 게이트·승격 비교를 `verified`로 수행할 수 없다고 한다. `src/`가 환경변수를 읽지 않아 `ICF_*` export가 무효이고, 저장 예측 파일에 branch list·가중치·코드 해시가 없어 과거 산출물을 특정 구성에 귀속시킬 수 없다.
+- **Q3 — context 100개 제한은 closed-form ridge 해 자체를 바꾼다**: ridge 해는 context 표본 수, 가중치, 정규화 규모에 의존한다. context slide 수를 줄이면 데이터량 감소만이 아니라 추정기 조건이 바뀐다. `D-048` 이후 적합 분산 보고가 필수이며, `RU-97` §8은 동일 구성에서 seed만 바꿔도 macro 폭 `0.0200`을 실측했다.
+- **Q3 — `>100` threshold는 fold별 선택적 개입이다**: `closed_axes.md` CA-04/CA-06에서 현행 Primary 7 fold의 실측 context 슬라이드 수는 90~261장이다. 따라서 context slide가 100 이하인 fold에서는 subsample arm이 no-op에 가까울 수 있고, unconditional 50-fold 평균은 activated fold 효과와 비활성 fold의 희석 효과가 섞인다.
+- **Q4 — 두 대조는 각각 제한된 범위만 배제한다**: 라벨 순열 대조는 라벨 association이 실제로 가중치·fit 경로에 들어가는 경우에만 그 association을 배제할 수 있다. seed-only 대조는 context·draw·입력이 고정된 채 seed만 바뀌는 경우에만 seed/fit noise를 배제한다. `RU-97` §8의 seed-only macro 폭 `0.0200`은 seed 변동이 무시할 수 없음을 지지한다.
+- **Q5 — 계측 복구 전에는 프로브 결과를 verified 근거로 쓸 수 없다**: D-050은 현재 기준선 `0.6227`을 `unverified-hold`로 두고, 승격 근거 `+0.56%p`, 게이트 ① 결과, 게이트 ② 실적을 `verified`로 인용하지 말라고 한다. 따라서 프로브가 탐색 기록으로만 종료되더라도, provenance가 없으면 구성 귀속이 실패한다.
+
+## 반박 (증거가 반박함)
+- **“PCA arm과 subsample arm을 각각 나누면 두 효과를 분리한다”는 현재 설계의 식별 주장은 반박된다**: 외부 설정은 PCA 25와 subsample 100을 동시에 적용했고, 현재 설계에는 combined 셀이 없다. PCA fit이 context 집합과 draw에 의존하므로 PCA 요인은 subsample draw·context budget과 결합될 수 있다. 이는 실제 interaction이 존재한다는 증명은 아니지만, 현재 2-arm 설계가 두 효과를 분리한다는 식별 주장은 지지되지 않는다.
+- **“적재 벡터 해시 기록만으로 context-only fit이 지켜진 것을 확인한다”는 주장은 반박된다**: 적재 벡터 해시는 fit output을 특정할 뿐, fit input에 query/test/SEAL feature가 들어갔는지, 전처리·캐시·label·metadata 경로가 context-only였는지를 증명하지 못한다. D-050은 코드 해시·branch list·가중치·fold manifest 해시 등 provenance가 복구되지 않았다고 하며, 값 앵커 오염 검사는 구성 변경과 수치 드리프트를 구분할 수 없어 폐지·재설계 상태다.
+- **“context를 100개로 줄이면 관측되는 변화를 subsample 효과라고 부를 수 있다”는 명명은 반박된다**: 100-slide 제한은 content loss, effective-N/regularization 변화, random draw variance, activated fold heterogeneity가 섞인 개입이다. 현재 명세만으로는 이 변화를 “subsample 효과”로 재귀인할 estimand가 성립하지 않는다.
+- **“PSW의 라벨 순열 대조와 seed-only 대조만으로 충분하다”는 충분성 주장은 반박된다**: inverse-variance 가중의 실제 계산식·라벨 의존 경로·weight provenance가 문서에 없다. 라벨 순열이 가중치를 실제로 바꾸지 못하면 label association을 배제하지 못하고, seed-only가 draw까지 바꾸면 seed noise가 아니라 draw variance와 혼동된다. unweighted ridge paired 대조, weight provenance, same-input pairing이 없으면 inverse-variance 가중 효과와 variance estimator bias·penalty 상호작용을 분리할 수 없다.
+- **“현재 계측 상태에서 프로브 결과를 verified 승격·게이트·채택 근거로 쓸 수 있다”는 주장은 반박된다**: D-050은 계측 복구 전 verified 게이트·승격 비교가 불가하다고 명시한다. 저장 산출물에 구성 귀속 정보가 없으므로, 결과를 특정 arm에 귀속시켜 판단하는 것은 실행 무효다.
+
+## 판별 불가 (증거가 가르지 못함)
+- **PCA×subsample interaction의 실제 존재와 크기**: 현재 문서에는 combined 셀 결과도, interaction 추정치도 없다. interaction이 0인지, 양인지, 음인지, fold/task별로 부호가 갈리는지는 문서에 없음.
+- **외부 bag subsample이 우리 context slide subsample과 동일 estimand인지**: 외부 문서는 bag 단위 subsample을 말하고, 우리는 context slide 수를 제한한다. 둘이 통계적으로 동일한 개입인지 문서에 없음.
+- **외부 PCA 25 설정이 우리 1536차원 closed-form ridge 환경으로 전이되는지**: `icmil_digest.md`는 high-dimensional foundation-model embeddings를 future work로 두고, 우리 closed-form ridge와의 head-to-head 비교는 본문에서 확인 못함이라고 한다. 전이 여부는 문서에 없음.
+- **context-only fit 위반이 실제로 발생했는지**: D-050은 검증 경로가 복구되지 않았다고 하지만, 특정 run에서 query/test/SEAL feature가 fit에 들어갔다는 직접 증거는 문서에 없음.
+- **구체적 누수 지점 중 어느 것이 실제로 문제인지**: 전처리 표준화, feature cache, PCA 객체 재사용, label 기반 context 선택, hold-out feature 혼입 등은 가능한 결함 후보로 지적되지만, 문서에는 실제 발생 사실이 없음.
+- **context 100개 제한의 관측 변화가 content loss, effective-N, regularization, draw variance 중 어디에서 오는지**: 현재 문서에는 ridge 계수 변화, condition number, effective rank, draw variance 실측이 없음.
+- **random 100-slide subsampling이 성능을 개선·악화·변화시키는지**: 성능 관측 자체가 문서에 없으므로 방향과 크기는 문서에 없음.
+- **PSW inverse-variance 가중의 실제 효과**: weight가 context label, feature covariance, prediction variance, branch margin 중 어디에서 나오는지 문서에 없음. 따라서 PSW Δ가 label association, variance estimator bias, penalty 상호작용, leakage 중 무엇인지 판별 불가.
+- **25, 100, `>100`이 결과 조회 전에 사전 고정되었는지**: 외부 출처에서 가져온 값일 수 있으나, 우리 프로브의 사전 고정 기록·결정 해시·결과 접근 로그는 문서에 없음.
+- **sample weight 지원 여부**: 파이프라인이 ridge sample weight를 지원하는지 문서에 없음. weighted-full-context 대조가 실행 가능한지 판별 불가.
+- **activated fold 수와 교환 가능성**: context slide 90~261 범위만 알려져 있고, `>100` fold의 실제 개수·과제 분포·전체 fold와의 교환 가능성은 문서에 없음.
+- **성능 변화의 기전**: PCA, subsample, PSW 모두에서 성능 변화가 실제로 발생하더라도 그 기전은 현재 문서에서 입증되지 않는다. 기전 미확인.
+
+## 실행 무효 (실행·계측 결함으로 판단 불가)
+- **D-050 복구 전의 verified 게이트·승격 비교**: provenance writer, branch control, 오염 검사 재설계, 단위 테스트가 복구되기 전에는 `verified`로 수행할 수 없다.
+- **현재 저장 산출물의 구성 귀속**: branch list·가중치·코드 해시·데이터 버전·fold manifest 해시가 없으므로, 과거 또는 현재 산출물을 PCA arm, subsample arm, PSW arm 중 특정 구성에 귀속시키는 판단은 실행 무효다.
+- **기존 값 앵커 오염 검사 통과 주장**: `PROJECT.md` §3.4는 값 앵커 오염 검사를 폐지하고 provenance 기반 재설계 전까지 오염 검사 통과를 주장하는 실행을 무효로 둔다.
+- **계측 복구 전 프로브 결과를 채택·승격·게이트 근거로 쓰는 실행**: 프로브는 탐색 기록으로만 종료될 수 있고, verified 근거로 승격하면 실행 무효다.
+- **현재 무효한 env/branch control 경로로 context-only fit을 주장하는 실행**: `src/`가 `ICF_*` export를 읽지 않고 문서화된 `SH`/`SJ` control 경로가 동작하지 않으므로, 이 경로로 fit 범위를 통제했다고 verified로 주장할 수 없다.
+- **SEAL 10을 선택·튜닝·개선 방향 결정에 쓰는 실행**: SEAL 10은 최종 hold-out으로 유보되어 있으며, 어떤 형태로도 선택·튜닝에 사용 금지다.
+
+## 좌석 공백 (기권·실패로 빠진 관점)
+- 없음.
+
+## 다음 행동 (권한 등급과 함께)
+- **[사용자 승인]** 계측 복구 완료 전에는 모든 프로브 결과를 탐색 기록으로만 취급하고, verified 승격·게이트·채택 근거로 사용하지 않음을 유지한다.
+- **[연구자 실행]** D-050 복구를 우선한다: provenance writer, `SH`/`SJ` branch control 경로, 오염 검사 재설계, 단위 테스트. 복구 전에는 verified 비교를 수행하지 않는다.
+- **[연구자 실행]** 프로브를 계속하려면 25, 100, `>100`을 외부 수치가 아니라 우리 프로브의 사전 고정 상수로 기록한다. 결정 시점, 결과 조회 이전 상태, 코드 상수 해시, estimand 선언을 산출물에 남긴다.
+- **[연구자 실행]** PCA×subsample 문제는 2×2 factorial로 재설계한다: baseline, PCA-only, subsample-only, combined. 같은 fold, 같은 query/test, 같은 λ, 같은 코드 경로, 같은 subsample draw를 사용하고, combined에서 PCA fit은 subsampled context에서만 수행한다.
+- **[연구자 실행]** subsample estimand를 activated fold로 제한한다. fold별 context slide count, `>100` activation mask, unconditional 50-fold Δ와 activated-fold Δ를 분리 보고한다. activated fold 수와 교환 가능성은 문서에 없으므로, 부족하면 interaction은 판별 불가로 둔다.
+- **[연구자 실행]** fold당 여러 draw와 seed를 반복해 draw variance와 fit variance를 기록한다. 단일 seed·단일 draw만으로는 효과와 변동을 분리할 수 없다.
+- **[연구자 실행]** context-only fit 게이트를 canary만으로 끝내지 않는다. fit 직전 feature matrix hash, context slide ID set hash, label access trace 또는 label mask hash, cache key, 코드 해시, fold manifest hash, hold-out ID disjointness를 기록한다. canary sentinel은 production fit 경로와 cache·precomputed feature 경로에 실제로 도달하는지 확인해야 한다.
+- **[연구자 실행]** PSW에는 unweighted ridge paired 대조를 추가한다. PSW와 unweighted ridge는 같은 fold, 같은 context draw, 같은 λ, 같은 코드 경로에서 실행되어야 한다. weight provenance, weight hash, 라벨 순열이 weight를 실제로 바꾸는지, seed-only가 draw를 고정하고 seed만 바꾸는지를 기록한다.
+- **[연구자 실행]** 모든 Δ는 `PROJECT.md` §4.1의 대응 per-fold Δ 방식으로 계산하고, fold를 독립 표본으로 보지 않는다. 과제 군집 CI 또는 동등한 task-cluster 추정과 함께 보고한다.
+- **[자동 금지]** 외부 ICMIL 수치를 우리 근거로 사용하지 않는다. 외부 문서는 가설 출처일 뿐이며, 우리 결론이 되려면 Primary 7에서 직접 측정해야 한다.
+- **[자동 금지]** D-050의 `unverified-hold` 기준선 `0.6227`, 승격 근거 `+0.56%p`, 게이트 ①·② 실적을 `verified`로 인용하지 않는다.
+- **[자동 금지]** 결과 AUROC를 보고 나서 λ, threshold, arm, 강도, 변형을 고르지 않는다. 이는 §224 Oracle 금지와 선택 편향에 해당한다.
+- **[자동 금지]** canary 통과 또는 해시 기록만으로 “누수 없음”을 증명한다고 주장하지 않는다.
+
+## 하지 말 것 (이유와 함께)
+- **외부 수치를 우리 근거로 쓰지 말 것**: `icmil_digest.md`는 외부 주장이며, 어떤 수치도 우리 게이트·승격의 근거가 될 수 없다.
+- **현재 기준선을 verified로 인용하지 말 것**: D-050으로 `0.6227`은 `unverified-hold`이며, 재현 경로가 현재 없다.
+- **SEAL 10을 선택에 쓰지 말 것**: SEAL 10은 최종 hold-out으로 유보되어 있고, 선택·튜닝에 어떤 형태로도 사용 금지다.
+- **적재 벡터 해시만으로 context-only fit을 입증하지 말 것**: 해시는 output을 특정할 뿐, fit input 경로·cache·label·metadata·hold-out disjointness를 증명하지 못한다.
+- **context 100개 제한의 변화를 “subsample 효과”로만 명명하지 말 것**: content loss, effective-N, regularization, draw variance, activated fold heterogeneity가 혼동된다.
+- **PSW 대조 2종만으로 충분하다고 주장하지 말 것**: weight provenance, unweighted ridge paired 대조, same-input pairing, variance estimator bias·penalty 상호작용 배제가 없다.
+- **성능 관측을 기전 입증으로 바꾸지 말 것**: PCA, subsample, PSW 모두에서 성능 변화가 보인다고 해서 그 기전이 입증된 것은 아니다. 기전 미확인으로 둔다.
+- **문서에 없는 수치를 만들지 말 것**: sample weight 지원 여부, interaction 크기, activated fold 수, 실제 누수 여부, PSW weight 공식 등은 문서에 없으므로 추측하지 않는다.
+- **좌석 동의 수를 근거로 쓰지 말 것**: 몇 좌석이 동의했는지는 증거가 아니다.
