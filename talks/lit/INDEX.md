@@ -1,6 +1,6 @@
 # 문헌 색인 (자동 생성)
 
-- 갱신: 2026-09-18 12:24 KST · 브리프 9건 · 요약 대기 2건
+- 갱신: 2026-09-18 16:29 KST · 브리프 18건 · 요약 대기 1건
 - 생성: `scripts/ops/lit_index.py` (코드 추출만, 모델이 쓰지 않음)
 - **모든 브리프는 외부 주장이며 우리의 관측이 아니다**(`D-047`). 게이트·승격의 근거가
   될 수 없고, 우리 결론이 되려면 `Primary 7`에서 직접 측정한다.
@@ -8,17 +8,25 @@
 
 | 브리프 | 제목 | 원문 | 수집 | 분량 | 이 프로젝트와의 관련 (브리프 §5 첫 줄) |
 |---|---|---|---|---:|---|
+| [`abmil_rethinking`](abmil_rethinking_digest.md) | Content selection saved. Describe the issue below: | [원문](https://arxiv.org/abs/2404.00351) | 2026-09-18 | 9,467단어 | 옮겨올 수 있는 것, 가설 1: attribute scoring의 아이디어를 fold context ridge의 bag/instance contribution 진단 지표로 사용할 수 있을지 확인해 볼 가치가 있다. 가설적으로 ridge coefficient가 bag head weight |
+| [`bayes_classifier_compare`](bayes_classifier_compare_digest.md) | Statistical comparison of classifiers through Bayesian hierarchical modelling | [원문](https://arxiv.org/abs/1609.08905) | 2026-09-18 | 13,479단어 | 옮겨올 수 있는 것 (가설): 우리 in-context 분류기와 ABMIL의 성능 차이를 여러 fold/데이터셋/벤치마크에서 비교할 때, rope 기반 실질 동등 판정을 쓰면 아주 작은 차이를 “실질 동등”으로 처리할 수 있어 과대 해석을 줄일 수 있다. 단, 우리 지표가 정확도 또는  |
 | [`benchmark_lottery`](benchmark_lottery_digest.md) | The Benchmark Lottery | [원문](https://arxiv.org/abs/2107.07002) | 2026-09-18 | 20,343단어 | 옮겨올 수 있는 것: fold/과제/브랜치별 점수를 단일 aggregate로만 보고 승격하지 말고, fold subset별 Top-k 불일치와 Kendall rank correlation을 함께 보고, 특정 fold context에서만 우위가 나타나는지 점검할 수 있다. 이는 이 논문에 |
+| [`camil`](camil_digest.md) | CAMIL: Context-Aware Multiple Instance Learning for Cancer Detection and Subtyping in Whole Slide Images | [원문](https://arxiv.org/abs/2305.05314) | 2026-09-18 | 9,158단어 | neighbor-constrained attention의 8-neighbor similarity mask는 우리 브랜치 중복을 줄이는 local regularizer로 작용할 수 있다는 가설이 있다; 이유는 고점 tile이 low-scoring neighborhood에 있으면 noise |
+| [`car_mil`](car_mil_digest.md) | CAR-MIL: Counterfactual Attention Regularization for Multiple Instance Learning | [원문](https://arxiv.org/abs/2609.08419) | 2026-09-18 | 13,369단어 | 가설: 우리 목표가 pathology WSI 벤치마크에서 ABMIL 기준선을 넘는 것이므로, 이 논문의 ABMIL 대비 CAR-MIL 비교는 외부 기준선 설계 또는 attention regularization 후보로 참고할 수 있을 수 있다 (출처: Sec. 4.2, Table 2). |
 | [`cellpath_bench`](cellpath_bench_digest.md) | CellPath-Bench: A Multidimensional Benchmark for Whole-Slide Cellular Representations in Pathology Foundation Models | [원문](https://arxiv.org/abs/2608.21060) | 2026-09-18 | 144,922단어 | 우리가 옮겨올 수 있는 것(가설): registered nuclear coordinates에서 bilinear sampling하는 Nuc readout을 우리 WSI in-context 분류기에 적용하면, patch mean pooling보다 cell-level signal을 보존하여  |
+| [`dagger_provenance`](dagger_provenance_digest.md) | dagger: A Python Framework for Reproducible Machine Learning Experiment Orchestration | [원문](https://arxiv.org/abs/2006.07484) | 2026-09-18 | 2,180단어 | dagger의 state tree/provenance와 recipe caching을 현재 프로젝트의 fold context in-context 분류 실험에 적용하면, 각 fold/branch 상태의 계보와 설정을 재현 가능하게 추적할 수 있을 수 있다는 가설 (출처: Sec. 3.1,  |
+| [`ensembles_effective`](ensembles_effective_digest.md) | When are ensembles really effective? | [원문](https://arxiv.org/abs/2305.12313) | 2026-09-18 | 13,344단어 | 가설: 우리 fold context의 여러 브랜치를 ρ에서 뽑은 classifier로 본다면, 브랜치 간 중복이 크다는 것은 DER가 낮을 가능성을 시사하고, DER < 1이면 majority vote/평균화 이점이 작을 수 있다. (출처: Section 3.2, Section 5) |
 | [`feature_extractor_bench`](feature_extractor_bench_digest.md) | Benchmarking Pathology Feature Extractors for Whole Slide Image Classification | [원문](https://arxiv.org/abs/2311.11772) | 2026-09-18 | 47,478단어 | 가설: pathology-specific SSL feature extractor, 특히 Lunit-DINO, UNI, CTransPath를 frozen feature로 사용하면, 우리 in-context 분류기의 입력 표현 품질이 개선되어 branch 간 중복이나 적합 불안정성이 완화될 |
 | [`icmil`](icmil_digest.md) | In-Context Multiple Instance Learning | [원문](https://arxiv.org/abs/2606.06458) | 2026-09-18 | 12,514단어 | 가설: ICMIL의 fold context를 query bag label prediction에 쓰는 in-context formulation은 우리의 closed-form ridge in-context 분류기와 같은 문제 구조이므로, 병리 WSI low-label fold에서도 lear |
+| [`madeleine_slide_repr`](madeleine_slide_repr_digest.md) | Unsupervised Foundation Model-Agnostic Slide-Level Representation Learning | [원문](https://arxiv.org/abs/2411.13623) | 2026-09-18 | 28,368단어 | Cobra가 768-dim slide embedding을 생성하므로, 이 embedding을 fold/slide 단위 고정 feature로 사용해 closed-form ridge 또는 in-context classifier 입력으로 쓰는 실험을 설계할 수 있을 수 있다. 단, Cobra |
 | [`multimodal_pfn`](multimodal_pfn_digest.md) | MultiModalPFN: Extending Prior-Data Fitted Networks for Multimodal Tabular Learning | [원문](https://arxiv.org/abs/2602.20223) | 2026-09-18 | 10,130단어 | 가설: CAP의 learnable query pooling은 우리 fold context에서 branch output token/feature 수를 compact하게 조절하는 장치로 옮길 수 있을 수 있다. 논문은 token count 불균형이 attention mass를 왜곡한다고 보 |
+| [`multimodal_prototyping`](multimodal_prototyping_digest.md) | Multimodal Prototyping for cancer survival prediction | [원문](https://arxiv.org/abs/2407.00224) | 2026-09-18 | 19,612단어 | 가설: GMM/prototype summarization을 fold-context ridge classifier 앞에 두면 patch token을 고정된 C_h개 summary로 줄여, branch 출력이 공유하는 저차원 basis를 강제할 수 있을지 모른다. 근거는 MMP가 K-mea |
 | [`pfn_foundations`](pfn_foundations_digest.md) | Statistical Foundations of Prior-Data Fitted Networks | [원문](https://arxiv.org/abs/2305.11097) | 2026-09-18 | 14,606단어 | 옮겨올 수 있는 것 (가설): PFN의 고정 in-context 예측자 관점은 우리 closed-form ridge fold context 분류기를 bias/variance 분해로 진단하는 틀로 사용할 수 있을 수 있다. (출처: 5.1절) |
 | [`pfn_imbalance`](pfn_imbalance_digest.md) | Correcting Class Imbalance in Prior-Data Fitted Networks for Tabular Classification | [원문](https://arxiv.org/abs/2605.21742) | 2026-09-18 | 4,364단어 | 가설: 우리 fold context in-context 분류기의 soft score가 이 논문의 TabPFN처럼 prior-driven bias만 보인다면, minority prior에 맞춘 thresholding이 rare-class 성능이나 WCA를 개선할 수 있다. 단, WSI/M |
+| [`pfn_uncertainty`](pfn_uncertainty_digest.md) | Uncertainty Quantification for Prior-Data Fitted Networks using Martingale Posteriors | [원문](https://arxiv.org/abs/2505.11325) | 2026-09-18 | 9,166단어 | 옮겨올 수 있는 것, 가설: fold context에서 closed-form ridge로 푸는 in-context 분류기가 label 또는 score에 대한 predictive distribution를 제공할 수 있다면, AMP처럼 초기 PPD를 받아 nonparametric resam |
 | [`titan_slide_fm`](titan_slide_fm_digest.md) | Multimodal Whole Slide Foundation Model for Pathology | [원문](https://arxiv.org/abs/2411.19666) | 2026-09-18 | 50,308단어 | ABMIL 기준선: 가설: 이 논문의 ABMIL 비교 프로토콜, 즉 CLAM scaffold 기반 weakly supervised MIL, batch size 1, 20 epochs, AdamW weight decay 10^-5, cosine annealing peak LR 10^-4는 |
 | [`variance_benchmarks`](variance_benchmarks_digest.md) | ACCOUNTING FOR VARIANCE IN M ACHINE L EARNING B ENCHMARKS | [원문](https://proceedings.mlsys.org/paper_files/paper/2021/file/0184b0cd3cfb185989f858a1d9f5c1eb-Paper.pdf) | 2026-09-18 | 16,835단어 | 옮겨올 수 있는 것, 가설: |
 
 ## 요약 대기
 
-- `ensembles_effective`
-- `madeleine_slide_repr`
+- `tabpfn_sketching`
