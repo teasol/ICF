@@ -1,0 +1,79 @@
+{
+  "round_id": "C-20260918-10",
+  "question": "D-050으로 값 앵커 오염 검사(AUROC 4자리 일치)를 폐지하고 provenance 기록 대조로 재설계하기로 했다. 이 회차는 그 기록 스키마를 설계한다.\n\n배경: 저장된 예측 파일의 키는 task_dir, fold_indices, fold_aurocs, fold_auroc_mean, per_fold 뿐이다. branch list, 가중치, 코드 해시, 데이터 버전이 하나도 없어 과거 산출물을 특정 구성에 귀속시킬 수 없다. 또 src/가 환경변수를 하나도 읽지 않아 실행 스크립트의 ICF_* export가 전부 무효이며, 기록된 5-branch 앵커도 재현되지 않는다.\n\n설계할 것: (1) 산출물에 무엇을 기록해야 구성을 재구성할 수 있는가 - 필드를 구체적으로 나열하라. (2) 무엇을 해시할 것인가. 코드 해시는 무엇의 해시인가(파일/디렉토리/git). (3) 기록이 실제 실행과 어긋날 수 있는 경로는 무엇이고 무엇으로 막는가. 기록은 실행과 같은 지점에서 생성돼야 하는가? (4) 값 앵커가 제공하던 기능 중 provenance 대조로 대체되지 않는 것이 있는가. 있다면 무엇으로 메우는가. (5) 과거 산출물에는 이 기록이 없다. 소급 귀속이 가능한 경우와 불가능한 경우를 어떻게 구분해 표시하는가.\n\n문서에 없는 수치를 지어내지 말라.",
+  "ru_type": "탐색",
+  "prefixed_criteria": "",
+  "composition_rationale": "계측 복구의 첫 단계 설계다. 감사(A)를 핵심으로 두었다 - 기록과 실행이 어긋나는 경로를 찾는 것이 이 스키마의 존재 이유다. 반증(R)은 '기록만 늘리면 해결된다'는 결론과 스키마가 실제로는 검증력이 없는 형식주의가 되는 경로를 공격한다. 제안(P)이 스키마를 낸다. 이론(T)은 '값 앵커가 제공하던 기능 중 대체되지 않는 것'이라는 질문을 맡는다. 일반화(G)와 실측(M)은 제외: 질문이 내부 계측 설계이고 실행 대상이 아직 없다.",
+  "max_authority": "T1",
+  "convener": "Claude Code (claude-opus-5)",
+  "state_documents": [
+    "docs/PROJECT.md",
+    "docs/closed_axes.md",
+    "talks/reports/2026-09-18_ru90_baseline_regen.md"
+  ],
+  "max_tokens_per_seat": 32000,
+  "max_total_calls": 14,
+  "seats": [
+    {
+      "name": "P1",
+      "archetype": "P",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.8,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-18_ru90_baseline_regen.md"
+      ]
+    },
+    {
+      "name": "A1",
+      "archetype": "A",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-18_ru90_baseline_regen.md"
+      ]
+    },
+    {
+      "name": "R1",
+      "archetype": "R",
+      "endpoint": "http://127.0.0.1:8003/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.5,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-18_ru90_baseline_regen.md"
+      ]
+    },
+    {
+      "name": "T1",
+      "archetype": "T",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.4,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-18_ru90_baseline_regen.md"
+      ]
+    },
+    {
+      "name": "S1",
+      "archetype": "S",
+      "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/reports/2026-09-18_ru90_baseline_regen.md"
+      ]
+    }
+  ],
+  "note": "SEAL 10 수치 미입력 (D-047)."
+}
