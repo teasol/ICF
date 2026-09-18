@@ -30,17 +30,25 @@ curl -s http://10.34.5.16:8000/v1/models          # 200
   문서인데 접근 가능한 경로에 없었다. **로그인 노드에서 먼저 읽어라.**
 - 이 기계에는 `sbatch`·`squeue`·`sinfo`가 **설치돼 있지 않다.** 파티션 이름, 계정, 큐 정책,
   GPU 요청 방식은 **모른다.** 지어내지 말고 로그인 노드에서 확인하라.
-- 데이터 경로가 로그인 노드에서도 같은지 확인하라. 이 기계 기준:
-  - `OFFICIAL=/NHNHOME/BASE/kimds/Data/PathoBench/official`
-  - `FEATURES=/NHNHOME/BASE/kimds/Data/PathoBench/features`
-  - `scripts/node_env.sh`가 경로를 탐색하므로 그 스크립트를 먼저 source 하라.
+- **데이터가 계산 노드에서 보이는지 먼저 확인하라. 이게 가장 큰 위험이다.**
+
+  | 경로 | 파일시스템 | 공유 여부 |
+  |:---|:---|:---|
+  | `/NHNHOME/WORKSPACE` (저장소·마진) | **lustre** 49T | 공유될 가능성 높음 |
+  | `/NHNHOME` (데이터 `BASE/kimds/Data/PathoBench`) | **로컬 xfs** 3.2T | **이 기계 전용일 수 있다** |
+
+  즉 **코드와 마진은 따라가지만 feature 데이터는 안 따라갈 수 있다.** 계산 노드에서
+  `ls $FEATURES | head` 가 비면 실험이 시작조차 못 한다. 그 경우 데이터를 Lustre로 옮기거나
+  스테이징하는 것이 첫 작업이며, 그 전에는 어떤 제출도 의미가 없다.
+  `scripts/node_env.sh`가 경로를 탐색하므로 먼저 source 하라.
 
 ## 즉시 쓸 수 있는 자산
 
 ### 저장된 branch 마진 — 집계 후보는 GPU 0회
 
-`predictions/margins_7b/` (1.3 MB, 7과제 × 50 fold, 공식 7-branch).
-**git에 들어가지 않는다**(`predictions/`가 ignore 대상) — 필요하면 이 기계에서 복사하거나
+`predictions/margins_7b/` (1.5 MB, 7과제 × 50 fold, 공식 7-branch).
+git에 들어가지 않지만(`predictions/`가 ignore 대상) **저장소가 Lustre 위에 있으므로 복사가
+필요 없을 가능성이 높다** — 계산 노드에서 그대로 보이는지 확인하라. 안 보이면
 `scripts/analysis/dump_branch_margins.py`로 다시 만든다(`1.94` GPU-h).
 
 이 마진으로 `scripts/analysis/eval_aggregations.py`가 **GPU 없이** 집계 후보를 채점한다.
