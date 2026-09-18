@@ -91,7 +91,6 @@ def evaluate_file(path: Path) -> dict[str, float]:
         m_bm = m_bm.float()
         m_bd = m_bd.float()
         m_qa = m_qa.float() if m_qa is not None else None
-        n = len(label)
 
         # 1. v119 Soft Voting (5-branch: CV + CT + BM + BD + QA)
         if m_qa is not None:
@@ -232,7 +231,7 @@ def main():
     if not has_qa:
         methods = [m for m in methods if m[0] != "v119_soft"]
 
-    header = f"| Task | " + " | ".join(name for _, name in methods) + " |"
+    header = "| Task | " + " | ".join(name for _, name in methods) + " |"
     sep = "| :--- | " + " | ".join(":---:" for _ in methods) + " |"
     print("\n" + header)
     print(sep)
@@ -264,7 +263,7 @@ def main():
         standalones = [s for s in standalones if s[0] != "qa_only"]
 
     print(f"\n\n### Standalone Branch Performance ({args.suite.upper()} Single Branch AUROC)")
-    st_header = f"| Task | " + " | ".join(name for _, name in standalones) + " |"
+    st_header = "| Task | " + " | ".join(name for _, name in standalones) + " |"
     st_sep = "| :--- | " + " | ".join(":---:" for _ in standalones) + " |"
     print(st_header)
     print(st_sep)

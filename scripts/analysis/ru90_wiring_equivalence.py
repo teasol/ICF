@@ -120,7 +120,7 @@ def run_phase1(tag: str) -> None:
     macro_base = float(np.mean(list(task_mean_base.values())))
 
     print(f"\n[RU-90 Layer 1] tag={tag}  measurement integrity")
-    print(f"\n(1) Primary 7 macro AUROC (BASE = stored `probability`)")
+    print("\n(1) Primary 7 macro AUROC (BASE = stored `probability`)")
     print(f"{'task':<24}{'auroc':>8}")
     for t in PRIMARY7:
         print(f"{short(t):<24}{task_mean_base[t]:>8.4f}")
@@ -129,13 +129,13 @@ def run_phase1(tag: str) -> None:
     # ---- 2. contamination check ----
     smad4 = task_mean_base["cptac_pda_SMAD4_mutation"]
     pbrm1 = task_mean_base["cptac_ccrcc_PBRM1_mutation"]
-    print(f"\n(2) contamination check")
+    print("\n(2) contamination check")
     print(f"{'task':<24}{'auroc':>8}{'anchor':>8}{'result':>10}")
     print(f"{'SMAD4_mutation':<24}{smad4:>8.4f}{ANCHOR_SMAD4:>8.4f}{_match(smad4, ANCHOR_SMAD4):>10}")
     print(f"{'PBRM1_mutation':<24}{pbrm1:>8.4f}{ANCHOR_PBRM1:>8.4f}{_match(pbrm1, ANCHOR_PBRM1):>10}")
 
     # ---- 3. BASE arm offline re-aggregation check ----
-    print(f"\n(3) BASE arm: stored `probability` vs offline trimmed_mean(sigmoid(BRANCHES))")
+    print("\n(3) BASE arm: stored `probability` vs offline trimmed_mean(sigmoid(BRANCHES))")
     print(f"{'task':<24}{'max|diff|prob':>16}{'auroc match(6dp)':>18}")
     global_max_diff = 0.0
     all_auroc_match = True
@@ -158,7 +158,7 @@ def run_phase1(tag: str) -> None:
     print(f"{'GLOBAL MAX':<24}{global_max_diff:>16.3e}{('MATCH' if all_auroc_match else 'MISMATCH'):>18}")
 
     # ---- 4. margin presence ----
-    print(f"\n(4) margin presence (RU-90 kill condition (5))")
+    print("\n(4) margin presence (RU-90 kill condition (5))")
     print(f"{'task':<24}{'m_sh':>8}{'m_sj':>8}{'m_bs':>8}{'n_folds':>9}")
     for t in PRIMARY7:
         folds = data[t]
@@ -210,7 +210,7 @@ def run_layer3(data: dict, tag: str) -> None:
           f"{macro_row['+SH+SJ']:>8.4f}{macro_delta['+SH']:>+8.4f}{macro_delta['+SJ']:>+8.4f}"
           f"{macro_delta['+SH+SJ']:>+8.4f}")
 
-    print(f"\n[RU-90 Layer 3] task-clustered 95% t CI (df=6, n_tasks=7) on mean per-fold delta vs BASE")
+    print("\n[RU-90 Layer 3] task-clustered 95% t CI (df=6, n_tasks=7) on mean per-fold delta vs BASE")
     print(f"{'variant':<10}{'mean_delta':>12}{'se':>10}{'ci_lo':>10}{'ci_hi':>10}{'sign agr.':>11}"
           f"{'vs RU-89':>12}{'|diff|%p':>10}")
     ci_result = {}
@@ -228,17 +228,17 @@ def run_layer3(data: dict, tag: str) -> None:
     d_sj = ci_result["+SJ"][0]
     d_shsj = ci_result["+SH+SJ"][0]
     gap = d_shsj - (d_sh + d_sj)
-    print(f"\n[RU-90 Layer 3] additivity gap (task-mean basis, secondary indicator only)")
+    print("\n[RU-90 Layer 3] additivity gap (task-mean basis, secondary indicator only)")
     print(f"  gap = delta(+SH+SJ) - [delta(+SH) + delta(+SJ)] "
           f"= {d_shsj:+.4f} - [{d_sh:+.4f} + {d_sj:+.4f}] = {gap:+.4f}")
 
-    print(f"\n[RU-90 Layer 3] tasks worsened vs BASE (task-mean delta <= 0), listed in full")
+    print("\n[RU-90 Layer 3] tasks worsened vs BASE (task-mean delta <= 0), listed in full")
     for v in ("+SH", "+SJ", "+SH+SJ"):
         worsened = [short(t) for t in PRIMARY7 if task_mean_delta[v][t] <= 0]
         print(f"  {v}: {worsened if worsened else '(none)'}")
 
     # ---- SH-SJ inter-margin correlation (max|r| across tasks, gate (1) reference) ----
-    print(f"\n[RU-90 Layer 3] SH-SJ inter-margin correlation (mean within-fold Pearson r), gate (1) reference")
+    print("\n[RU-90 Layer 3] SH-SJ inter-margin correlation (mean within-fold Pearson r), gate (1) reference")
     print(f"{'task':<24}{'mean_r':>10}")
     corrs = []
     for t in PRIMARY7:
@@ -287,7 +287,7 @@ def run_phase3(tag_prefix: str, task: str, ref_tag: str) -> None:
         print(f"\n--- arm {arm_name}  (live_tag={live_tag})")
 
         # (1) margin equivalence, per branch
-        print(f"  (1) live margin vs ref margin, max|diff| per branch")
+        print("  (1) live margin vs ref margin, max|diff| per branch")
         print(f"      {'branch':<8}{'max|diff|':>14}")
         for b in LIVE_CHECK_BRANCHES:
             diffs = []

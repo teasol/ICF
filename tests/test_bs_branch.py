@@ -25,7 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.models.branches.bs import bs_features, bs_slide_features  # noqa: E402
+from src.models.branches.bs import bs_slide_features  # noqa: E402
 from src.models.config import TrainingFreeConfig  # noqa: E402
 from src.models.training_free import TrainingFreeClassifier  # noqa: E402
 from src.models.aggregations.voting import (  # noqa: E402

@@ -9,12 +9,11 @@ Provides:
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, fields
+from dataclasses import asdict, dataclass, fields
 import difflib
-from io import StringIO
 from pathlib import Path
 import re
-from typing import Any, Sequence, get_args, get_origin, get_type_hints
+from typing import Any, get_args, get_origin, get_type_hints
 import yaml
 
 

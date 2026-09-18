@@ -128,7 +128,7 @@ def main() -> None:
     args.out_dir = args.out_dir.expanduser().resolve()
     save_split(train_table, args.out_dir / f"{args.csv.stem}_train.pt")
     save_split(test_table, args.out_dir / f"{args.csv.stem}_test.pt")
-    print(f"Done. Eval can now load these cached 512-d files.")
+    print("Done. Eval can now load these cached 512-d files.")
 
 
 if __name__ == "__main__":

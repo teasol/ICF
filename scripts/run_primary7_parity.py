@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -36,7 +35,7 @@ def main() -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     PRED_DIR.mkdir(parents=True, exist_ok=True)
 
-    print(f"=== Starting Primary 7 Parity Suite across 7 GPUs ===")
+    print("=== Starting Primary 7 Parity Suite across 7 GPUs ===")
     print(f"Config: {CONFIG}")
     print(f"Tasks: {len(TASKS)}")
 
@@ -67,7 +66,7 @@ def main() -> None:
         p = subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT)
         procs.append((task, gpu_id, p, fh, log_file, golden_file))
 
-    print(f"\nAll 7 tasks launched. Waiting for completion...")
+    print("\nAll 7 tasks launched. Waiting for completion...")
 
     results = []
     for task, gpu_id, p, fh, log_file, golden_file in procs:
@@ -107,8 +106,8 @@ def main() -> None:
 
     total_time = time.time() - start_time
     print(f"\n=== Primary 7 Parity Results (Total Time: {total_time:.1f}s = {total_time/3600:.3f} GPU-h equivalent) ===")
-    print(f"| Task | Pure AUROC | Golden AUROC | ΔAUROC | max|Δp| | mean|Δp| | Status |")
-    print(f"|:---|---:|---:|---:|---:|---:|:---:|")
+    print("| Task | Pure AUROC | Golden AUROC | ΔAUROC | max|Δp| | mean|Δp| | Status |")
+    print("|:---|---:|---:|---:|---:|---:|:---:|")
 
     pure_aurocs = []
     gold_aurocs = []

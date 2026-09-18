@@ -108,7 +108,7 @@ def screen_one(data: dict, cand: str, siblings: list[str],
         return None
 
     # ---- STEP 3: performance, reported only after the screen passes ----
-    print(f"\nSTEP 3 - performance (post-screen record)")
+    print("\nSTEP 3 - performance (post-screen record)")
     print(f"{'task':<24}{tag_c+' alone':>12}{'5-branch':>10}{'+'+tag_c:>10}{'delta':>9}")
     base_all, new_all, wins = [], [], 0
     for t in PRIMARY7:

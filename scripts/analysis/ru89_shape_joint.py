@@ -116,7 +116,7 @@ def main() -> None:
           f"{macro_delta['+SH+SJ']:>+8.4f}")
 
     # ---- task-clustered 95% t CI (df=6) for each variant's mean delta ----
-    print(f"\n[RU-89] task-clustered 95% t CI (df=6, n_tasks=7) on mean per-fold delta vs BASE")
+    print("\n[RU-89] task-clustered 95% t CI (df=6, n_tasks=7) on mean per-fold delta vs BASE")
     print(f"{'variant':<10}{'mean_delta':>12}{'se':>10}{'ci_lo':>10}{'ci_hi':>10}{'sign agr.':>11}")
     ci_result = {}
     for v in ("+SH", "+SJ", "+SH+SJ"):
@@ -131,12 +131,12 @@ def main() -> None:
     d_sj = ci_result["+SJ"][0]
     d_shsj = ci_result["+SH+SJ"][0]
     gap = d_shsj - (d_sh + d_sj)
-    print(f"\n[RU-89] additivity gap (task-mean basis, secondary indicator only)")
+    print("\n[RU-89] additivity gap (task-mean basis, secondary indicator only)")
     print(f"  gap = delta(+SH+SJ) - [delta(+SH) + delta(+SJ)] "
           f"= {d_shsj:+.4f} - [{d_sh:+.4f} + {d_sj:+.4f}] = {gap:+.4f}")
 
     # ---- worsened tasks, listed in full ----
-    print(f"\n[RU-89] tasks worsened vs BASE (task-mean delta <= 0), listed in full")
+    print("\n[RU-89] tasks worsened vs BASE (task-mean delta <= 0), listed in full")
     for v in ("+SH", "+SJ", "+SH+SJ"):
         worsened = [short(t) for t in PRIMARY7 if task_mean_delta[v][t] <= 0]
         print(f"  {v}: {worsened if worsened else '(none)'}")

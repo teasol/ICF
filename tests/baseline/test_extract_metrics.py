@@ -5,7 +5,6 @@ Stdlib-only: no third-party imports.
 """
 
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -16,7 +15,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from src.baseline.extract_metrics import extract_metrics, parse_log_file
+from src.baseline.extract_metrics import parse_log_file
 
 
 class TestMetricsExtractor(unittest.TestCase):

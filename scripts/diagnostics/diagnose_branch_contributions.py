@@ -60,7 +60,6 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     config = merge_train_config(args.config)
-    kwargs = {**config["model"], **config["model_kwargs"]}
 
     interface = ModelInterface.load_from_checkpoint(
         args.checkpoint, map_location="cpu", strict=True

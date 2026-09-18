@@ -57,7 +57,7 @@ def main():
     print("Running 1 fold with detailed profiling...", flush=True)
     t0 = time.time()
     with torch.no_grad():
-        m = clf.margins(ctx_bags, ctx_labels, qry_bags)
+        clf.margins(ctx_bags, ctx_labels, qry_bags)
     print(f"Total Fold Time: {time.time() - t0:.2f}s", flush=True)
 
 if __name__ == "__main__":

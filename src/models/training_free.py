@@ -58,19 +58,10 @@ result.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Sequence
 
 import torch
 
-from src.models.common.solvers import (
-    solve_ridge as _solve_ridge,
-    kernel_matrix as _kernel_matrix,
-    fast_context_auroc as _fast_context_auroc,
-    solve_kernel_ridge as _solve_kernel_ridge,
-    standardise as _standardise,
-    standardise_blocks as _standardise_blocks,
-)
 from src.models.common.basis import (
     within_slide_basis as _within_slide_basis_fn,
     extract_bag_descriptor,

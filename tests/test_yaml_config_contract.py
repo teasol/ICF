@@ -16,7 +16,7 @@ Guards against 11 distinct YAML & Python configuration pitfalls:
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError, fields
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 import unittest
 
@@ -24,7 +24,6 @@ from src.models.config import (
     TrainingFreeConfig,
     from_dict,
     from_yaml,
-    to_dict,
     to_yaml,
 )
 

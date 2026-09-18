@@ -85,7 +85,7 @@ def main() -> None:
     env_base["ICF_DS_TEMPERATURE"] = "1.0"
     env_base["ICF_DS_TOKENS"] = "256"
     env_base["ICF_AGGREGATION"] = "trimmed_mean"
-    
+
     # 7-branch live activation
     env_base["ICF_SHAPE_SCREEN_ONLY"] = "0"
     env_base["ICF_FIXED_HEAD_SH_WEIGHT"] = "1.0"

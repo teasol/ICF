@@ -9,7 +9,6 @@ and aggregates their predictions via Soft Voting.
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import time
 from pathlib import Path
@@ -23,9 +22,6 @@ import numpy as np
 import torch
 
 from src.models.common.solvers import fast_context_auroc, solve_kernel_ridge
-from src.models.branches.cv import cv_logits
-from src.models.branches.bd import bd_features
-from src.models.branches.ct import ct_margins
 
 
 def parse_args():

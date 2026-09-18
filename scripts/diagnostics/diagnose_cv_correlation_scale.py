@@ -115,7 +115,7 @@ def main() -> None:
     print("-" * 64)
     print(f"{'MEAN':34s}{statistics.mean(cov_rms):>10.3f}"
           f"{statistics.mean(corr_rms):>11.3f}{statistics.mean(ratios):>9.3f}")
-    print(f"\nratio 1.0에서 멀수록 SS162의 full-model 비교가 CV의 크기를 비교한 것이 된다.")
+    print("\nratio 1.0에서 멀수록 SS162의 full-model 비교가 CV의 크기를 비교한 것이 된다.")
 
 
 if __name__ == "__main__":
