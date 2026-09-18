@@ -41,6 +41,20 @@ fi
 
 [ -s "$TMP" ] || { echo "내려받기 실패: $URL" >&2; rm -f "$TMP"; exit 1; }
 
+# Many venues serve only PDF. pdftotext -layout keeps table columns adjacent,
+# which matters because the numbers we care about live in results tables and a
+# reflowed table turns them into an unreadable stream.
+if head -c 5 "$TMP" | grep -q "%PDF"; then
+  pdftotext -layout -q "$TMP" "${TMP}.txt" 2>/dev/null || {
+    echo "PDF 변환 실패: $URL" >&2; rm -f "$TMP"; exit 1; }
+  mv "${TMP}.txt" "$RAW"
+  rm -f "$TMP"
+  printf 'url: %s\nfetched_from: %s (PDF)\nfetched_at: %s\n' \
+    "$URL" "$TARGET" "$(date '+%F %T %Z')" > "$META"
+  echo "저장: ${RAW} ($(wc -c < "$RAW") bytes, $(wc -w < "$RAW") words) · PDF ${TARGET}"
+  exit 0
+fi
+
 .venv/bin/python - "$TMP" "$RAW" <<'PY'
 import re, sys, html
 src, dst = sys.argv[1], sys.argv[2]

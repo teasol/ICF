@@ -312,13 +312,16 @@ def main() -> None:
                     spec = {}
                 is_parallel = bool(spec.get("parallel"))
                 if is_parallel:
-                    # Parallel items may share the node with each other, but not
-                    # with an exclusive job already holding it.
-                    exclusive_busy = snap["busy"] and not children
-                    at_cap = args.max_parallel and len(children) >= args.max_parallel
-                    if exclusive_busy or at_cap:
+                    # Parallel items dispatch regardless of what else is running.
+                    # They are vLLM calls or CPU work, and vLLM queues rather
+                    # than rejecting, so a council round and a chore coexist at
+                    # the cost of latency. Blocking chores behind rounds left
+                    # the queue idle for most of the morning for no gain.
+                    if args.max_parallel and len(children) >= args.max_parallel:
                         break
                 elif snap["busy"]:
+                    # Exclusive items still demand a quiet node: these are the
+                    # ones that hold a GPU outright.
                     break
                 rec, handle = launch(item)
                 if handle is not None:
