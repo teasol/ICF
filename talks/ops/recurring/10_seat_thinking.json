@@ -1,0 +1,1 @@
+{"kind":"routine","label":"seat-thinking","cmd":".venv/bin/python scripts/ops/seat_thinking.py","every_minutes":45,"parallel":true}

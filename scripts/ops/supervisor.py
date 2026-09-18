@@ -55,6 +55,11 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OPS = PROJECT_ROOT / "talks/ops"
 QUEUE, DONE = OPS / "queue", OPS / "done"
+#: Templates that re-enter the queue on a period. A chore that runs once and
+#: lands in done/ stops being a chore -- on 2026-09-18 the queue drained in one
+#: minute and then nothing ran for half an hour, because every item was
+#: single-shot and the orchestrator was the only thing that could refill it.
+RECURRING = OPS / "recurring"
 TICKS, STATE = OPS / "ticks.jsonl", OPS / "state.md"
 HEARTBEAT = OPS / "heartbeat"
 #: Liveness is checked through this file rather than by pattern-matching the
@@ -103,6 +108,34 @@ def snapshot() -> dict[str, Any]:
         "queue": len(list(QUEUE.glob("*.json"))),
         "head": _sh("git -C %s log --oneline -1" % PROJECT_ROOT),
     }
+
+
+def refill_recurring(now: float) -> list[str]:
+    """Copy due recurring templates back into the queue.
+
+    Each template carries `every_minutes`. Due-ness is measured against the
+    copy's own last dispatch, recorded in done/, so a long-running chore does
+    not stack up behind itself.
+    """
+    refilled = []
+    for tpl in sorted(RECURRING.glob("*.json")):
+        try:
+            spec = json.loads(tpl.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            continue
+        period = float(spec.get("every_minutes", 0))
+        if period <= 0:
+            continue
+        target = QUEUE / tpl.name
+        if target.exists():
+            continue  # still waiting its turn; do not queue a second copy
+        marker = DONE / tpl.name
+        last = marker.stat().st_mtime if marker.exists() else 0.0
+        if now - last < period * 60:
+            continue
+        target.write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
+        refilled.append(spec.get("label", tpl.stem))
+    return refilled
 
 
 def next_item() -> Path | None:
@@ -162,7 +195,7 @@ def facts_block(ticks: list[dict[str, Any]]) -> str:
         "## 실측 (코드 생성, 모델이 쓰지 않음)", "",
         f"- **시각**: {cur['t']}",
         f"- **가동 중**: {running}",
-        f"- **큐 대기**: {cur['queue']}건",
+        f"- **큐 대기**: {cur['queue']}건 · 병렬 실행 {cur.get('parallel_running', 0)}건",
         f"- **최근 {len(ticks)}틱 가동률**: {100 * busy_ticks // max(len(ticks), 1)}% "
         f"({busy_ticks}/{len(ticks)})",
         f"- **GPU**: {gpu_line}",
@@ -221,9 +254,13 @@ def main() -> None:
     ap.add_argument("--summarise-every", type=int, default=10, help="ticks per model call")
     ap.add_argument("--timeout", type=int, default=600)
     ap.add_argument("--no-dispatch", action="store_true", help="watch only, never launch")
+    ap.add_argument("--max-parallel", type=int, default=0,
+                    help="concurrent parallel items; 0 = unlimited. vLLM queues "
+                         "requests rather than rejecting them, so the real limit "
+                         "is each item's own timeout, not the server count")
     args = ap.parse_args()
 
-    for d in (QUEUE, DONE):
+    for d in (QUEUE, DONE, RECURRING):
         d.mkdir(parents=True, exist_ok=True)
     import fcntl
     import os
@@ -238,29 +275,63 @@ def main() -> None:
     globals()["_LOCK_HANDLE"] = lock
     PIDFILE.write_text(str(os.getpid()), encoding="utf-8")
     window: list[dict[str, Any]] = []
-    child: subprocess.Popen | None = None
+    #: Several literature digests can run at once -- each occupies one seat
+    #: server and nothing else. Items without "parallel" still demand an idle
+    #: node, because an experiment sharing a GPU with another job is how the
+    #: idle-GPU rule gets broken quietly.
+    children: list[subprocess.Popen] = []
     tick = 0
     print(f"supervisor 시작 · 틱 {args.interval}s · 요약 {args.summarise_every}틱마다", flush=True)
 
     while True:
         tick += 1
+        refilled = refill_recurring(time.time())
+        if refilled:
+            print(f"[{datetime.now(KST):%H:%M:%S}] 주기 잡무 복귀: {', '.join(refilled)}",
+                  flush=True)
         snap = snapshot()
 
-        # A job we started ourselves counts as busy even when no pattern
-        # matches it, so an unrecognised command cannot be dispatched over.
-        child_alive = child is not None and child.poll() is None
-        if child_alive:
+        # Jobs we started ourselves count as busy even when no pattern matches
+        # them, so an unrecognised command cannot be dispatched over.
+        children = [c for c in children if c.poll() is None]
+        if children:
             snap["running"]["launched"] = True
             snap["busy"] = True
+        snap["parallel_running"] = len(children)
 
-        # Dispatch before logging so the tick records the launch that it caused.
-        if not args.no_dispatch and not snap["busy"]:
-            item = next_item()
-            if item is not None:
-                snap["dispatch"], child = launch(item)
-                snap["running"]["launched"] = True
-                snap["busy"] = True
-                print(f"[{snap['t']}] 발사 {snap['dispatch'].get('launch')}", flush=True)
+        # Dispatch before logging so the tick records the launches it caused.
+        if not args.no_dispatch:
+            launched = []
+            while True:
+                item = next_item()
+                if item is None:
+                    break
+                try:
+                    spec = json.loads(item.read_text(encoding="utf-8"))
+                except Exception:  # noqa: BLE001 - malformed item is retired by launch()
+                    spec = {}
+                is_parallel = bool(spec.get("parallel"))
+                if is_parallel:
+                    # Parallel items may share the node with each other, but not
+                    # with an exclusive job already holding it.
+                    exclusive_busy = snap["busy"] and not children
+                    at_cap = args.max_parallel and len(children) >= args.max_parallel
+                    if exclusive_busy or at_cap:
+                        break
+                elif snap["busy"]:
+                    break
+                rec, handle = launch(item)
+                if handle is not None:
+                    children.append(handle)
+                    snap["running"]["launched"] = True
+                    snap["busy"] = True
+                launched.append(rec)
+                print(f"[{snap['t']}] 발사 {rec.get('launch')}"
+                      f"{' (병렬)' if is_parallel else ''}", flush=True)
+                if not is_parallel:
+                    break
+            if launched:
+                snap["dispatch"] = launched
 
         # Written every tick so an outside check can tell a stopped supervisor
         # from a quiet one: state.md alone only changes every summarise-every

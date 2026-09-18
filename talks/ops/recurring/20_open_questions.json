@@ -1,0 +1,1 @@
+{"kind":"routine","label":"open-questions","cmd":".venv/bin/python scripts/ops/routine_open_questions.py","every_minutes":90,"parallel":true}

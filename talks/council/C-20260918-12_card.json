@@ -1,29 +1,35 @@
 {
-  "round_id": "C-20260918-11",
-  "question": "D-049로 CA-R1 다중 강도 브랜치 동시 투입이 비저촉으로 확정됐다. 경계는 브랜치 구성이 아니라 선택의 주체와 시점에 있다 - 승인된 ensemble readout이 context 라벨만으로 계수를 정하는 것은 허용되고, 결과 AUROC를 보고 나서 강도를 고르는 것은 Oracle로 금지된다.\n\n이 회차는 CA-R1 게이트 1의 사전 등록안을 설계한다. 실행 승인이 아니며 성능을 조회하지 않는다. 계측 경로가 현재 무효라 실행은 복구 뒤로 미뤄져 있다(D-050).\n\n설계할 것: (1) 강도 집합을 결과 전에 고정하라 - 몇 개, 어떤 값, 왜 그 값인가. (2) 게이트 1 임계값(max |r|, eff.rank)과 그 집계 단위를 명시하라. 6개 변형은 상호 상관이 높을 것으로 예상되는데, 상관이 높다는 것이 기각 사유가 되는 근거는 무엇인가. (3) Dual Ridge가 계수를 정하는 경로에서 라벨이 쓰이는 지점을 전부 나열하고, 그것이 context 라벨만인지 확인할 방법을 적어라. (4) 이 설계가 Oracle 경계를 넘는 조건을 구체적으로 쓰라 - 무엇을 하면 위반인가. (5) 탈락 시 성능을 조회하지 않고 종료하는 규칙과 그 강제 방법.\n\n문서에 없는 수치를 지어내지 말라. closed_axes.md의 CA-R1 항목과 §3-J를 근거로 삼아라.",
+  "round_id": "C-20260918-12",
+  "question": "외부 문헌 4편이 처음으로 들어왔다. 첨부된 브리프만 근거로 삼는다.\n\n가장 눈에 띄는 사실: ICMIL은 12개 MIL 벤치마크 평균에서 ABMIL(79.97)을 앞서지만(84.17), 그 중 유일한 병리 WSI 과제인 TCGA에서는 ABMIL 90.7이 ICMIL 87.9를 앞선다. 그리고 그 TCGA 과제는 UNI2 1536차원 patch feature를 PCA 25차원으로 줄인 LUAD vs LUSC 이진 분류로, 우리와 같은 특징 추출기를 쓴다. 다만 저들은 bag을 약 100개로 subsample한다.\n\n우리 맥락: 목표는 SEAL 10에서 ABMIL을 넘는 것이고 개선 근거는 Primary 7 뿐이다. 학습 파라미터 제약은 폐기됐다. 현재 공식 7-branch의 유효 랭크는 3.52/7로 중복이 크고, 확률적 적합을 쓰면 적합 분산이 승격 기준의 최대 2.8배가 된다.\n\n질문: (1) 병리 과제에서만 ICMIL이 지는 것은 무엇을 시사하는가? 저들의 실험 설정 중 무엇이 그 결과를 만들었을 가능성이 있는가. (2) 저들은 여러 prior를 섞어 상보성을 얻었다고 주장한다. 우리는 브랜치를 늘려도 유효 랭크가 오르지 않는다. 무엇이 다른가? 이 차이가 우리에게 옮겨올 수 있는 것인가. (3) ICMIL의 분산은 TCGA에서 ±0.1, ABMIL은 ±1.6이다. 우리의 적합 분산 문제에 이 구조가 시사하는 바가 있는가. (4) 이 네 논문에서 우리가 옮겨올 수 없는 것은 무엇이고 왜인가. (5) Primary 7에서 무엇을 재면 위 가설들이 갈리는가.\n\n주의: 외부 결과는 주장이지 우리의 관측이 아니다. 어떤 외부 수치도 우리 게이트·승격의 근거가 될 수 없다. 과제 집합이 다르므로 절대값 직접 비교는 금지다. 브리프에 없는 논문·수치를 만들어내지 마라. 브리프 자체가 로컬 모델 요약이며 원문 대조가 되지 않았다는 점도 감안하라.",
   "ru_type": "탐색",
   "prefixed_criteria": "",
-  "composition_rationale": "D-049 직후 첫 설계다. 제안(P)이 사전 등록안을 내고, 반증(R)은 설계가 게이트를 통과하도록 편의적으로 짜였는지 공격한다 - 3회차에서 제안 좌석이 RBF fallback으로 경계를 넘으려 한 전례가 있다. 감사(A)는 라벨 사용 지점 열거를 맡는다. 이론(T)은 '상관이 높다는 것이 기각 사유가 되는 근거'라는 질문을 맡는다 - 게이트 1의 전제 자체를 검토한다. 일반화(G)와 실측(M)은 제외: 실행이 계측 복구 대기라 비용도 전이도 아직 논할 수 없다.",
+  "composition_rationale": "E(외부) 좌석의 첫 투입이다. 외부 문헌이 들어온 회차이므로 E를 첫 좌석에 둔다. 가장 큰 위험은 새 논문에 휩쓸려 우리 제약을 잊는 것이므로 감사(A)가 '과제 집합이 다른 절대값 비교'와 '외부 수치의 우리 근거화'를 감시한다. 반증(R)은 'ICMIL을 따라하면 된다'는 손쉬운 결론과, 반대로 '병리에서 졌으니 무관하다'는 성급한 기각을 둘 다 공격한다. 이론(T)은 prior 혼합의 상보성과 우리 유효 랭크 문제의 관계를 맡는다. 제안(P)은 온도를 높여(0.9) 옮겨올 설계를 낸다. 일반화(G)는 제외했다 - 이번 질문 자체가 분포 밖 전이에 관한 것이라 E와 역할이 겹친다. 실측(M)도 제외: 아직 후보가 확정되지 않았다. 브리프는 로컬 모델 요약이고 원문 대조가 안 됐으므로 그 한계를 프롬프트에 명시했다.",
   "max_authority": "T1",
   "convener": "Claude Code (claude-opus-5)",
   "state_documents": [
     "docs/PROJECT.md",
     "docs/closed_axes.md",
-    "talks/reports/2026-09-18_ru90_baseline_regen.md"
+    "talks/lit/icmil_digest.md",
+    "talks/lit/pfn_imbalance_digest.md",
+    "talks/lit/pfn_foundations_digest.md",
+    "talks/lit/multimodal_pfn_digest.md"
   ],
   "max_tokens_per_seat": 32000,
-  "max_total_calls": 14,
+  "max_total_calls": 18,
   "seats": [
     {
-      "name": "P1",
-      "archetype": "P",
+      "name": "E1",
+      "archetype": "E",
       "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
       "model": "Qwen3.8-27B",
-      "temperature": 0.9,
+      "temperature": 0.3,
       "data_slice": [
         "docs/PROJECT.md",
         "docs/closed_axes.md",
-        "talks/reports/2026-09-18_ru90_baseline_regen.md"
+        "talks/lit/icmil_digest.md",
+        "talks/lit/pfn_imbalance_digest.md",
+        "talks/lit/pfn_foundations_digest.md",
+        "talks/lit/multimodal_pfn_digest.md"
       ]
     },
     {
@@ -35,45 +41,72 @@
       "data_slice": [
         "docs/PROJECT.md",
         "docs/closed_axes.md",
-        "talks/reports/2026-09-18_ru90_baseline_regen.md"
-      ]
-    },
-    {
-      "name": "A1",
-      "archetype": "A",
-      "endpoint": "http://127.0.0.1:8003/v1/chat/completions",
-      "model": "Qwen3.8-27B",
-      "temperature": 0.2,
-      "data_slice": [
-        "docs/PROJECT.md",
-        "docs/closed_axes.md",
-        "talks/reports/2026-09-18_ru90_baseline_regen.md"
+        "talks/lit/icmil_digest.md",
+        "talks/lit/pfn_imbalance_digest.md",
+        "talks/lit/pfn_foundations_digest.md",
+        "talks/lit/multimodal_pfn_digest.md"
       ]
     },
     {
       "name": "T1",
       "archetype": "T",
-      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "endpoint": "http://127.0.0.1:8003/v1/chat/completions",
       "model": "Qwen3.8-27B",
       "temperature": 0.4,
       "data_slice": [
         "docs/PROJECT.md",
         "docs/closed_axes.md",
-        "talks/reports/2026-09-18_ru90_baseline_regen.md"
+        "talks/lit/icmil_digest.md",
+        "talks/lit/pfn_imbalance_digest.md",
+        "talks/lit/pfn_foundations_digest.md",
+        "talks/lit/multimodal_pfn_digest.md"
       ]
     },
     {
-      "name": "S1",
-      "archetype": "S",
+      "name": "P1",
+      "archetype": "P",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.9,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/lit/icmil_digest.md",
+        "talks/lit/pfn_imbalance_digest.md",
+        "talks/lit/pfn_foundations_digest.md",
+        "talks/lit/multimodal_pfn_digest.md"
+      ]
+    },
+    {
+      "name": "A1",
+      "archetype": "A",
       "endpoint": "http://127.0.0.1:8001/v1/chat/completions",
       "model": "Qwen3.8-27B",
       "temperature": 0.2,
       "data_slice": [
         "docs/PROJECT.md",
         "docs/closed_axes.md",
-        "talks/reports/2026-09-18_ru90_baseline_regen.md"
+        "talks/lit/icmil_digest.md",
+        "talks/lit/pfn_imbalance_digest.md",
+        "talks/lit/pfn_foundations_digest.md",
+        "talks/lit/multimodal_pfn_digest.md"
+      ]
+    },
+    {
+      "name": "S1",
+      "archetype": "S",
+      "endpoint": "http://127.0.0.1:8003/v1/chat/completions",
+      "model": "Qwen3.8-27B",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "talks/lit/icmil_digest.md",
+        "talks/lit/pfn_imbalance_digest.md",
+        "talks/lit/pfn_foundations_digest.md",
+        "talks/lit/multimodal_pfn_digest.md"
       ]
     }
   ],
-  "note": "SEAL 10 수치 미입력 (D-047)."
+  "note": "E 좌석 첫 투입. 외부 주장은 우리 관측이 아니다. SEAL 10 수치 미입력 (D-047)."
 }
