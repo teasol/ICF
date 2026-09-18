@@ -43,7 +43,6 @@ def compute_auroc(scores: torch.Tensor, labels: torch.Tensor):
 
 def main():
     tag = "ensemble_8branch_primary7"
-    branch_names = ["CV", "CT", "BM", "BD", "QA", "DS", "DE", "SW"]
     branch_keys = ["m_cv", "m_ct", "m_bm", "m_bd", "m_qa", "m_ds", "m_de", "m_sw"]
     B = len(branch_keys)
 

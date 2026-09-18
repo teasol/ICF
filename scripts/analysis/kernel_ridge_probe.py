@@ -1,5 +1,4 @@
 import torch
-import torch.nn.functional as F
 
 def _kernel_matrix(left: torch.Tensor, right: torch.Tensor, kernel: str = "rbf", gamma: float | None = None, degree: int = 2, coef0: float = 1.0) -> torch.Tensor:
     if kernel == "linear":

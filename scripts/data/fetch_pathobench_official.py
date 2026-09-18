@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import subprocess
-import sys
 from pathlib import Path
 
 # Sources/tasks used by this project (from official available_splits.yaml).

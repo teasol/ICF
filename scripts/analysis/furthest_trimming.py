@@ -63,7 +63,7 @@ def eval_method(pts, method):
                 m_list = [torch.tensor(m) for m in m_list]
             m_stack = torch.stack(m_list, dim=-1)
             p_stack = torch.sigmoid(m_stack)
-            
+
             if method == "standard_mean":
                 p = torch.mean(p_stack, dim=-1)
             elif method == "trimmed_mean (1 min, 1 max)":
@@ -118,7 +118,7 @@ def eval_method(pts, method):
                 p = torch.sigmoid(avg_m)
             elif method == "median_prob":
                 p = torch.median(p_stack, dim=-1).values
-            
+
             fold_aucs.append(auroc(p, y))
         task_scores.append(np.mean(fold_aucs))
     return task_scores

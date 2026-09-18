@@ -406,7 +406,6 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
 
     void = round_invalid_reason(phase1)
-    proposal_texts = [r.text for r in phase1 if r.archetype == "P" and r.ok()]
     phase2: list[SeatResult] = []
     phase2b: list[SeatResult] = []
     questions: list[str] = []
@@ -440,7 +439,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
         challenges = "\n\n".join(f"## {r.seat}의 반론\n{r.text}" for r in phase2 if r.ok())
         if challenges and spend(len(proposers), "Phase 2b"):
-            print(f"\n[Phase 2b] 제안 좌석이 반론에 일괄 응답", flush=True)
+            print("\n[Phase 2b] 제안 좌석이 반론에 일괄 응답", flush=True)
             phase2b = run_phase(
                 [(s, base + f"\n# 당신의 제안\n{proposals}\n\n# 받은 반론\n{challenges}\n\n"
                             "각 반론에 대해 (1) 수용하고 수정할지 (2) 근거를 들어 반박할지 "
@@ -463,14 +462,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     )
 
     transcript = "\n\n".join(
-        [f"# Phase 1\n"] + [f"## {r.seat}\n{r.text}" for r in phase1 if r.ok()]
-        + ([f"# Phase 2 반론"] + [f"## {r.seat}\n{r.text}" for r in phase2 if r.ok()] if phase2 else [])
-        + ([f"# Phase 2b 제안 좌석 응답"] + [f"## {r.seat}\n{r.text}" for r in phase2b if r.ok()] if phase2b else [])
+        ["# Phase 1\n"] + [f"## {r.seat}\n{r.text}" for r in phase1 if r.ok()]
+        + (["# Phase 2 반론"] + [f"## {r.seat}\n{r.text}" for r in phase2 if r.ok()] if phase2 else [])
+        + (["# Phase 2b 제안 좌석 응답"] + [f"## {r.seat}\n{r.text}" for r in phase2b if r.ok()] if phase2b else [])
     )
 
     phase3: list[SeatResult] = []
     if spend(len(synths), "Phase 3"):
-        print(f"\n[Phase 3] 종합", flush=True)
+        print("\n[Phase 3] 종합", flush=True)
         phase3 = run_phase(
             [(s, base + "\n" + transcript + gap_note + "\n\n"
                         "위 논의의 증거를 지지 / 반박 / 판별 불가 / 실행 무효로 분류하고, "
@@ -559,14 +558,14 @@ def cmd_run(args: argparse.Namespace) -> int:
         f"- **RU 유형**: {card.ru_type}",
         f"- **최대 권한 등급**: {card.max_authority}",
         f"- **소집자**: {card.convener or '미기재'}",
-        f"- **좌석**: " + ", ".join(
+        "- **좌석**: " + ", ".join(
             f"{s.name}({s.archetype}, temp {s.temperature}, {s.endpoint})" for s in card.seats),
         f"- **호출**: {budget['used']}/{budget['cap']} · **소요**: {elapsed}초", "",
         "> 이 문서는 로컬 모델이 생성한 것이며 **검증되지 않았습니다.** 좌석이 인용한 수치는",
         "> 정본 문서와 대조하기 전에는 결론에 넣지 마십시오. 좌석 수와 동의 수는 증거가 아닙니다.", "",
     ]
     if void:
-        lines += [f"## ⚠ 회차 무효", "", void, "",
+        lines += ["## ⚠ 회차 무효", "", void, "",
                   "무효 회차의 산출물은 판정의 근거로 쓰지 않습니다. 아래는 기록용입니다.", ""]
     if blackboard["abstentions"]:
         lines += ["## 기권한 좌석", ""]

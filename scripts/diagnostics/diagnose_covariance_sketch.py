@@ -206,7 +206,6 @@ def main() -> None:
         print("\nCV-1과 동일한 class-balanced dual ridge로 sketch만 바꿔 50-fold 채점")
         print(f"{'dim':>6} {'feats':>7} {'sinusoid':>16} {'gaussian':>16} {'PCA':>16}")
         for dim in dims:
-            cells = []
             out = [f"{dim:>6}", f"{dim * (dim + 1) // 2:>7}"]
             for name, fn in (("sinusoid", sinusoidal_basis), ("gaussian", gaussian_basis)):
                 P, _ = fn(FEATURE_DIM, dim)

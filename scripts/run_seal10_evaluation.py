@@ -11,10 +11,7 @@ from __future__ import annotations
 
 import csv
 import json
-import os
-import re
 import subprocess
-import sys
 import time
 from pathlib import Path
 import torch
@@ -133,10 +130,9 @@ def main() -> None:
                 print(f"  [GPU {gpu_id}] Finished {task} (rc={ret}, elapsed={elapsed:.1f}s)")
 
                 # Parse log
-                log_text = log_file.read_text()
+                log_file.read_text()
                 fold_mean = None
                 fold_std = None
-                pooled = None
                 if out_file.exists():
                     data = torch.load(out_file, map_location="cpu")
                     aurocs = [float(x) for x in data.get("fold_aurocs", [])]
@@ -146,7 +142,6 @@ def main() -> None:
                 else:
                     fold_mean = None
                     fold_std = None
-                    pooled = None
 
                 results[task] = {
                     "task": task,

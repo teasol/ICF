@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol, Sequence, runtime_checkable
+from typing import Protocol, Sequence, runtime_checkable
 import torch
 import torch.nn as nn
 

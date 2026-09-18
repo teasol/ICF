@@ -44,7 +44,7 @@ class BMBranchTest(unittest.TestCase):
         context, labels, query = synthetic_episode(seed=42)
         model_v114 = TrainingFreeClassifier(TrainingFreeConfig(weight_bm=0.0))
         # Compute manually with CV, DD, CT
-        cfg = TrainingFreeConfig(weight_bm=0.0)
+        TrainingFreeConfig(weight_bm=0.0)
         margin = model_v114.margins(context, labels, query)
         self.assertEqual(margin.shape, (len(query),))
 
@@ -94,7 +94,7 @@ class BMBranchTest(unittest.TestCase):
 
         # Create a modified query set (different bags)
         other_query = [q * 5.0 + 10.0 for q in query]
-        margin_other = model.margins(context, labels, other_query)
+        model.margins(context, labels, other_query)
 
         # Re-running original query should be identical
         margin_repeat = model.margins(context, labels, query)

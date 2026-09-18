@@ -58,14 +58,14 @@ for t, pt in zip(all_tasks, all_pts):
         if isinstance(m_list[0], list):
             m_list = [torch.tensor(m) for m in m_list]
         p_stack = torch.sigmoid(torch.stack(m_list, dim=-1))
-        
+
         # Trimmed (1 min, 1 max)
         sum_p = torch.sum(p_stack, dim=-1)
         min_p = torch.min(p_stack, dim=-1).values
         max_p = torch.max(p_stack, dim=-1).values
         p_trim = (sum_p - min_p - max_p) / 4.0
         trim_aucs.append(auroc(p_trim, y))
-        
+
         # Drop 2 furthest from median
         med = torch.median(p_stack, dim=-1, keepdim=True).values
         dev = (p_stack - med).abs()
@@ -74,7 +74,7 @@ for t, pt in zip(all_tasks, all_pts):
         mask.scatter_(-1, top2, 0.0)
         p_furth = (p_stack * mask).sum(dim=-1) / 4.0
         furth_aucs.append(auroc(p_furth, y))
-        
+
     m_trim = np.mean(trim_aucs)
     m_furth = np.mean(furth_aucs)
     trim_all.append(m_trim)

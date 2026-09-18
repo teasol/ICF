@@ -1,4 +1,3 @@
-import sys
 import itertools
 import torch
 from pathlib import Path
