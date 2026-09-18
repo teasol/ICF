@@ -37,7 +37,7 @@ introduce numbers. If the model call fails the narrative keeps its previous
 text with a staleness marker -- a missing narrative must never look like a
 fresh one.
 
-    python scripts/ops/supervisor.py --endpoint http://127.0.0.1:8000/v1/chat/completions
+    python scripts/ops/supervisor.py   (엔드포인트는 talks/ops/llm.json)
 """
 
 from __future__ import annotations

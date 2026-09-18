@@ -1,0 +1,91 @@
+{
+  "round_id": "C-20260918-24",
+  "question": "앞선 회차가 우리 게이트의 한계를 확정했다. 이 회차는 그 자리에 무엇을 놓을지 정한다.\n\n확정된 사실:\n- 게이트 ①(직교성)은 중복을 거르지 유용성을 거르지 않는다. SJ는 상관 0.078로 ①을, 48/50으로 ②를 통과했으나 5→7 대응 비교에서 3개 과제가 악화된다.\n- 5-branch와 7-branch를 실제로 나눠 돌린 비교에서 macro Δ는 +0.0057이고 과제 군집 95% 구간이 [-0.0115, +0.0228]로 0을 포함한다.\n- fold 적합 1회가 20.0초다. 2 arm paired 확증은 3.89 GPU-hour로 예산 4시간의 97%이며, 7-branch는 더 비싸다. 즉 확증을 한 번 돌리면 예산이 사라진다.\n- 중복은 위치 계열에 몰려 있다. BM-QA가 7개 과제 전부에서 최상위(0.897~0.931), BM·QA·DS 셋의 참여비가 1.29/3. BD 0.062, SJ 0.078은 거의 독립.\n- fold는 과제 안에서 독립이 아니다. 독립 단위는 과제 7개에 가깝고, fold를 독립으로 보면 같은 Δ가 0을 벗어나 통과로 보인다.\n\n질문:\n(1) 게이트 ①·②를 통과하고도 성능을 해치는 branch를, 성능 확증 없이 미리 걸러낼 수 있는 신호가 있는가? 후보를 제시하되 각각에 대해 (a) 라벨을 쓰는가 (b) Primary 7 안에서만 계산되는가 (c) 비용이 fold 적합 몇 회인가를 밝혀라. 없다면 없다고 하라.\n(2) 확증 1회로 예산이 소진되는 상황에서, 후보 여러 개를 어떻게 순서 세울 것인가? 순서를 세우는 행위 자체가 선택 편향을 만들지 않으려면 무엇을 사전에 고정해야 하는가.\n(3) 과제 7개가 독립 단위라면 우리가 검출할 수 있는 최소 효과 크기는 얼마인가? 문서에 있는 수치만으로 계산할 수 있으면 계산하고, 계산에 필요한 값이 없으면 무엇이 없는지 말하라. 그 크기가 승격 임계 +0.0030보다 크다면 그것은 무엇을 뜻하는가.\n(4) 위치 계열(BM·QA·DS)이 사실상 하나의 신호라면, 셋 중 둘을 빼는 것은 비용을 줄이는가? fold 적합 시간이 branch 수에 어떻게 의존하는지 문서에 있는가? 없다면 그것을 재는 것이 확증보다 싼가.\n(5) 지금 예산으로 할 수 있는 가장 정보량이 큰 단 하나의 실행은 무엇인가? 하나만 고르고, 그것이 실패했을 때 무엇을 알게 되는지도 함께 적어라.\n\n문서에 없는 수치를 지어내지 마라. 특히 branch 수에 따른 적합 시간, 후보 목록, 최소 검출 크기는 측정되거나 계산된 적이 없을 수 있다.",
+  "ru_type": "탐색",
+  "prefixed_criteria": "",
+  "composition_rationale": "예산이 한 번의 확증만 허용하는 상황의 설계 회차다. 실측(M)을 첫 좌석에 두어 질문 3·4의 계산 가능성을 먼저 가른다. 이론(T)은 질문 1 — 유용성을 예측하는 신호가 존재할 수 있는가 — 을 맡는다. 반증(R)은 '이 신호로 고르면 된다'는 안이함과 질문 2의 선택 편향을 공격한다. 감사(A)는 제안된 신호가 라벨이나 hold-out을 몰래 쓰지 않는지 본다. 제안(P)은 온도 0.7로 질문 5의 단일 실행안을 낸다. 외부(E)·일반화(G)는 제외. Phase B는 A/B 결과로 기본 꺼짐. 앞선 회차 보고서는 입력에 넣지 않았다.",
+  "max_authority": "T1",
+  "convener": "Claude Code (claude-opus-5)",
+  "state_documents": [
+    "docs/PROJECT.md",
+    "docs/closed_axes.md",
+    "docs/current_status.md"
+  ],
+  "max_tokens_per_seat": 32000,
+  "max_total_calls": 18,
+  "seats": [
+    {
+      "name": "M1",
+      "archetype": "M",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.3,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "T1",
+      "archetype": "T",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.4,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "R1",
+      "archetype": "R",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.5,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "A1",
+      "archetype": "A",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "P1",
+      "archetype": "P",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.7,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "S1",
+      "archetype": "S",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    }
+  ],
+  "note": "예산 제약 하의 후보 선별 설계. SEAL 10 수치 미입력 (D-047)."
+}

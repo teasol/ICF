@@ -19,9 +19,14 @@ from pathlib import Path
 
 CONFIG = Path(__file__).resolve().parents[2] / "talks" / "ops" / "llm.json"
 
+#: Fallback only. The real values live in talks/ops/llm.json, which is in git,
+#: so a machine that checks out this repository gets the right address without
+#: editing code. The LAN address rather than localhost: the server runs on the
+#: NEXGEM box while experiments are submitted through Slurm from elsewhere, and
+#: 127.0.0.1 would mean "the compute node", where nothing is listening.
 DEFAULT = {
     "model": "deepseek-v4.1-flash",
-    "endpoints": ["http://127.0.0.1:8000/v1/chat/completions"],
+    "endpoints": ["http://10.34.5.16:8000/v1/chat/completions"],
 }
 
 

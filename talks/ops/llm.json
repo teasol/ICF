@@ -1,5 +1,9 @@
 {
   "model": "deepseek-v4.1-flash",
-  "endpoints": ["http://127.0.0.1:8000/v1/chat/completions"],
-  "note": "2026-09-18 16:xx: Qwen 3대가 죽고 GPU 4-7에 deepseek 단일 서버가 올라왔다. 엔드포인트가 하나이므로 좌석들이 같은 서버를 공유한다 (vLLM이 큐잉한다)."
+  "endpoints": ["http://10.34.5.16:8000/v1/chat/completions"],
+  "note": "2026-09-19: 실험을 NEXGEM 로그인 노드(Slurm)로 옮기면서 주소를 127.0.0.1에서 LAN 주소로 바꿨다. 서버는 이 기계(hostname NEXGEM, GPU 4-7)에 그대로 있고 0.0.0.0:8000에 바인딩돼 있으므로, 같은 기계에서도 이 주소로 접속된다. 대체 주소 100.134.17.129도 같은 호스트다.",
+  "host": "NEXGEM",
+  "lan": "10.34.5.16",
+  "alt": "100.134.17.129",
+  "gpus": "4-7 (tensor parallel)"
 }
