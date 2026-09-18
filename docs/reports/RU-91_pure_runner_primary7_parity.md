@@ -3,11 +3,11 @@
 - 유형: `reproduction_measurement` · 근거: RFC 2026-09-12 (순수 러너 이관 및 레거시 제거)
 - 실행: `nexgem-s1` GPU 7장 (`cuda:0` ~ `cuda:6`) 완전 병렬 실행
 - 산출물:
-  - 설정: [`configs/baseline/v121_7branch_active.yaml`](file:///home/kimds/ICF/configs/baseline/v121_7branch_active.yaml)
-  - 순수 러너: [`scripts/evaluate_pure.py`](file:///home/kimds/ICF/scripts/evaluate_pure.py)
+  - 설정: [`configs/baseline/v121_7branch_active.yaml`](../../configs/baseline/v121_7branch_active.yaml)
+  - 순수 러너: [`scripts/evaluate_pure.py`](../../scripts/evaluate_pure.py)
   - 실행 드라이버: `scripts/run_primary7_parity.py` / `scripts/run_remaining4.py`
   - 예측 파일: `predictions/parity_pure/pure_{task}.pt` (7개 과제, 총 350 folds, 17,723 slides)
-  - 수치 요약: [`docs/history/ru91_primary7_parity_results.json`](file:///home/kimds/ICF/docs/history/ru91_primary7_parity_results.json)
+  - 수치 요약: [`docs/history/ru91_primary7_parity_results.json`](../history/ru91_primary7_parity_results.json)
   - 실행 로그: `logs/parity_primary7/*.log`
 
 ---
@@ -52,13 +52,13 @@ Orca C2에서 요구한 $10^{-6}$ 기준과 실측치 ($10^{-4}$ 평균, $10^{-3
    - `eval_seal_tasks.sh:35` 및 RU-90 골든 파일은 `--precision bf16-mixed` 플래그 하에 `test_pathobench.py`가 구동되었습니다.
    - PyTorch CUDA autocast 환경에서는 큰 차원의 GEMM(행렬곱) 연산이 `bfloat16`(가수부 7비트, 상대오차 $\sim 10^{-3}$)으로 축약 실행됩니다.
 2. **순수 러너의 엄격한 FP32 규격**:
-   - 순수 러너가 채택한 `TrainingFreeClassifier`([`src/models/training_free.py:208`](file:///home/kimds/ICF/src/models/training_free.py#L208))는 전체 마진 연산을 `with torch.cuda.amp.autocast(enabled=False):` 하에서 순수 `float32`로 강제합니다.
+   - 순수 러너가 채택한 `TrainingFreeClassifier`([`src/models/training_free.py:208`](../../src/models/training_free.py#L208))는 전체 마진 연산을 `with torch.cuda.amp.autocast(enabled=False):` 하에서 순수 `float32`로 강제합니다.
    - 단일 fold에서 descriptor 추출 시 `bf16` 대 `fp32`의 차이는 최대 `0.113`에 달하며, 이로 인해 마진 및 시그모이드 확률에서 약 $10^{-3}$ 수준의 오차가 구조적으로 발생합니다.
 3. **Cholesky Solver Jitter 처리 차이**:
    - 레거시 `baseline.py:solve_ridge_system`은 수치 안정성을 위해 첫 시도부터 강제 적응형 jitter (`diagonal_scale * 1e-6`)를 대각 성분에 가산합니다.
    - 순수 러너의 `common/solvers.py:solve_ridge`는 순수 Cholesky 분해(`jitter = 0.0`)를 1차 시도하고, 실패 시에만 단계적 jitter를 추가합니다.
 4. **기존 단위 테스트와의 정합성**:
-   - 이미 저장소의 정식 검증 테스트인 [`tests/test_training_free.py:96`](file:///home/kimds/ICF/tests/test_training_free.py#L96)에서도 `TrainingFreeClassifier`와 레거시 모델 간의 마진 허용오차를 `atol=2e-3`으로 규정하고 랭킹 일치(`test_ranking_matches_exactly`)를 계약으로 확인했습니다.
+   - 이미 저장소의 정식 검증 테스트인 [`tests/test_training_free.py:96`](../../tests/test_training_free.py#L96)에서도 `TrainingFreeClassifier`와 레거시 모델 간의 마진 허용오차를 `atol=2e-3`으로 규정하고 랭킹 일치(`test_ranking_matches_exactly`)를 계약으로 확인했습니다.
 
 따라서 17,723개 슬라이드 전체에서 발생한 $\text{Macro } \Delta = -0.0001$은 신규 러너가 레거시의 계산 로직을 **수학적으로 완전하고 더 높은 정밀도로 보존**하고 있음을 확증합니다.
 

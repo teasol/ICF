@@ -2,12 +2,12 @@
 
 - 유형: `holdout_measurement` · 근거: 연구 책임자(kimds) 지시 (2026-09-14)
 - 실행 환경: `nexgem-s1` GPU 8장 (`cuda:0` ~ `cuda:7`) 병렬 워커 풀
-- 실행 스크립트: [`scripts/run_seal10_evaluation.py`](file:///home/kimds/ICF/scripts/run_seal10_evaluation.py) (내부 러너: [`scripts/evaluate_pure.py`](file:///home/kimds/ICF/scripts/evaluate_pure.py))
-- 대상 구성: [`configs/baseline/v121_7branch_active.yaml`](file:///home/kimds/ICF/configs/baseline/v121_7branch_active.yaml) (7-Branch: CV + BM + BD + QA + DS + SH + SJ, Trimmed Mean)
+- 실행 스크립트: [`scripts/run_seal10_evaluation.py`](../../scripts/run_seal10_evaluation.py) (내부 러너: [`scripts/evaluate_pure.py`](../../scripts/evaluate_pure.py))
+- 대상 구성: [`configs/baseline/v121_7branch_active.yaml`](../../configs/baseline/v121_7branch_active.yaml) (7-Branch: CV + BM + BD + QA + DS + SH + SJ, Trimmed Mean)
 - 산출물:
   - 예측 파일: `predictions/seal10_pure/pure_v121_7branch_{task}.pt` (10개 과제, 500 folds 전수)
   - 실행 로그: `logs/seal10_v121_7branch/*.log`
-  - 수치 요약: [`docs/history/ru92_seal10_v121_7branch_results.json`](file:///home/kimds/ICF/docs/history/ru92_seal10_v121_7branch_results.json)
+  - 수치 요약: [`docs/history/ru92_seal10_v121_7branch_results.json`](../history/ru92_seal10_v121_7branch_results.json)
 
 ---
 

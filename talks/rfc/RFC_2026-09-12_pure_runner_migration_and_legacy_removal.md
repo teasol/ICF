@@ -41,11 +41,11 @@
 - **전략의 핵심**:
   - 기존 레거시 코드는 일절 수정하지 않고 **'황금 오라클(Ground Truth Oracle)'로 동결 보존**합니다.
   - 이미 저장소 내에 순수 PyTorch로 독립 구현되어 있는 자산들을 조합하여, 단 200~250라인의 초경량 순수 평가 러너(`scripts/evaluate_pure.py`)를 신설합니다:
-    - 핵심 분류기: `TrainingFreeClassifier` ([`src/models/training_free.py`](file:///home/kimds/ICF/src/models/training_free.py))
-    - 설정 파서: `TrainingFreeConfig` ([`src/models/config.py`](file:///home/kimds/ICF/src/models/config.py))
-    - 투표 집계: `trimmed_mean` ([`src/models/aggregations/voting.py`](file:///home/kimds/ICF/src/models/aggregations/voting.py))
-    - 수치 메트릭: `auroc` ([`src/utils/metrics.py`](file:///home/kimds/ICF/src/utils/metrics.py))
-    - WSI 특징 로더: [`scripts/eval_dual16_top3.py`](file:///home/kimds/ICF/scripts/eval_dual16_top3.py)의 H5/PT 직접 로딩 로직 재사용
+    - 핵심 분류기: `TrainingFreeClassifier` ([`src/models/training_free.py`](../../src/models/training_free.py))
+    - 설정 파서: `TrainingFreeConfig` ([`src/models/config.py`](../../src/models/config.py))
+    - 투표 집계: `trimmed_mean` ([`src/models/aggregations/voting.py`](../../src/models/aggregations/voting.py))
+    - 수치 메트릭: `auroc` ([`src/utils/metrics.py`](../../src/utils/metrics.py))
+    - WSI 특징 로더: [`scripts/eval_dual16_top3.py`](../../scripts/eval_dual16_top3.py)의 H5/PT 직접 로딩 로직 재사용
   - 기존 `eval_v121.sh`와 신규 `evaluate_pure.py`를 동일 에피소드/태스크에 동시 구동하여 1:1 수치 패리티를 확인합니다.
   - **수치 일치가 입증되는 즉시, 기존 레거시 모듈 전체(8,500+라인)와 `test_pathobench.py`(3,100+라인)를 단 한 번의 커밋으로 일괄 삭제(`rm -rf`)합니다.**
 
