@@ -105,6 +105,9 @@ class TrainingFreeClassifier:
 
     def __init__(self, config: TrainingFreeConfig | None = None) -> None:
         self.config = config or TrainingFreeConfig()
+        #: Set only while branch_margins() is running; None the rest of the time
+        #: so the normal path allocates nothing extra.
+        self._branch_capture: dict[str, torch.Tensor] | None = None
 
     # ---- 1. basis ---------------------------------------------------------
     def within_slide_basis(
@@ -198,6 +201,31 @@ class TrainingFreeClassifier:
         return sw_features(self.config, context_bags, context_labels, query_bags, basis, return_loo=return_loo)
 
     # ---- 6. head ----------------------------------------------------------
+    def branch_margins(
+        self,
+        context_bags: Sequence[torch.Tensor],
+        context_labels: torch.Tensor,
+        query_bags: Sequence[torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Per-branch signed score, before aggregation.
+
+        Several rounds asked for the label-free gate -- branch correlation and
+        effective rank on real Primary 7 margins -- and could not have it,
+        because only the aggregated probability ever left this class. The
+        redundancy figure in circulation (effective rank 3.52 of 7) cannot be
+        rechecked without this.
+
+        Branches whose weight is zero are absent from the dict rather than
+        present as zeros, so a caller cannot silently average a branch that was
+        never computed.
+        """
+        self._branch_capture = {}
+        try:
+            self.margins(context_bags, context_labels, query_bags)
+            return dict(self._branch_capture)
+        finally:
+            self._branch_capture = None
+
     def margins(
         self,
         context_bags: Sequence[torch.Tensor],
@@ -327,6 +355,17 @@ class TrainingFreeClassifier:
                 m_bs, loo_bs = (bs_res[0], bs_res[1]) if return_loo else (bs_res, None)
             else:
                 m_bs, loo_bs = None, None
+
+            if getattr(self, "_branch_capture", None) is not None:
+                # Names match the config weight_* keys so a caller can line the
+                # margins up with the weights that produced them.
+                for name, value in (("cv", m_cv), ("dd", m_dd), ("ct", m_ct),
+                                    ("bm", m_bm), ("bd", m_bd), ("qa", m_qa),
+                                    ("ds", m_ds), ("lr", m_lr), ("de", m_de),
+                                    ("sw", m_sw), ("sj", m_sj), ("sh", m_sh),
+                                    ("bs", m_bs)):
+                    if value is not None:
+                        self._branch_capture[name] = value.detach().to("cpu")
 
             if config.aggregation == "linear":
                 return linear_aggregation(config, cv, m_cv, m_dd, m_ct, m_bm, m_bd, m_qa, m_ds, m_lr, m_de, m_sw, m_sj=m_sj, m_sh=m_sh, m_bs=m_bs)

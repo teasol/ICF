@@ -277,7 +277,8 @@ def run_brainstorm(card: RoundCard, base: str, timeout: int,
 
 
 def answer_questions(card: RoundCard, questions: list[str], corpus: str,
-                     timeout: int, spend) -> tuple[list[tuple[str, list[str]]], int]:
+                     timeout: int, spend,
+                     out_dir: Path | None = None) -> tuple[list[tuple[str, list[str]]], int]:
     """Answer seats' factual questions out of the state documents only.
 
     Seats kept filing `판별 불가` items of the form "X is not in the documents"
@@ -305,11 +306,20 @@ def answer_questions(card: RoundCard, questions: list[str], corpus: str,
     res = run_phase([(seat, prompt)], card.max_tokens_per_seat, timeout)
     if not res or not res[0].ok():
         return [], 0
+    if out_dir is not None:
+        (out_dir / "phase_q_raw.md").write_text(
+            "# 질문\n" + "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions))
+            + "\n\n# 원문 응답 (검증 전)\n" + res[0].text, encoding="utf-8")
 
     blocks: dict[int, list[str]] = {}
     current: int | None = None
+    # Round 21 returned 20 questions' worth of answer and parsed zero blocks:
+    # the reply did not use the exact "[n]" form asked for. Accept the forms
+    # models actually produce, and keep the raw reply so a future mismatch is
+    # diagnosable instead of invisible.
+    head = re.compile(r"^\s*(?:\*\*)?\[?(\d{1,2})\]?[.)\]]?\s*(?:\*\*)?")
     for line in res[0].text.splitlines():
-        m = re.match(r"^\s*\[?(\d{1,2})\]?[.)\s]", line)
+        m = head.match(line)
         if m and 1 <= int(m.group(1)) <= len(questions):
             current = int(m.group(1)) - 1
             blocks.setdefault(current, [])
@@ -410,7 +420,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         # they are attacked for gaps that were never really gaps.
         questions = harvest_questions([r.text for r in phase1 if r.ok()])
         answers, quotes_dropped = answer_questions(
-            card, questions, state_text, args.timeout, spend)
+            card, questions, state_text, args.timeout, spend, out_dir)
         if answers:
             base += ("\n# 문서 질의 응답 (좌석 질문에 대한 문서 인용, 코드가 검증함)\n"
                      + "\n".join("- **" + q + "**\n" + "\n".join("  > " + k for k in ks)
@@ -483,11 +493,15 @@ def cmd_run(args: argparse.Namespace) -> int:
              for i, a in enumerate(p_texts) for b in p_texts[i + 1:]]
     supported = 0
     if phase3 and phase3[0].ok():
+        # Seats number their items as "- ", "**1.", "1." or "1)" depending on
+        # the model. Round 21 scored 0 while its 지지 section held numbered bold
+        # items, so the count is taken over all four forms.
+        item = re.compile(r"^\s*(?:[-*+]\s+|\*\*\d{1,2}[.)]|\d{1,2}[.)]\s)")
         in_block = False
         for line in phase3[0].text.splitlines():
             if line.startswith("## "):
                 in_block = line.startswith("## 지지")
-            elif in_block and line.strip().startswith("- "):
+            elif in_block and item.match(line):
                 supported += 1
     metrics = {
         "round_id": card.round_id,
