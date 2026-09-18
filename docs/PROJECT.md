@@ -52,6 +52,7 @@ SEAL 논문(`seal_univ2_baseline_17tasks.csv`)의 UNI2 기준선이다.
 |:---|:---|
 | **현재 목표** | **계측 복구.** provenance writer, `SH`/`SJ` branch control 경로, 오염 검사 재설계, 단위 테스트. 복구 전에는 게이트·승격 비교를 `verified`로 수행할 수 없다(`D-050`). `RU-97`은 음성으로 종료됐다(`D-052`) |
 | **완료 조건** | M별 Primary 7 전 과제 50-fold 결과와 component 점유율을 누락 없이 저장하고 원시 margin에서 독립 재계산한다. SEAL 10은 열지 않으며 결과는 탐색 기록으로만 종료한다 |
+| **fold 적합 단가** | **`20.0`초/fold** (5-branch, GPU 단독, 과제 3개 평균 `18.2`\~`22.0`). 한 arm Primary 7(350 fold) `1.94` GPU-h · **2 arm paired 확증 `3.89` GPU-h = 예산의 97%** · `R=4` 2×2 `31.1` GPU-h. 7-branch는 더 비싸므로 이 값은 하한이다. 출처: [fold 적합 비용 보고서](../talks/reports/2026-09-18_foldfit_cost.md) |
 | **예산** | NEXGEM B200 1장 합계 최대 4 GPU-hour. 배경 GMM은 기존 3M 표본, CPU thread 8, `max_iter=100` 범위만 사용한다 |
 | **중단 조건** | NaN/Inf, responsibility 합 오차 `1e-4` 초과, sklearn 대비 component 불일치, 입력 누락, OOM, 단일 M 2시간 또는 합계 4 GPU-hour 초과. GMM 미수렴 M은 평가하지 않는다 |
 | **다음 목표 슬롯** | RU-97 종료 뒤 후속 연구 방향을 별도로 정한다. GF를 공식 후보로 되돌리려면 새 사용자 결정과 사전 설계가 필요하다 |

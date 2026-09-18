@@ -40,6 +40,9 @@ GUARDED_NUMBERS = (
     "0.6681",  # v120 전체 17
     "0.7266",  # SEAL ABMIL 목표
     "0.7125",  # SEAL MeanMIL
+    "3.52",    # 7-branch 유효 랭크 (참여비). 2026-09-18 실측으로 재확인
+    # fold 적합 단가는 PROJECT.md 2절이 선언하지만 여기 넣지 않는다 -- "20.0" 같은
+    # 짧은 숫자는 무관한 문맥에 흔히 나타나 부분 문자열 검사로는 오탐이 된다.
 )
 
 #: 위 수치를 담아서는 안 되는 Living 문서.
@@ -51,6 +54,21 @@ GUARDED_FILES = (
     "current_status.md",
     "current_architecture.md",
 )
+
+# research_directions.md 를 여기 넣어 봤다가 뺐다(2026-09-18). 그 문서는 실측의 절반도
+# 안 되는 스윕 단가를 선언하고 그 위에 예산표를 얹고 있었으므로 넣을 이유는 충분했다.
+# 그런데 넣으면 4.1절 각주가 걸린다 -- 거기서 0.6171 은 선언이 아니라 "비교 원점"이라는
+# 표기 규칙을 설명하려고 인용한 것이다. 부분 문자열 검사로는 선언과 인용을 가를 수 없고,
+# 통과시키려고 문장을 비트는 것은 규칙이 문서를 망가뜨리는 쪽이다.
+#
+# 그 문서의 실제 문제(낡은 단가)는 다른 방법으로 처리했다. 본문 앞머리에 날짜 있는
+# 정정을 달았고, fold 적합 단가를 PROJECT.md 2절이 선언하게 만들었다.
+
+#: 인용 줄은 검사하지 않는다. 정정 블록은 틀렸던 값을 그대로 적어야 무엇이 바뀌었는지
+#: 알 수 있고, 그것은 선언이 아니다. 인용부호로 시작하는 줄만 면제하는 이유는, 그
+#: 표기가 본문 선언과 기계적으로 구분되는 유일한 신호이기 때문이다.
+def _declaration_lines(text: str) -> str:
+    return "\n".join(l for l in text.splitlines() if not l.lstrip().startswith(">"))
 
 #: current_status.md 가 다시 자라지 않도록 하는 상한. 문서 자체가 선언한 값과 같다.
 STATUS_MAX_LINES = 100
@@ -80,7 +98,7 @@ class TestSingleSourceOfTruth(unittest.TestCase):
             path = DOCS / name
             if not path.exists():
                 continue
-            text = _read(path)
+            text = _declaration_lines(_read(path))
             for num in GUARDED_NUMBERS:
                 # assertNotIn 은 실패 시 파일 전문을 덤프하므로 assertTrue 로 쓴다.
                 self.assertTrue(

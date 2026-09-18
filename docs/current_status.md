@@ -12,7 +12,7 @@
 | **Environment** | uv venv `.venv` · Python 3.12.3 · PyTorch 2.14.0+cu130 · `pytest` 9.1.1 |
 | **GPU 배정** | **GPU 4 = 실험 전용.** GPU 5·6·7 = 로컬 Qwen 서버(포트 8003/8001/8000). GPU 0-3은 타 사용자 |
 | **Active Job** | **없음.** GPU 5·6·7의 Qwen 서버 3대가 모두 죽어 있다(아래) |
-| **회귀 테스트** | `bash scripts/run_tests.sh` 200 tests. `test_docs_consistency` RU 번호 1건 실패는 기존 결함(아래) |
+| **회귀 테스트** | `bash scripts/run_tests.sh` 210 tests. `test_docs_consistency` RU 번호 1건 실패는 기존 결함(아래) |
 
 ---
 
