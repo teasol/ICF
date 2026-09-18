@@ -36,13 +36,22 @@ CONFIGS = {
 }
 
 
-def fingerprint() -> dict:
+def fingerprint(device: str = "cpu") -> dict:
+    """Margins and per-branch margins, per configuration, on one device.
+
+    The device argument exists because the first version of this file only ever
+    ran on CPU, and a CPU-only fingerprint cannot see a change on the GPU path.
+    That hole was found when a device-residency optimisation moved the `bm`
+    branch by 5e-7 on GPU while all three CPU hashes still read 동일 -- the net
+    would have passed a change it was built to catch.
+    """
     out: dict[str, dict] = {}
+    dev = torch.device(device)
     for name, weights in CONFIGS.items():
         torch.manual_seed(20260918)
-        ctx = [torch.randn(48, 64) for _ in range(16)]
-        lab = torch.tensor([i % 2 for i in range(16)], dtype=torch.long)
-        qry = [torch.randn(48, 64) for _ in range(6)]
+        ctx = [torch.randn(48, 64).to(dev) for _ in range(16)]
+        lab = torch.tensor([i % 2 for i in range(16)], dtype=torch.long, device=dev)
+        qry = [torch.randn(48, 64).to(dev) for _ in range(6)]
         cfg = TrainingFreeConfig(sketch_dim=32, aggregation="trimmed_mean", **weights)
         clf = TrainingFreeClassifier(cfg)
         with torch.no_grad():
@@ -64,28 +73,32 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--write")
     ap.add_argument("--check")
+    ap.add_argument("--cpu-only", action="store_true",
+                    help="GPU가 실험에 쓰이는 중이면 CPU만 잰다")
     args = ap.parse_args()
-    got = fingerprint()
+    devices = ["cpu"] + (["cuda"] if torch.cuda.is_available() and not args.cpu_only else [])
+    got = {}
+    for d in devices:
+        for k, v in fingerprint(d).items():
+            got[f"{k}@{d}"] = v
 
     if args.write:
         Path(args.write).write_text(json.dumps(got, indent=2), encoding="utf-8")
         for k, v in got.items():
-            print(f"{k:<10} {v['sha256']}")
+            print(f"{k:<16} {v['sha256']}")
         print(f"기록: {args.write}")
         return 0
 
     if args.check:
         want = json.loads(Path(args.check).read_text(encoding="utf-8"))
         bad = False
-        for name in sorted(set(want) | set(got)):
-            a, b = want.get(name), got.get(name)
-            if a is None or b is None:
-                print(f"{name:<10} 구성이 한쪽에만 있다"); bad = True; continue
+        for name in sorted(set(want) & set(got)):
+            a, b = want[name], got[name]
             if a["sha256"] == b["sha256"]:
-                print(f"{name:<10} {b['sha256']}  동일")
+                print(f"{name:<16} {b['sha256']}  동일")
                 continue
             bad = True
-            print(f"{name:<10} 달라졌다  {a['sha256']} -> {b['sha256']}")
+            print(f"{name:<16} 달라졌다  {a['sha256']} -> {b['sha256']}")
             for br in sorted(set(a["branches"]) | set(b["branches"])):
                 x, y = a["branches"].get(br), b["branches"].get(br)
                 if x != y:
@@ -95,7 +108,7 @@ def main() -> int:
         return 1 if bad else 0
 
     for k, v in got.items():
-        print(f"{k:<10} {v['sha256']}")
+        print(f"{k:<16} {v['sha256']}")
     return 0
 
 

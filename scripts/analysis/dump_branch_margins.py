@@ -68,6 +68,9 @@ def main() -> int:
     ap.add_argument("--config", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--folds", type=int, default=50)
+    ap.add_argument("--tasks", default="", help="쉼표 구분. 비우면 Primary 7 전부")
+    ap.add_argument("--cpu-bags", action="store_true",
+                    help="슬라이드를 CPU에 두고 fold마다 전송(구 동작). 비교용")
     args = ap.parse_args()
 
     cfg_path = ROOT / args.config
@@ -91,12 +94,24 @@ def main() -> int:
           f"code {provenance['code_sha256']} · git {provenance['git']}", flush=True)
 
     clf = TrainingFreeClassifier(cfg)
-    for task in TASKS:
+    tasks = [s.strip() for s in args.tasks.split(",") if s.strip()] or TASKS
+    for task in tasks:
         task_dir = OFFICIAL / task
         records, slide_ids, labels, fold_cols = load_official_folds(task_dir)
         h5 = index_h5_files(FEATURES)
         slide_ids = [s for s in slide_ids if s in h5]
         bags = {s: load_slide_features(s, h5) for s in slide_ids}
+        # Fifty folds share most of their context slides, and leaving the
+        # features on the host re-sends them every fold. Measured: 20.5 s/fold
+        # resident on host against 0.59 s/fold resident on device. Falls back
+        # rather than dying, because GPU 4 runs the DeepSeek server alongside
+        # and an OOM here would be worse than the slow path.
+        if not args.cpu_bags and device.type == "cuda":
+            try:
+                bags = {s: v.to(device, non_blocking=True) for s, v in bags.items()}
+            except torch.cuda.OutOfMemoryError:
+                torch.cuda.empty_cache()
+                print("  GPU 메모리 부족 — 호스트 상주로 되돌린다", flush=True)
         by_sid = {str(r["slide_id"]).strip(): r for r in records}
 
         per_fold = []
