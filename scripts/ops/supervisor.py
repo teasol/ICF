@@ -53,6 +53,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gpu_busy  # noqa: E402
 import llm_env  # noqa: E402
 from typing import Any
 
@@ -84,8 +85,9 @@ KST = timezone(timedelta(hours=9))
 # self-match that made an earlier watcher wait on itself forever.
 WORK_PATTERNS = {
     "council": "counci[l].py run",
-    "experiment": "run_gf_standal[o]ne.py|build_gf_[b]ackground_gmm.py|"
-                  "build_gf_[w]hitened_gmm.py|eval_[v]121.sh|eval_seal_[t]asks.sh",
+    # Shell runners only. Python experiments are detected by gpu_busy, which
+    # asks the driver rather than matching a list that must be kept up to date.
+    "experiment": "eval_[v]121.sh|eval_seal_[t]asks.sh",
 }
 
 
@@ -105,6 +107,10 @@ def snapshot() -> dict[str, Any]:
         if len(parts) == 3:
             gpus.append({"i": int(parts[0]), "util": int(parts[1]), "mem": int(parts[2])})
     running = {k: bool(_sh(f"pgrep -f '{p}'")) for k, p in WORK_PATTERNS.items()}
+    try:
+        running["experiment"] = running["experiment"] or bool(gpu_busy.busy(4))
+    except Exception:  # noqa: BLE001 - a detector failure must not stop the tick
+        pass
     return {
         "t": datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S"),
         "gpus": gpus,

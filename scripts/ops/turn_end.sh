@@ -19,12 +19,16 @@ bash scripts/ops/check_supervisor.sh || RC=1
 
 QUEUED=$(ls talks/ops/queue/*.json 2>/dev/null | wc -l)
 COUNCIL=$(pgrep -f "counci[l].py run" >/dev/null && echo yes || echo no)
-EXPERIMENT=$(pgrep -f "run_gf_standal[o]ne.py|build_gf_[b]ackground_gmm.py|evaluate_[p]ure.py" \
-             >/dev/null && echo yes || echo no)
+# Not a pattern list: every new experiment script would have to be added to it,
+# and a script missing from it makes a busy node read as idle -- which is how a
+# dispatch lands on top of a running experiment. gpu_busy.py asks the driver and
+# /proc instead. branch_redundancy.py was the first to fall through the list.
+EXPCOUNT=$(.venv/bin/python scripts/ops/gpu_busy.py --gpu 4 2>/dev/null | grep -oE '^[0-9]+' || echo 0)
+EXPERIMENT=$([ "${EXPCOUNT:-0}" -gt 0 ] && echo yes || echo no)
 CHORES=$(pgrep -f "lit_dige[s]t.py|seat_thinkin[g].py|routine_[o]pen_questions.py|run_test[s].sh" \
          | wc -l)
 
-echo "회차 실행: ${COUNCIL} · 실험 실행: ${EXPERIMENT} · 잡무 실행: ${CHORES}건 · 큐: ${QUEUED}건"
+echo "회차 실행: ${COUNCIL} · 실험 실행: ${EXPERIMENT}(${EXPCOUNT}) · 잡무 실행: ${CHORES}건 · 큐: ${QUEUED}건"
 
 # A recurring template due soon counts as armed: the supervisor will queue it.
 RECUR=$(ls talks/ops/recurring/*.json 2>/dev/null | wc -l)
