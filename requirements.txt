@@ -22,6 +22,14 @@ h5py==3.16.0
 # torcheval supplies binary_auroc for tests/test_context_weighting.py.
 torcheval==0.0.7
 
+# tests/test_gf_background_gmm.py imports pytest. It was never declared, so the
+# suite ran green only on a machine that happened to have it installed: on the
+# Slurm login node the module raised ModuleNotFoundError and unittest reported it
+# as one collection ERROR, which also threw off the documented test count.
+# The suite itself runs under unittest (scripts/run_tests.sh); this is here for
+# that one module's assertion helpers.
+pytest==9.1.1
+
 # Optional loggers, selected by the `logger:` block of a train config. wandb is
 # imported lazily (src/utils/utils.py); tensorboard backs TensorBoardLogger.
 wandb==0.28.0
