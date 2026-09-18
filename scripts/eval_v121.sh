@@ -17,7 +17,10 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"; cd "$PROJECT_RO
 
 . "$(dirname "${BASH_SOURCE[0]}")/node_env.sh"
 CKPT=""
-CONFIG="configs/archive/v94_v102_cell_value/train_v98_p1_reverse_1536_1gpu.yaml"
+# Until 2026-09-18 this pointed at a *training* config, which eval_seal_tasks.sh
+# silently swapped for the 7-branch config -- so this "5-branch" runner ran
+# 7 branches. See D-053.
+CONFIG="configs/baseline/v121_active.yaml"
 GPU="${1:?usage: eval_v121.sh <gpu> <tag> [task]...}"
 TAG="${2:?usage: eval_v121.sh <gpu> <tag> [task]...}"
 shift 2

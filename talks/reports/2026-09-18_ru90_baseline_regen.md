@@ -210,3 +210,82 @@ export하든 **5-branch 구성**이다.
 걸리고 결론을 즉시 가른다. 코드를 읽어 내려가는 것보다 **출력 차이를 먼저 재는 것**이 빨랐다.
 
 [작성자: Claude Code / 소집자 / claude-opus-5 (effort: 미확인) · 2026-09-18 12:40 KST]
+
+---
+
+## §10 폴백이 언제 발동하는가 — 사슬을 끝까지 따라간 결과
+
+§9는 원인을 `eval_seal_tasks.sh`의 폴백으로 지목했지만, **어떤 실행이 그 폴백을 밟는지는
+확인하지 않았다.** 확인해 보니 두 baseline 설정 중 어느 쪽도 폴백 조건을 만족하지 않는다.
+
+```
+grep -c "model:" configs/baseline/v121_active.yaml          -> 0
+grep -c "model:" configs/baseline/v121_7branch_active.yaml  -> 0
+```
+
+폴백 조건은 `[ ! -f "$cfg" ] || grep -q "model:" "$cfg"`이다. baseline 설정을 직접 넘기면
+폴백은 발동하지 않는다. 그렇다면 왜 산출물이 비트 단위로 같았는가.
+
+### 사슬
+
+`scripts/eval_v121.sh`가 넘기는 설정은 baseline 설정이 아니다.
+
+```
+scripts/eval_v121.sh:22
+CONFIG="configs/archive/v94_v102_cell_value/train_v98_p1_reverse_1536_1gpu.yaml"
+```
+
+이것은 **학습 설정**이고 `model:` 블록을 갖는다(`grep -c "model:"` → `1`). 따라서
+`eval_seal_tasks.sh`가 이를 `configs/baseline/v121_7branch_active.yaml`로 교체한다.
+
+`eval_v121.sh`의 머리말은 첫 줄부터 `v121 = 5-Branch Fast Baseline (CT=OFF)`이라고 적고
+있고, 실행 직전에 `CV=offdiag ... CT=off w=0.0`을 출력한다. **그 출력은 실제 실행 구성과
+무관하다.** 실제로는 7-branch가 돈다.
+
+### 범위 — 어느 러너가 영향을 받는가
+
+| 러너 | 넘기는 설정 | `model:` | 실제 실행 |
+|---|---|---|---|
+| `eval_v121.sh` | `train_v98_p1_reverse_1536_1gpu.yaml` | 1 | 7-branch |
+| `run_v120_clean_loo_experiments.sh` | 같음 | 1 | 7-branch |
+| `run_v121_salience_anchor.sh` | 같음 | 1 | 7-branch |
+| `eval_v120.sh` | `$ICF_CONFIG` | 1 | 7-branch |
+| `eval_ct_alone.sh` | `$ICF_CONFIG` | 1 | 7-branch |
+| `eval_ds_aug.sh` | `$ICF_CONFIG` | 1 | 7-branch |
+
+`ICF_CONFIG`는 `scripts/node_env.sh:95`에서 같은 학습 설정으로 기본값이 잡힌다. 즉
+**여섯 러너 전부가 같은 하나의 설정으로 수렴한다.** 이름이 다른 arm들이 서로 다른 구성을
+돌린 적이 없다.
+
+두 번째 층도 있다. 각 러너는 `icf_arm_v120` / `icf_arm_v121` 등으로 `ICF_*` 환경변수를
+export 해 arm을 고른다. `src/`에서 이 변수를 읽는 코드는 0개다(§9에서 확인). 따라서
+**arm 선택도 무효**다. 설정 경로와 환경변수 경로, 두 경로 모두 arm을 전달하지 못했다.
+
+### 직접 실행한 5-branch
+
+`evaluate_pure.py`를 직접 호출해 `v121_active.yaml`(5-branch)로 돌리면 결과가 달라진다.
+
+```
+config: aggregation=trimmed_mean weights(cv=1.0,bm=1.0,bd=1.0,qa=1.0,ds=1.0,sh=0.0,sj=0.0,ct=0.0,dd=0.0)
+cptac_pda/SMAD4_mutation  fold-mean AUROC: 0.4426  n_folds=50
+```
+
+같은 과제를 7-branch로 돌린 값은 `0.4661`이다. **두 설정은 실제로 다른 결과를 낸다.**
+비트 동일성은 설정이 무력했기 때문이 아니라 두 실행이 같은 설정으로 교체됐기 때문이다.
+
+문서에 앵커로 적힌 값은 SMAD4 `0.4421`이다. 직접 실행한 5-branch는 `0.4426`으로
+4자리에서 일치하지 않는다(차이 `0.0005`). 7-branch `0.4661`과는 훨씬 멀다. 즉 앵커는
+5-branch 계열에서 나온 것으로 보이나 **현재 코드로 재현되지 않는다.** 재현 실패의 원인이
+코드 변경인지 데이터 변경인지는 미확인이다. PBRM1은 실행 중이다.
+
+### 이것이 바꾸는 것
+
+§9는 "공식 태그가 정확했다"고 썼다. 그 문장은 유지된다 — `ru90_shape_triple` 산출물은
+7-branch가 맞다. 다만 §9가 몰랐던 것은, **7-branch로 태그되지 않은 과거 arm 비교들도
+전부 같은 7-branch였다**는 점이다. arm 간 차이를 보고했던 과거 실행은 구성 차이가 없는
+실행들을 비교한 것이므로, 거기서 나온 차이는 전부 적합 변동이다.
+
+이 결론의 범위: 위 표의 여섯 러너를 거친 실행에 한정한다. `evaluate_pure.py`를 직접 호출한
+실행과 `scripts/analysis/` 프로브는 이 사슬을 타지 않으므로 별도 판정이 필요하다.
+
+[작성자: Claude Code / 소집자 / claude-opus-5 · 2026-09-18 13:05 KST]
