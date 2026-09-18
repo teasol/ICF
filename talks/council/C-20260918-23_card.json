@@ -1,0 +1,91 @@
+{
+  "round_id": "C-20260918-23",
+  "question": "branch 중복 구조를 처음으로 실제 Primary 7 margin에서 쟀다. 이 회차는 그 결과가 무엇을 바꾸는지 정한다.\n\n확인된 사실(전부 라벨 무관 측정, 과제 7개 × fold 50):\n- 7-branch 유효 랭크(참여비 정의)가 3.518이다. 문서의 3.52와 일치한다. BM·QA·DS 부분 집합은 1.29/3으로 역시 문서와 일치한다.\n- 중복이 흩어져 있지 않다. 7개 과제 전부에서 최상위 상관 쌍이 BM-QA이고 0.897~0.931이다.\n- 타 branch 대비 평균 상관: BM 0.459, QA 0.454, DS 0.413, CV 0.360, SH 0.231, SJ 0.078, BD 0.062.\n- BM·QA·DS는 셋 다 PCA-32에 투영한 bag-mean 계열 readout이다. BD(스펙트럼 엔트로피)와 SJ는 나머지와 거의 독립이다.\n\n별도로 확인된 사실:\n- 5-branch와 7-branch를 실제로 나눠 돌린 첫 비교에서 macro 차이는 +0.0057이고, 과제 군집 95% 구간이 [-0.0115, +0.0228]로 0을 포함한다. 7개 중 3개 과제가 악화된다.\n- fold 적합 1회가 20.0초다. 2 arm paired 확증은 3.89 GPU-hour로 예산 4시간의 97%다.\n- 게이트 ①은 max |r| > 0.6이면 성능과 무관하게 기각하도록 되어 있다. 그런데 공식 구성 안의 BM-QA가 0.90을 넘는다.\n\n질문:\n(1) 유효 랭크 3.52는 \"branch 추가가 포화됐다\"는 뜻인가, \"서로 다른 것을 재는 branch를 아직 못 만들었다\"는 뜻인가? 위 중복 구조가 두 해석 중 어느 쪽을 지지하는지, 그리고 지지하지 않는 쪽을 배제할 수 있는지 판단하라.\n(2) 공식 구성 안의 BM-QA가 0.90인데 게이트 ①은 0.6 초과를 기각한다. 이것은 게이트의 결함인가, 기존 구성의 결함인가, 아니면 게이트의 적용 대상을 내가 잘못 읽은 것인가? 어느 쪽이든 무엇을 고쳐야 하는가.\n(3) BM·QA·DS가 사실상 하나의 신호라면, 셋을 하나로 합치거나 둘을 빼는 것은 어떤 결과를 낳는가? 이것이 성능을 올릴 것이라는 근거가 있는가, 아니면 단지 구조가 깔끔해지는 것뿐인가. 근거가 없다면 그렇게 말하라.\n(4) 4 GPU-hour 안에서 확증이 불가능한 상황에서, 라벨 무관 진단만으로 어디까지 말할 수 있는가? 진단 결과를 후보 선택에 쓰는 것과 승격 근거로 쓰는 것의 경계를 구체적으로 그어라.\n(5) SJ는 다른 branch와 거의 독립(0.078)인데 3개 과제에서 7-branch가 악화된다. 독립성이 높은데 도움이 안 되는 경우, 독립성 게이트는 무엇을 거르고 있는 것인가?\n\n문서에 없는 수치를 지어내지 마라. 위 수치의 출처는 talks/reports/2026-09-18_branch_redundancy.md 와 2026-09-18_arm_parity.md 이며 소집자가 실행으로 얻은 것이다.",
+  "ru_type": "진단",
+  "prefixed_criteria": "",
+  "composition_rationale": "측정 결과의 해석 회차이므로 이론(T)을 첫 좌석에 둔다 — 질문 1과 5, 즉 중복 구조와 독립성 게이트의 의미가 이 회차의 핵심이다. 감사(A)는 질문 2의 게이트 모순을 맡는다. 반증(R)은 '구조가 깔끔해지면 성능이 오른다'는 비약을 공격한다. 제안(P)은 온도 0.7로 예산 안에 들어가는 안을 낸다. 실측(M)은 질문 4의 비용 경계를 맡는다. 외부(E)·일반화(G)는 제외 — 우리 측정의 해석 문제다. Phase B는 A/B 결과로 기본 꺼짐이다. 앞선 회차 보고서는 입력에 넣지 않았다.",
+  "max_authority": "T1",
+  "convener": "Claude Code (claude-opus-5)",
+  "state_documents": [
+    "docs/PROJECT.md",
+    "docs/closed_axes.md",
+    "docs/current_status.md"
+  ],
+  "max_tokens_per_seat": 32000,
+  "max_total_calls": 18,
+  "seats": [
+    {
+      "name": "T1",
+      "archetype": "T",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.4,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "A1",
+      "archetype": "A",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "R1",
+      "archetype": "R",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.5,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "P1",
+      "archetype": "P",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.7,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "M1",
+      "archetype": "M",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.3,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    },
+    {
+      "name": "S1",
+      "archetype": "S",
+      "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/closed_axes.md",
+        "docs/current_status.md"
+      ]
+    }
+  ],
+  "note": "branch 중복 구조 해석. SEAL 10 수치 미입력 (D-047)."
+}
