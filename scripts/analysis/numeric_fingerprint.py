@@ -92,6 +92,17 @@ def main() -> int:
     if args.check:
         want = json.loads(Path(args.check).read_text(encoding="utf-8"))
         bad = False
+        # Loudly, not silently. Keys gained the "@device" suffix in 7b53973 while
+        # talks/reports/numeric_baseline.json was left at the older bare names, so
+        # the intersection below was empty and --check returned 0 having compared
+        # nothing -- a safety net reporting success because it never looked.
+        missing = sorted(set(want) - set(got))
+        if missing:
+            print(f"기준선의 항목이 이번 실행에 없다: {', '.join(missing)}")
+            print(f"  이번 실행: {', '.join(sorted(got))}")
+            print("  이름 규약이 다르면(7b53973에서 '@device'가 붙었다) 기준선을 "
+                  "재생성하거나 옛 기준선임을 밝히고 비교하라.")
+            bad = True
         for name in sorted(set(want) & set(got)):
             a, b = want[name], got[name]
             if a["sha256"] == b["sha256"]:

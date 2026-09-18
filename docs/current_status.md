@@ -12,7 +12,7 @@
 | **Environment** | uv venv `.venv` · Python 3.12.3 · PyTorch 2.14.0+cu130 · `pytest` 9.1.1 |
 | **GPU 배정** | **GPU 4\~7 = deepseek 서버**(텐서 병렬, 168 GB). **실험은 Slurm으로 제출한다.** GPU 0-3은 타 사용자 |
 | **Active Job** | 없음. deepseek 서버가 GPU 4\~7에서 `0.0.0.0:8000` 대기 중(네트워크 접속 가능) |
-| **회귀 테스트** | `bash scripts/run_tests.sh` 213 tests. `test_docs_consistency` RU 번호 1건 실패는 기존 결함(아래) |
+| **회귀 테스트** | `bash scripts/run_tests.sh` 214 tests. `test_docs_consistency` RU 번호 1건 실패는 기존 결함(아래) |
 
 ---
 
