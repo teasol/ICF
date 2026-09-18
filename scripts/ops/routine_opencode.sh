@@ -22,7 +22,8 @@ TASK="${1:?usage: routine_opencode.sh <task.md>}"
 NAME="$(basename "$TASK" .md)"
 BRANCH="chore/${NAME}-$(date +%m%d-%H%M)"
 TREE="${ROOT}/../ICF.worktrees/chore-${NAME}"
-MODEL="${ICF_OPENCODE_MODEL:-qwen-gpu6/qwen3.8-27b}"
+# 2026-09-18: the Qwen servers died; DeepSeek took GPUs 4-7 on port 8000.
+MODEL="${ICF_OPENCODE_MODEL:-deepseek/deepseek-v4.1-flash}"
 
 # Changed only by user decision and recorded by hand. A background edit here
 # would rewrite the project's canon without anyone deciding anything.
@@ -36,7 +37,7 @@ git worktree add -b "$BRANCH" "$TREE" HEAD >/dev/null 2>&1 || {
   echo "worktree 생성 실패" >&2; exit 2; }
 echo "=== ${NAME} · 브랜치 ${BRANCH} · 모델 ${MODEL} ==="
 
-( cd "$TREE" && timeout 3000 opencode run --model "$MODEL" "$(cat "$ROOT/$TASK")" ) \
+( cd "$TREE" && timeout ${ICF_OPENCODE_TIMEOUT:-5400} opencode run --model "$MODEL" "$(cat "$ROOT/$TASK")" ) \
   2>&1 | tail -25
 RC=$?
 
