@@ -40,12 +40,21 @@ TASKS = ["cptac_lscc/ARID1A_mutation", "cptac_lscc/Histologic_Grade",
 
 
 def effective_rank(corr: torch.Tensor) -> float:
-    """exp of the entropy of the normalised eigenvalue spectrum.
+    """Participation ratio of the correlation eigenvalues, (sum L)^2 / sum L^2.
 
-    Reported alongside the spectrum itself: a single number hides whether the
-    redundancy sits in one pair of branches or is spread across all of them,
-    and that distinction is exactly what the open question asks about.
+    This is the definition branch_diagnostics.py uses and the one behind the
+    3.52/7 in PROJECT.md. It matters: the entropy form exp(-sum p log p) gives
+    4.61 on the same matrices, and reporting that against a documented 3.52
+    would look like a failure to reproduce when it is only a change of
+    definition. Both are returned by effective_ranks(); this one is the
+    comparable figure.
     """
+    eig = torch.linalg.eigvalsh(corr).clamp(min=0.0)
+    return float(eig.sum() ** 2 / (eig ** 2).sum())
+
+
+def entropy_rank(corr: torch.Tensor) -> float:
+    """exp of the entropy of the normalised spectrum. Not comparable to 3.52."""
     eig = torch.linalg.eigvalsh(corr).clamp(min=1e-12)
     p = eig / eig.sum()
     return float(torch.exp(-(p * p.log()).sum()))
@@ -99,6 +108,8 @@ def run_task(cfg: TrainingFreeConfig, task: str, folds: int, device) -> dict | N
             "mean_abs_offdiag": round(
                 float(off.abs().sum() / (len(names) * (len(names) - 1))), 3),
             "effective_rank": round(effective_rank(corr), 3),
+            "effective_rank_definition": "participation ratio (PROJECT.md 3.52와 비교 가능)",
+            "entropy_rank": round(entropy_rank(corr), 3),
             "eigenvalues": [round(float(x), 3)
                             for x in torch.linalg.eigvalsh(corr).flip(0)]}
 
