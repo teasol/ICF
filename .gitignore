@@ -92,3 +92,8 @@ results/*
 talks/ops/ticks.jsonl
 talks/ops/state.md
 talks/ops/done/
+talks/ops/open_questions.md
+talks/ops/provenance_debt.json
+talks/ops/heartbeat
+talks/ops/supervisor.pid
+talks/ops/supervisor.lock
