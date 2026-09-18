@@ -27,6 +27,13 @@ TOL = 1e-6
 
 def trimmed_mean(probs):
     """Drop min and max member, average the rest. Matches ru81_probe.ensemble."""
+    # Guard matches src/models/aggregations/voting.py:_trimmed_mean_from_probs,
+    # which is the canonical aggregation. Without it two members sort to an
+    # empty slice and the result is silently NaN. Current callers always pass 5,
+    # so no past result is affected -- this closes the trap, it does not fix a
+    # wrong number.
+    if len(probs) < 3:
+        return torch.stack(probs).mean(dim=0)
     stacked = torch.stack(probs)
     return stacked.sort(dim=0).values[1:-1].mean(dim=0)
 

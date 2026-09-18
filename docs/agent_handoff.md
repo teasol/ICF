@@ -230,8 +230,8 @@ $PYTHON scripts/docs/ru.py close --id RU-xx
 | `src/models/dd_adaptive_rank.py` | BD ordered-typicality 마진 (DD는 `CA-02`로 닫힘) |
 | `scripts/evaluate_pure.py` | **단일 정본 순수 러너** — 레거시 스택 없이 Zero-Leakage WSI 인컨텍스트 평가 |
 | `scripts/node_env.sh` | **노드 종속 설정의 단일 출처** — 인터프리터·GPU 수·경로 탐색 |
-| `scripts/lib/arms.sh` | arm 구성과 환경변수 주입의 단일 출처 (`icf_arm_v1xx`) |
-| `scripts/eval_v121.sh` | 공식 비교 기준(5-branch) 평가 진입점 |
+| `scripts/lib/arms.sh` | arm 구성 (`icf_arm_v1xx`) — **환경변수 주입은 무효다(`D-053`)** |
+| `scripts/eval_v121.sh` | 5-branch 평가 진입점 — 2026-09-18까지 **학습 설정을 넘겨 7-branch로 폴백**했다(`D-053`). 지금은 `v121_active.yaml`을 넘긴다 |
 | `scripts/analysis/branch_screen.py` | 게이트 ① 직교성 스크리닝 |
 | `scripts/analysis/branch_diagnostics.py` | 저장 마진 오프라인 재집계 (GPU 불필요) |
 | `scripts/docs/ru.py` | RU 카드 생성·종료 |
@@ -406,6 +406,12 @@ bash scripts/run_and_wait.sh scripts/run_v121_shape_screen.sh v121_sh_v2 \
 활성 baseline은 학습 파라미터가 0개이므로 루트에 학습 arm config를 새로 만들 이유가 없다.
 arm 정의는 config가 아니라 [`../scripts/lib/arms.sh`](../scripts/lib/arms.sh)의 `icf_arm_v1xx`
 함수 + 환경변수로 주입한다. fold/seed도 config가 아니라 `--cv`/`--seed`로 주입한다.
+
+> **2026-09-18 정정 (`D-053`): 위 문단은 틀렸다.** `src/`에서 `ICF_*` 환경변수를 읽는
+> 비테스트 코드가 **0개**다. `icf_arm_v1xx`가 export하는 값은 평가 코드에 도달하지 않으므로
+> **환경변수로 arm이 주입되지 않는다.** 실제로 arm을 정하는 것은 `--config`로 넘기는
+> `configs/baseline/*.yaml`이며, 그 경로는 정상 동작한다. 상세는
+> [`../talks/reports/2026-09-18_ru90_baseline_regen.md`](../talks/reports/2026-09-18_ru90_baseline_regen.md) §9\~§10.
 
 현재 상태에 이른 정리 경위(이관 대상·폴더·삭제 개수)는 시점 기록이므로 여기서 되풀이하지 않는다 —
 [`history/archive.md` §205](history/archive.md)에 보존되어 있다.

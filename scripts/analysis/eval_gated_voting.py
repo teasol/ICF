@@ -49,6 +49,11 @@ methods = {}
 
 # 1. Baseline Trimmed Mean (drops 1 min, 1 max)
 def trimmed_mean(probs):
+    # See ru82_lambda_ensemble.trimmed_mean: fewer than three members sorts to
+    # an empty slice and yields NaN. `branches` above is always 5, so this
+    # guards a future caller rather than correcting a past run.
+    if probs.shape[0] < 3:
+        return probs.mean(dim=0)
     sorted_p, _ = torch.sort(probs, dim=0)
     return sorted_p[1:-1].mean(dim=0)
 methods["Trimmed Mean"] = trimmed_mean
