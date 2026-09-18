@@ -39,7 +39,6 @@ that judgment belongs to Main (Orca) per docs/agent_handoff.md.
 from __future__ import annotations
 
 import argparse
-import math
 import sys
 
 import numpy as np
