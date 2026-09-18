@@ -37,6 +37,11 @@ git worktree add -b "$BRANCH" "$TREE" HEAD >/dev/null 2>&1 || {
   echo "worktree 생성 실패" >&2; exit 2; }
 echo "=== ${NAME} · 브랜치 ${BRANCH} · 모델 ${MODEL} ==="
 
+# git-ignore 되는 기계별 override 는 새 worktree 로 따라오지 않는다. LLM 주소가 그 파일에만
+# 있는 기계(Slurm 로그인 노드)에서는 위임받은 모델이 자기 서버에 못 닿아 "No route to host"
+# 를 보고 그것을 결과에 적는다. 있으면 복사한다.
+[ -f "$ROOT/talks/ops/llm.local.json" ] && cp "$ROOT/talks/ops/llm.local.json" "$TREE/talks/ops/"
+
 ( cd "$TREE" && timeout ${ICF_OPENCODE_TIMEOUT:-5400} opencode run --model "$MODEL" "$(cat "$ROOT/$TASK")" ) \
   2>&1 | tail -25
 RC=$?
