@@ -566,6 +566,7 @@ def build_state(metrics: dict[str, Any] | None = None,
     recurring = read_recurring(now)
     return {
         "now": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "day_start": now.strftime("%Y-%m-%d 00:00:00"),
         "server": metrics,
         "gpus": gpu_state(now),
         "recurring": recurring,
@@ -656,7 +657,7 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,
   c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function num(x, d){return (x===null||x===undefined||isNaN(x))?'모름':Number(x).toFixed(d);}
 function render(s){
-  document.getElementById('now').textContent = '기준 시각 ' + s.now + ' KST';
+  document.getElementById('now').textContent = '기준 시각 ' + s.day_start + ' KST';
 
   const sv = s.server, el = document.getElementById('server');
   const gp = s.gpus || {available:false, gpus:[], error:'상태 없음'};
@@ -681,17 +682,12 @@ function render(s){
   }
 
   const gel = document.getElementById('gpus');
-  if(!gp.available){
-    gel.innerHTML = '<span class="muted">GPU 텔레메트리 도달 불가 · '
-      + esc(gp.error || '캐시 없음') + '</span>';
-  } else {
-    const rows = gp.gpus.map(g=>[
-      '<code>GPU'+g.index+'</code>',
-      (g.power_draw===null||g.power_draw===undefined)?'<span class="muted">모름</span>':num(g.power_draw,1)+' W',
-      (g.utilization===null||g.utilization===undefined)?'<span class="muted">모름</span>':num(g.utilization,0)+' %',
-      gpuStatus(g.status)]);
-    gel.innerHTML = table(['GPU','전력 사용','가동률','상태'], rows);
-  }
+  const rows = gp.gpus.map(g=>[
+    '<code>GPU'+g.index+'</code>',
+    (g.power_draw===null||g.power_draw===undefined)?'<span class="muted">모름</span>':num(g.power_draw,1)+' W',
+    (g.utilization===null||g.utilization===undefined)?'<span class="muted">모름</span>':num(g.utilization,0)+' %',
+    gp.available ? gpuStatus(g.status) : '<span class="muted">도달 불가</span>']);
+  gel.innerHTML = table(['GPU','전력 사용','가동률','상태'], rows);
 
   const wm = document.getElementById('workmeta');
   if(sv.reachable){

@@ -467,6 +467,14 @@ class TestPageLayout(unittest.TestCase):
     def test_endpoint_url_is_not_rendered(self):
         self.assertNotIn("sv.url", qm.PAGE)
 
+    def test_reference_time_is_midnight_not_current_time(self):
+        state = qm.build_state(
+            metrics={"reachable": False, "error": "test"},
+            now=datetime(2026, 9, 19, 13, 45, 12, tzinfo=qm.KST))
+        self.assertEqual(state["day_start"], "2026-09-19 00:00:00")
+        self.assertIn("'기준 시각 ' + s.day_start + ' KST'", qm.PAGE)
+        self.assertNotIn("'기준 시각 ' + s.now + ' KST'", qm.PAGE)
+
     def test_running_and_waiting_moved_to_work_section(self):
         server_part = qm.PAGE.split("const gel = document.getElementById('gpus')")[0]
         self.assertNotIn("처리 중", server_part)
@@ -490,6 +498,10 @@ class TestPageLayout(unittest.TestCase):
     def test_gpu_section_has_three_columns_only(self):
         self.assertIn("['GPU','전력 사용','가동률','상태']", qm.PAGE)
         self.assertNotIn("전력 한도", qm.PAGE)
+
+    def test_gpu_failure_keeps_table_without_explanation(self):
+        self.assertNotIn("GPU 텔레메트리 도달 불가 ·", qm.PAGE)
+        self.assertIn("도달 불가", qm.PAGE)
 
 
 if __name__ == "__main__":
