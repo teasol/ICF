@@ -13,7 +13,7 @@
 | **GPU 배정** | Slurm `batch` 파티션 `gnode1\~6`. `gnode5`(A6000, 드라이버 595.91.07) 실측 동작. 딥시크는 NHN `NEXGEM` GPU 4\~7에 그대로 |
 | **LLM 접속** | `talks/ops/llm.json`의 주소는 이 기계에서 안 닿는다. `ssh nhn` 터널 + git-ignore된 `llm.local.json` 필요 — [`SESSION_HANDOFF.md`](SESSION_HANDOFF.md) §1 |
 | **Active Job** | RU-98 array `156357` 완료. tmux `queue_monitor` → `http://100.65.212.1:8899`; `supervisor` 복구됨 |
-| **회귀 테스트** | ops 대상 회귀 57건 통과. 전체 회귀는 변경 전 `275 passed, 16 skipped, 1 failed`, 현재 294건 수집; 실패 1건은 기존 RU 번호 공백(아래) |
+| **회귀 테스트** | 전체 회귀 **286 tests 통과**(16 skipped, 71초). `RU-91`\~`96` 총람 공백을 실측 보고서·`D-043`·`D-044`에서 복원(사전 등록 필드는 `미보존`으로 명시)해 `test_docs_consistency.py` 포함 전부 초록 |
 
 ---
 
@@ -91,10 +91,9 @@ tmux list-sessions; squeue -u kimds
 - **앵커 재현 실패 원인 미확인.** RU-98이 **장비는 원인이 아님**을 보였다(`SMAD4` `0.4426`,
   `PBRM1` `0.5546` 4자리 재현). 코드인지 데이터인지는 여전히 미확인이다.
 - **PCA·subsample 사양이 문서에 없다.** 회차 16이 v1 안을 냈으나 기록되지 않았다.
-- **RU 번호 공백**: `RU-90` → `RU-97`. `RU-91`\~`96`이 대장에도 열린 카드에도 없어
-  `test_docs_consistency.py` 1건이 실패한다. 없는 기록을 지어낼 수 없어 미수정으로 둔다.
 - 모든 후보 판정은 `SEAL 10` hold-out 미검증 상태를 유지한다.
 
 [작성자: Claude Code / 소집자 / claude-opus-5 · 2026-09-19 06:40 KST]
 [작성자: Claude Code / Platform Agent / claude-opus-5 (effort: 미확인) · 2026-09-19 09:40 KST]
 [작성자: OpenAI Codex / Reasoning Agent / GPT-5 (effort: 미확인) · 2026-09-19 11:20 KST]
+[작성자: opencode / Platform Agent / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 14:27 KST]

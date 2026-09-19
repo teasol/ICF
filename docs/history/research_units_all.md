@@ -2123,6 +2123,139 @@ F3(대조군)만 유의: 새 지문의 기여가 없다는 뜻이므로 Task-Geo
 
 ---
 
+### RU-91. 순수 러너(evaluate_pure.py) Primary 7 50-fold 수치 패리티 검증
+
+- **일자 (Date)**: `2026-09-12` ~ `2026-09-14`
+- **커밋 범위**: - (`4e83fb76` ... `56dc1762`)
+- **작업 유형**: `reproduction_measurement`
+- **질문 (Question)**: 순수 러너 evaluate_pure.py가 레거시 test_pathobench.py 스택과 Primary 7 50-fold(350 fold, 17,723 slide)에서 수치적으로 동일한가? Phase B 이관·레거시 삭제의 근거가 되는가? (질문은 보고서 서두에서 재구성)
+- **가설 (Hypothesis)**: 사전 등록 원문 미보존(사후 복원 불가) — 아래 서술은 보고서에서 재구성했다.
+- **판정 기준 (Criteria, 사전 고정)**: 보고서에 기록된 판정선: (A) bf16 골든 대비 슬라이드 평균 확률오차 10^-4 수준, (B) 동일 정밀도(--precision 32-true) 대조에서 수치 항등. 사전 고정 원문은 미보존.
+- **예산 / 중단 조건**: nexgem-s1 GPU 7장(cuda:0~6) 완전 병렬. 슬라이드 수 17,723. 사전 고정 예산 원문 미보존. / 사전 등록 원문 미보존(사후 복원 불가) — 아래 서술은 보고서에서 재구성했다.
+- **실험 및 변경 (Experiment)**: scripts/evaluate_pure.py를 configs/baseline/v121_7branch_active.yaml로 Primary 7 전 과제 50-fold 실행. 골든과의 bf16 차이를 규명하기 위해 레거시 오라클을 --precision 32-true로 7개 GPU에서 병렬 재실행(RU-91-B).
+- **관측 결과 (Observations)**: Primary 7 Macro AUROC 순수 러너 0.6226 vs 골든 0.6227 (Δ=-0.0001). 전 태스크 평균 슬라이드 오차 mean|Δp| 1.919e-4~6.286e-4. RU-91-B(32-true): Macro 0.6226 vs 0.6226 (Δ=-0.0000), mean|Δp| 10^-5 단위. bf16 대비 10^-3 차이는 bf16-mixed 정밀도 아티팩트로 규명.
+- **결정 (Decision)**: 확증 — 수치 패리티 통과. 순수 러너가 레거시 로직을 수학적으로 보존하며 더 높은 정밀도를 갖는다. D-043 레거시 11,800라인 삭제의 실측 근거.
+- **결과별 후속 행동**: Phase B-1(Commit ①): test_pathobench.py 의존 17건을 evaluate_pure.py로 이관하고 골든 참조를 보존 선언. Phase B-2(Commit ②): 레거시 학습/인코더 스택 및 test_pathobench.py 11,800라인 일괄 삭제(D-043).
+- **원문 근거 (Evidence)**:
+  - docs/reports/RU-91_pure_runner_primary7_parity.md
+  - docs/history/ru91_primary7_parity_results.json
+  - docs/history/ru91b_legacy_32true_parity_results.json
+  - configs/baseline/v121_7branch_active.yaml
+  - scripts/evaluate_pure.py
+  - docs/history/archive.md D-043
+- **선행·후속 관계 (Relations)**: 선행 RFC 2026-09-12(순수 러너 이관) · D-043. 후속 RU-92(SEAL 10 평가).
+- **확인 필요 사항 및 한계 (Uncertainties)**: 사전 등록 필드(question/hypothesis/criteria/budget/kill)는 카드가 커밋된 적이 없어 미보존. commit_count·SHA 범위는 보고서 추가 커밋(4e83fb7)과 RU-91 후속 커밋(56dc176) 기준 근사이며 원래 카드의 start/end SHA가 아니다.
+
+---
+
+### RU-92. SEAL 10 hold-out: v121 7-branch vs v120 6-branch 및 공개 기준선 비교
+
+- **일자 (Date)**: `2026-09-14` ~ `2026-09-14`
+- **커밋 범위**: - (`d68aeb63` ... `d68aeb63`)
+- **작업 유형**: `holdout_measurement`
+- **질문 (Question)**: SEAL 10개 공식 과제 hold-out에서 v121 7-branch는 v120 6-branch 및 SEAL 공개 지도학습 기준선(ABMIL·MeanMIL) 대비 어떤 성능인가? (질문은 보고서 서두에서 재구성)
+- **가설 (Hypothesis)**: 사전 등록 원문 미보존(사후 복원 불가) — 아래 서술은 보고서에서 재구성했다.
+- **판정 기준 (Criteria, 사전 고정)**: 사전 등록 원문 미보존(사후 복원 불가) — 아래 서술은 보고서에서 재구성했다.
+- **예산 / 중단 조건**: nexgem-s1 GPU 8장(cuda:0~7) 병렬 워커 풀. 사전 고정 예산 원문 미보존. / 사전 등록 원문 미보존(사후 복원 불가) — 아래 서술은 보고서에서 재구성했다.
+- **실험 및 변경 (Experiment)**: scripts/run_seal10_evaluation.py(내부 러너 evaluate_pure.py)로 configs/baseline/v121_7branch_active.yaml을 SEAL 10과제 50 folds(총 500회) 전수 평가. v120 기존 수치 및 SEAL 논문 공개 ABMIL/MeanMIL과 비교.
+- **관측 결과 (Observations)**: v121 7-branch Macro 0.6869 vs v120 6-branch 0.6972 (Δ=-0.0102, 10개 중 7개 악화). SEAL ABMIL 0.7266 대비 Δ=-0.0397, MeanMIL 0.7125 대비 Δ=-0.0256. BAP1 -0.0418, EGFR -0.0217에서 두드러짐.
+- **결정 (Decision)**: 음성 전이 관측 기록. 단 정정 이력: v121은 CT 제외 + 형상 브랜치 추가가 겹친 비교이므로 하락 원인을 형상 브랜치 단독으로 귀속할 수 없다. 기전 미확인.
+- **결과별 후속 행동**: 판정 결과를 SEAL 10 선택에 사용 금지(D-047) — 이 측정은 기록이며 개선 선택 근거가 아니다.
+- **원문 근거 (Evidence)**:
+  - docs/reports/RU-92_seal10_v121_vs_v120_evaluation.md
+  - docs/history/ru92_seal10_v121_7branch_results.json
+  - scripts/run_seal10_evaluation.py
+  - docs/history/archive.md D-044
+- **선행·후속 관계 (Relations)**: 선행 RU-91 · D-042(공식 7-branch 고정). 후속 D-044(스프린트 중단).
+- **확인 필요 사항 및 한계 (Uncertainties)**: 사전 등록 필드 미보존. 보고서 초판의 v120 표기 오기(5-branch → 6-branch)를 2026-09-14 12:15 정정했고 측정값은 불변. SEAL 10 결과이므로 개선·선택 회차 입력으로 쓰지 않는다(D-047).
+
+---
+
+### RU-93. ICMIL 공개 체크포인트 재현 (ICLR 2027 Gate 1 판정용 실측)
+
+- **일자 (Date)**: `2026-09-14` ~ `2026-09-14`
+- **커밋 범위**: - (`d68aeb63` ... `d68aeb63`)
+- **작업 유형**: `reproduction_measurement`
+- **질문 (Question)**: ICMIL(arXiv 2606.06458) 공개 체크포인트가 논문 수치를 실측 재현하는가? (Gate 1) (질문은 보고서 서두에서 재구성)
+- **가설 (Hypothesis)**: 사전 등록 원문 미보존(사후 복원 불가) — 아래 서술은 보고서에서 재구성했다.
+- **판정 기준 (Criteria, 사전 고정)**: 사전 등록 원문 미보존(사후 복원 불가) — 아래 서술은 보고서에서 재구성했다.
+- **예산 / 중단 조건**: 격리 환경 scratch/icmil/ICMIL(.venv, torch 2.14.0+cu13.0), ICF 저장소 미접촉. Slurm 1 GPU. 사전 고정 예산 2시간(보고서상). / 사전 등록 원문 미보존(사후 복원 불가) — 아래 서술은 보고서에서 재구성했다.
+- **실험 및 변경 (Experiment)**: Slurm sbatch --gres=gpu:1(gnode1 A5000)으로 python -m icmil.reproduce --baselines none --icmil-seeds all --tasks all 실행(job 138294). 별도 bag_scale_test.py로 bag_size 10/100/500/1000 forward 동작·메모리 측정.
+- **관측 결과 (Observations)**: 12과제 3-seed 앙상블 평균 84.06 vs 논문 84.17 (Δ=-0.11pp). Elapsed 62초, 파라미터 8.26M. bag_size 1000까지 에러 없이 동작(peak 6516 MiB).
+- **결정 (Decision)**: Gate 1 통과 — 논문 평균을 재현 오차 범위 내에서 재현. 8종 baseline은 미실행(구현 확인만).
+- **결과별 후속 행동**: 8종 baseline 실행 여부, 논문 Table 과제별 대조, bag_size 붕괴점 실측은 Main 판단으로 이관.
+- **원문 근거 (Evidence)**:
+  - docs/reports/RU-93_icmil_reproduction.md
+  - docs/history/archive.md D-044
+- **선행·후속 관계 (Relations)**: 선행 D-044 스프린트. 후속 RU-95(bag_size sweep) · RU-96(Token-MIL).
+- **확인 필요 사항 및 한계 (Uncertainties)**: 사전 등록 필드 미보존. 8종 baseline 미실행, 논문 Table 과제별 수치 부재로 과제 단위 대조 불가, bag_size 붕괴점(약 3625~3656)은 RU-95에서 실측됐다. scratch/ 데이터는 D-044로 삭제됨.
+
+---
+
+### RU-94. S1/S2/S3 사양 후보 구현·부분 실측 후 전량 폐기
+
+- **일자 (Date)**: `2026-09-14` ~ `2026-09-14`
+- **커밋 범위**: - (`d68aeb63` ... `d68aeb63`)
+- **작업 유형**: `exploratory`
+- **질문 (Question)**: 새 단순 모델 피벗에서 제안된 S1/S2/S3 사양 후보가 ICMIL/PFN 기반 in-context MIL을 대체할 수 있는가? (질문은 D-044 정리문에서 재구성)
+- **가설 (Hypothesis)**: 사전 등록 원문 미보존(사후 복원 불가) — 아래 서술은 보고서에서 재구성했다.
+- **판정 기준 (Criteria, 사전 고정)**: 사전 등록 원문 미보존(사후 복원 불가) — 아래 서술은 보고서에서 재구성했다.
+- **예산 / 중단 조건**: 사전 등록 원문 미보존(사후 복원 불가) — 아래 서술은 보고서에서 재구성했다. / 사전 등록 원문 미보존(사후 복원 불가) — 아래 서술은 보고서에서 재구성했다.
+- **실험 및 변경 (Experiment)**: S1/S2/S3 사양 후보를 구현하고 부분 실측을 확보한 뒤 중단. 전용 보고서는 작성되지 않았고 재실행 데이터 docs/history/ru94_rerun/는 D-044로 삭제됐다.
+- **관측 결과 (Observations)**: S1은 φ 34,176차원 대 컨텍스트 약 240의 과소결정으로 ARID1A에서 반예측(사양 실패). S2/S3는 부분 실측만 확보.
+- **결정 (Decision)**: 전량 폐기 — D-044로 ICLR 2027 12일 스프린트 중단. 재현 자산은 기록으로 보존.
+- **결과별 후속 행동**: 후보를 닫고 ICLR 2027 스프린트를 중단한다(D-044).
+- **원문 근거 (Evidence)**:
+  - docs/history/archive.md D-044
+  - (삭제됨) docs/history/ru94_rerun/
+- **선행·후속 관계 (Relations)**: 동일 스프린트: RU-93 · RU-95 · RU-96. 결정 D-044.
+- **확인 필요 사항 및 한계 (Uncertainties)**: 전용 보고서가 없고 원시 재실행 데이터(docs/history/ru94_rerun/)가 삭제되어 가장 얇은 복원이다. 사전 등록 필드 미보존. commit_count·SHA는 D-044 기록 커밋(d68aeb6) 기준 근사.
+
+---
+
+### RU-95. 실험 F1: Primary 7 instance-count sweep (ICMIL vs mean_logreg)
+
+- **일자 (Date)**: `2026-09-14` ~ `2026-09-14`
+- **커밋 범위**: - (`d68aeb63` ... `d68aeb63`)
+- **작업 유형**: `exploratory`
+- **질문 (Question)**: ICMIL의 컨텍스트 병목(context bottleneck) 주장이 성립하는가 — n(instance 수)을 10→1000으로 늘릴 때 ICMIL과 mean_logreg의 Primary 7 성능은 어떻게 변하는가? (질문은 보고서 §0·D-044에서 재구성)
+- **가설 (Hypothesis)**: 사전 등록 원문 미보존(사후 복원 불가) — 아래 서술은 보고서에서 재구성했다.
+- **판정 기준 (Criteria, 사전 고정)**: 보고서는 관측만 기록하고 해석·결론은 Main 판정 영역으로 남겼다. 판정선 원문은 미보존.
+- **예산 / 중단 조건**: GPU 4장·6시간 상한(보고서 §실측 비용). 실측 사용 약 47.6 GPU-분. / 사전 등록 원문 미보존(사후 복원 불가) — 아래 서술은 보고서에서 재구성했다.
+- **실험 및 변경 (Experiment)**: 격리 환경(scratch/icmil/f1_sweep, ICF 미접촉)에서 Primary 7 4개 n(10/50/200/1000) × 2 arm(ICMIL/mean_logreg) × 50 fold를 4 GPU로 실행(job 138300~138303). 별도로 cptac_luad 실제 타일 풀에서 OOM 이분 탐색(job 138306).
+- **관측 결과 (Observations)**: macro: ICMIL n10 59.41% → n1000 59.93%, mean_logreg n10 60.33% → n1000 59.30%. ICMIL n 증가에 +0.52pp(4/7 과제 하락), mean_logreg -1.04pp. 실측 OOM 경계 bag_size 3,625(성공)~3,656(실패), A5000 24GB. ucla_lung만 n=1000에서 fill 0.506~0.539.
+- **결정 (Decision)**: 관측 기록 완료 — D-044에서 'Context Bottleneck 주장 반박' 근거로 인용. 보고서 자체는 해석을 담지 않았다.
+- **결과별 후속 행동**: 3-seed 확장 여부, OOM 데이터 치환, PCA 적합 단위, 패딩 처리는 Main 판단으로 이관.
+- **원문 근거 (Evidence)**:
+  - docs/reports/RU-95_bagsize_sweep_primary7.md
+  - docs/history/ru95_f1_sweep_results/
+  - docs/history/archive.md D-044
+- **선행·후속 관계 (Relations)**: 동일 스프린트: RU-93 · RU-94 · RU-96. 결정 D-044.
+- **확인 필요 사항 및 한계 (Uncertainties)**: 사전 등록 필드 미보존. ICMIL은 단일 seed(c5trd795), OOM 탐색은 tcga_fixed 대신 cptac_luad 실제 타일 풀로 치환(방법론 이탈 고지), PCA는 (task,fold,n)마다 적합, 패딩은 마스킹 없이 투입 — 4개 설계 선택이 판정에 영향을 줄 수 있음. scratch/ 원자료는 D-044로 삭제.
+
+---
+
+### RU-96. Token-MIL Primary 7 실측 및 기각
+
+- **일자 (Date)**: `2026-09-14` ~ `2026-09-14`
+- **커밋 범위**: - (`d68aeb63` ... `d68aeb63`)
+- **작업 유형**: `confirmatory`
+- **질문 (Question)**: CT 브랜치의 결정론적 token 방식 요약을 확장한 Token-MIL(abundance 32 + token-conditional content 32×8 = 288차원)이 Primary 7에서 v121 7-branch를 대체할 수 있는가? (질문은 보고서 §1에서 재구성)
+- **가설 (Hypothesis)**: 사전 등록 원문 미보존(사후 복원 불가) — 아래 서술은 보고서에서 재구성했다.
+- **판정 기준 (Criteria, 사전 고정)**: 사전 등록 채택 기준: macro Δ ≥ -0.5pp. 사전 등록 대안(T=16, φ 144차원)의 발동 조건은 '과소결정 병리(반예측 등)'.
+- **예산 / 중단 조건**: RTX A5000 1장, fold당 약 25~40초. 사양은 고정 규칙·하이퍼 서치 없음. 사전 고정 예산 원문 미보존. / 사전 등록 기준 미달 시 기각. T=16 재측정은 '과소결정 병리' 조건에서만 발동.
+- **실험 및 변경 (Experiment)**: 컨텍스트 전용 PCA-32 표준화 → k-means++(seed 0)+Lloyd(8 iter) T=32 코드북 → φ 288차원 → 컨텍스트 표준화 + class-balanced ridge λ=1. 학습 파라미터 0. Primary 7 50-fold를 v121 7-branch와 동일 fold paired로 평가.
+- **관측 결과 (Observations)**: Macro 0.5754 vs v121 0.6226 (Δ=-0.0472, sign 1/7). KRAS +0.0333만 승리, ARID1A -0.1618.
+- **결정 (Decision)**: 기각 — 사전 등록 채택 기준(macro Δ ≥ -0.5pp)에 크게 미달. D-044 산출물 정리로 구현 코드·드라이버·로그 삭제, per-fold 데이터는 보존.
+- **결과별 후속 행동**: T=16 대안은 발동 조건 미해당으로 실행하지 않음. abundance 단독 arm 미측정.
+- **원문 근거 (Evidence)**:
+  - docs/reports/RU-96_token_mil_primary7.md
+  - docs/history/ru96/
+  - docs/history/archive.md D-044
+- **선행·후속 관계 (Relations)**: 동일 스프린트: RU-93 · RU-94 · RU-95. 결정 D-044.
+- **확인 필요 사항 및 한계 (Uncertainties)**: 사전 등록 필드 일부 미보존. abundance 단독 arm을 재지 않아 content 요약의 정보 기여는 판별 불가(기전 미확인). ARID1A 붕괴는 모델 고유 병리가 아니라 과제 특성으로 보이나 기전 미확인.
+
+---
 ### RU-97. GF 단독 Fisher Vector의 과제별 성질 탐색
 
 - **일자 (Date)**: `2026-09-16` ~ `2026-09-16`
