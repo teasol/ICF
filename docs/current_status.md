@@ -13,7 +13,7 @@
 | **GPU 배정** | Slurm `batch` 파티션 `gnode1\~6`. `gnode5`(A6000, 드라이버 595.91.07) 실측 동작. 딥시크는 NHN `NEXGEM` GPU 4\~7에 그대로 |
 | **LLM 접속** | `talks/ops/llm.json`의 주소는 이 기계에서 안 닿는다. `ssh nhn` 터널 + git-ignore된 `llm.local.json` 필요 — [`SESSION_HANDOFF.md`](SESSION_HANDOFF.md) §1 |
 | **Active Job** | RU-98 array `156357` 완료. tmux `queue_monitor` → `http://100.65.212.1:8899`; `supervisor` 복구됨 |
-| **회귀 테스트** | ops 대상 회귀 55건 통과. 전체 회귀는 `275 passed, 16 skipped, 1 failed`; 실패 1건은 기존 RU 번호 공백(아래) |
+| **회귀 테스트** | ops 대상 회귀 57건 통과. 전체 회귀는 변경 전 `275 passed, 16 skipped, 1 failed`, 현재 294건 수집; 실패 1건은 기존 RU 번호 공백(아래) |
 
 ---
 

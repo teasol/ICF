@@ -63,6 +63,18 @@ class TestScriptUsesLocalConfig(unittest.TestCase):
         self.assertIn("opencode_config.py", text)
         self.assertIn("require_local_model", text)
 
+    def test_absolute_task_path_is_not_prefixed_with_repo_root(self):
+        text = ROUTINE.read_text(encoding="utf-8")
+        self.assertIn('TASK_PATH="$(realpath "$TASK")"', text)
+        self.assertIn('cat "$TASK_PATH"', text)
+        self.assertNotIn('cat "$ROOT/$TASK"', text)
+
+    def test_agent_failure_precedes_successful_no_change_branch(self):
+        text = ROUTINE.read_text(encoding="utf-8")
+        rc_guard = text.index('if [ "$RC" -ne 0 ]')
+        no_change = text.index("if git diff --quiet")
+        self.assertLess(rc_guard, no_change)
+
 
 if __name__ == "__main__":
     unittest.main()

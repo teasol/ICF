@@ -26,15 +26,15 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"; cd "$ROOT"
 TASK="${1:?usage: routine_opencode.sh <task.md>}"
-NAME="$(basename "$TASK" .md)"
+[ -f "$TASK" ] || { echo "작업 파일 없음: $TASK" >&2; exit 2; }
+TASK_PATH="$(realpath "$TASK")"
+NAME="$(basename "$TASK_PATH" .md)"
 BRANCH="chore/${NAME}-$(date +%m%d-%H%M)"
 TREE="${ROOT}/../ICF.worktrees/chore-${NAME}"
 
 # Changed only by user decision and recorded by hand. A background edit here
 # would rewrite the project's canon without anyone deciding anything.
 PROTECTED=(AGENTS.md docs/PROJECT.md docs/closed_axes.md docs/history/archive.md)
-
-[ -f "$TASK" ] || { echo "작업 파일 없음: $TASK" >&2; exit 2; }
 
 cleanup_tree() {
   git worktree remove --force "$TREE" >/dev/null 2>&1
@@ -68,9 +68,17 @@ print("엔드포인트 " + llm_env.base_url() + " · 모델 " + llm_env.require_
   cleanup_tree; exit 2; }
 echo "=== ${NAME} · 브랜치 ${BRANCH} · 모델 ${MODEL} ==="
 
-( cd "$TREE" && timeout ${ICF_OPENCODE_TIMEOUT:-5400} opencode run --model "$MODEL" "$(cat "$ROOT/$TASK")" ) \
+( cd "$TREE" && timeout ${ICF_OPENCODE_TIMEOUT:-5400} opencode run --model "$MODEL" "$(cat "$TASK_PATH")" ) \
   2>&1 | tail -25
 RC=$?
+
+# OpenCode가 비정상 종료했는데 변경이 없으면 성공으로 덮어쓰지 않는다. 이전 구현은
+# 아래의 "변경 없음" 분기에서 0을 반환해 wrapper가 실패한 작업을 completed로 기록했다.
+if [ "$RC" -ne 0 ]; then
+  echo "OpenCode 실패(rc=$RC) — 작업을 완료로 기록하지 않는다" >&2
+  cd "$ROOT"; cleanup_tree
+  exit "$RC"
+fi
 
 cd "$TREE"
 for f in "${PROTECTED[@]}"; do
@@ -89,7 +97,7 @@ fi
 git add -A
 git commit -q -m "chore(${NAME}): opencode 자동 편집 (미검토)
 
-작업 지시: ${TASK}
+작업 지시: ${TASK_PATH}
 모델: ${MODEL} (로컬 vLLM)
 이 커밋은 검토되지 않았다. main에 병합하기 전에 오케스트레이터가 확인한다."
 echo "--- 변경 요약 ---"
