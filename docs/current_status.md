@@ -83,7 +83,7 @@ curl -s -m 5 http://100.97.255.47:8000/v1/models >/dev/null && echo llm-ok || ec
 - **`SEAL 10` 개봉 보류(사용자, `D-057`).** 성능이 충분히 오른 후보가 없어 열지 않는다. 후보가
   서면 그때 다시 정하며, 개봉은 독립 최종 검증 가치를 소멸시킨다(`D-047`).
 - **오염 검사는 L1 귀속 검사로 재설계(C-20260919-2).** `check_artifacts.py`가 provenance를 선언 config와 대조한다. 시점 간 드리프트 검출은 상실됐고 공백으로 명시한다(L2는 현행 closed-form 전용).
-- **PCA·subsample 사양이 문서에 없다.** 회차 16이 v1 안을 냈으나 기록되지 않았다.
+- **PCA·subsample v1 사양 문서화 완료(2026-09-19).** 회차 16의 v1 안을 [`pca_subsample_spec_v1`](../talks/reports/2026-09-19_pca_subsample_spec_v1.md)에 남겼다. 남은 막힘: `feature_dim` 확정 · upstream fit 범위 · 라벨 무사용 검사 절차.
 - **재구축 운영 구조의 장기 실측이 남았다.** 자정 토큰 rollover·재시작 복구는 단위 테스트만 통과했다.
 - **7-branch `3/7` 악화 기전 부분 확인(RU-101).** SJ 단독 AUROC이 악화 3과제에서 ≈`0.49`(무정보)·나머지 `0.56`. RU-102 oracle 상한 Δ `+0.0053`(임계 초과, SE 미만). RU-103: context-only 신호(context 자기 AUROC)가 in-sample이라 퇴화 → **판별 불가**. `TGW`(P4)는 유효 신호 재설계가 선행 조건.
 - **앵커 `5e-4` 원인 미확인.** RU-98이 장비를 배제했고, 규명 RU 신설은 `D-057`로 보류했다.
