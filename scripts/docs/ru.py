@@ -152,6 +152,10 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 def _render_md(card: dict) -> str:
     ev = card.get("evidence") or []
+    if isinstance(ev, str):
+        # 일부 카드가 evidence를 문자열로 쓴다. 그대로 순회하면 문자 단위로 쪼개져
+        # 한 글자짜리 bullet이 쏟아진다(RU-98에서 실제로 발생).
+        ev = [ev]
     ev_md = "\n".join(f"  - {e}" for e in ev) if ev else "  - (없음)"
     rng = card.get("commit_indices") or "-"
     return f"""
