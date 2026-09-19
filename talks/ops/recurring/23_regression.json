@@ -1,1 +1,1 @@
-{"kind":"routine","label":"regression-suite","cmd":"bash scripts/run_tests.sh","every_minutes":240,"parallel":true}
+{"kind":"routine","label":"regression-suite","cmd":"bash scripts/run_tests.sh","every_minutes":240,"parallel":true,"resource":"login_cpu"}

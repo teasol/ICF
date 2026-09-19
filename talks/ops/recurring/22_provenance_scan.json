@@ -1,1 +1,1 @@
-{"kind":"routine","label":"provenance-scan","cmd":".venv/bin/python scripts/ops/routine_provenance_scan.py","every_minutes":360,"parallel":true}
+{"kind":"routine","label":"provenance-scan","cmd":".venv/bin/python scripts/ops/routine_provenance_scan.py","every_minutes":360,"parallel":true,"resource":"login_cpu"}

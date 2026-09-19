@@ -6,6 +6,7 @@ the loop, not by the suite.
 """
 
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -53,40 +54,36 @@ class TestQueueOrder(unittest.TestCase):
         self.assertTrue((sup.DONE / "01_bad.json").is_file())
 
 
-class TestDelegatedTasks(unittest.TestCase):
-    def setUp(self):
-        self._tmp = TemporaryDirectory()
-        root = Path(self._tmp.name)
-        self._saved = (sup.QUEUE, sup.DONE, sup.TASKS, sup._git_lines)
-        sup.QUEUE, sup.DONE, sup.TASKS = root / "queue", root / "done", root / "tasks"
-        sup.QUEUE.mkdir(); sup.DONE.mkdir(); sup.TASKS.mkdir()
+class TestResourceConflicts(unittest.TestCase):
+    def test_login_cpu_and_remote_llm_coexist(self):
+        active = [{"resource": "login_cpu", "worktree": None}]
+        self.assertFalse(sup.conflicts("remote_llm", None, active))
+        self.assertFalse(sup.conflicts("login_cpu", None, active))
 
-    def tearDown(self):
-        sup.QUEUE, sup.DONE, sup.TASKS, sup._git_lines = self._saved
-        self._tmp.cleanup()
+    def test_exclusive_gpu_excludes_slurm_and_itself(self):
+        active = [{"resource": "slurm", "worktree": None}]
+        self.assertTrue(sup.conflicts("exclusive_gpu", None, active))
+        active = [{"resource": "exclusive_gpu", "worktree": None}]
+        self.assertTrue(sup.conflicts("exclusive_gpu", None, active))
 
-    def test_merged_tasks_are_not_queued_but_pending_tasks_are(self):
-        for name in ("docs_links", "perf_transfer"):
-            (sup.TASKS / f"{name}.md").write_text("task", encoding="utf-8")
-        sup._git_lines = lambda *args: (
-            ["main"] if args[0] == "for-each-ref"
-            else ["Merge branch 'chore/docs_links-0918-2055'"])
+    def test_same_worktree_never_runs_twice(self):
+        active = [{"resource": "remote_llm", "worktree": "chore-x"}]
+        self.assertTrue(sup.conflicts("remote_llm", "chore-x", active))
+        self.assertFalse(sup.conflicts("remote_llm", "chore-y", active))
 
-        self.assertEqual(sup.refill_delegated_tasks(), ["perf_transfer"])
-        card = json.loads((sup.QUEUE / "40_task_perf_transfer.json").read_text())
-        self.assertEqual(card["label"], "task:perf_transfer")
-        self.assertIn("perf_transfer.md", card["cmd"])
 
-    def test_done_marker_prevents_automatic_retry(self):
-        (sup.TASKS / "perf_transfer.md").write_text("task", encoding="utf-8")
-        (sup.DONE / "40_task_perf_transfer.json").write_text("{}", encoding="utf-8")
-        sup._git_lines = lambda *args: []
-        self.assertEqual(sup.refill_delegated_tasks(), [])
+class TestRecover(unittest.TestCase):
+    def test_dead_running_task_becomes_failed(self):
+        store = {"t": {"name": "t", "state": "running", "pid": 2 ** 31 - 1}}
+        with TemporaryDirectory() as d:
+            notes = sup.recover(store, Path(d) / "state.json")
+        self.assertEqual(store["t"]["state"], "failed")
+        self.assertTrue(notes)
 
-    def test_task_state_prefers_durable_completion(self):
-        refs = ["chore/queue_monitor-0919-0855"]
-        subjects = ["Merge branch 'chore/queue_monitor-0919-0855'"]
-        self.assertEqual(sup.task_state("queue_monitor", refs, subjects), "completed")
+    def test_live_running_task_is_adopted_not_retried(self):
+        store = {"t": {"name": "t", "state": "running", "pid": os.getpid()}}
+        sup.recover(store)
+        self.assertEqual(store["t"]["state"], "running")
 
 
 if __name__ == "__main__":

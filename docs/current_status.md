@@ -6,14 +6,14 @@
 
 | 항목 | 값 |
 |:---|:---|
-| **Last Updated** | 2026-09-19 09:40 KST |
+| **Last Updated** | 2026-09-19 11:20 KST |
 | **Status** | **WIP** · RU-98 실행 7/7 완료, 전부 표시 정밀도 Δ=`0.0000`. Reasoning 판정·종료 대기 |
 | **Host / Node** | **`nexgem`(소문자) = Slurm 로그인 노드.** GPU 없음, 20 CPU · 93 GB. 계산은 전부 `sbatch`/`srun`. 대문자 `NEXGEM`(NHN, B200)은 **다른 기계**다 |
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · `pytest` 9.1.1. `scripts/node_env.sh`가 `ICF_DATA_ROOT=data/repro_labels_folds`로 해소 |
 | **GPU 배정** | Slurm `batch` 파티션 `gnode1\~6`. `gnode5`(A6000, 드라이버 595.91.07) 실측 동작. 딥시크는 NHN `NEXGEM` GPU 4\~7에 그대로 |
 | **LLM 접속** | `talks/ops/llm.json`의 주소는 이 기계에서 안 닿는다. `ssh nhn` 터널 + git-ignore된 `llm.local.json` 필요 — [`SESSION_HANDOFF.md`](SESSION_HANDOFF.md) §1 |
 | **Active Job** | RU-98 array `156357` 완료. tmux `queue_monitor` → `http://100.65.212.1:8899`; `supervisor` 복구됨 |
-| **회귀 테스트** | `bash scripts/run_tests.sh` 220 tests. `test_docs_consistency` RU 번호 1건 실패는 기존 결함(아래) |
+| **회귀 테스트** | ops 대상 회귀 55건 통과. 전체 회귀는 `275 passed, 16 skipped, 1 failed`; 실패 1건은 기존 RU 번호 공백(아래) |
 
 ---
 
@@ -86,7 +86,7 @@ tmux list-sessions; squeue -u kimds
 - **지문 기준선을 기계별로 나눌지 미정.** 기계가 바뀌면 해시가 달라진다(집계 margin 절대
   `1.5e-06`) — 무효가 아니라 비트 비교 불가다. 별도로 **결론 재현 허용 오차**를 판정 규칙에
   넣을지도 사용자 판단 사안이다(RU-98 결과가 입력).
-- **감독자가 이 기계에서 돌지 않는다.** 주기 잡무 6건이 전부 미실행이고, 그래서 딥시크가 논다.
+- **재구축 운영 구조의 장기 실측이 남았다.** 명시적 상태 머신·자원별 스케줄링·로컬 vLLM 강제는 구현됐으나, 재시작 복구와 자정 토큰 rollover는 단위 테스트만 통과했다.
 - **4 GPU-hour로는 확증이 불가능하다.** 예산 증액이냐 설계 축소냐는 사용자 판단 사안이다.
 - **앵커 재현 실패 원인 미확인.** RU-98이 **장비는 원인이 아님**을 보였다(`SMAD4` `0.4426`,
   `PBRM1` `0.5546` 4자리 재현). 코드인지 데이터인지는 여전히 미확인이다.
@@ -97,3 +97,4 @@ tmux list-sessions; squeue -u kimds
 
 [작성자: Claude Code / 소집자 / claude-opus-5 · 2026-09-19 06:40 KST]
 [작성자: Claude Code / Platform Agent / claude-opus-5 (effort: 미확인) · 2026-09-19 09:40 KST]
+[작성자: OpenAI Codex / Reasoning Agent / GPT-5 (effort: 미확인) · 2026-09-19 11:20 KST]

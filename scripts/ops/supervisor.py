@@ -11,9 +11,9 @@ agent.
 
 Three jobs, split by what each participant is cheap at:
 
-  supervisor (this file)   every 60s: snapshot the node, and if nothing is
-                           running and the queue is non-empty, launch the next
-                           ROUTINE chore. It never launches council rounds.
+  supervisor (this file)   every 60s: snapshot the node, and if a resource is
+                           free and the queue has work for it, launch the next
+                           item. It never launches council rounds.
   local model              every 10 ticks: read the last 10 snapshots and
                            rewrite the narrative half of state.md. Free, runs
                            on the same servers the council uses.
@@ -37,6 +37,20 @@ introduce numbers. If the model call fails the narrative keeps its previous
 text with a staleness marker -- a missing narrative must never look like a
 fresh one.
 
+Scheduling by resource, not by a single busy bit. The old loop had one `busy`
+boolean over everything: a login-node pytest and a GPU experiment looked alike,
+so unrelated work serialised and a lone `login_cpu` chore could read as "the
+node is busy" to a waiting GPU job. Jobs now carry one of `remote_llm`,
+`slurm`, `login_cpu`, `exclusive_gpu`. `login_cpu` and `remote_llm` coexist;
+`exclusive_gpu` and `slurm` exclude each other and demand the node otherwise
+quiet; and no two jobs may share an isolation worktree, which is how two
+OpenCode runs would otherwise edit one tree.
+
+Task lifecycle is persisted. A delegated task is recorded `running` before its
+process is spawned and `completed`/`failed` by the wrapper that ran it, so a
+supervisor restart neither loses a running state nor re-fires a finished task
+(see scripts/ops/task_state.py and task_queue.py).
+
     python scripts/ops/supervisor.py   (엔드포인트는 talks/ops/llm.json)
 """
 
@@ -44,6 +58,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shlex
 import subprocess
 import sys
@@ -55,13 +70,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gpu_busy  # noqa: E402
 import llm_env  # noqa: E402
+import task_queue  # noqa: E402
+import task_state  # noqa: E402
 from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OPS = PROJECT_ROOT / "talks/ops"
 QUEUE, DONE = OPS / "queue", OPS / "done"
-TASKS = OPS / "tasks"
 FAILURES = OPS / "failures.jsonl"
+STORE = OPS / "task_state.json"
 #: Templates that re-enter the queue on a period. A chore that runs once and
 #: lands in done/ stops being a chore -- on 2026-09-18 the queue drained in one
 #: minute and then nothing ran for half an hour, because every item was
@@ -81,6 +98,13 @@ PIDFILE = OPS / "supervisor.pid"
 LOCKFILE = OPS / "supervisor.lock"
 KST = timezone(timedelta(hours=9))
 
+#: How often to reconcile task cards into the queue (every N ticks). The scan
+#: shells out to git to read merge evidence, so it is not every-tick work.
+SYNC_EVERY = 30
+#: A local-model probe is cached this long, so a dead server does not add a
+#: timeout to every tick while still stopping remote_llm dispatch promptly.
+LOCAL_MODEL_TTL = 60.0
+
 # Processes that count as "the node is working". Bracketed first character so
 # the pattern never matches the pgrep command line itself -- the same
 # self-match that made an earlier watcher wait on itself forever.
@@ -90,6 +114,9 @@ WORK_PATTERNS = {
     # asks the driver rather than matching a list that must be kept up to date.
     "experiment": "eval_[v]121.sh|eval_seal_[t]asks.sh",
 }
+
+#: Resources that need exclusive access to the GPU pool.
+GPU_RESOURCES = {"exclusive_gpu", "slurm"}
 
 
 def _sh(cmd: str) -> str:
@@ -150,66 +177,6 @@ def refill_recurring(now: float) -> list[str]:
     return refilled
 
 
-def _git_lines(*args: str) -> list[str]:
-    """Run one bounded git query; a failed query means no evidence."""
-    try:
-        proc = subprocess.run(
-            ["git", "-C", str(PROJECT_ROOT), *args],
-            capture_output=True, text=True, timeout=30,
-        )
-        return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-    except Exception:  # noqa: BLE001 - dispatch must survive an unavailable git
-        return []
-
-
-def task_state(name: str, refs: list[str], subjects: list[str]) -> str:
-    """Return completed / started / pending from durable Git evidence.
-
-    A branch is only transient evidence: merged task branches are normally
-    deleted. Commit subjects survive that cleanup, so they decide completion.
-    """
-    edit_subject = f"chore({name}):"
-    merge_subject = f"Merge branch 'chore/{name}-"
-    if any(edit_subject in subject or merge_subject in subject for subject in subjects):
-        return "completed"
-    for ref in refs:
-        core = ref[len("origin/"):] if ref.startswith("origin/") else ref
-        if core == f"chore/{name}" or core.startswith(f"chore/{name}-"):
-            return "started"
-    return "pending"
-
-
-def refill_delegated_tasks() -> list[str]:
-    """Queue each unfinished task specification exactly once.
-
-    The task directory used to be display-only: adding a markdown task made it
-    visible in the monitor but nothing copied it into the supervisor queue.
-    Done markers prevent automatic retries after a failed run; failures remain
-    explicit in failures.jsonl and require a deliberate human retry.
-    """
-    refs = _git_lines("for-each-ref", "--format=%(refname:short)",
-                      "refs/heads", "refs/remotes")
-    subjects = _git_lines("log", "--all", "--format=%s")
-    queued = []
-    for task in sorted(TASKS.glob("*.md")):
-        name = task.stem
-        card_name = f"40_task_{name}.json"
-        if (QUEUE / card_name).exists() or (DONE / card_name).exists():
-            continue
-        if task_state(name, refs, subjects) != "pending":
-            continue
-        spec = {
-            "kind": "routine",
-            "label": f"task:{name}",
-            "cmd": f"bash scripts/ops/routine_opencode.sh talks/ops/tasks/{name}.md",
-            "parallel": True,
-        }
-        (QUEUE / card_name).write_text(
-            json.dumps(spec, ensure_ascii=False), encoding="utf-8")
-        queued.append(name)
-    return queued
-
-
 def next_item() -> Path | None:
     """Queue order is filename order, so callers control priority by name."""
     items = sorted(QUEUE.glob("*.json"))
@@ -227,45 +194,141 @@ def failure_count() -> int:
     return sum(1 for _ in FAILURES.open(encoding="utf-8"))
 
 
-def launch(item: Path) -> tuple[dict[str, Any], subprocess.Popen | None]:
-    """Start one queued item detached and move its card to done/.
+def alive(pid: Any) -> bool:
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (TypeError, ValueError, ProcessLookupError, PermissionError):
+        return False
 
-    Returns (tick record, handle). The handle matters: pattern matching alone
-    cannot tell whether a launched job is alive, because a queued item may run
-    a command no pattern anticipates. Treating that as idle would dispatch the
-    next item on top of it and oversubscribe the GPU, which is exactly what the
-    project's idle-GPU rule forbids. A launch failure is recorded rather than
-    retried, since a broken item would otherwise fire every tick.
+
+def conflicts(resource: str, worktree: str | None, active: list[dict[str, Any]]) -> bool:
+    """Whether a job may run alongside everything already running."""
+    for a in active:
+        if worktree and a.get("worktree") and worktree == a["worktree"]:
+            return True
+        if resource in GPU_RESOURCES and a.get("resource") in GPU_RESOURCES:
+            return True
+    return False
+
+
+def launch(item: Path, store: dict | None = None,
+           store_path: Path | str = STORE) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Start one queued item detached and retire its card to done/.
+
+    Delegated items are marked `running` in the persistent store *before* the
+    process starts, so a restart cannot mistake them for unstarted work. The
+    command is run through `run_task.py`, which writes the terminal state
+    itself -- the supervisor holding only a Popen handle lost the outcome when
+    it restarted.
+
+    Returns (tick record, child). `child` is None when nothing was spawned.
     """
     spec = json.loads(item.read_text(encoding="utf-8"))
     label = spec.get("label", item.stem)
     logfile = PROJECT_ROOT / "logs" / f"ops_{item.stem}.log"
     logfile.parent.mkdir(parents=True, exist_ok=True)
+    resource = task_queue.resource_of(spec)
+    worktree = spec.get("worktree")
+    name = spec.get("label") if (spec.get("kind") == "delegate" or spec.get("task")) else None
 
-    if spec["kind"] == "council":
+    if spec.get("kind") == "council":
         # Refused by design, not by configuration -- see the module docstring.
         rec = {"launch": label,
                "error": "감독자는 회차를 발사하지 않는다. 회차는 Claude가 직접 띄운다."}
         item.rename(DONE / item.name)
         return rec, None
-    if spec["kind"] == "routine":
-        cmd = spec["cmd"]
-    else:
-        rec = {"launch": label, "error": f"unknown kind {spec['kind']!r}"}
+    if spec.get("kind") not in ("routine", "delegate"):
+        rec = {"launch": label, "error": f"unknown kind {spec.get('kind')!r}"}
         item.rename(DONE / item.name)
         return rec, None
+
+    if name:
+        store = store if store is not None else task_state.load(store_path)
+        try:
+            task_state.transition(store, name, "running", reason="supervisor dispatch",
+                                  branch=f"chore/{name}", resource=resource)
+        except task_state.InvalidTransition as exc:
+            # Already running/completed: retire the duplicate card, spawn nothing.
+            rec = {"launch": label, "error": str(exc)}
+            item.rename(DONE / item.name)
+            return rec, None
+        task_state.save(store_path, store)
+
+    # Retire the card before spawning so the item cannot be double-dispatched
+    # even if the spawn fails; the store carries the outcome.
+    item.rename(DONE / item.name)
+
+    if spec.get("kind") == "delegate":
+        cmd = (f".venv/bin/python scripts/ops/run_task.py "
+               f"--item {shlex.quote(str(DONE / item.name))} "
+               f"--store {shlex.quote(str(store_path))} "
+               f"--log {shlex.quote(str(logfile))}")
+    else:
+        cmd = spec["cmd"]
 
     handle = None
     try:
         handle = subprocess.Popen(
-            f"cd {shlex.quote(str(PROJECT_ROOT))} && {cmd} >> {shlex.quote(str(logfile))} 2>&1",
+            f"cd {shlex.quote(str(PROJECT_ROOT))} && {cmd} "
+            f">> {shlex.quote(str(logfile))} 2>&1",
             shell=True, start_new_session=True,
         )
-        rec = {"launch": label, "cmd": cmd, "log": str(logfile.relative_to(PROJECT_ROOT))}
+        rec = {"launch": label, "cmd": spec.get("cmd", cmd), "resource": resource,
+               "log": str(logfile.relative_to(PROJECT_ROOT))}
     except Exception as exc:  # noqa: BLE001
-        rec = {"launch": label, "error": str(exc)}
-    item.rename(DONE / item.name)
-    return rec, handle
+        rec = {"launch": label, "error": str(exc), "resource": resource}
+        if name:
+            task_state.transition(store, name, "failed", reason=f"spawn 실패: {exc}")
+            task_state.save(store_path, store)
+
+    if name and store is not None and handle is not None:
+        task_state.update_fields(store, name, pid=handle.pid)
+        task_state.save(store_path, store)
+
+    child = None
+    if handle is not None:
+        child = {"label": label, "log": rec["log"], "handle": handle,
+                 "resource": resource, "worktree": worktree, "name": name}
+    return rec, child
+
+
+def recover(store: dict, store_path: Path | str = STORE) -> list[str]:
+    """Resolve `running` records left by a previous supervisor.
+
+    A still-live pid is adopted (its wrapper will write its own outcome). A
+    dead pid is marked failed -- the outcome is unknown, and re-firing a task
+    whose side effects are unknown is worse than asking for an explicit retry.
+    """
+    notes = []
+    dirty = False
+    for name, rec in list(store.items()):
+        if rec.get("state") != "running":
+            continue
+        pid = rec.get("pid")
+        if pid and alive(pid):
+            notes.append(f"{name}: 실행 중(pid {pid}) — 그대로 둔다")
+            continue
+        task_state.transition(store, name, "failed",
+                              reason="감독자 재시작 · 종료 결과 미상 (자동 재시도 안 함)")
+        notes.append(f"{name}: 결과 미상 → failed (명시적 retry 필요)")
+        dirty = True
+    if dirty:
+        task_state.save(store_path, store)
+    return notes
+
+
+def local_model_status(state: dict[str, Any], timeout: float = 3.0) -> bool:
+    """Cached probe of the local endpoint. False blocks remote_llm dispatch."""
+    now = time.monotonic()
+    if state.get("t") and now - state["t"] < LOCAL_MODEL_TTL:
+        return bool(state.get("ok"))
+    try:
+        llm_env.require_local_model(timeout)
+        state.update(t=now, ok=True, error=None)
+    except Exception as exc:  # noqa: BLE001 - unreachable is a state, not a crash
+        state.update(t=now, ok=False, error=str(exc))
+    return bool(state["ok"])
 
 
 def facts_block(ticks: list[dict[str, Any]]) -> str:
@@ -274,14 +337,24 @@ def facts_block(ticks: list[dict[str, Any]]) -> str:
     busy_ticks = sum(1 for t in ticks if t.get("busy"))
     gpu_line = " · ".join(f"GPU{g['i']} {g['util']}% {g['mem'] // 1024}G" for g in cur["gpus"])
     running = ", ".join(k for k, v in cur["running"].items() if v) or "없음"
+    active = cur.get("active_resources") or {}
+    active_line = ", ".join(f"{k} {v}" for k, v in active.items()) or "없음"
+    starved = cur.get("work_starved")
+    if starved:
+        starve_line = f"- **⚠ work-starved**: {cur.get('starved_reason', '실행 가능한 작업 없음')}"
+    else:
+        starve_line = "- **work-starved**: 아님"
     return "\n".join([
         "## 실측 (코드 생성, 모델이 쓰지 않음)", "",
         f"- **시각**: {cur['t']}",
-        f"- **가동 중**: {running}",
-        f"- **큐 대기**: {cur['queue']}건 · 병렬 실행 {cur.get('parallel_running', 0)}건",
+        f"- **가동 중(패턴)**: {running}",
+        f"- **자원별 실행**: {active_line}",
+        f"- **큐 대기**: {cur['queue']}건",
         f"- **최근 {len(ticks)}틱 가동률**: {100 * busy_ticks // max(len(ticks), 1)}% "
         f"({busy_ticks}/{len(ticks)})",
         f"- **GPU**: {gpu_line}",
+        starve_line,
+        f"- **로컬 모델**: {cur.get('local_model', '미확인')}",
         f"- **HEAD**: `{cur['head']}`",
         f"- **감독자 심박**: {cur['t']} (이 값이 멈춰 있으면 감독자가 죽은 것이다)", "",
     ])
@@ -346,7 +419,6 @@ def main() -> None:
     for d in (QUEUE, DONE, RECURRING):
         d.mkdir(parents=True, exist_ok=True)
     import fcntl
-    import os
     lock = LOCKFILE.open("w")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -357,12 +429,29 @@ def main() -> None:
     # Held for the process lifetime; released by the kernel on exit.
     globals()["_LOCK_HANDLE"] = lock
     PIDFILE.write_text(str(os.getpid()), encoding="utf-8")
+
+    store = task_state.load(STORE)
+    for note in recover(store):
+        print(f"[{snap_time()}] 복구: {note}", flush=True)
+    added = task_queue.sync_tasks(store, task_queue.TASKS, QUEUE)
+    task_state.save(STORE, store)
+    if added:
+        print(f"[{snap_time()}] 작업 큐 등록: {', '.join(added)}", flush=True)
+
+    # Say out loud which provider/base URL/model is in play before dispatching
+    # anything. A silent fallback to an external provider is what this line is
+    # meant to make impossible to miss.
+    probe: dict[str, Any] = {}
+    if local_model_status(probe):
+        print(f"[{snap_time()}] 로컬 모델 확인: {llm_env.describe()} · "
+              f"{llm_env.models_url()}", flush=True)
+    else:
+        print(f"[{snap_time()}] ⚠ 로컬 모델 도달 불가 — remote_llm 발사 중단: "
+              f"{probe.get('error')}", flush=True)
+
     window: list[dict[str, Any]] = []
-    #: Several literature digests can run at once -- each occupies one seat
-    #: server and nothing else. Items without "parallel" still demand an idle
-    #: node, because an experiment sharing a GPU with another job is how the
-    #: idle-GPU rule gets broken quietly.
-    children: list[tuple[str, str, subprocess.Popen]] = []
+    #: Active children, each carrying the resource and worktree it occupies.
+    children: list[dict[str, Any]] = []
     tick = 0
     print(f"supervisor 시작 · 틱 {args.interval}s · 요약 {args.summarise_every}틱마다", flush=True)
 
@@ -372,10 +461,12 @@ def main() -> None:
         if refilled:
             print(f"[{datetime.now(KST):%H:%M:%S}] 주기 잡무 복귀: {', '.join(refilled)}",
                   flush=True)
-        delegated = refill_delegated_tasks()
-        if delegated:
-            print(f"[{datetime.now(KST):%H:%M:%S}] 위임 작업 큐 등록: {', '.join(delegated)}",
-                  flush=True)
+        if tick == 1 or tick % SYNC_EVERY == 0:
+            added = task_queue.sync_tasks(store, task_queue.TASKS, QUEUE)
+            task_state.save(STORE, store)
+            if added:
+                print(f"[{snap_time()}] 작업 큐 등록: {', '.join(added)}", flush=True)
+
         snap = snapshot()
 
         # Jobs we started ourselves count as busy even when no pattern matches
@@ -385,66 +476,86 @@ def main() -> None:
         # failed was indistinguishable from one that worked: the card moved to
         # done/ either way and nothing recorded the returncode. Five literature
         # digests failed on a bad argument and left no trace anywhere.
-        still: list[tuple[str, str, subprocess.Popen]] = []
-        for label, log, c in children:
-            if c.poll() is None:
-                still.append((label, log, c))
+        still: list[dict[str, Any]] = []
+        for c in children:
+            if c["handle"].poll() is None:
+                still.append(c)
                 continue
-            if c.returncode != 0:
+            if c["handle"].returncode != 0:
                 tail = ""
-                lf = PROJECT_ROOT / log
+                lf = PROJECT_ROOT / c["log"]
                 if lf.exists():
                     tail = lf.read_text(encoding="utf-8", errors="replace")[-400:]
-                fail = {"t": snap_time(), "label": label, "rc": c.returncode,
-                        "log": log, "tail": tail}
+                fail = {"t": snap_time(), "label": c["label"],
+                        "rc": c["handle"].returncode, "log": c["log"], "tail": tail}
                 with FAILURES.open("a", encoding="utf-8") as fh:
                     fh.write(json.dumps(fail, ensure_ascii=False) + "\n")
-                print(f"[{snap_time()}] 잡무 실패 {label} rc={c.returncode} · {log}",
-                      flush=True)
+                print(f"[{snap_time()}] 잡무 실패 {c['label']} "
+                      f"rc={c['handle'].returncode} · {c['log']}", flush=True)
         children = still
-        if children:
-            snap["running"]["launched"] = True
-            snap["busy"] = True
-        snap["parallel_running"] = len(children)
+
+        active: dict[str, int] = {}
+        for c in children:
+            active[c["resource"]] = active.get(c["resource"], 0) + 1
+        snap["active_resources"] = active
+        snap["busy"] = snap["busy"] or bool(children)
         snap["failures_total"] = failure_count()
 
+        # Work starvation: the local server is idle for lack of work, not
+        # because the node is working. The old monitor could not tell the two
+        # apart -- a periodic CPU test kept "activity" true while no request
+        # ever reached the model.
+        queued = []
+        for item in sorted(QUEUE.glob("*.json")):
+            try:
+                queued.append((item, json.loads(item.read_text(encoding="utf-8"))))
+            except Exception:  # noqa: BLE001
+                queued.append((item, {}))
+        remote_active = any(c["resource"] == "remote_llm" for c in children)
+        remote_queued = any(task_queue.resource_of(s) == "remote_llm"
+                            for _, s in queued)
+        pending = [n for n, r in store.items() if r.get("state") == "pending"]
+        local_ok = local_model_status(probe)
+        snap["local_model"] = (f"{llm_env.model()} @ {llm_env.base_url()}"
+                               if local_ok else f"도달 불가 ({probe.get('error')})")
+        snap["work_starved"] = bool(
+            local_ok and not remote_active and not remote_queued and not pending)
+        snap["starved_reason"] = (
+            "로컬 모델은 살아 있으나 remote_llm 작업도 대기 작업도 없다 — "
+            "오케스트레이터가 다음 질문/작업을 넣어야 한다"
+            if snap["work_starved"] else None)
+
         # Dispatch before logging so the tick records the launches it caused.
+        launched = []
         if not args.no_dispatch:
-            launched = []
-            while True:
-                item = next_item()
-                if item is None:
-                    break
-                try:
-                    spec = json.loads(item.read_text(encoding="utf-8"))
-                except Exception:  # noqa: BLE001 - malformed item is retired by launch()
-                    spec = {}
-                is_parallel = bool(spec.get("parallel"))
-                if is_parallel:
-                    # Parallel items dispatch regardless of what else is running.
-                    # They are vLLM calls or CPU work, and vLLM queues rather
-                    # than rejecting, so a council round and a chore coexist at
-                    # the cost of latency. Blocking chores behind rounds left
-                    # the queue idle for most of the morning for no gain.
-                    if args.max_parallel and len(children) >= args.max_parallel:
-                        break
-                elif snap["busy"]:
-                    # Exclusive items still demand a quiet node: these are the
-                    # ones that hold a GPU outright.
-                    break
-                rec, handle = launch(item)
-                if handle is not None:
-                    children.append((rec.get("launch", "?"),
-                                     rec.get("log", ""), handle))
-                    snap["running"]["launched"] = True
-                    snap["busy"] = True
+            blocked = []
+            for item, spec in queued:
+                resource = task_queue.resource_of(spec)
+                worktree = spec.get("worktree")
+                if conflicts(resource, worktree, children):
+                    blocked.append({"label": spec.get("label", item.stem),
+                                    "resource": resource, "why": "자원/worktree 충돌"})
+                    continue
+                if args.max_parallel and len(children) >= args.max_parallel:
+                    blocked.append({"label": spec.get("label", item.stem),
+                                    "resource": resource, "why": "max-parallel"})
+                    continue
+                if resource == "remote_llm" and not local_ok:
+                    blocked.append({"label": spec.get("label", item.stem),
+                                    "resource": resource,
+                                    "why": f"로컬 모델 도달 불가: {probe.get('error')}"})
+                    continue
+                rec, child = launch(item, store, STORE)
+                if child is not None:
+                    children.append(child)
                 launched.append(rec)
-                print(f"[{snap['t']}] 발사 {rec.get('launch')}"
-                      f"{' (병렬)' if is_parallel else ''}", flush=True)
-                if not is_parallel:
-                    break
+                print(f"[{snap['t']}] 발사 {rec.get('launch')} "
+                      f"({resource}){' ⚠ ' + rec['error'] if rec.get('error') else ''}",
+                      flush=True)
             if launched:
                 snap["dispatch"] = launched
+            if blocked:
+                snap["blocked"] = blocked
 
         # Written every tick so an outside check can tell a stopped supervisor
         # from a quiet one: state.md alone only changes every summarise-every

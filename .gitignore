@@ -92,6 +92,10 @@ results/*
 talks/ops/ticks.jsonl
 talks/ops/state.md
 talks/ops/done/
+talks/ops/queue/
+talks/ops/task_state.json
+# generated per-worktree by scripts/ops/opencode_config.py, machine-local
+/opencode.json
 talks/ops/open_questions.md
 talks/ops/provenance_debt.json
 talks/ops/heartbeat
@@ -102,3 +106,6 @@ talks/ops/seat_questions.md
 talks/lit/raw/
 talks/ops/failures.jsonl
 talks/ops/llm.local.json
+talks/ops/gpu.local.json
+talks/ops/gpu_telemetry_cache.json
+talks/ops/token_baseline.json
