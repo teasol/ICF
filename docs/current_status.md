@@ -6,13 +6,14 @@
 
 | 항목 | 값 |
 |:---|:---|
-| **Last Updated** | 2026-09-19 06:40 KST |
-| **Status** | **WIP** · 집계 축 종료(후보 4건 전부 미달). **실험을 NEXGEM 로그인 노드 Slurm으로 이관 중** |
-| **Host / Node** | `NEXGEM` · NVIDIA B200 8장(각 183,359 MiB) · `sbatch`·`squeue` 없음 |
-| **Environment** | uv venv `.venv` · Python 3.12.3 · PyTorch 2.14.0+cu130 · `pytest` 9.1.1 |
-| **GPU 배정** | **GPU 4\~7 = deepseek 서버**(텐서 병렬, 168 GB). **실험은 Slurm으로 제출한다.** GPU 0-3은 타 사용자 |
-| **Active Job** | 없음. deepseek 서버가 GPU 4\~7에서 `0.0.0.0:8000` 대기 중(네트워크 접속 가능) |
-| **회귀 테스트** | `bash scripts/run_tests.sh` 214 tests. `test_docs_consistency` RU 번호 1건 실패는 기존 결함(아래) |
+| **Last Updated** | 2026-09-19 09:40 KST |
+| **Status** | **WIP** · RU-98(교차 기계 재현성) 4/7 완료, 전부 Δ=0.0000. 실험은 이제 `nexgem` Slurm에서 돈다 |
+| **Host / Node** | **`nexgem`(소문자) = Slurm 로그인 노드.** GPU 없음, 20 CPU · 93 GB. 계산은 전부 `sbatch`/`srun`. 대문자 `NEXGEM`(NHN, B200)은 **다른 기계**다 |
+| **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · `pytest` 9.1.1. `scripts/node_env.sh`가 `ICF_DATA_ROOT=data/repro_labels_folds`로 해소 |
+| **GPU 배정** | Slurm `batch` 파티션 `gnode1\~6`. `gnode5`(A6000, 드라이버 595.91.07) 실측 동작. 딥시크는 NHN `NEXGEM` GPU 4\~7에 그대로 |
+| **LLM 접속** | `talks/ops/llm.json`의 주소는 이 기계에서 안 닿는다. `ssh nhn` 터널 + git-ignore된 `llm.local.json` 필요 — [`SESSION_HANDOFF.md`](SESSION_HANDOFF.md) §1 |
+| **Active Job** | array `156357` (RU-98) 3개 진행 중. tmux `queue_monitor` → `http://100.65.212.1:8899` |
+| **회귀 테스트** | `bash scripts/run_tests.sh` 220 tests. `test_docs_consistency` RU 번호 1건 실패는 기존 결함(아래) |
 
 ---
 
@@ -26,32 +27,14 @@
 보고는 전부 적합 변동이다. 폴백은 이제 **큰 소리로 실패**한다.
 상세: [`RU-90 보고서`](../talks/reports/2026-09-18_ru90_baseline_regen.md) §9\~§10.
 
-### 5-branch 대 7-branch — 판별 불가 (처음으로 실제로 나눠 돌렸다)
+### 5-branch 대 7-branch — 판별 불가 · 앵커 재현 실패 · fold 비용
 
-Primary 7 macro 차이는 **`+0.0057`**이고, [`PROJECT.md`](PROJECT.md)의 공식 기준선·계보값·
-승격 근거가 **전부 재현된다.** 값이 틀린 적은 없었고 문제는 귀속 불가였다. 그러나 과제
-군집(`df=6`) 95% CI가 **`[-0.0115, +0.0228]`로 0을 포함**하고 **7개 중 3개 과제가 악화**된다.
-과제 간 sd `0.0185`가 평균 효과의 3배다.
-`evaluate_pure.py`는 결정론적이라 적합 분산은 없다.
-상세: [`talks/reports/2026-09-18_arm_parity.md`](../talks/reports/2026-09-18_arm_parity.md).
-
-### 5-branch 앵커는 재현되지 않고, 검사가 요구 정밀도를 못 낸다
-
-SMAD4·PBRM1 앵커가 **부호가 반대인 `5e-4`** 만큼 어긋난다. 결정론적 실행이므로 기록 이후
-실제로 무언가 바뀌었고(원인 미확인), `PROJECT.md` §3.4의 4자리 요구는 **구성을 안 바꿔도
-못 맞춘다.**
-
-### fold 적합 1회 = `20.0`초 — 그중 GPU가 일하는 시간은 절반 미만이다
-
-한 arm Primary 7 `1.94` GPU-hour, 2 arm paired `3.89`(예산 4h의 97%).
-**다만 이 값의 절반 이상이 호스트↔디바이스 전송이다** — 디바이스 상주로 `0.59`초/fold(35배)가
-실측됐으나 GPU 메모리 부족으로 이 기계에서는 적용 못 했다. Slurm 노드에서는 가능하다.
-([비용](../talks/reports/2026-09-18_foldfit_cost.md) · [인계](SESSION_HANDOFF.md))
-
-### 교차 query 누수는 없다
-
-`tests/test_query_independence.py` — query를 50배로 교체·제거·순서변경해도 나머지 margin
-변화 `1e-5` 미만.
+상세는 [`arm_parity`](../talks/reports/2026-09-18_arm_parity.md)와
+[`foldfit_cost`](../talks/reports/2026-09-18_foldfit_cost.md)가 정본이다. 요지:
+macro 차이 `+0.0057`이나 과제군집 95% CI `[-0.0115, +0.0228]`이 0을 포함하고 7개 중
+3개가 악화된다. 5-branch 앵커는 `5e-4` 어긋난다(RU-98이 **장비는 원인이 아님**을 보였다).
+fold 적합의 절반 이상이 GPU 밖이며 디바이스 상주로 35배가 실측됐다 — 전용 GPU가 생긴
+지금 적용 가능하나 **RU-98이 끝나기 전엔 안 된다**(수치를 바꾼다).
 
 ## 협의체 — Phase B(자유 대화)와 Phase Q(문서 질의) 신설
 
@@ -74,13 +57,16 @@ SMAD4·PBRM1 앵커가 **부호가 반대인 `5e-4`** 만큼 어긋난다. 결�
 ### Immediate Next Command
 
 ```bash
-# 로그인 노드에서. 먼저 slurm_rules.md 를 읽는다 (이 저장소에는 없다)
-cd <repo>/ICF && . scripts/node_env.sh
-.venv/bin/python scripts/analysis/numeric_fingerprint.py --check talks/reports/numeric_baseline.json
-# 기계가 바뀌면 해시가 달라질 수 있다. 달라지면 비트 비교 불가로 기록하고 진행한다.
+# 0. 터널이 살아 있는지부터 (죽어 있으면 딥시크·잡무가 전부 조용히 실패한다)
+curl -s -m 5 http://192.168.100.100:8000/v1/models >/dev/null && echo tunnel-ok || \
+  ssh -fN -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 \
+      -L 127.0.0.1:8000:127.0.0.1:8000 -L 192.168.100.100:8000:127.0.0.1:8000 nhn
 
-# 가장 값어치 있는 첫 작업: 디바이스 상주 35배를 Slurm 전용 GPU에서 검증
-#   talks/ops/tasks/perf_transfer.md · 적용 전 한 과제로 fold AUROC 불변 확인
+# 1. RU-98 남은 3과제 수확 (SESSION_HANDOFF.md 3절에 수확 스크립트)
+squeue -u kimds; ls slurm_outputs/2026-09-19/0853_ru98/
+
+# 2. 딥시크가 노는 근본 원인 — 감독자가 안 돈다. 주기 잡무 6건 전부 미실행
+tmux new-session -d -s supervisor '.venv/bin/python scripts/ops/supervisor.py'
 ```
 
 ---
@@ -90,11 +76,17 @@ cd <repo>/ICF && . scripts/node_env.sh
 - **fold 적합의 절반 이상이 GPU 밖이다.** 디바이스 상주 35배가 실측됐으나 이 기계에서는
   GPU 메모리가 없어 적용 못 했다. Slurm 노드의 첫 과제다([인계](SESSION_HANDOFF.md)).
 - **적합 분산 포함 승격 절차가 미승인**이고 `R`도 미정이다(`D-054`는 `R=1`만 정했다).
+- **지문 기준선을 기계별로 나눌지 미정.** 기계가 바뀌면 해시가 달라진다(집계 margin 절대
+  `1.5e-06`) — 무효가 아니라 비트 비교 불가다. 별도로 **결론 재현 허용 오차**를 판정 규칙에
+  넣을지도 사용자 판단 사안이다(RU-98 결과가 입력).
+- **감독자가 이 기계에서 돌지 않는다.** 주기 잡무 6건이 전부 미실행이고, 그래서 딥시크가 논다.
 - **4 GPU-hour로는 확증이 불가능하다.** 예산 증액이냐 설계 축소냐는 사용자 판단 사안이다.
-- **앵커 재현 실패 원인 미확인**(코드 변경인지 데이터 변경인지).
+- **앵커 재현 실패 원인 미확인.** RU-98이 **장비는 원인이 아님**을 보였다(`SMAD4` `0.4426`,
+  `PBRM1` `0.5546` 4자리 재현). 코드인지 데이터인지는 여전히 미확인이다.
 - **PCA·subsample 사양이 문서에 없다.** 회차 16이 v1 안을 냈으나 기록되지 않았다.
 - **RU 번호 공백**: `RU-90` → `RU-97`. `RU-91`\~`96`이 대장에도 열린 카드에도 없어
   `test_docs_consistency.py` 1건이 실패한다. 없는 기록을 지어낼 수 없어 미수정으로 둔다.
 - 모든 후보 판정은 `SEAL 10` hold-out 미검증 상태를 유지한다.
 
 [작성자: Claude Code / 소집자 / claude-opus-5 · 2026-09-19 06:40 KST]
+[작성자: Claude Code / Platform Agent / claude-opus-5 (effort: 미확인) · 2026-09-19 09:40 KST]
