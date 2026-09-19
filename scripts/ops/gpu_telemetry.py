@@ -58,6 +58,8 @@ KST = timezone(timedelta(hours=9))
 GPU_IDS = (4, 5, 6, 7)
 
 DEFAULT_TTL = 15.0
+#: 가동률이 이 시간(초) 이상 연속 0%일 때만 유휴로 본다. 표본 한 번으로는 확정하지 않는다.
+IDLE_SECONDS = 10.0
 DEFAULT_CONFIG = {
     "mode": "ssh",
     "ssh": "nhn",
@@ -202,6 +204,36 @@ def collect(cfg: dict | None = None, gpus: list[int] | None = None,
     return record
 
 
+def carry_zero_since(prev: dict | None, record: dict, now: datetime,
+                     ttl: float = DEFAULT_TTL,
+                     idle_seconds: float = IDLE_SECONDS) -> dict:
+    """새 수집 레코드에 GPU별 `zero_since`(0% 시작 수집 시각)를 붙인다.
+
+    한 표본의 0%만으로 유휴를 주장하지 않기 위해, 직전 수집이 충분히 가까울
+    때만 0% 구간을 이어 붙인다. 직전 수집이 없거나 오래됐으면(수집기 중단 등)
+    구간을 `now`에서 다시 시작하므로, 수집 공백이 긴 유휴로 둔갑하지 않는다.
+    가동률이 양수이거나 알 수 없으면 구간을 지운다.
+    """
+    prev_rows = (prev or {}).get("gpus") or {}
+    prev_epoch = (prev or {}).get("epoch")
+    now_epoch = now.timestamp()
+    recent = (isinstance(prev_epoch, (int, float))
+              and 0 <= now_epoch - float(prev_epoch) <= max(ttl, idle_seconds) * 1.5)
+    for idx, row in (record.get("gpus") or {}).items():
+        if not isinstance(row, dict):
+            continue
+        key = idx if idx in prev_rows else (int(idx) if str(idx).isdigit() and int(idx) in prev_rows else idx)
+        prev_zero = (prev_rows.get(key) or {}).get("zero_since")
+        util = row.get("utilization")
+        if util is not None and util <= 0 and isinstance(prev_zero, (int, float)) and recent:
+            row["zero_since"] = float(prev_zero)
+        elif util is not None and util <= 0:
+            row["zero_since"] = now_epoch
+        else:
+            row["zero_since"] = None
+    return record
+
+
 def write_cache(path: Path | str, record: dict) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -237,6 +269,7 @@ def refresh_cache(path: Path | str = CACHE, cfg: dict | None = None,
     if isinstance(epoch, (int, float)) and now.timestamp() - float(epoch) < ttl:
         return cached
     record = collector(cfg, gpus, now)
+    record = carry_zero_since(cached, record, now, ttl)
     write_cache(path, record)
     return record
 
@@ -245,7 +278,28 @@ def refresh_cache(path: Path | str = CACHE, cfg: dict | None = None,
 # 표시 — 순수 함수. 캐시만 본다.
 # --------------------------------------------------------------------------
 
-def _gpu_view(index: int, row: dict | None) -> dict:
+def gpu_activity_status(utilization: float | None, zero_since: float | None,
+                        collected_epoch: float | None, stale: bool = False,
+                        idle_seconds: float = IDLE_SECONDS) -> str:
+    """가동률 하나가 아니라 **연속 0% 구간**으로 상태를 정하는 순수 함수.
+
+    - `stale`이거나 가동률을 모르면 `모름` (0으로 대체하지 않는다).
+    - 가동률이 0보다 크면 `사용 중`.
+    - 0% 구간이 `idle_seconds` 이상 **수집 시각 기준**으로 이어졌을 때만 `유휴`.
+      표본 한 번이나 브라우저 렌더 시각만으로는 `유휴`가 되지 않는다.
+    """
+    if stale or utilization is None:
+        return "모름"
+    if utilization > 0:
+        return "사용 중"
+    if (isinstance(zero_since, (int, float)) and isinstance(collected_epoch, (int, float))
+            and collected_epoch - float(zero_since) >= idle_seconds):
+        return "유휴"
+    return "모름"
+
+
+def _gpu_view(index: int, row: dict | None, collected_epoch: float | None,
+              stale: bool) -> dict:
     if not row:
         return {"index": index, "power_draw": None, "power_limit": None,
                 "utilization": None, "status": "모름"}
@@ -254,7 +308,8 @@ def _gpu_view(index: int, row: dict | None) -> dict:
         "power_draw": row.get("power_draw"),
         "power_limit": row.get("power_limit"),
         "utilization": row.get("utilization"),
-        "status": "ok",
+        "status": gpu_activity_status(row.get("utilization"), row.get("zero_since"),
+                                      collected_epoch, stale),
     }
 
 
@@ -273,22 +328,26 @@ def telemetry_state(cache: dict | None, now: datetime,
         return {"available": False, "stale": False, "collected_at": None,
                 "age_seconds": None, "mode": None, "source": None,
                 "error": "GPU telemetry 캐시 없음 — 수집기가 아직 돌지 않았다",
-                "gpus": [_gpu_view(i, None) for i in want]}
+                "gpus": [_gpu_view(i, None, None, False) for i in want]}
     epoch = cache.get("epoch")
     age = None
+    collected_epoch = None
     if isinstance(epoch, (int, float)):
-        age = max(0.0, now.timestamp() - float(epoch))
+        collected_epoch = float(epoch)
+        age = max(0.0, now.timestamp() - collected_epoch)
+    stale = bool(age is not None and age > ttl * 2)
     rows = cache.get("gpus") or {}
     ok = bool(cache.get("ok"))
     return {
         "available": ok,
-        "stale": bool(age is not None and age > ttl * 2),
+        "stale": stale,
         "collected_at": cache.get("collected_at"),
         "age_seconds": age,
         "mode": cache.get("mode"),
         "source": cache.get("source"),
         "error": cache.get("error"),
-        "gpus": [_gpu_view(i, rows.get(str(i)) or rows.get(i)) for i in want],
+        "gpus": [_gpu_view(i, rows.get(str(i)) or rows.get(i), collected_epoch, stale)
+                 for i in want],
     }
 
 
