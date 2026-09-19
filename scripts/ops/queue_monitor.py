@@ -9,8 +9,10 @@
                            떼어 `/metrics`를 붙여 Prometheus 텍스트를 받는다.
                            지금 처리 중·대기 중 요청, KV 캐시 사용률, 누적 토큰과
                            직전 폴링 대비 초당 생성 토큰을 보여준다.
-  - talks/ops/recurring/*.json  주기 잡무 명세와 다음 실행까지 남은 분.
-  - talks/ops/tasks/*.md        위임 작업과 `chore/<이름>-*` 브랜치 착수 여부.
+  - talks/ops/recurring/*.json  주기 잡무 명세, 자원 종류, 다음 실행까지 남은 분.
+  - talks/ops/tasks/*.md + talks/ops/task_state.json
+                               위임 작업의 수명주기(`pending/running/completed/failed`).
+                               브랜치 존재가 아니라 영속 상태 기록이 정본이다.
   - talks/ops/ticks.jsonl       최근 실행 이력(마지막 20줄).
   - talks/ops/failures.jsonl    실패 이력(마지막 10줄, 붉게).
   - talks/ops/heartbeat         감독자 심박(수정 시각). 5분 넘으면 정지 의심.
@@ -23,7 +25,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 import threading
 import time
@@ -37,11 +38,15 @@ from urllib.parse import urlparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import llm_env  # noqa: E402
+import task_queue  # noqa: E402
+import task_state  # noqa: E402
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OPS = PROJECT_ROOT / "talks" / "ops"
 RECURRING = OPS / "recurring"
 TASKS = OPS / "tasks"
+QUEUE = OPS / "queue"
+STORE = OPS / "task_state.json"
 TICKS = OPS / "ticks.jsonl"
 FAILURES = OPS / "failures.jsonl"
 HEARTBEAT = OPS / "heartbeat"
@@ -232,6 +237,7 @@ def read_recurring(now: datetime) -> list[dict[str, Any]]:
             "cmd": spec.get("cmd"),
             "every_minutes": spec.get("every_minutes"),
             "parallel": bool(spec.get("parallel")),
+            "resource": task_queue.resource_of(spec),
             "last_run": last.strftime("%Y-%m-%d %H:%M:%S") if last else None,
             "remaining_minutes": remaining,
             "status": status,
@@ -239,31 +245,31 @@ def read_recurring(now: datetime) -> list[dict[str, Any]]:
     return items
 
 
-def git_branches() -> list[str]:
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(PROJECT_ROOT), "for-each-ref",
-             "--format=%(refname:short)", "refs/heads", "refs/remotes"],
-            capture_output=True, text=True, timeout=10,
-        )
-        return [b for b in out.stdout.splitlines() if b.strip()]
-    except Exception:  # noqa: BLE001 - git이 없으면 착수 여부를 모른다
-        return []
+def read_tasks(store: dict | None = None) -> list[dict[str, Any]]:
+    """One row per task card, its lifecycle state taken from the persistent store.
 
-
-def read_tasks() -> list[dict[str, Any]]:
-    branches = git_branches()
+    The old version inferred `started` from a `chore/<name>-*` branch. Merging a
+    task and deleting the branch made a finished task read `미착수` again, and a
+    task that never ran was indistinguishable from one that ran and failed. The
+    store now carries `pending / running / completed / failed` plus the last
+    error, so the table says what actually happened.
+    """
+    store = store if store is not None else task_state.load(STORE)
     items = []
     for path in sorted(TASKS.glob("*.md")):
         name = path.stem
-        found = None
-        for branch in branches:
-            core = branch[len("origin/"):] if branch.startswith("origin/") else branch
-            if core == f"chore/{name}" or core.startswith(f"chore/{name}-"):
-                found = branch
-                break
-        items.append({"name": name, "branch": found,
-                      "started": found is not None})
+        rec = store.get(name) or {}
+        state = rec.get("state") or "미착수"
+        items.append({
+            "name": name,
+            "state": state,
+            "resource": rec.get("resource") or task_queue.TASK_RESOURCE,
+            "branch": rec.get("branch"),
+            "commit": rec.get("commit"),
+            "rc": rec.get("rc"),
+            "error": rec.get("reason") or rec.get("error"),
+            "updated": rec.get("updated"),
+        })
     return items
 
 
@@ -283,11 +289,13 @@ def read_ticks() -> list[dict[str, Any]]:
     for tick in recent:
         launches = [r.get("launch") for r in (tick.get("dispatch") or [])
                     if r.get("launch")]
+        active = tick.get("active_resources") or {}
         slim.append({
             "t": tick.get("t"),
             "busy": bool(tick.get("busy")),
             "queue": tick.get("queue"),
-            "parallel": tick.get("parallel_running"),
+            "resources": ", ".join(f"{k}:{v}" for k, v in active.items()) or "–",
+            "starved": bool(tick.get("work_starved")),
             "launches": launches,
         })
     return slim
@@ -299,6 +307,42 @@ def read_failures() -> list[dict[str, Any]]:
              "rc": f.get("rc"), "log": f.get("log")} for f in recent]
 
 
+def starvation(metrics: dict[str, Any], tasks: list[dict[str, Any]],
+               recurring: list[dict[str, Any]]) -> dict[str, Any]:
+    """Whether the local server is idle for lack of work.
+
+    The distinction the old monitor could not make: a recurring CPU test every
+    few minutes kept the node looking "busy" while no request ever reached the
+    model. Starvation is claimed only when the server is reachable and idle,
+    nothing remote_llm is running or queued, and no task is pending.
+    """
+    if not metrics.get("reachable"):
+        return {"state": "모름", "reason": "서버 도달 불가 — 유휴 여부를 판단할 수 없다"}
+    running = metrics.get("running")
+    waiting = metrics.get("waiting")
+    if running is None or waiting is None:
+        return {"state": "모름", "reason": "요청 수 지표 없음"}
+    remote_running = [t["name"] for t in tasks if t["state"] == "running"]
+    pending = [t["name"] for t in tasks if t["state"] == "pending"]
+    remote_due = [r["label"] for r in recurring
+                  if r.get("resource") == "remote_llm" and r.get("remaining_minutes") is not None
+                  and r["remaining_minutes"] <= 0]
+    idle = running == 0 and waiting == 0
+    starved = idle and not remote_running and not pending and not remote_due
+    if starved:
+        reason = "서버가 놀고 있는데 remote_llm 작업도 대기 작업도 없다 — 오케스트레이터 공급 필요"
+    elif not idle:
+        reason = f"서버가 일하고 있다 (running={running:g}, waiting={waiting:g})"
+    elif remote_due:
+        reason = "곧 실행될 주기 잡무가 있다: " + ", ".join(remote_due)
+    elif pending:
+        reason = "미착수 작업이 큐를 기다린다: " + ", ".join(pending)
+    else:
+        reason = "remote_llm 작업이 실행 중이다: " + ", ".join(remote_running)
+    return {"state": "work-starved" if starved else "정상", "reason": reason,
+            "running": running, "waiting": waiting}
+
+
 def build_state(metrics: dict[str, Any] | None = None,
                 now: datetime | None = None) -> dict[str, Any]:
     """페이지가 그릴 모든 값. metrics를 주면 서버 폴링을 건너뛴다(시험용)."""
@@ -306,15 +350,18 @@ def build_state(metrics: dict[str, Any] | None = None,
     if metrics is None:
         metrics = server_metrics()
     failures = read_failures()
+    tasks = read_tasks()
+    recurring = read_recurring(now)
     return {
         "now": now.strftime("%Y-%m-%d %H:%M:%S"),
         "server": metrics,
-        "recurring": read_recurring(now),
-        "tasks": read_tasks(),
+        "recurring": recurring,
+        "tasks": tasks,
         "ticks": read_ticks(),
         "failures": failures,
         "failures_total": len(_read_jsonl(FAILURES)),
         "heartbeat": read_heartbeat(now),
+        "starvation": starvation(metrics, tasks, recurring),
     }
 
 
@@ -342,6 +389,14 @@ PAGE = """<!doctype html>
   .down { background:#5c1a1a; border:1px solid #a33; color:#ffd7d7;
           padding:14px 18px; border-radius:8px; font-size:22px; font-weight:700; }
   .down .sub { font-size:12px; font-weight:400; color:#f0b8b8; margin-top:6px; }
+  .starved { background:#4a3a12; border:1px solid #c9a227; color:#ffe9a8;
+             padding:12px 16px; border-radius:8px; margin-top:10px; font-weight:700; }
+  .starved .sub { font-size:12px; font-weight:400; color:#e8d59a; margin-top:6px; }
+  .pill.running { background:#1d2f4a; color:#9cc4ff; }
+  .pill.completed { background:#1d3a24; color:#8fe0a0; }
+  .pill.failed { background:#3a1212; color:#ffb3b3; }
+  .pill.pending { background:#3a341d; color:#e0d08f; }
+  .pill.unknown { background:#2a323e; color:#aab4c0; }
   table { border-collapse:collapse; width:100%%; font-size:12px; }
   th, td { text-align:left; padding:4px 10px 4px 0; border-bottom:1px solid #232a35; }
   th { color:#8892a0; font-weight:500; }
@@ -360,6 +415,7 @@ PAGE = """<!doctype html>
 <h1>딥시크 큐 모니터</h1>
 <div class="now" id="now">불러오는 중…</div>
 <div id="server"></div>
+<div id="starvation"></div>
 
 <h2>프로젝트가 딥시크에 시킬 것 — 주기 잡무</h2>
 <div id="recurring"></div>
@@ -380,7 +436,7 @@ PAGE = """<!doctype html>
 const EMPTY = '기록 없음';
 function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,
   c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
-function num(x, d){return (x===null||x===undefined)?'–':Number(x).toFixed(d);}
+function num(x, d){return (x===null||x===undefined||isNaN(x))?'모름':Number(x).toFixed(d);}
 function render(s){
   document.getElementById('now').textContent = '기준 시각 ' + s.now + ' KST';
 
@@ -402,22 +458,37 @@ function render(s){
       + esc(sv.url) + '</div>';
   }
 
+  const st = s.starvation || {state:'모름', reason:''}, stel = document.getElementById('starvation');
+  if(st.state === 'work-starved'){
+    stel.innerHTML = '<div class="starved">⚠ work-starved'
+      + '<div class="sub">' + esc(st.reason) + '</div></div>';
+  } else {
+    stel.innerHTML = '<div class="muted" style="margin-top:8px">'
+      + '공급 상태: ' + esc(st.state) + ' · ' + esc(st.reason) + '</div>';
+  }
+
   document.getElementById('recurring').innerHTML = table(
-    ['잡무','주기(분)','마지막 실행','상태','명령'],
-    s.recurring.map(r=>[esc(r.label), esc(r.every_minutes),
+    ['잡무','자원','주기(분)','마지막 실행','상태','명령'],
+    s.recurring.map(r=>[esc(r.label), '<code>'+esc(r.resource)+'</code>', esc(r.every_minutes),
       esc(r.last_run||'미실행'), esc(r.status), '<code>'+esc(r.cmd)+'</code>']));
 
+  function statePill(state){
+    const cls = (state==='running'||state==='completed'||state==='failed'||state==='pending')
+      ? state : 'unknown';
+    return '<span class="pill '+cls+'">'+esc(state)+'</span>';
+  }
   document.getElementById('tasks').innerHTML = table(
-    ['작업','착수','브랜치'],
-    s.tasks.map(t=>[esc(t.name),
-      t.started?'<span class="pill started">착수됨</span>'
-               :'<span class="pill todo">미착수</span>',
-      t.branch?('<code>'+esc(t.branch)+'</code>'):'<span class="muted">없음</span>']));
+    ['작업','상태','자원','브랜치','최근 오류'],
+    s.tasks.map(t=>[esc(t.name), statePill(t.state), '<code>'+esc(t.resource)+'</code>',
+      t.branch?('<code>'+esc(t.branch)+'</code>'):'<span class="muted">없음</span>',
+      t.error?('<span class="fail">'+esc(t.error)+'</span>'):'<span class="muted">–</span>']));
 
   document.getElementById('ticks').innerHTML = table(
-    ['시각','가동','큐','병렬','발사'],
+    ['시각','가동','큐','자원별 실행','공급','발사'],
     s.ticks.map(t=>[esc(t.t), t.busy?'<span class="ok">예</span>':'<span class="muted">아니오</span>',
-      esc(t.queue), esc(t.parallel), esc((t.launches||[]).join(', ')||'–')]));
+      esc(t.queue), esc(t.resources),
+      t.starved?'<span class="stale">work-starved</span>':'<span class="muted">정상</span>',
+      esc((t.launches||[]).join(', ')||'–')]));
 
   const f = document.getElementById('failures');
   if(!s.failures.length){ f.innerHTML = '<span class="muted">'+EMPTY+'</span>'; }

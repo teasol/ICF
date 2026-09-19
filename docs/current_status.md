@@ -13,7 +13,7 @@
 | **GPU 배정** | Slurm `batch` 파티션 `gnode1\~6`. `gnode5`(A6000, 드라이버 595.91.07) 실측 동작. 딥시크는 NHN `NEXGEM` GPU 4\~7에 그대로 |
 | **LLM 접속** | `talks/ops/llm.json`의 주소는 이 기계에서 안 닿는다. `ssh nhn` 터널 + git-ignore된 `llm.local.json` 필요 — [`SESSION_HANDOFF.md`](SESSION_HANDOFF.md) §1 |
 | **Active Job** | array `156357` (RU-98) 3개 진행 중. tmux `queue_monitor` → `http://100.65.212.1:8899` |
-| **회귀 테스트** | `bash scripts/run_tests.sh` 220 tests. `test_docs_consistency` RU 번호 1건 실패는 기존 결함(아래) |
+| **회귀 테스트** | `bash scripts/run_tests.sh` 244 tests. `test_docs_consistency` RU 번호 1건 실패는 기존 결함(아래) |
 
 ---
 

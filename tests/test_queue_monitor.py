@@ -56,15 +56,18 @@ class TestEmptyOpsDir(unittest.TestCase):
     def setUp(self):
         self._tmp = TemporaryDirectory()
         root = Path(self._tmp.name)
-        self._saved = (qm.RECURRING, qm.TASKS, qm.TICKS, qm.FAILURES, qm.HEARTBEAT)
+        self._saved = (qm.RECURRING, qm.TASKS, qm.TICKS, qm.FAILURES,
+                       qm.HEARTBEAT, qm.STORE)
         qm.RECURRING = root / "recurring"
         qm.TASKS = root / "tasks"
         qm.TICKS = root / "ticks.jsonl"
         qm.FAILURES = root / "failures.jsonl"
         qm.HEARTBEAT = root / "heartbeat"
+        qm.STORE = root / "task_state.json"
 
     def tearDown(self):
-        (qm.RECURRING, qm.TASKS, qm.TICKS, qm.FAILURES, qm.HEARTBEAT) = self._saved
+        (qm.RECURRING, qm.TASKS, qm.TICKS, qm.FAILURES,
+         qm.HEARTBEAT, qm.STORE) = self._saved
         self._tmp.cleanup()
 
     def test_no_files_yields_empty_records_without_raising(self):
@@ -101,30 +104,58 @@ class TestEmptyOpsDir(unittest.TestCase):
         self.assertEqual(overdue["status"], "지연 5분")
 
 
-class TestTaskBranches(unittest.TestCase):
+class TestTaskStates(unittest.TestCase):
+    """Task status comes from the store, not from a deletable branch name."""
+
     def setUp(self):
         self._tmp = TemporaryDirectory()
-        self._saved_branches = qm.git_branches
-        self._saved_tasks = qm.TASKS
-        qm.TASKS = Path(self._tmp.name)
-        qm.git_branches = lambda: ["main", "chore/queue_monitor-0919-0855",
-                                   "origin/chore/docs_links-0918"]
-        for name in ("queue_monitor", "docs_links", "perf_transfer"):
+        self._saved_tasks, self._saved_store = qm.TASKS, qm.STORE
+        qm.TASKS = Path(self._tmp.name) / "tasks"
+        qm.TASKS.mkdir()
+        qm.STORE = Path(self._tmp.name) / "task_state.json"
+        for name in ("merged", "running", "broke", "fresh"):
             (qm.TASKS / f"{name}.md").write_text("x", encoding="utf-8")
+        qm.STORE.write_text(json.dumps({
+            "merged": {"name": "merged", "state": "completed", "branch": "chore/merged"},
+            "running": {"name": "running", "state": "running", "resource": "remote_llm"},
+            "broke": {"name": "broke", "state": "failed", "reason": "rc=1"},
+        }), encoding="utf-8")
 
     def tearDown(self):
-        qm.git_branches = self._saved_branches
-        qm.TASKS = self._saved_tasks
+        qm.TASKS, qm.STORE = self._saved_tasks, self._saved_store
         self._tmp.cleanup()
 
-    def test_branch_prefix_marks_task_started(self):
+    def test_state_survives_branch_deletion(self):
+        # `merged` has no branch in this fixture at all, yet reads completed.
         by_name = {t["name"]: t for t in qm.read_tasks()}
-        self.assertEqual(by_name["queue_monitor"]["branch"],
-                         "chore/queue_monitor-0919-0855")
-        self.assertTrue(by_name["queue_monitor"]["started"])
-        self.assertEqual(by_name["docs_links"]["branch"],
-                         "origin/chore/docs_links-0918")
-        self.assertFalse(by_name["perf_transfer"]["started"])
+        self.assertEqual(by_name["merged"]["state"], "completed")
+        self.assertEqual(by_name["running"]["state"], "running")
+        self.assertEqual(by_name["broke"]["state"], "failed")
+        self.assertEqual(by_name["broke"]["error"], "rc=1")
+
+    def test_task_with_no_record_reads_unstarted(self):
+        by_name = {t["name"]: t for t in qm.read_tasks()}
+        self.assertEqual(by_name["fresh"]["state"], "미착수")
+
+
+class TestStarvation(unittest.TestCase):
+    def test_idle_server_with_no_work_is_starved(self):
+        metrics = {"reachable": True, "running": 0.0, "waiting": 0.0}
+        st = qm.starvation(metrics, tasks=[], recurring=[])
+        self.assertEqual(st["state"], "work-starved")
+
+    def test_idle_server_with_pending_task_is_not_starved(self):
+        metrics = {"reachable": True, "running": 0.0, "waiting": 0.0}
+        tasks = [{"name": "t", "state": "pending", "resource": "remote_llm"}]
+        self.assertNotEqual(qm.starvation(metrics, tasks, [])["state"], "work-starved")
+
+    def test_unreachable_server_is_unknown_not_zero(self):
+        st = qm.starvation({"reachable": False}, tasks=[], recurring=[])
+        self.assertEqual(st["state"], "모름")
+
+    def test_busy_server_is_not_starved(self):
+        metrics = {"reachable": True, "running": 2.0, "waiting": 5.0}
+        self.assertNotEqual(qm.starvation(metrics, [], [])["state"], "work-starved")
 
 
 if __name__ == "__main__":
