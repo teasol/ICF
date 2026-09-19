@@ -268,7 +268,7 @@ SEAL 논문(`seal_univ2_baseline_17tasks.csv`)의 UNI2 기준선이다.
   `48/50`으로 ②를 통과했으나 5→7 대응 비교에서 **3개 과제가 악화**된다
   ([parity 보고서](../talks/reports/2026-09-18_arm_parity.md)). 두 게이트를 통과했다는
   사실은 성능 이득의 근거가 아니다.
-- 측정은 `SCREEN_ONLY=1`로 앙상블에 넣지 않은 채 마진만 기록해 수행하고, §3.4 오염 검사를 통과해야 한다.
+- 측정은 **순수 러너**(`scripts/evaluate_pure.py`)로 후보 config의 per-branch margin을 별도 실행으로 산출해 `scripts/analysis/branch_screen_pure.py`로 수행한다. 순수 러너는 앙상블과 분리된 **독립 프로세스**라 `SCREEN_ONLY` 경로가 필요 없고, 그 경로는 `D-050`으로 무효다(`C-20260919-4` 정정). 산출물은 §3.4 **L1 귀속 검사**(provenance)를 통과해야 한다.
 - 게이트 ① 탈락 시 **성능을 조회하지 않고 종료**한다 (§217 `RM` 선례, max |r| = 0.690).
 
 ### 게이트 ② 정보량 — 아래 둘 중 하나
