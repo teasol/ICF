@@ -7,13 +7,13 @@
 | 항목 | 값 |
 |:---|:---|
 | **Last Updated** | 2026-09-19 15:03 KST |
-| **Status** | **RU-98 종료(지지)** · 교차 기계 4자리 재현, 앵커 `5e-4` 어긋남은 장비 탓 아님. 잡무 `regression-suite`·`docs-consistency` 복구 |
+| **Status** | **계측 복구 진전** · RU-98 종료(지지)·RU-99 상주화 채택 · 협의체 C-20260919-1(승격 확증 절차) · 공식 러너 provenance writer 구현 · 잡무 정상 |
 | **Host / Node** | **`nexgem`(소문자) = Slurm 로그인 노드.** GPU 없음, 20 CPU · 93 GB. 계산은 전부 `sbatch`/`srun`. 대문자 `NEXGEM`(NHN, B200)은 **다른 기계**다 |
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · `pytest` 9.1.1. `scripts/node_env.sh`가 `ICF_DATA_ROOT=data/repro_labels_folds`로 해소 |
 | **GPU 배정** | Slurm `batch` 파티션 `gnode1\~6`. `gnode5`(A6000, 드라이버 595.91.07) 실측 동작. 딥시크는 NHN `NEXGEM` GPU 4\~7에 그대로 |
 | **LLM 접속** | NEXGEM이 tailscale로 **직결** — `llm.local.json`의 `100.97.255.47:8000`. 옛 `ssh nhn` 터널은 불필요. ssh도 `100.97.255.47:22`(`NEXGEM_key`) |
 | **Active Job** | 없음. RU-98 array `156357` 종료. tmux `queue_monitor` → `http://100.65.212.1:8899`; `supervisor` 가동 중 |
-| **회귀 테스트** | 전체 회귀 **287 tests 통과**(16 skipped). `RU-91`\~`96` 총람 공백을 실측 보고서·`D-043`·`D-044`에서 복원(사전 등록 필드는 `미보존`으로 명시)해 `test_docs_consistency.py` 포함 전부 초록 |
+| **회귀 테스트** | 전체 회귀 **290 tests 통과**(16 skipped). `RU-91`\~`96` 총람 공백을 실측 보고서·`D-043`·`D-044`에서 복원(사전 등록 필드는 `미보존`으로 명시)해 `test_docs_consistency.py` 포함 전부 초록 |
 
 ---
 
@@ -33,8 +33,9 @@
 [`foldfit_cost`](../talks/reports/2026-09-18_foldfit_cost.md)가 정본이다. 요지:
 macro 차이 `+0.0057`이나 과제군집 95% CI `[-0.0115, +0.0228]`이 0을 포함하고 7개 중
 3개가 악화된다. 5-branch 앵커는 `5e-4` 어긋난다(RU-98이 **장비는 원인이 아님**을 보였다).
-fold 적합의 절반 이상이 GPU 밖이며 디바이스 상주로 35배가 실측됐다 — 전용 GPU가 생긴
-지금 적용 가능하나 **RU-98이 끝나기 전엔 안 된다**(수치를 바꾼다).
+fold 적합 디바이스 상주화는 RU-99에서 채택(수치 비트 동일, `12.8→7.1`초/fold). 협의체
+C-20260919-1은 700 fold를 `적합 분산`이 아니라 **provenance 고정 재실행**으로 규정했고,
+선행 확인에서 **공식 러너 provenance 부재**와 `parity_*` 원시 예측 미보존을 실측했다.
 
 ### RU-98 교차 기계 재현 종료 — 지지
 
@@ -67,8 +68,8 @@ Primary 7 전 과제가 Slurm A5000/A6000에서 완료, B200 참조와 소수 4�
 # 0. NEXGEM vLLM 도달 확인 (tailscale 직결, 터널 불필요)
 curl -s -m 5 http://100.97.255.47:8000/v1/models >/dev/null && echo llm-ok || echo llm-DOWN
 
-# 1. RU-98 종료로 수치 동결 해제 — perf_transfer 위임 재시도
-$PYTHON scripts/ops/task_queue.py retry perf_transfer
+# 1. (Slurm 풀리면) provenance-fixed 전후 검정 — SMAD4 fold 10, 상주화 ON/OFF
+#    선행 확인에서 걸린 공식 러너 provenance 는 evaluate_pure.py 에 구현·테스트 완료
 
 # 2. 운영 상태 확인
 tmux list-sessions; squeue -u kimds
@@ -96,3 +97,4 @@ tmux list-sessions; squeue -u kimds
 [작성자: opencode / Platform Agent / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 14:27 KST]
 [작성자: opencode / 종결권자(사용자 위임) / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 15:03 KST]
 [작성자: opencode / Platform Agent / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 16:40 KST]
+[작성자: opencode / 소집자 / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 17:30 KST]

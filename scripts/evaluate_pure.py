@@ -44,6 +44,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
+import subprocess
 import sys
 from pathlib import Path
 
@@ -61,6 +63,73 @@ from src.utils.metrics import auroc  # noqa: E402
 
 FEATURE_DIM = 1536
 MODEL_INPUT_DIM = FEATURE_DIM
+
+
+def _code_hash() -> str:
+    """Hash of the files that decide the margins, so a later diff is visible.
+
+    Same set `scripts/analysis/dump_branch_margins.py` hashes. A stored result
+    can be attributed to a code state only if the state is written down.
+    """
+    h = hashlib.sha256()
+    for rel in ("src/models/training_free.py", "src/models/config.py"):
+        p = PROJECT_ROOT / rel
+        if p.exists():
+            h.update(p.read_bytes())
+    for f in sorted((PROJECT_ROOT / "src/models/branches").glob("*.py")):
+        h.update(f.read_bytes())
+    return h.hexdigest()[:16]
+
+
+def _git_rev() -> str:
+    try:
+        return subprocess.run(
+            ["git", "-C", str(PROJECT_ROOT), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=10).stdout.strip()
+    except Exception:  # noqa: BLE001 - git absent is unknown, not fatal
+        return "unknown"
+
+
+def _manifest_hash(task_dir: Path) -> str:
+    """Content hash of the fold-assignment files (contents, never paths)."""
+    h = hashlib.sha256()
+    for name in ("k=all.tsv", "config.yaml"):
+        p = task_dir / name
+        if p.exists():
+            h.update(p.read_bytes())
+    return h.hexdigest()[:16]
+
+
+def build_provenance(config: TrainingFreeConfig, config_path: Path,
+                     task_dir: Path, features_root: Path,
+                     device: torch.device) -> dict:
+    """Everything needed to attribute a stored prediction to a configuration.
+
+    D-050 found stored predictions record only the task dir, folds and AUROCs,
+    so no result can be attributed to a branch list, weights, code hash or data
+    version. This is the record that closes that gap for the official runner.
+    """
+    weights = {k: getattr(config, k) for k in dir(config)
+               if k.startswith("weight_")}
+    branch_list = sorted(k[len("weight_"):] for k, v in weights.items() if v)
+    cfg_path = Path(config_path)
+    return {
+        "branch_list": branch_list,
+        "weights": weights,
+        "aggregation": config.aggregation,
+        "sketch_dim": config.sketch_dim,
+        "config_path": str(config_path),
+        "config_sha256": (hashlib.sha256(cfg_path.read_bytes()).hexdigest()[:16]
+                          if cfg_path.exists() else None),
+        "code_hash": _code_hash(),
+        "git_commit": _git_rev(),
+        "data_version": {"features_root": str(features_root),
+                         "task_dir": str(task_dir)},
+        "manifest_hash": _manifest_hash(Path(task_dir)),
+        "env": {"torch": torch.__version__, "device": str(device),
+                "cuda_available": torch.cuda.is_available()},
+    }
+
 
 
 def fit_pca(
@@ -347,14 +416,20 @@ def main() -> None:
 
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
+        provenance = build_provenance(config, args.config, args.official_folds,
+                                      args.features, device)
         torch.save({
             "task_dir": str(args.official_folds),
             "fold_indices": [e["fold"] for e in per_fold],
             "fold_aurocs": fold_aurocs,
             "fold_auroc_mean": mean,
             "per_fold": per_fold,
+            "provenance": provenance,
         }, args.output)
         print(f"Saved pure-runner predictions to {args.output}")
+        print(f"provenance · branch_list={provenance['branch_list']} · "
+              f"config_sha256={provenance['config_sha256']} · "
+              f"code_hash={provenance['code_hash']} · git={provenance['git_commit']}")
 
     if args.compare_golden is not None:
         metrics = compare_with_golden(args.compare_golden, per_fold, config)

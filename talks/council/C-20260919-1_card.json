@@ -1,0 +1,91 @@
+{
+  "round_id": "C-20260919-1",
+  "question": "이 회차는 적합 분산(fold·과제 표집 변동)을 포함한 승격 확증 절차를 정하고, Slurm이 풀리면 즉시 돌릴 구체 실행안을 낸다. 메타 논의로 끝내지 말고 다음에 실행할 한 건을 특정하라.\n\n전제 (제공 문서에서 확인된 사실로 취급):\n- 승격 규칙 PROJECT.md §4는 점추정 규칙이다. 대응 per-fold Δ 평균이 +0.003 이상이면 충족이고, 구간 하한은 게이트가 아니다. 과제 군집 95% 구간과 악화 과제 전량은 함께 보고한다.\n- D-054: 현행 branch 구성·집계는 closed-form 결정론이므로 R=1이 근사가 아니라 정확하다. 확률적 후보(GMM·부분추출·학습 파라미터)는 승격 심사 전에 seed를 사전 고정한다.\n- arm_parity(2026-09-18): 5-branch 대 7-branch per-task Δ 평균 +0.0057이나 과제 군집 95% CI [-0.0115, +0.0228]가 0을 포함하고 7개 중 3개가 악화된다. D-042는 이전에 7-branch를 승격했다.\n- RU-99: 호출부 디바이스 상주화로 후보 arm 약 0.69 GPU-hour, 700 fold 2-arm paired 약 1.38 GPU-hour(4 GPU-h 예산 내). Slurm은 현재 혼잡하다.\n\n답할 것:\n(1) 결정론 후보에서 '적합 분산 포함'이 실제로 요구하는 것은 무엇인가? R>1이 정당해지는 조건은 무엇이고 현행 후보가 거기 해당하는가? 아니라면 승격 판정에 반드시 함께 보고할 불확실성은 무엇이며 그것이 승격을 막는가?\n(2) Slurm이 풀리면 돌릴 확증 절차를 실행 가능한 수준으로 특정하라: arm(들), fold 범위, 통계량, 사전 등록 합격/불합격, 보고 항목(sign agreement·과제별 악화·군집 CI), 사용할 스크립트와 명령.\n(3) 그 절차가 먼저 진전시킬 구체적 승격 결정 하나를 고르고 왜 그것인지 대라. 예: D-042의 7-branch 승격을 새 절차로 재확증할지, 다른 후보를 올릴지. SEAL 10은 입력에 없다(D-047).\n(4) 실행 전에 결과를 보지 않고 고정해야 할 것과, 이 회차가 정하지 않고 사용자에게 남길 것(T2)을 나눠라.\n\n금지: 제공된 문서에 없는 수치를 지어내지 말라. 관측과 추론을 구분하라. 동의 자체에는 가치가 없다. 합의를 추구하지 말라.",
+  "ru_type": "탐색",
+  "prefixed_criteria": "",
+  "composition_rationale": "승격 확증 절차 설계이므로 제안(P)이 실행안을 만들고 반증(R)이 '그 절차가 불필요하거나 해롭다'는 쪽을 포함해 공격한다. 감사(A)는 절차가 게임 가능한지(점추정 규칙·과제 선택·fold 재사용)와 평가 독립성을 본다. 이론(T)은 결정론 + 점추정 + 과제 군집 의존성의 통계적 타당성을 본다. 종합(S)은 네 칸으로 나누고 다음에 실행할 한 건을 특정한다. 실측(M)과 일반화(G)는 제외: 좌석은 인터넷·GPU 실행이 없고 Slurm이 혼잡하며 질문이 내부 절차 설계다. 좌석 전원이 같은 모델·엔드포인트(deepseek-v4.1-flash)라 모델 다양성이 0이므로 독립성은 정보 격리와 반증 의무로만 부분 확보된다 - 결론에 명시한다. P 온도는 실행 가능성 우선으로 0.7, R 0.5, A 0.2, T 0.4, S 0.2. Phase B(자유 대화)는 2026-09-18 A/B에서 이득이 없어 기본 꺼짐이다.",
+  "max_authority": "T1",
+  "convener": "opencode (deepseek-v4.1-flash)",
+  "state_documents": [
+    "docs/PROJECT.md",
+    "docs/current_status.md",
+    "talks/reports/2026-09-18_arm_parity.md",
+    "talks/reports/2026-09-18_foldfit_cost.md",
+    "talks/reports/2026-09-19_ru99_device_residency.md"
+  ],
+  "max_tokens_per_seat": 32000,
+  "max_total_calls": 14,
+  "seats": [
+    {
+      "name": "P1",
+      "archetype": "P",
+      "endpoint": "http://100.97.255.47:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.7,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/current_status.md",
+        "talks/reports/2026-09-18_arm_parity.md",
+        "talks/reports/2026-09-18_foldfit_cost.md",
+        "talks/reports/2026-09-19_ru99_device_residency.md"
+      ]
+    },
+    {
+      "name": "R1",
+      "archetype": "R",
+      "endpoint": "http://100.97.255.47:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.5,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/current_status.md",
+        "talks/reports/2026-09-18_arm_parity.md",
+        "talks/reports/2026-09-18_foldfit_cost.md",
+        "talks/reports/2026-09-19_ru99_device_residency.md"
+      ]
+    },
+    {
+      "name": "A1",
+      "archetype": "A",
+      "endpoint": "http://100.97.255.47:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/current_status.md",
+        "talks/reports/2026-09-18_arm_parity.md",
+        "talks/reports/2026-09-18_foldfit_cost.md",
+        "talks/reports/2026-09-19_ru99_device_residency.md"
+      ]
+    },
+    {
+      "name": "T1",
+      "archetype": "T",
+      "endpoint": "http://100.97.255.47:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.4,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/current_status.md",
+        "talks/reports/2026-09-18_arm_parity.md",
+        "talks/reports/2026-09-18_foldfit_cost.md",
+        "talks/reports/2026-09-19_ru99_device_residency.md"
+      ]
+    },
+    {
+      "name": "S1",
+      "archetype": "S",
+      "endpoint": "http://100.97.255.47:8000/v1/chat/completions",
+      "model": "deepseek-v4.1-flash",
+      "temperature": 0.2,
+      "data_slice": [
+        "docs/PROJECT.md",
+        "docs/current_status.md",
+        "talks/reports/2026-09-18_arm_parity.md",
+        "talks/reports/2026-09-18_foldfit_cost.md",
+        "talks/reports/2026-09-19_ru99_device_residency.md"
+      ]
+    }
+  ],
+  "note": "SEAL 10 수치 미입력(D-047). 좌석 전원 동일 모델·엔드포인트 - 모델 다양성 0. Phase B 기본 꺼짐(2026-09-18 A/B). max_authority T1(판정 기준·절차 설계)."
+}
