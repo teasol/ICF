@@ -1,0 +1,39 @@
+{
+  "round_id": "C-20260919-4",
+  "question": "프로젝트의 대표 교착은 `P5 #22`다 — **라벨 없이 과제(또는 브랜치 유용성)를 판별할 선택 신호가 없다.** 그래서 과제별 이득이 실재해도(SJ는 악화 3과제에서 무정보, RU-101) 그것을 활용할 수 없다. 지금까지 실패한 신호: `RU-88` fold 지문 패널(F1·F2 반박, F3 판별 불가), `RU-103` context 자기 AUROC(in-sample 퇴화), `RU-104` label-free 합의 상관(전 과제 양수), `RU-86` MDX 부호 반전(부호는 라벨 필요).\n\n이 회차의 목적은 **이 벽을 여는 새 아이디어 창출**이다. 자유 대화에서 신호 후보를 만들고 협의체가 압박한다.\n\n답할 것:\n(1) 위 실패들과 **다른 원천**에서 라벨 무관 신호를 내라 — 각각 무엇을 재는가, 왜 위 실패와 다른 경로인가, 언제 라벨이 필요한 벽에 부딪히는가.\n(2) 각 아이디어의 사전 고정 판정 기준·반증 조건·비용(GPU-hour)을 대라. Primary 7만 쓴다.\n(3) 그중 **값싸게 죽일 수 있는 것 하나**를 골라 첫 실행 스텝을 대라.\n(4) 신호가 실재해도 승격으로 이어지려면 과제 적응이 선택 편향이 되지 않아야 한다 — 그 통제를 어떻게 하는가.\n\n제약: SEAL 10은 입력에 없다(`D-057`). 제공 문서에 없는 수치를 지어내지 말라. 관측과 추론을 구분하라. 동의 자체에는 가치가 없다.",
+  "ru_type": "탐색",
+  "prefixed_criteria": "",
+  "composition_rationale": "아이디어 창출이므로 Phase B(B1·B2, temp 0.9, 3턴)를 켜 신호 후보를 co-construct한다. 협의체 P1(제안)·R1(반증: 기존 실패의 재탕인지)·A1(감사: 라벨 누출·선택 편향 통제)·T1(이론: 신호의 정보량·식별 가능성)·S1(종합). 실측(M)·외부(E) 제외(실행·인터넷 없음). 좌석 전원 동일 모델(모델 다양성 0) - 결론에 명시.",
+  "max_authority": "T1",
+  "convener": "opencode (deepseek-v4.1-flash)",
+  "state_documents": [
+    "docs/PROJECT.md",
+    "docs/closed_axes.md",
+    "docs/current_status.md",
+    "docs/research_directions.md"
+  ],
+  "max_tokens_per_seat": 32000,
+  "max_total_calls": 24,
+  "brainstorm": {
+    "turns": 3,
+    "seats": [
+      {"name": "B1", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.9,
+       "data_slice": ["docs/PROJECT.md", "docs/closed_axes.md", "docs/current_status.md", "docs/research_directions.md"]},
+      {"name": "B2", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.9,
+       "data_slice": ["docs/PROJECT.md", "docs/closed_axes.md", "docs/current_status.md", "docs/research_directions.md"]}
+    ]
+  },
+  "seats": [
+    {"name": "P1", "archetype": "P", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.8,
+     "data_slice": ["docs/PROJECT.md", "docs/closed_axes.md", "docs/current_status.md", "docs/research_directions.md"]},
+    {"name": "R1", "archetype": "R", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.5,
+     "data_slice": ["docs/PROJECT.md", "docs/closed_axes.md", "docs/current_status.md", "docs/research_directions.md"]},
+    {"name": "A1", "archetype": "A", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.2,
+     "data_slice": ["docs/PROJECT.md", "docs/closed_axes.md", "docs/current_status.md", "docs/research_directions.md"]},
+    {"name": "T1", "archetype": "T", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.4,
+     "data_slice": ["docs/PROJECT.md", "docs/closed_axes.md", "docs/current_status.md", "docs/research_directions.md"]},
+    {"name": "S1", "archetype": "S", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.2,
+     "data_slice": ["docs/PROJECT.md", "docs/closed_axes.md", "docs/current_status.md", "docs/research_directions.md"]}
+  ],
+  "note": "선택 신호 벽(P5 #22) 아이디어 창출. SEAL 10 수치 미입력(D-047·D-057). 좌석 전원 동일 모델 - 모델 다양성 0. Phase B 켬. 대화록은 감사용, 협의체에는 가설 한 줄만."
+}
