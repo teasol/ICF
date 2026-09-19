@@ -4133,6 +4133,34 @@
       "end_sha": "4115c78bb874dd487ae8bfbdb60b4a6fbb2795ce",
       "date_range": "2026-09-19 ~ 2026-09-19",
       "commit_count": 0
+    },
+    {
+      "id": "RU-102",
+      "title": "TGW 착수 가치 판정 — oracle per-task 상한 대비",
+      "type": "diagnostic",
+      "start_date": "2026-09-19T19:30:04+09:00",
+      "start_sha": "eae04a333833cd42645d99185ccded4d3387c729",
+      "question": "TGW(TGW=P4 #16, Context 신호 기하로 형상 브랜치 가중)에 착수할 가치가 있는가? 저장된 per-branch margin(RU-101)으로 과제별로 브랜치 부분집합을 **oracle로** 고를 때의 macro 상한이, 승격 기준 `+0.003`과 과제군집 SE `0.0070`(RU-100) 대비 얼마인가? 상한이 승격 기준 미만이면 어떤 현실적 context-only 신호로도 승격에 못 미친다는 뜻이다.",
+      "hypothesis": "RU-101에서 SJ가 악화 3과제에서만 무정보였다. 따라서 7-branch 대비 {SJ 제거, SH 제거, 둘 다 제거} 중 과제별 최선을 고르는 oracle 상한은 `+0.003`~`+0.006` 정도로 작고, 잡음(SE 0.0070)과 구분되지 않을 것이다. 그러면 TGW는 착수 가치가 낮다.",
+      "criteria": "결과를 보기 전에 고정한다. 후보 family: F7(7-branch), F6-SJ, F6-SH, F5(둘 다 제거), 그리고 단일 브랜치 중 과제별 최선. oracle = 각 과제에서 family를 **사후 선택**(query AUROC 최대화)한 macro. **판정 규칙**: (상한_Δ = oracle_macro − 0.6226) < `+0.003`(승격 임계)이면 **TGW 착수 보류 권고**, ≥ `+0.003`이면 설계 진행. 상한이 임계를 넘더라도 과제군집 SE 0.0070과 비교해 '잡음과 구분 불가'를 함께 보고한다. oracle은 query 라벨을 쓰므로 **유효한 방법이 아니라 상한**이다 — 확증·승격에 쓰지 않는다. 실행 무효: margin 누락, 재집계 macro가 0.6226과 불일치.",
+      "budget": "0 GPU-hour (저장 margin 오프라인 재집계, RU-101 산출물).",
+      "kill": "저장 margin에서 family 재집계가 불가하거나 재구성 macro가 공식 0.6226과 다르면 실행 무효로 종료한다. 상한이 임계 미만이면 그 자리에서 보류 권고로 종료하고 추가 GPU를 쓰지 않는다.",
+      "next_actions": "상한 < 임계: TGW를 큐에서 '보류(상한 미달)'로 표시하고 착수하지 않는다. 상한 ≥ 임계: context-only 신호 설계(전이 검증 포함)를 다음 RU로 열고, 사전 등록 후 소액 GPU로 확인한다.",
+      "experiment": "저장된 RU-101 per-branch margin(predictions/margins_7b, 7-branch, provenance)을 오프라인 재집계. family {F7, F6-SJ, F6-SH, F5}와 단일 브랜치를 과제별로 구성하고, 스크립트 scripts/analysis/tgw_oracle_ceiling.py로 조회했다. GPU 0.",
+      "observations": "F7 macro 재구성 0.6226(공식 일치). 과제별 family AUROC: PBRM1 F5 0.5546 · ARID1A F7 0.5795 · Grade F5 0.6772 · KEAP1 F7 0.6248 · KRAS F6-SJ 0.7039 · SMAD4 F7 0.4661 · progression F5 0.7891. **oracle family macro 0.6279, Δ = +0.0053** (임계 +0.003 초과). 악화 3과제(PBRM1·Grade·progression)가 모두 F5(SH·SJ 둘 다 제거)를 고른다 — RU-101과 일관. oracle best-single macro 0.6596, Δ=+0.0371(단일 브랜치는 앙상블을 떼어낸 선택이라 과적합·비현실).",
+      "decision": "사전 규칙 적용: Δ_fam `+0.0053 ≥ +0.003` → **TGW 설계 진행**. 단 두 한계를 함께 기록한다 — (1) oracle은 query 라벨로 family를 고른 **낙관 상한**이지 방법이 아니다. (2) Δ가 과제군집 SE `0.0070`보다 작아 **잡음과 구분 불가**이며, context-only 신호가 회수할 몫은 상한보다 작다. 따라서 다음 RU는 'context-only 신호가 상한의 일부라도 회수하는가'를 전이 검증으로 판정한다. 종료.",
+      "evidence": [
+        "scripts/analysis/tgw_oracle_ceiling.py",
+        "predictions/margins_7b/*.pt",
+        "scripts/analysis/task_branch_diagnosis.py",
+        "docs/research_directions.md P4 #16"
+      ],
+      "relations": "선행 RU-101(SJ 무정보 관측) · RU-100(7-branch macro 0.6226, 과제군집 SE 0.0070) · research_directions P4 #16(TGW) · closed_axes CA-08(집계 변형, 탐색 예외).",
+      "uncertainties": "oracle은 query 라벨로 family를 고르므로 하한이 아니라 낙관 상한이다. family를 {F7,F6-SJ,F6-SH,F5} 4개로 제한하므로 그보다 넓은 부분집합 탐색의 상한은 다를 수 있다(넓히면 상한이 커지나 과적합도 커진다). '단일 브랜치 최선' family는 브랜치를 앙상블에서 떼어내는 것이라 실현 가능성이 낮다. margin은 7-branch 실행에서 나온 것이라 5·6-branch를 margin 재집계로 흉내낸다.",
+      "end_date": "2026-09-19T19:31:18+09:00",
+      "end_sha": "eae04a333833cd42645d99185ccded4d3387c729",
+      "date_range": "2026-09-19 ~ 2026-09-19",
+      "commit_count": 0
     }
   ]
 }
