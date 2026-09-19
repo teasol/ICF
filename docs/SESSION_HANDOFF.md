@@ -21,6 +21,12 @@ Slurm 규칙 정본은 **`/home/kimds/.agents/rules/slurm_rules.md`** 다.
 
 ## 1. 딥시크에 닿는 법 — 저장소에 적힌 주소로는 안 된다
 
+> **2026-09-19 15:30 정정 — 터널 불필요.** NEXGEM이 **tailscale로 직접 닿게** 됐다.
+> `talks/ops/llm.local.json`을 `http://100.97.255.47:8000/v1/chat/completions`로 바꿨고,
+> ssh도 `kimds@100.97.255.47`(포트 **22**, `~/NEXGEM_key`)다. 옛 주소
+> `59.150.32.1:46401`(`ssh nhn`)은 지금 이 기계에서 no route이고, `10.34.5.16`·
+> `100.134.17.129`도 여전히 안 닿는다. 아래 터널 설명은 09:40 시점 기록으로 보존한다.
+
 `talks/ops/llm.json`의 `10.34.5.16`·`100.134.17.129`는 **이 기계에서 `No route to host`** 다.
 서로 다른 tailnet이다. 닿는 경로는 **SSH 터널뿐**이다.
 
