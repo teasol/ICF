@@ -7,12 +7,12 @@
 | 항목 | 값 |
 |:---|:---|
 | **Last Updated** | 2026-09-19 09:40 KST |
-| **Status** | **WIP** · RU-98(교차 기계 재현성) 4/7 완료, 전부 Δ=0.0000. 실험은 이제 `nexgem` Slurm에서 돈다 |
+| **Status** | **WIP** · RU-98 실행 7/7 완료, 전부 표시 정밀도 Δ=`0.0000`. Reasoning 판정·종료 대기 |
 | **Host / Node** | **`nexgem`(소문자) = Slurm 로그인 노드.** GPU 없음, 20 CPU · 93 GB. 계산은 전부 `sbatch`/`srun`. 대문자 `NEXGEM`(NHN, B200)은 **다른 기계**다 |
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · `pytest` 9.1.1. `scripts/node_env.sh`가 `ICF_DATA_ROOT=data/repro_labels_folds`로 해소 |
 | **GPU 배정** | Slurm `batch` 파티션 `gnode1\~6`. `gnode5`(A6000, 드라이버 595.91.07) 실측 동작. 딥시크는 NHN `NEXGEM` GPU 4\~7에 그대로 |
 | **LLM 접속** | `talks/ops/llm.json`의 주소는 이 기계에서 안 닿는다. `ssh nhn` 터널 + git-ignore된 `llm.local.json` 필요 — [`SESSION_HANDOFF.md`](SESSION_HANDOFF.md) §1 |
-| **Active Job** | array `156357` (RU-98) 3개 진행 중. tmux `queue_monitor` → `http://100.65.212.1:8899` |
+| **Active Job** | RU-98 array `156357` 완료. tmux `queue_monitor` → `http://100.65.212.1:8899`; `supervisor` 복구됨 |
 | **회귀 테스트** | `bash scripts/run_tests.sh` 220 tests. `test_docs_consistency` RU 번호 1건 실패는 기존 결함(아래) |
 
 ---
@@ -35,6 +35,13 @@ macro 차이 `+0.0057`이나 과제군집 95% CI `[-0.0115, +0.0228]`이 0을 �
 3개가 악화된다. 5-branch 앵커는 `5e-4` 어긋난다(RU-98이 **장비는 원인이 아님**을 보였다).
 fold 적합의 절반 이상이 GPU 밖이며 디바이스 상주로 35배가 실측됐다 — 전용 GPU가 생긴
 지금 적용 가능하나 **RU-98이 끝나기 전엔 안 된다**(수치를 바꾼다).
+
+### RU-98 교차 기계 재현 실행 완료
+
+Primary 7 전 과제가 Slurm A5000/A6000에서 완료됐고 B200 참조값과 소수 4자리까지 모두 같았다.
+사전 기준에 대입하면 장비를 건너 4자리 결론이 유지되며, 기존 앵커 어긋남은 장비 탓이 아니다.
+실행 보고는 [`cross_machine_repro`](../talks/reports/2026-09-19_cross_machine_repro.md), 공식 판정과
+RU 종료는 Reasoning 대기다.
 
 ## 협의체 — Phase B(자유 대화)와 Phase Q(문서 질의) 신설
 
@@ -62,11 +69,11 @@ curl -s -m 5 http://192.168.100.100:8000/v1/models >/dev/null && echo tunnel-ok 
   ssh -fN -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 \
       -L 127.0.0.1:8000:127.0.0.1:8000 -L 192.168.100.100:8000:127.0.0.1:8000 nhn
 
-# 1. RU-98 남은 3과제 수확 (SESSION_HANDOFF.md 3절에 수확 스크립트)
-squeue -u kimds; ls slurm_outputs/2026-09-19/0853_ru98/
+# 1. RU-98 실행 보고를 Reasoning에 전달해 판정·종료
+bash scripts/call_agent.sh orca "RU-98 판정·종료: docs/ru/RU-98.json과 talks/reports/2026-09-19_cross_machine_repro.md 검토"
 
-# 2. 딥시크가 노는 근본 원인 — 감독자가 안 돈다. 주기 잡무 6건 전부 미실행
-tmux new-session -d -s supervisor '.venv/bin/python scripts/ops/supervisor.py'
+# 2. 운영 상태 확인
+tmux list-sessions; squeue -u kimds
 ```
 
 ---
