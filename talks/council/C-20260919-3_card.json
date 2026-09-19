@@ -1,0 +1,39 @@
+{
+  "round_id": "C-20260919-3",
+  "question": "목표는 SEAL 10에서 ABMIL(`0.7266`)을 넘는 것이나 후보 선택은 Primary 7만으로 한다(`D-047`; SEAL 10 개봉은 `D-057`로 보류). 현황: 공식 7-branch가 provenance와 함께 verified(`RU-100`, Δ_macro `+0.0057`), 계측 복구 완료(provenance·오염 검사 L1), 여러 축이 닫혔고(`closed_axes`), TGW는 context 신호 퇴화로 판별 불가(`RU-103`). Primary 7 per-branch margin·fold 지표가 저장돼 있다.\n\n이 회차의 목적은 **아이디어 창출**이다. Phase B 자유 대화에서 새 후보 아이디어를 만들고, 협의체가 그것을 압박한다.\n\n답할 것:\n(1) 닫힌 축을 되살리지 않으면서 Primary 7에서 승격 가능성이 있는 새 후보/진단 아이디어를 내라 — 각각 무엇을 바꾸는가, 어떤 **새 정보**를 쓰는가, 왜 지금 없는가.\n(2) 각 아이디어의 사전 고정 판정 기준·반증 조건·비용(GPU-hour)을 대라. 후보 선택과 평가는 Primary 7만 쓴다.\n(3) 그중 **가장 값싸게 죽일 수 있는 것 하나**를 골라 첫 실행 스텝을 대라.\n\n제약: SEAL 10은 입력에 없다. 제공 문서에 없는 수치를 지어내지 말라. 관측과 추론을 구분하라. 동의 자체에는 가치가 없다. 합의를 추구하지 말라.",
+  "ru_type": "탐색",
+  "prefixed_criteria": "",
+  "composition_rationale": "아이디어 창출이므로 Phase B 자유 대화(B1·B2, temp 0.9, 3턴)를 켜 새 후보를 co-construct한다. 협의체는 P1(제안)·R1(반증)·A1(감사: SEAL/닫힌 축/라벨 누출 점검)·T1(이론: 기전 식별 가능성)·S1(종합)로 압박한다. 실측(M)은 제외(좌석은 GPU 실행 없음), 외부(E)는 제외(인터넷 없음). 좌석 전원 동일 모델·엔드포인트(모델 다양성 0) — 결론에 명시. Phase B A/B(2026-09-18)에서 협의체 산출 개선 이득은 없었으나, 그 A/B는 '협의체 산출'을 쟀고 이 회차의 산출은 **후보 아이디어**다.",
+  "max_authority": "T1",
+  "convener": "opencode (deepseek-v4.1-flash)",
+  "state_documents": [
+    "docs/PROJECT.md",
+    "docs/closed_axes.md",
+    "docs/current_status.md",
+    "docs/research_directions.md"
+  ],
+  "max_tokens_per_seat": 32000,
+  "max_total_calls": 24,
+  "brainstorm": {
+    "turns": 3,
+    "seats": [
+      {"name": "B1", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.9,
+       "data_slice": ["docs/PROJECT.md", "docs/closed_axes.md", "docs/current_status.md", "docs/research_directions.md"]},
+      {"name": "B2", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.9,
+       "data_slice": ["docs/PROJECT.md", "docs/closed_axes.md", "docs/current_status.md", "docs/research_directions.md"]}
+    ]
+  },
+  "seats": [
+    {"name": "P1", "archetype": "P", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.8,
+     "data_slice": ["docs/PROJECT.md", "docs/closed_axes.md", "docs/current_status.md", "docs/research_directions.md"]},
+    {"name": "R1", "archetype": "R", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.5,
+     "data_slice": ["docs/PROJECT.md", "docs/closed_axes.md", "docs/current_status.md", "docs/research_directions.md"]},
+    {"name": "A1", "archetype": "A", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.2,
+     "data_slice": ["docs/PROJECT.md", "docs/closed_axes.md", "docs/current_status.md", "docs/research_directions.md"]},
+    {"name": "T1", "archetype": "T", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.4,
+     "data_slice": ["docs/PROJECT.md", "docs/closed_axes.md", "docs/current_status.md", "docs/research_directions.md"]},
+    {"name": "S1", "archetype": "S", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.2,
+     "data_slice": ["docs/PROJECT.md", "docs/closed_axes.md", "docs/current_status.md", "docs/research_directions.md"]}
+  ],
+  "note": "아이디어 창출(탐색). SEAL 10 수치 미입력(D-047·D-057). 좌석 전원 동일 모델 - 모델 다양성 0. Phase B 켬(후보 창출 목적). 대화록은 감사용으로만 남기고 협의체 프롬프트에는 가설 한 줄만 넘어간다."
+}
