@@ -295,14 +295,15 @@ class TestGpuTelemetry(unittest.TestCase):
         parsed = gpu_telemetry.parse_nvidia_smi("4, [N/A], 1000.00, 0\n")
         self.assertIsNone(parsed["gpus"][4]["power_draw"])
 
-    def test_normal_state_shows_all_four(self):
+    def test_normal_state_does_not_claim_idle_from_one_zero_sample(self):
         cache = {"epoch": self.NOW.timestamp(), "collected_at": "2026-09-19 09:00:00",
                  "mode": "ssh", "source": "ssh:nhn", "ok": True, "error": None,
                  "gpus": {str(k): v for k, v in
                           gpu_telemetry.parse_nvidia_smi(self.FULL)["gpus"].items()}}
         state = gpu_telemetry.telemetry_state(cache, self.NOW, None, 15)
         self.assertTrue(state["available"])
-        self.assertEqual([g["status"] for g in state["gpus"]], ["ok"] * 4)
+        # 0% 표본 하나만으로는 유휴가 아니다.
+        self.assertEqual([g["status"] for g in state["gpus"]], ["모름"] * 4)
         self.assertEqual(state["gpus"][0]["power_limit"], 1000.0)
 
     def test_partial_missing_is_unknown_not_zero(self):
@@ -313,8 +314,9 @@ class TestGpuTelemetry(unittest.TestCase):
         state = gpu_telemetry.telemetry_state(cache, self.NOW, None, 15)
         self.assertTrue(state["available"])
         by_index = {g["index"]: g for g in state["gpus"]}
-        self.assertEqual(by_index[4]["status"], "ok")
+        self.assertEqual(by_index[4]["status"], "모름")   # 0% 한 표본은 유휴 아님
         self.assertEqual(by_index[5]["utilization"], 12.0)
+        self.assertEqual(by_index[5]["status"], "사용 중")
         self.assertEqual(by_index[6]["status"], "모름")
         self.assertIsNone(by_index[6]["power_draw"])
         self.assertIsNone(by_index[7]["power_draw"])
@@ -355,6 +357,139 @@ class TestGpuTelemetry(unittest.TestCase):
             finally:
                 gpu_telemetry.collect = original
                 qm.GPU_CACHE = saved_cache
+
+
+class TestGpuActivityStatus(unittest.TestCase):
+    """GPU 상태는 값 존재가 아니라 연속 0% 구간으로 정한다 (순수 함수)."""
+
+    def test_zero_shorter_than_idle_seconds_is_not_idle(self):
+        self.assertNotEqual(
+            gpu_telemetry.gpu_activity_status(0.0, 100.0, 109.0), "유휴")
+
+    def test_zero_for_idle_seconds_is_idle(self):
+        self.assertEqual(
+            gpu_telemetry.gpu_activity_status(0.0, 100.0, 110.0), "유휴")
+
+    def test_positive_utilization_is_busy(self):
+        self.assertEqual(
+            gpu_telemetry.gpu_activity_status(12.0, None, 200.0), "사용 중")
+        self.assertEqual(
+            gpu_telemetry.gpu_activity_status(0.5, 100.0, 200.0), "사용 중")
+
+    def test_single_zero_sample_has_no_zero_since_and_is_unknown(self):
+        self.assertEqual(
+            gpu_telemetry.gpu_activity_status(0.0, None, 200.0), "모름")
+
+    def test_missing_utilization_is_unknown_not_zero(self):
+        self.assertEqual(
+            gpu_telemetry.gpu_activity_status(None, 100.0, 200.0), "모름")
+
+    def test_stale_is_unknown_even_with_long_zero_run(self):
+        self.assertEqual(
+            gpu_telemetry.gpu_activity_status(0.0, 0.0, 999.0, stale=True), "모름")
+
+    def test_browser_render_time_does_not_create_idle(self):
+        # 수집 시각(collected)이 0% 시작과 같으면, 렌더 시각이 아무리 흘러도 유휴가 아니다.
+        self.assertEqual(
+            gpu_telemetry.gpu_activity_status(0.0, 500.0, 500.0), "모름")
+
+
+class TestCarryZeroSince(unittest.TestCase):
+    """수집 공백·새로고침이 유휴 시간을 거짓으로 늘리지 않아야 한다."""
+
+    NOW = datetime(2026, 9, 19, 9, 0, 0, tzinfo=qm.KST)
+
+    def _record(self, util):
+        return {"gpus": {"4": {"power_draw": 100.0, "power_limit": 1000.0,
+                               "utilization": util}}}
+
+    def test_contiguous_zero_keeps_start(self):
+        prev = {"epoch": self.NOW.timestamp(),
+                "gpus": {"4": {"utilization": 0.0, "zero_since": 1.0}}}
+        rec = gpu_telemetry.carry_zero_since(
+            prev, self._record(0.0), self.NOW, 15)
+        self.assertEqual(rec["gpus"]["4"]["zero_since"], 1.0)
+
+    def test_stale_previous_sample_restarts_zero_run(self):
+        prev = {"epoch": self.NOW.timestamp() - 3600,
+                "gpus": {"4": {"utilization": 0.0, "zero_since": 1.0}}}
+        rec = gpu_telemetry.carry_zero_since(
+            prev, self._record(0.0), self.NOW, 15)
+        self.assertAlmostEqual(rec["gpus"]["4"]["zero_since"], self.NOW.timestamp())
+
+    def test_busy_clears_zero_since(self):
+        prev = {"epoch": self.NOW.timestamp(),
+                "gpus": {"4": {"utilization": 0.0, "zero_since": 1.0}}}
+        rec = gpu_telemetry.carry_zero_since(
+            prev, self._record(20.0), self.NOW, 15)
+        self.assertIsNone(rec["gpus"]["4"]["zero_since"])
+
+
+class TestGpuNotMistakenForIdle(unittest.TestCase):
+    """누락·stale·실패는 유휴로 오인되지 않는다."""
+
+    NOW = datetime(2026, 9, 19, 9, 0, 0, tzinfo=qm.KST)
+
+    def test_missing_row_is_unknown(self):
+        state = gpu_telemetry.telemetry_state({}, self.NOW, [4], 15)
+        self.assertEqual(state["gpus"][0]["status"], "모름")
+
+    def test_stale_cache_is_unknown_not_idle(self):
+        cache = {"epoch": self.NOW.timestamp() - 3600, "ok": True,
+                 "collected_at": "2026-09-19 08:00:00", "source": "ssh:nhn",
+                 "gpus": {"4": {"utilization": 0.0, "power_draw": 100.0,
+                                "power_limit": 1000.0, "zero_since": 1.0}}}
+        state = gpu_telemetry.telemetry_state(cache, self.NOW, [4], 15)
+        self.assertTrue(state["stale"])
+        self.assertEqual(state["gpus"][0]["status"], "모름")
+        self.assertNotEqual(state["gpus"][0]["status"], "유휴")
+
+    def test_failed_collection_is_unknown_not_idle(self):
+        state = gpu_telemetry.telemetry_state(
+            {"epoch": self.NOW.timestamp(), "ok": False, "error": "ssh: timeout",
+             "gpus": {}, "collected_at": "2026-09-19 09:00:00"}, self.NOW, [4], 15)
+        self.assertFalse(state["available"])
+        self.assertEqual(state["gpus"][0]["status"], "모름")
+
+
+class TestPageLayout(unittest.TestCase):
+    """HTML 문자열 수준에서 제거 대상과 표시 위치를 확인한다."""
+
+    def test_removed_phrases_are_gone(self):
+        for phrase in ("KV 캐시", "전력 한도",
+                       "자정~관측 시작 구간 미포함", "관측 시작",
+                       "서버 재시작 이후만 집계", "원격 NHN NEXGEM",
+                       "캐시 표시", "요청마다 SSH 안 함",
+                       "nvidia_gpu_exporter", "출처",
+                       "공급 상태"):
+            self.assertNotIn(phrase, qm.PAGE, phrase)
+
+    def test_endpoint_url_is_not_rendered(self):
+        self.assertNotIn("sv.url", qm.PAGE)
+
+    def test_running_and_waiting_moved_to_work_section(self):
+        server_part = qm.PAGE.split("const gel = document.getElementById('gpus')")[0]
+        self.assertNotIn("처리 중", server_part)
+        self.assertNotIn("대기 중", server_part)
+        work_part = qm.PAGE.split('id="workmeta"')[1]
+        self.assertIn("처리 중", work_part)
+        self.assertIn("대기 중", work_part)
+
+    def test_top_cards_are_only_rate_and_today(self):
+        server_part = qm.PAGE.split("const gel = document.getElementById('gpus')")[0]
+        self.assertIn("초당 생성", server_part)
+        self.assertIn("오늘 생성 토큰", server_part)
+        self.assertNotIn("KV 캐시", server_part)
+
+    def test_work_starved_is_a_title_badge_not_a_block(self):
+        self.assertIn('id="badge"', qm.PAGE)
+        self.assertIn("badge warn", qm.PAGE)
+        self.assertNotIn('id="starvation"', qm.PAGE)
+        self.assertNotIn('<div class="starved">', qm.PAGE)
+
+    def test_gpu_section_has_three_columns_only(self):
+        self.assertIn("['GPU','전력 사용','가동률','상태']", qm.PAGE)
+        self.assertNotIn("전력 한도", qm.PAGE)
 
 
 if __name__ == "__main__":

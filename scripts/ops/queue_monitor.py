@@ -7,9 +7,10 @@
 
   - vLLM /metrics          `scripts/ops/llm_env.py`의 엔드포인트에서 호스트·포트만
                            떼어 `/metrics`를 붙여 Prometheus 텍스트를 받는다.
-                           지금 처리 중·대기 중 요청, KV 캐시 사용률, **오늘** 생성
-                           토큰(M)과 직전 폴링 대비 초당 생성 토큰을 보여준다.
-                           누적 프롬프트/누적 생성 토큰은 표시하지 않는다.
+                           처리 중·대기 중 요청과 **오늘** 생성 토큰(M), 직전 폴링 대비
+                           초당 생성 토큰을 읽는다. 처리 중·대기 중은 "딥시크가 할 일"
+                           영역에, 생성 토큰은 최상단 카드에 보여준다. KV 캐시
+                           사용률·누적 프롬프트/누적 생성 토큰은 화면에 표시하지 않는다.
   - talks/ops/recurring/*.json  주기 잡무 명세, 자원 종류, 다음 실행까지 남은 분.
   - talks/ops/tasks/*.md + talks/ops/task_state.json
                                위임 작업의 수명주기(`pending/running/completed/failed`).
@@ -28,8 +29,9 @@
 
 vLLM의 `generation_tokens_total`은 **프로세스 누적**이다. 자정 기준선을
 `talks/ops/token_baseline.json`에 영속 저장하고 차감해야 오늘치가 나온다.
-첫 관측이 자정 이후면 그 전에 만들어진 토큰은 알 수 없으므로, 전체인 척하지
-않고 "관측 시작 이후"로 표시한다. 서버 재시작으로 counter가 줄면 재기록한다.
+첫 관측이 자정 이후면 그 전에 만들어진 토큰은 알 수 없으므로 내부적으로
+`partial=True`로 표시한다(화면에는 이 설명을 붙이지 않는다). 서버 재시작으로
+counter가 줄면 재기록한다.
 
 ### GPU (원격 NHN NEXGEM 4~7)
 
@@ -598,12 +600,10 @@ PAGE = """<!doctype html>
           padding:12px 16px; min-width:120px; }
   .card .k { font-size:11px; color:#8892a0; }
   .card .v { font-size:24px; font-weight:600; margin-top:4px; }
-  .down { background:#5c1a1a; border:1px solid #a33; color:#ffd7d7;
-          padding:14px 18px; border-radius:8px; font-size:22px; font-weight:700; }
-  .down .sub { font-size:12px; font-weight:400; color:#f0b8b8; margin-top:6px; }
-  .starved { background:#4a3a12; border:1px solid #c9a227; color:#ffe9a8;
-             padding:12px 16px; border-radius:8px; margin-top:10px; font-weight:700; }
-  .starved .sub { font-size:12px; font-weight:400; color:#e8d59a; margin-top:6px; }
+  .badge { display:inline-block; font-size:12px; font-weight:600; padding:1px 8px;
+           border-radius:10px; vertical-align:middle; margin-left:6px; }
+  .badge.warn { background:#4a3a12; border:1px solid #c9a227; color:#ffe9a8; }
+  .badge.down { background:#5c1a1a; border:1px solid #a33; color:#ffd7d7; }
   .pill.running { background:#1d2f4a; color:#9cc4ff; }
   .pill.completed { background:#1d3a24; color:#8fe0a0; }
   .pill.failed { background:#3a1212; color:#ffb3b3; }
@@ -624,15 +624,15 @@ PAGE = """<!doctype html>
 </style>
 </head>
 <body>
-<h1>딥시크 큐 모니터</h1>
+<h1>딥시크 큐 모니터 <span id="badge"></span></h1>
 <div class="now" id="now">불러오는 중…</div>
 <div id="server"></div>
-<div id="starvation"></div>
 
-<h2>딥시크 GPU — 원격 NHN NEXGEM 4~7 (캐시 표시, 요청마다 SSH 안 함)</h2>
+<h2>딥시크 GPU</h2>
 <div id="gpus"></div>
 
-<h2>딥시크가 할 일 — 실행 중·대기 중</h2>
+<h2>딥시크가 할 일</h2>
+<div id="workmeta"></div>
 <div id="work"></div>
 
 <h2>최근 완료</h2>
@@ -659,55 +659,48 @@ function render(s){
   document.getElementById('now').textContent = '기준 시각 ' + s.now + ' KST';
 
   const sv = s.server, el = document.getElementById('server');
+  const gp = s.gpus || {available:false, gpus:[], error:'상태 없음'};
+  const st = s.starvation || {state:'모름', reason:''};
+
+  // 제목 옆 상태 배지: 정상이면 아무 설명도 붙이지 않는다.
+  const badges = [];
+  if(!sv.reachable) badges.push('<span class="badge down">서버 도달 불가</span>');
+  if(st.state === 'work-starved') badges.push('<span class="badge warn">work-starved</span>');
+  if(!gp.available) badges.push('<span class="badge warn">GPU 도달 불가</span>');
+  document.getElementById('badge').innerHTML = badges.join(' ');
+
   if(!sv.reachable){
-    el.innerHTML = '<div class="down">서버 도달 불가'
-      + '<div class="sub">' + esc(sv.error || '') + '</div></div>';
+    el.innerHTML = '<span class="muted">' + esc(sv.error || '서버 도달 불가') + '</span>';
   } else {
     const rate = (sv.generation_tokens_per_sec===null)?
         '<span class="muted">측정 전</span>' : num(sv.generation_tokens_per_sec,1)+' tok/s';
-    let todayNote = '';
-    if(sv.generation_tokens_today_since){
-      todayNote = '관측 시작 ' + esc(sv.generation_tokens_today_since);
-      if(sv.generation_tokens_today_partial) todayNote = '자정~관측 시작 구간 미포함 · ' + todayNote;
-    }
-    if(sv.generation_tokens_reset) todayNote = '서버 재시작 이후만 집계 · ' + todayNote;
     el.innerHTML = '<div class="grid">'
-      + card('처리 중', num(sv.running,0))
-      + card('대기 중', num(sv.waiting,0))
-      + card('KV 캐시', (sv.kv_cache_perc===null)?'–':num(sv.kv_cache_perc*100,1)+'%')
       + card('초당 생성', rate)
-      + cardNote('오늘 생성 토큰', esc(sv.generation_tokens_today_text || '모름'), todayNote)
-      + '</div><div class="muted" style="margin-top:8px">'
-      + esc(sv.url) + '</div>';
+      + card('오늘 생성 토큰', esc(sv.generation_tokens_today_text || '모름'))
+      + '</div>';
   }
 
-  const gp = s.gpus || {available:false, gpus:[], error:'상태 없음'};
   const gel = document.getElementById('gpus');
   if(!gp.available){
-    gel.innerHTML = '<div class="down" style="font-size:16px">GPU 텔레메트리 도달 불가'
-      + '<div class="sub">' + esc(gp.error || '캐시 없음')
-      + '<br>원격 nvidia-smi(ssh)가 막히면 nvidia_gpu_exporter/dcgm-exporter를 '
-      + '세우고 talks/ops/gpu.json에 mode/http/exporter_url을 설정하라.</div></div>';
+    gel.innerHTML = '<span class="muted">GPU 텔레메트리 도달 불가 · '
+      + esc(gp.error || '캐시 없음') + '</span>';
   } else {
     const rows = gp.gpus.map(g=>[
       '<code>GPU'+g.index+'</code>',
       (g.power_draw===null||g.power_draw===undefined)?'<span class="muted">모름</span>':num(g.power_draw,1)+' W',
-      (g.power_limit===null||g.power_limit===undefined)?'<span class="muted">모름</span>':num(g.power_limit,0)+' W',
       (g.utilization===null||g.utilization===undefined)?'<span class="muted">모름</span>':num(g.utilization,0)+' %',
-      (g.status==='ok')?'<span class="ok">정상</span>':'<span class="muted">모름</span>']);
-    const stale = gp.stale ? ' <span class="stale">(캐시 오래됨)</span>' : '';
-    gel.innerHTML = table(['GPU','전력 사용','전력 한도','가동률','상태'], rows)
-      + '<div class="muted" style="margin-top:6px">출처 ' + esc(gp.source || '–')
-      + ' · 수집 ' + esc(gp.collected_at || '–') + stale + '</div>';
+      gpuStatus(g.status)]);
+    gel.innerHTML = table(['GPU','전력 사용','가동률','상태'], rows);
   }
 
-  const st = s.starvation || {state:'모름', reason:''}, stel = document.getElementById('starvation');
-  if(st.state === 'work-starved'){
-    stel.innerHTML = '<div class="starved">⚠ work-starved'
-      + '<div class="sub">' + esc(st.reason) + '</div></div>';
+  const wm = document.getElementById('workmeta');
+  if(sv.reachable){
+    wm.innerHTML = '<div class="grid">'
+      + card('처리 중', num(sv.running,0))
+      + card('대기 중', num(sv.waiting,0))
+      + '</div>';
   } else {
-    stel.innerHTML = '<div class="muted" style="margin-top:8px">'
-      + '공급 상태: ' + esc(st.state) + ' · ' + esc(st.reason) + '</div>';
+    wm.innerHTML = '<span class="muted">서버 도달 불가 — 처리 중·대기 중 모름</span>';
   }
 
   document.getElementById('recurring').innerHTML = table(
@@ -754,9 +747,10 @@ function render(s){
       +' <span class="muted">('+Math.round(hb.age_seconds/60)+'분 전)</span>'; }
 }
 function card(k,v){return '<div class="card"><div class="k">'+k+'</div><div class="v">'+v+'</div></div>';}
-function cardNote(k,v,note){
-  return '<div class="card"><div class="k">'+k+'</div><div class="v">'+v+'</div>'
-    + (note?'<div class="k" style="margin-top:6px">'+note+'</div>':'') + '</div>';
+function gpuStatus(s){
+  if(s==='사용 중') return '<span class="ok">사용 중</span>';
+  if(s==='유휴') return '<span class="muted">유휴</span>';
+  return '<span class="muted">모름</span>';
 }
 function table(head, rows){
   if(!rows.length) return '<span class="muted">'+EMPTY+'</span>';
@@ -823,6 +817,9 @@ def start_gpu_collector(interval: float | None = None) -> threading.Thread:
         while True:
             try:
                 record = gpu_telemetry.collect(cfg)
+                record = gpu_telemetry.carry_zero_since(
+                    gpu_telemetry.read_cache(GPU_CACHE), record,
+                    datetime.now(KST), ttl)
                 gpu_telemetry.write_cache(GPU_CACHE, record)
             except Exception:  # noqa: BLE001 - 수집 실패가 모니터를 죽이면 안 된다
                 pass
