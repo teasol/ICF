@@ -1,0 +1,271 @@
+{
+ "note": "RU-100 confirmed artifacts live under predictions/ (git-ignored). This manifest is the durable attribution record; regenerate with scripts/slurm/primary7_arm_confirmation.sbatch.",
+ "files": [
+  {
+   "file": "predictions/parity_cptac_ccrcc_PBRM1_mutation_v121_7branch_active.pt",
+   "task_dir": "data/repro_labels_folds/official/cptac_ccrcc/PBRM1_mutation",
+   "n_folds": 50,
+   "fold_aurocs_sha256": "8b51c37bbf41b5b4",
+   "fold_auroc_mean": 0.54075,
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa",
+    "sh",
+    "sj"
+   ],
+   "config_sha256": "d8c8ae4dca9b8ecf",
+   "code_hash": "ec8db13e9248dc68",
+   "git_commit": "b3b7fb7",
+   "manifest_hash": "f263010974f9c60e"
+  },
+  {
+   "file": "predictions/parity_cptac_ccrcc_PBRM1_mutation_v121_active.pt",
+   "task_dir": "data/repro_labels_folds/official/cptac_ccrcc/PBRM1_mutation",
+   "n_folds": 50,
+   "fold_aurocs_sha256": "1439e1ce3c0cdc28",
+   "fold_auroc_mean": 0.554614,
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa"
+   ],
+   "config_sha256": "2a2ec33a97ab3e45",
+   "code_hash": "ec8db13e9248dc68",
+   "git_commit": "b3b7fb7",
+   "manifest_hash": "f263010974f9c60e"
+  },
+  {
+   "file": "predictions/parity_cptac_lscc_ARID1A_mutation_v121_7branch_active.pt",
+   "task_dir": "data/repro_labels_folds/official/cptac_lscc/ARID1A_mutation",
+   "n_folds": 50,
+   "fold_aurocs_sha256": "f36c985d29a49ead",
+   "fold_auroc_mean": 0.5795,
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa",
+    "sh",
+    "sj"
+   ],
+   "config_sha256": "d8c8ae4dca9b8ecf",
+   "code_hash": "ec8db13e9248dc68",
+   "git_commit": "b3b7fb7",
+   "manifest_hash": "6f8a5b507f00bfe3"
+  },
+  {
+   "file": "predictions/parity_cptac_lscc_ARID1A_mutation_v121_active.pt",
+   "task_dir": "data/repro_labels_folds/official/cptac_lscc/ARID1A_mutation",
+   "n_folds": 50,
+   "fold_aurocs_sha256": "1ae5a9ade9fdd206",
+   "fold_auroc_mean": 0.550693,
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa"
+   ],
+   "config_sha256": "2a2ec33a97ab3e45",
+   "code_hash": "ec8db13e9248dc68",
+   "git_commit": "b3b7fb7",
+   "manifest_hash": "6f8a5b507f00bfe3"
+  },
+  {
+   "file": "predictions/parity_cptac_lscc_Histologic_Grade_v121_7branch_active.pt",
+   "task_dir": "data/repro_labels_folds/official/cptac_lscc/Histologic_Grade",
+   "n_folds": 50,
+   "fold_aurocs_sha256": "37aaccf969a9f5fc",
+   "fold_auroc_mean": 0.666494,
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa",
+    "sh",
+    "sj"
+   ],
+   "config_sha256": "d8c8ae4dca9b8ecf",
+   "code_hash": "ec8db13e9248dc68",
+   "git_commit": "b3b7fb7",
+   "manifest_hash": "4afed36ca770733b"
+  },
+  {
+   "file": "predictions/parity_cptac_lscc_Histologic_Grade_v121_active.pt",
+   "task_dir": "data/repro_labels_folds/official/cptac_lscc/Histologic_Grade",
+   "n_folds": 50,
+   "fold_aurocs_sha256": "dee70934914c9eb2",
+   "fold_auroc_mean": 0.677182,
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa"
+   ],
+   "config_sha256": "2a2ec33a97ab3e45",
+   "code_hash": "ec8db13e9248dc68",
+   "git_commit": "b3b7fb7",
+   "manifest_hash": "4afed36ca770733b"
+  },
+  {
+   "file": "predictions/parity_cptac_lscc_KEAP1_mutation_v121_7branch_active.pt",
+   "task_dir": "data/repro_labels_folds/official/cptac_lscc/KEAP1_mutation",
+   "n_folds": 50,
+   "fold_aurocs_sha256": "50f176ed3c5e524c",
+   "fold_auroc_mean": 0.624844,
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa",
+    "sh",
+    "sj"
+   ],
+   "config_sha256": "d8c8ae4dca9b8ecf",
+   "code_hash": "ec8db13e9248dc68",
+   "git_commit": "b3b7fb7",
+   "manifest_hash": "861a0ed027f925ce"
+  },
+  {
+   "file": "predictions/parity_cptac_lscc_KEAP1_mutation_v121_active.pt",
+   "task_dir": "data/repro_labels_folds/official/cptac_lscc/KEAP1_mutation",
+   "n_folds": 50,
+   "fold_aurocs_sha256": "586c470aae38c56a",
+   "fold_auroc_mean": 0.603787,
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa"
+   ],
+   "config_sha256": "2a2ec33a97ab3e45",
+   "code_hash": "ec8db13e9248dc68",
+   "git_commit": "b3b7fb7",
+   "manifest_hash": "861a0ed027f925ce"
+  },
+  {
+   "file": "predictions/parity_cptac_luad_KRAS_mutation_v121_7branch_active.pt",
+   "task_dir": "data/repro_labels_folds/official/cptac_luad/KRAS_mutation",
+   "n_folds": 50,
+   "fold_aurocs_sha256": "d17bc00a0c699bcf",
+   "fold_auroc_mean": 0.703119,
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa",
+    "sh",
+    "sj"
+   ],
+   "config_sha256": "d8c8ae4dca9b8ecf",
+   "code_hash": "ec8db13e9248dc68",
+   "git_commit": "b3b7fb7",
+   "manifest_hash": "93e5210dd065496e"
+  },
+  {
+   "file": "predictions/parity_cptac_luad_KRAS_mutation_v121_active.pt",
+   "task_dir": "data/repro_labels_folds/official/cptac_luad/KRAS_mutation",
+   "n_folds": 50,
+   "fold_aurocs_sha256": "6834c7b9de92880c",
+   "fold_auroc_mean": 0.700437,
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa"
+   ],
+   "config_sha256": "2a2ec33a97ab3e45",
+   "code_hash": "ec8db13e9248dc68",
+   "git_commit": "b3b7fb7",
+   "manifest_hash": "93e5210dd065496e"
+  },
+  {
+   "file": "predictions/parity_cptac_pda_SMAD4_mutation_v121_7branch_active.pt",
+   "task_dir": "data/repro_labels_folds/official/cptac_pda/SMAD4_mutation",
+   "n_folds": 50,
+   "fold_aurocs_sha256": "5c1dd5eedc2aa7a1",
+   "fold_auroc_mean": 0.466121,
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa",
+    "sh",
+    "sj"
+   ],
+   "config_sha256": "d8c8ae4dca9b8ecf",
+   "code_hash": "ec8db13e9248dc68",
+   "git_commit": "b3b7fb7",
+   "manifest_hash": "1b6359fe041134d5"
+  },
+  {
+   "file": "predictions/parity_cptac_pda_SMAD4_mutation_v121_active.pt",
+   "task_dir": "data/repro_labels_folds/official/cptac_pda/SMAD4_mutation",
+   "n_folds": 50,
+   "fold_aurocs_sha256": "38c6eb9075f6f4d9",
+   "fold_auroc_mean": 0.442593,
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa"
+   ],
+   "config_sha256": "2a2ec33a97ab3e45",
+   "code_hash": "ec8db13e9248dc68",
+   "git_commit": "b3b7fb7",
+   "manifest_hash": "1b6359fe041134d5"
+  },
+  {
+   "file": "predictions/parity_ucla_lung_progression_regression_v121_7branch_active.pt",
+   "task_dir": "data/repro_labels_folds/official/ucla_lung/progression_regression",
+   "n_folds": 50,
+   "fold_aurocs_sha256": "933e1273ef2ba64f",
+   "fold_auroc_mean": 0.777179,
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa",
+    "sh",
+    "sj"
+   ],
+   "config_sha256": "d8c8ae4dca9b8ecf",
+   "code_hash": "ec8db13e9248dc68",
+   "git_commit": "b3b7fb7",
+   "manifest_hash": "0e0f4df61b5f9b97"
+  },
+  {
+   "file": "predictions/parity_ucla_lung_progression_regression_v121_active.pt",
+   "task_dir": "data/repro_labels_folds/official/ucla_lung/progression_regression",
+   "n_folds": 50,
+   "fold_aurocs_sha256": "49c354db05873dc3",
+   "fold_auroc_mean": 0.789145,
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa"
+   ],
+   "config_sha256": "2a2ec33a97ab3e45",
+   "code_hash": "ec8db13e9248dc68",
+   "git_commit": "b3b7fb7",
+   "manifest_hash": "0e0f4df61b5f9b97"
+  }
+ ]
+}

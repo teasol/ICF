@@ -108,11 +108,28 @@ def build_provenance(config: TrainingFreeConfig, config_path: Path,
     D-050 found stored predictions record only the task dir, folds and AUROCs,
     so no result can be attributed to a branch list, weights, code hash or data
     version. This is the record that closes that gap for the official runner.
+
+    Declared branches are read from the config file, not from every `weight_*`
+    attribute: `TrainingFreeConfig.__post_init__` mirrors `weight_sj` into the
+    legacy alias `weight_shj`, which is NOT a separate branch (the SJ branch
+    reads `weight_sj or weight_shj`). Deriving from the object alone would list
+    an eighth, non-existent branch. `config_sha256` still identifies the file.
     """
-    weights = {k: getattr(config, k) for k in dir(config)
-               if k.startswith("weight_")}
-    branch_list = sorted(k[len("weight_"):] for k, v in weights.items() if v)
     cfg_path = Path(config_path)
+    declared: dict[str, float] = {}
+    if cfg_path.exists():
+        raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        for section in ("branches", "experimental"):
+            for name, spec in (raw.get(section) or {}).items():
+                if isinstance(spec, dict):
+                    declared[name] = float(spec.get("weight", 0.0))
+    if declared:
+        branch_list = sorted(n for n, w in declared.items() if w)
+        weights = {f"weight_{n}": w for n, w in sorted(declared.items())}
+    else:  # file unreadable: fall back to the parsed object, aliases included
+        weights = {k: getattr(config, k) for k in dir(config)
+                   if k.startswith("weight_")}
+        branch_list = sorted(k[len("weight_"):] for k, v in weights.items() if v)
     return {
         "branch_list": branch_list,
         "weights": weights,

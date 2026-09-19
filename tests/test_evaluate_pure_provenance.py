@@ -53,16 +53,23 @@ class TestEvaluatePureProvenance(unittest.TestCase):
     def test_has_attribution_fields(self):
         task = self._task()
         (self.tmp / "v121.yaml").write_text(
-            "aggregation: trimmed_mean\nsketch_dim: 32\n", encoding="utf-8")
+            "aggregation: trimmed_mean\nsketch_dim: 32\n"
+            "branches:\n"
+            "  cv: {weight: 1.0}\n  bm: {weight: 1.0}\n  bd: {weight: 1.0}\n"
+            "  qa: {weight: 1.0}\n  ds: {weight: 1.0}\n  sh: {weight: 1.0}\n"
+            "  sj: {weight: 1.0}\n  ct: {weight: 0.0}\n  dd: {weight: 0.0}\n",
+            encoding="utf-8")
         prov = self._prov(task, "v121.yaml")
         for key in ("branch_list", "weights", "aggregation", "sketch_dim",
                     "config_sha256", "code_hash", "git_commit", "data_version",
                     "manifest_hash", "env"):
             self.assertIn(key, prov, f"provenance에 {key} 가 없다")
-        # Zero-weight branches must not enter the attribution record.
+        # The declared branches are 7; the legacy shj alias is NOT a branch and
+        # must not appear even though TrainingFreeConfig mirrors weight_sj into it.
+        self.assertEqual(prov["branch_list"],
+                         ["bd", "bm", "cv", "ds", "qa", "sh", "sj"])
+        self.assertNotIn("shj", prov["branch_list"])
         self.assertNotIn("ct", prov["branch_list"])
-        self.assertNotIn("dd", prov["branch_list"])
-        self.assertIn("cv", prov["branch_list"])
         self.assertTrue(prov["config_sha256"])
         self.assertTrue(prov["manifest_hash"])
         self.assertEqual(prov["data_version"]["task_dir"], str(task))

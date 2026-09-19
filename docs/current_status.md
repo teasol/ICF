@@ -7,7 +7,7 @@
 | 항목 | 값 |
 |:---|:---|
 | **Last Updated** | 2026-09-19 15:03 KST |
-| **Status** | **계측 복구 진전** · RU-98 종료(지지)·RU-99 상주화 채택 · 협의체 C-20260919-1(승격 확증 절차) · 공식 러너 provenance writer 구현 · 잡무 정상 |
+| **Status** | **D-042 verified** · RU-100이 5·7-branch를 provenance와 함께 재확증(§4 충족) · RU-98/99 종료 · 공식 러너 provenance · 자동 잡무 중단(`D-056`) |
 | **Host / Node** | **`nexgem`(소문자) = Slurm 로그인 노드.** GPU 없음, 20 CPU · 93 GB. 계산은 전부 `sbatch`/`srun`. 대문자 `NEXGEM`(NHN, B200)은 **다른 기계**다 |
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · `pytest` 9.1.1. `scripts/node_env.sh`가 `ICF_DATA_ROOT=data/repro_labels_folds`로 해소 |
 | **GPU 배정** | Slurm `batch` 파티션 `gnode1\~6`. `gnode5`(A6000, 드라이버 595.91.07) 실측 동작. 딥시크는 NHN `NEXGEM` GPU 4\~7에 그대로 |
@@ -31,11 +31,10 @@
 
 상세는 [`arm_parity`](../talks/reports/2026-09-18_arm_parity.md)와
 [`foldfit_cost`](../talks/reports/2026-09-18_foldfit_cost.md)가 정본이다. 요지:
-macro 차이 `+0.0057`이나 과제군집 95% CI `[-0.0115, +0.0228]`이 0을 포함하고 7개 중
-3개가 악화된다. 5-branch 앵커는 `5e-4` 어긋난다(RU-98이 **장비는 원인이 아님**을 보였다).
-fold 적합 디바이스 상주화는 RU-99에서 채택(수치 비트 동일, `12.8→7.1`초/fold). 협의체
-C-20260919-1은 700 fold를 `적합 분산`이 아니라 **provenance 고정 재실행**으로 규정했고,
-선행 확인에서 **공식 러너 provenance 부재**와 `parity_*` 원시 예측 미보존을 실측했다.
+macro 차이 `+0.0057`이고 과제군집 95% CI `[-0.0115, +0.0228]`이 0을 포함, 7개 중 3개가 악화된다.
+5-branch 앵커는 `5e-4` 어긋난다(RU-98이 **장비는 원인이 아님**을 보였다). fold 상주화는 RU-99
+채택(`12.8→7.1`초/fold). 협의체 C-20260919-1의 규정대로 **RU-100**이 두 arm을 같은 잡·세션에서
+재실행해 `+0.0057`(§4 충족)·CI·악화 `3/7`을 재현하고 provenance와 함께 **D-042를 verified**로 올렸다.
 
 ### RU-98 교차 기계 재현 종료 — 지지
 
@@ -98,3 +97,4 @@ curl -s -m 5 http://100.97.255.47:8000/v1/models >/dev/null && echo llm-ok || ec
 [작성자: opencode / 종결권자(사용자 위임) / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 15:03 KST]
 [작성자: opencode / Platform Agent / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 16:40 KST]
 [작성자: opencode / 소집자·오케스트레이터 / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 17:45 KST]
+[작성자: opencode / Platform Agent / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 18:00 KST]
