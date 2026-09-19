@@ -566,7 +566,6 @@ def build_state(metrics: dict[str, Any] | None = None,
     recurring = read_recurring(now)
     return {
         "now": now.strftime("%Y-%m-%d %H:%M:%S"),
-        "day_start": now.strftime("%Y-%m-%d 00:00:00"),
         "server": metrics,
         "gpus": gpu_state(now),
         "recurring": recurring,
@@ -657,7 +656,7 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,
   c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function num(x, d){return (x===null||x===undefined||isNaN(x))?'모름':Number(x).toFixed(d);}
 function render(s){
-  document.getElementById('now').textContent = '기준 시각 ' + s.day_start + ' KST';
+  document.getElementById('now').textContent = '기준 시각 ' + s.now + ' KST';
 
   const sv = s.server, el = document.getElementById('server');
   const gp = s.gpus || {available:false, gpus:[], error:'상태 없음'};

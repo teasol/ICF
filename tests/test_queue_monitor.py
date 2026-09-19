@@ -467,13 +467,9 @@ class TestPageLayout(unittest.TestCase):
     def test_endpoint_url_is_not_rendered(self):
         self.assertNotIn("sv.url", qm.PAGE)
 
-    def test_reference_time_is_midnight_not_current_time(self):
-        state = qm.build_state(
-            metrics={"reachable": False, "error": "test"},
-            now=datetime(2026, 9, 19, 13, 45, 12, tzinfo=qm.KST))
-        self.assertEqual(state["day_start"], "2026-09-19 00:00:00")
-        self.assertIn("'기준 시각 ' + s.day_start + ' KST'", qm.PAGE)
-        self.assertNotIn("'기준 시각 ' + s.now + ' KST'", qm.PAGE)
+    def test_page_reference_time_remains_current_time(self):
+        self.assertIn("'기준 시각 ' + s.now + ' KST'", qm.PAGE)
+        self.assertNotIn("s.day_start", qm.PAGE)
 
     def test_running_and_waiting_moved_to_work_section(self):
         server_part = qm.PAGE.split("const gel = document.getElementById('gpus')")[0]
