@@ -33,13 +33,13 @@ vLLM의 `generation_tokens_total`은 **프로세스 누적**이다. 자정 기�
 `partial=True`로 표시한다(화면에는 이 설명을 붙이지 않는다). 서버 재시작으로
 counter가 줄면 재기록한다.
 
-### GPU (원격 NHN NEXGEM 4~7)
+### GPU (로컬 NHN NEXGEM 4~7)
 
-모니터는 `nexgem` 로그인 노드에서 돈다. GPU는 원격에 있고 이 기계에
-`nvidia-smi`가 없다. 브라우저는 2초마다 폴링하므로 요청 경로에서 SSH를
-실행하지 않는다. `scripts/ops/gpu_telemetry.py`가 TTL마다 한 번 수집해 캐시를
-쓰고, 이 모니터는 **캐시만 읽는다**. 수집 경로 설정과 exporter 요구는 그 파일이
-정본이다.
+모니터는 GPU·vLLM이 있는 NHN NEXGEM에서 직접 돈다(`gpu.local.json` `mode: local`).
+브라우저는 2초마다 폴링하므로 요청 경로에서 `nvidia-smi`를 실행하지 않는다.
+`scripts/ops/gpu_telemetry.py`가 TTL마다 한 번 수집해 캐시를 쓰고, 이 모니터는
+**캐시만 읽는다**. 파일 로그는 만들지 않고 GPU 가동률을 최상단 카드에 바로 그린다.
+수집 경로 설정과 exporter 요구는 그 파일이 정본이다.
 """
 
 from __future__ import annotations
@@ -596,6 +596,8 @@ PAGE = """<!doctype html>
   h2 { font-size:14px; margin:24px 0 8px; color:#8fb4de; }
   .now { color:#6b7686; font-size:12px; margin-bottom:12px; }
   .grid { display:flex; flex-wrap:wrap; gap:12px; }
+  .toprow { display:flex; flex-wrap:wrap; gap:24px; align-items:flex-start; }
+  .toprow h2 { margin-top:0; }
   .card { background:#1a2029; border:1px solid #2a323e; border-radius:8px;
           padding:12px 16px; min-width:120px; }
   .card .k { font-size:11px; color:#8892a0; }
@@ -626,10 +628,10 @@ PAGE = """<!doctype html>
 <body>
 <h1>딥시크 큐 모니터 <span id="badge"></span></h1>
 <div class="now" id="now">불러오는 중…</div>
-<div id="server"></div>
-
-<h2>딥시크 GPU</h2>
-<div id="gpus"></div>
+<div class="toprow">
+  <div id="server"></div>
+  <div id="gpus"></div>
+</div>
 
 <h2>딥시크가 할 일</h2>
 <div id="workmeta"></div>
@@ -686,7 +688,7 @@ function render(s){
     (g.power_draw===null||g.power_draw===undefined)?'<span class="muted">모름</span>':num(g.power_draw,1)+' W',
     (g.utilization===null||g.utilization===undefined)?'<span class="muted">모름</span>':num(g.utilization,0)+' %',
     gp.available ? gpuStatus(g.status) : '<span class="muted">도달 불가</span>']);
-  gel.innerHTML = table(['GPU','전력 사용','가동률','상태'], rows);
+  gel.innerHTML = table(null, rows);
 
   const wm = document.getElementById('workmeta');
   if(sv.reachable){
@@ -749,7 +751,8 @@ function gpuStatus(s){
 }
 function table(head, rows){
   if(!rows.length) return '<span class="muted">'+EMPTY+'</span>';
-  let h = '<table><tr>' + head.map(x=>'<th>'+x+'</th>').join('') + '</tr>';
+  let h = '<table>';
+  if(head && head.length){ h += '<tr>' + head.map(x=>'<th>'+x+'</th>').join('') + '</tr>'; }
   for(const r of rows){ h += '<tr>' + r.map(c=>'<td>'+c+'</td>').join('') + '</tr>'; }
   return h + '</table>';
 }

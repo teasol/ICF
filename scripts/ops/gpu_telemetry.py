@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """딥시크가 점유한 원격 GPU의 전력·가동률을 캐시로 모아 온다.
 
-모니터는 **`nexgem` 로그인 노드**에서 돈다. GPU는 같은 기계가 아니라 원격 NHN
-`NEXGEM`(GPU 4~7, 텐서 병렬)에 있다. 이 기계에는 `nvidia-smi`가 없다.
+2026-09-19부터 모니터는 GPU·vLLM이 있는 NHN `NEXGEM`(GPU 4~7, 텐서 병렬)에서
+**직접** 돌고 `mode: local`로 로컬 `nvidia-smi`를 읽는다. 이전에는 `nexgem` 로그인
+노드에서 돌며 원격 `ssh nhn`으로 읽었다. `nexgem`에는 `nvidia-smi`가 없다.
 
 브라우저가 2초마다 `/api/state`를 폴링하므로, **요청마다 SSH나 nvidia-smi를 새로
 실행하면 안 된다.** 그러면 2초마다 SSH 세션이 열려 원격에 부하를 주고, 느린 SSH가

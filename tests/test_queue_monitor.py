@@ -485,14 +485,22 @@ class TestPageLayout(unittest.TestCase):
         self.assertIn("오늘 생성 토큰", server_part)
         self.assertNotIn("KV 캐시", server_part)
 
+    def test_gpu_table_sits_beside_top_cards(self):
+        self.assertIn('class="toprow"', qm.PAGE)
+        top = qm.PAGE.index('class="toprow"')
+        self.assertLess(top, qm.PAGE.index('id="gpus"'))
+        self.assertLess(qm.PAGE.index('id="gpus"'), qm.PAGE.index('id="workmeta"'))
+
     def test_work_starved_is_a_title_badge_not_a_block(self):
         self.assertIn('id="badge"', qm.PAGE)
         self.assertIn("badge warn", qm.PAGE)
         self.assertNotIn('id="starvation"', qm.PAGE)
         self.assertNotIn('<div class="starved">', qm.PAGE)
 
-    def test_gpu_section_has_three_columns_only(self):
-        self.assertIn("['GPU','전력 사용','가동률','상태']", qm.PAGE)
+    def test_gpu_table_has_no_heading_or_column_titles(self):
+        self.assertNotIn("딥시크 GPU", qm.PAGE)
+        self.assertNotIn("['GPU','전력 사용','가동률','상태']", qm.PAGE)
+        self.assertNotIn("가동률", qm.PAGE)
         self.assertNotIn("전력 한도", qm.PAGE)
 
     def test_gpu_failure_keeps_table_without_explanation(self):
