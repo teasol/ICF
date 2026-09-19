@@ -6,13 +6,13 @@
 
 | 항목 | 값 |
 |:---|:---|
-| **Last Updated** | 2026-09-19 11:20 KST |
-| **Status** | **WIP** · RU-98 실행 7/7 완료, 전부 표시 정밀도 Δ=`0.0000`. Reasoning 판정·종료 대기 |
+| **Last Updated** | 2026-09-19 15:03 KST |
+| **Status** | **RU-98 종료(지지)** · 교차 기계 4자리 재현, 앵커 `5e-4` 어긋남은 장비 탓 아님. 잡무 `regression-suite`·`docs-consistency` 복구 |
 | **Host / Node** | **`nexgem`(소문자) = Slurm 로그인 노드.** GPU 없음, 20 CPU · 93 GB. 계산은 전부 `sbatch`/`srun`. 대문자 `NEXGEM`(NHN, B200)은 **다른 기계**다 |
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · `pytest` 9.1.1. `scripts/node_env.sh`가 `ICF_DATA_ROOT=data/repro_labels_folds`로 해소 |
 | **GPU 배정** | Slurm `batch` 파티션 `gnode1\~6`. `gnode5`(A6000, 드라이버 595.91.07) 실측 동작. 딥시크는 NHN `NEXGEM` GPU 4\~7에 그대로 |
 | **LLM 접속** | `talks/ops/llm.json`의 주소는 이 기계에서 안 닿는다. `ssh nhn` 터널 + git-ignore된 `llm.local.json` 필요 — [`SESSION_HANDOFF.md`](SESSION_HANDOFF.md) §1 |
-| **Active Job** | RU-98 array `156357` 완료. tmux `queue_monitor` → `http://100.65.212.1:8899`; `supervisor` 복구됨 |
+| **Active Job** | 없음. RU-98 array `156357` 종료. tmux `queue_monitor` → `http://100.65.212.1:8899`; `supervisor` 가동 중 |
 | **회귀 테스트** | 전체 회귀 **286 tests 통과**(16 skipped, 71초). `RU-91`\~`96` 총람 공백을 실측 보고서·`D-043`·`D-044`에서 복원(사전 등록 필드는 `미보존`으로 명시)해 `test_docs_consistency.py` 포함 전부 초록 |
 
 ---
@@ -36,12 +36,12 @@ macro 차이 `+0.0057`이나 과제군집 95% CI `[-0.0115, +0.0228]`이 0을 �
 fold 적합의 절반 이상이 GPU 밖이며 디바이스 상주로 35배가 실측됐다 — 전용 GPU가 생긴
 지금 적용 가능하나 **RU-98이 끝나기 전엔 안 된다**(수치를 바꾼다).
 
-### RU-98 교차 기계 재현 실행 완료
+### RU-98 교차 기계 재현 종료 — 지지
 
-Primary 7 전 과제가 Slurm A5000/A6000에서 완료됐고 B200 참조값과 소수 4자리까지 모두 같았다.
-사전 기준에 대입하면 장비를 건너 4자리 결론이 유지되며, 기존 앵커 어긋남은 장비 탓이 아니다.
-실행 보고는 [`cross_machine_repro`](../talks/reports/2026-09-19_cross_machine_repro.md), 공식 판정과
-RU 종료는 Reasoning 대기다.
+Primary 7 전 과제가 Slurm A5000/A6000에서 완료, B200 참조와 소수 4자리 모두 동일. 사전 기준
+(1) 충족으로 **4자리 결론이 장비를 건너 유지**되며 **앵커 `5e-4` 어긋남은 장비 탓이 아님**으로
+판정·종료(대장 append). 실행 보고 [`cross_machine_repro`](../talks/reports/2026-09-19_cross_machine_repro.md).
+한계: 하드웨어 쌍 하나·5-branch만, 기계 A 원시 예측 부재로 정확 |Δ|는 `<0.0001` 상계뿐.
 
 ## 협의체 — Phase B(자유 대화)와 Phase Q(문서 질의) 신설
 
@@ -69,8 +69,8 @@ curl -s -m 5 http://192.168.100.100:8000/v1/models >/dev/null && echo tunnel-ok 
   ssh -fN -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 \
       -L 127.0.0.1:8000:127.0.0.1:8000 -L 192.168.100.100:8000:127.0.0.1:8000 nhn
 
-# 1. RU-98 실행 보고를 Reasoning에 전달해 판정·종료
-bash scripts/call_agent.sh orca "RU-98 판정·종료: docs/ru/RU-98.json과 talks/reports/2026-09-19_cross_machine_repro.md 검토"
+# 1. RU-98 종료로 수치 동결 해제 — perf_transfer 위임 재시도
+$PYTHON scripts/ops/task_queue.py retry perf_transfer
 
 # 2. 운영 상태 확인
 tmux list-sessions; squeue -u kimds
@@ -97,3 +97,4 @@ tmux list-sessions; squeue -u kimds
 [작성자: Claude Code / Platform Agent / claude-opus-5 (effort: 미확인) · 2026-09-19 09:40 KST]
 [작성자: OpenAI Codex / Reasoning Agent / GPT-5 (effort: 미확인) · 2026-09-19 11:20 KST]
 [작성자: opencode / Platform Agent / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 14:27 KST]
+[작성자: opencode / 종결권자(사용자 위임) / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 15:03 KST]

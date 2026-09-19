@@ -4017,6 +4017,29 @@
       "end_sha": "b3928268ef8490f693e358516a2ea3e16edeee4e",
       "date_range": "2026-09-16 ~ 2026-09-16",
       "commit_count": 0
+    },
+    {
+      "id": "RU-98",
+      "title": "결론 수준 교차 기계 재현성 계측",
+      "type": "reproduction",
+      "start_date": "2026-09-19T08:52:41+09:00",
+      "start_sha": "20a22364ef3dfeb84cc73313ae5cdaaa5531f3b6",
+      "question": "같은 코드·같은 config·같은 데이터로 5-branch Primary 7을 다른 장비(Slurm 클러스터 GPU 노드)에서 돌렸을 때, 2026-09-18 NHN NEXGEM(GPU 4)에서 얻은 과제별 fold-mean AUROC이 재현되는가. 표류 크기는 PROJECT.md 3.4의 4자리 요구 및 승격 임계 +0.0030과 비교해 어디에 놓이는가.",
+      "hypothesis": "부동소수 표류는 float32 반올림 규모(집계 margin 기준 절대 1e-6 수준, 합성 입력 실측)이므로 AUROC 4자리에는 거의 영향을 주지 않을 것이다. 기전은 BLAS 커널·벡터화 폭·리덕션 순서 차이로 추정하며 미확인이다. 앵커 어긋남 5e-4는 이보다 두 자릿수 크므로 장비가 원인이 아닐 것으로 본다 — 이것도 이 RU가 판별 대상으로 삼는다.",
+      "criteria": "결과를 보기 전에 고정한다. 과제별 |ΔAUROC|의 최댓값 기준: (1) < 0.0005 이면 4자리 정밀도가 장비를 건너 유지된다 — 앵커 5e-4 어긋남은 장비 탓이 아니다. (2) 0.0005 이상 0.0030 미만이면 4자리 값 앵커는 장비 간 성립 불가이나 승격 판정은 안전하다. (3) 0.0030 이상이면 장비가 승격 판정을 뒤집을 수 있어 허용 오차를 판정 규칙에 넣는 별도 결정이 필요하다. 부호 분포도 함께 본다 — 한쪽으로 쏠리면 계통 차이, 흩어지면 반올림.",
+      "budget": "약 1.94 GPU-hour (350 fold). array 원소당 --time=04:00:00. 초과 시 중단하고 보고한다.",
+      "kill": "선행 조건인 데이터 동일성이 깨지면 착수하지 않는다(2026-09-19 확인 완료: feature 파일 수·표본 sha256·fold manifest 내용 해시 전부 일치). 드라이버가 cu130에 못 미치는 노드에 배치되면 그 원소는 즉시 실패하고 해당 노드를 --exclude 하여 재제출한다. 예산 초과 시 중단.",
+      "next_actions": "sbatch --array=0-6 --wait scripts/slurm/xmachine_repro.sbatch 실행 후 과제별 AUROC을 talks/reports/2026-09-18_arm_parity.md 의 5-branch 참조값과 대조하고 talks/reports/2026-09-19_cross_machine_repro.md 에 provenance와 함께 기록한다.",
+      "experiment": "scripts/slurm/xmachine_repro.sbatch · config configs/baseline/v121_active.yaml (sha256 2a2ec33a97ab3e45) · 과제 7개 x fold 50 · 과제 하나가 array 원소 하나 · GPU 1장씩 병렬 · 배치는 Slurm에 맡기고 노드·GPU 모델·드라이버를 job 로그에 기록.",
+      "observations": "Slurm array 156357의 7개 원소가 모두 COMPLETED, ExitCode 0:0으로 종료됐다. 과제별 fold-mean AUROC은 B200 참조와 표시 정밀도 4자리에서 7/7 동일했다: ARID1A 0.5507, Histologic_Grade 0.6772, KEAP1 0.6038, KRAS 0.7004, SMAD4 0.4426, progression_regression 0.7891, PBRM1 0.5546; macro 0.6169. 양쪽 값이 같은 4자리 반올림 구간에 있으므로 과제별 실제 |Δ|는 0.0001 미만이며 사전 기준 0.0005 미만에 들어간다. 실행 보고: talks/reports/2026-09-19_cross_machine_repro.md.",
+      "decision": "판정 — 지지(supported) · 운영 결정: 종료. 사전 등록 기준 (1)을 충족한다: 5-branch Primary 7 과제별 fold-mean AUROC이 B200 참조와 표시 정밀도 4자리에서 7/7 동일하므로 각 과제의 실제 |ΔAUROC| < 0.0001이며 첫 기준 |Δ| < 0.0005에 들어간다. 부호 분포는 4자리에서 7개 모두 0이라 계통 편향을 볼 수 없다. 따라서 '4자리 정밀도가 장비를 건너 유지된다'와 '앵커 5e-4 어긋남은 장비 탓이 아니다'가 이 실행 범위에서 지지된다. 판정 주체: 사용자 위임에 따라 오케스트레이터/종결권자 자격으로 opencode가 판정했다. RU를 설계한 주체와 다른 세션이며, 판정의 독립성은 모델·문맥 분리로 부분적으로만 확보된다. 기준 (2)·(3)은 발동하지 않았고, 승격 판정 허용 오차를 판정 규칙에 넣을지는 별도 사용자 판단 사안으로 남긴다.",
+      "evidence": "기계 A 참조값: talks/reports/2026-09-18_arm_parity.md (5-branch, macro 0.6169). 코드 동등성: 패리티 실행 시점 830c973과 HEAD의 집계 margin이 이 기계에서 비트 동일(5branch 454a2effff16b2db, 7branch bf8f25ee1ff0ab9d) — 그 사이 src/ 변경 e2b0d79·bda3503은 집계 경로에 영향 없음. 데이터 동일성 대조 결과는 kill 항목 참조.",
+      "relations": "PROJECT.md 3.4(오염 검사 앵커) · D-050(provenance 기반 재설계) · D-053 · talks/reports/2026-09-18_arm_parity.md · 승격 임계는 PROJECT.md 4.",
+      "uncertainties": "앵커 5e-4 어긋남의 원인은 여전히 미확인이며 이 RU는 '장비가 원인인가'만 판별한다. 판정 근거의 한계: (a) 하드웨어 쌍 하나(B200 vs RTX A5000/A6000), 5-branch만 검정했고 7-branch 및 더 넓은 하드웨어·소프트웨어 조합의 일반화는 미측정이다. (b) 정확한 |ΔAUROC|는 4자리 표시에 더해 기계 A 원시 예측(predictions/parity_*v121_active.pt)이 현재 남아 있지 않아 독립 재계산이 불가하여 < 0.0001의 상계만 확보했다 — xmachine 예측의 정확 fold-mean이 보고 값과 4자리 일치함은 확인했다. (c) 합성 입력의 margin 표류(1e-6)가 실제 데이터 AUROC에 어떻게 전파되는지는 이 실행이 처음 쟀으나 별도 정밀 계측은 하지 않았다. fold 비용 20.0초/fold는 B200 실측이라 이 클러스터 카드에는 적용되지 않는다.",
+      "end_date": "2026-09-19T15:03:29+09:00",
+      "end_sha": "6f6d5ede78aa9112a36b28df59205d68a381e7bf",
+      "date_range": "2026-09-19 ~ 2026-09-19",
+      "commit_count": 14
     }
   ]
 }
