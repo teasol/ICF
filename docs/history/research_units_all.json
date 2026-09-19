@@ -4191,6 +4191,35 @@
       "end_sha": "e04eaf25cbb64ff0e0b67e0e31a61f52a24e49ab",
       "date_range": "2026-09-19 ~ 2026-09-19",
       "commit_count": 0
+    },
+    {
+      "id": "RU-104",
+      "title": "label-free context 합의 신호의 전이 검증 (SJ/SH 하향)",
+      "type": "confirmatory",
+      "start_date": "2026-09-20T04:02:04+09:00",
+      "start_sha": "9ca549a0b6c1bbbf724f0e7e8ce03c604facc91e",
+      "question": "RU-103이 건진 context-side margin만으로(라벨 미사용) 형상 브랜치 하향 신호를 만들 수 있는가? 사전 고정 규칙 R2: fold마다 context 슬라이드에서 기저 5브랜치(cv·bm·bd·qa·ds)의 trimmed-mean 확률(합의)과 형상 브랜치(SH·SJ) 확률의 **상관**을 계산해, 상관 < 0이면 그 형상 브랜치 가중을 0으로, 아니면 1로 두고 query를 재집계한다. R2의 paired fold Δ_macro가 `+0.003` 이상인가?",
+      "hypothesis": "RU-103의 in-sample 자기 AUROC은 퇴화했으나, 기저 합의와의 **상관**은 다른 신호다. 악화 3과제에서 형상 브랜치가 기저와 덜 일치(낮은/음의 상관)할 것으로 본다. 다만 상관의 크기가 과제 간에 겹치면 전이는 약해 Δ가 임계 미달일 것이다. 기전 미확인.",
+      "criteria": "결과를 보기 전에 고정한다. 신호: context_margins(RU-103 덤프)만 사용, 라벨 미사용. 합의 = 기저 5브랜치 sigmoid 확률의 trimmed_mean(최저·최고 1 절사). 형상 브랜치 신호 = context 슬라이드에 대한 corr(sigmoid(형상 margin), 합의). 규칙 R2(사전 고정): corr < 0 → 가중 0, ≥ 0 → 1. SH·SJ 각각 독립 적용. 주 판정: 같은 fold에서 R2와 F7을 짝지어 Δ_macro를 구하고 `Δ ≥ +0.003`이면 전이 확인. 함께 보고: 과제별 Δ, 형상 브랜치 drop율, corr 분포(악화 vs 나머지). 실행 무효: fold 누락, NaN, F7 재구성이 0.6226과 불일치. R2 외 규칙·임계는 사후 추가하지 않는다(추가하면 탐색으로 표시).",
+      "budget": "0 GPU-hour (RU-103의 predictions/ctxq_7b 오프라인 재집계).",
+      "kill": "context/query margin 누락, F7 재구성 불일치면 실행 무효. R2가 임계 미달이면 TGW 계보를 '전이 실패'로 종료하고 추가 규칙을 만들지 않는다. R2가 한 번도 발동하지 않으면(퇴화) 판별 불가로 적고 기각하지 않는다.",
+      "next_actions": "R2 ≥ +0.003: label-free 전이 확인 — TGW를 설계 후보로 승격 검토(T2). R2 < +0.003이나 퇴화: TGW 계보를 종료하고 그 관측을 기록한다. 어느 경우든 SEAL 10은 열지 않는다.",
+      "experiment": "RU-103의 predictions/ctxq_7b(context 자기 margin + query margin)를 오프라인 재집계. scripts/analysis/consensus_transfer_test.py로 사전 고정 규칙 R2(corr(형상, 기저 5브랜치 합의) < 0이면 그 형상 브랜치 가중 0)를 적용. GPU 0.",
+      "observations": "F7 macro 재구성 0.6226(공식 일치). context 상관(형상 브랜치 확률 vs 기저 5브랜치 trimmed-mean 확률): SH +0.55~+0.80, SJ +0.12~+0.28 — **전 과제에서 양수**이며 악화 3과제(PBRM1 sj +0.13, Grade +0.18, progression +0.25)가 나머지와 구분되지 않는다. R2는 KRAS에서만 SJ를 6% fold 하향했고, R2 macro 0.6225, **Δ = −0.0001**.",
+      "decision": "반박 · 종료(전이 실패). label-free context 합의 신호는 형상 브랜치를 하향할 지점을 가르지 못한다 — 형상 브랜치는 in-context에서 기저와 일관(양의 상관)인데도 query에서 3과제를 악화시킨다. 즉 **context→query 브랜치 유용성 전이가 성립하지 않는다.** RU-103(자기 AUROC 퇴화)·RU-102(oracle 상한이 SE 미만)·RU-104(합의 신호 실패)를 합쳐 TGW 계보를 종료한다. 기전 미확인이며, P5 #22(과제 판별 선택 신호 부재) 교착과 일치한다.",
+      "evidence": [
+        "scripts/analysis/consensus_transfer_test.py",
+        "predictions/ctxq_7b/*.pt",
+        "scripts/analysis/tgw_transfer_test.py",
+        "docs/research_directions.md P4 #16",
+        "talks/reports/2026-09-19_trim_rate_diagnostic.md"
+      ],
+      "relations": "선행 RU-103(context margin 덤프) · RU-101/102(형상 브랜치 진단) · C-20260919-3(label-free 합의 가설) · research_directions P4 #16(TGW).",
+      "uncertainties": "합의 신호는 라벨을 쓰지 않으나 상관이 낮은 원인이 무정보인지 분포 이동인지 구분되지 않는다. corr 임계 0은 사전 고정한 거친 규칙이다. 신호가 퇴화하면(발동 0) 전이를 시험하지 못한 것이므로 기각이 아니라 판별 불가다.",
+      "end_date": "2026-09-20T04:03:22+09:00",
+      "end_sha": "9ca549a0b6c1bbbf724f0e7e8ce03c604facc91e",
+      "date_range": "2026-09-20 ~ 2026-09-20",
+      "commit_count": 0
     }
   ]
 }
