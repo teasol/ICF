@@ -2358,3 +2358,28 @@ F3(대조군)만 유의: 새 지문의 기여가 없다는 뜻이므로 Task-Geo
 - **확인 필요 사항 및 한계 (Uncertainties)**: 결정론 파이프라인이므로 통계 증거는 재실행으로 늘지 않는다 — 얻는 것은 provenance 귀속과 7-branch 실측 초/fold다. 과제군집 CI 폭은 fold·과제 고정 때문에 좁혀지지 않으므로 '판별 불가'는 바뀌지 않을 것으로 본다. 기준선 재사용을 금지했으므로 세션 간 드리프트(5e-4)가 Δ에 섞이지 않지만, 단일 세션 2-arm 실행의 드리프트 분리는 여전히 하지 않는다. 좌석/사람 판정이 아니라 규칙 기계 적용이다.
 
 ---
+
+### RU-101. 7-branch 3/7 과제 악화의 브랜치 수준 진단
+
+- **일자 (Date)**: `2026-09-19` ~ `2026-09-19`
+- **커밋 범위**: - (`4115c78b` ... `4115c78b`)
+- **작업 유형**: `diagnostic`
+- **질문 (Question)**: 7-branch가 `Histologic_Grade`·`progression_regression`·`PBRM1` 3과제를 악화시키는(RU-100: 각 -0.0107·-0.0120·-0.0139) 기전은 무엇인가? SH·SJ 브랜치의 per-branch margin이 그 과제들에서 5-branch 대비 기여를 상쇄하거나 역전시키는가, 아니면 trimmed_mean 집계가 특정 브랜치에 지배되는가?
+- **가설 (Hypothesis)**: SH/SJ가 그 3과제에서 음의 기여를 하거나, 양수 기여를 하더라도 trimmed_mean에서 다른 브랜치와 충돌해 5-branch의 우위를 상쇄한다. 4과제(ARID1A·KEAP1·KRAS·SMAD4)에서는 SH/SJ 기여가 양이거나 중립일 것이다. 기전은 미확인.
+- **판정 기준 (Criteria, 사전 고정)**: 진단이므로 합격 컷을 두지 않고 관측을 보고한다. 산출: Primary 7 각 과제·fold별 per-branch margin(7-branch 실행). 보고 항목 — (1) 과제별 SH·SJ margin의 부호·평균·sd, (2) SH·SJ가 포함될 때와 제외될 때의 macro 및 과제별 Δ, (3) 악화 3과제와 나머지 4과제에서 SH·SJ margin 분포 차이, (4) trimmed_mean에서 어느 브랜치가 지배하는지. 실행 무효 조건: fold 누락, provenance 누락, per-branch margin 미저장, 4 GPU-h 초과. '기전 미확인'이면 그대로 적는다.
+- **예산 / 중단 조건**: 최대 1 GPU-hour (Primary 7 × 50 fold 7-branch per-branch margin 덤프, H100 실측 2.0초/fold → 약 0.2 GPU-h + 여유). / per-branch margin이 저장되지 않거나 provenance가 누락되면 실행 무효로 종료한다. 1 GPU-hour 초과 시 중단한다. margin에서 SH/SJ 기여를 분리할 수 없으면 '판별 불가'로 종료하고 꾸며내지 않는다.
+- **실험 및 변경 (Experiment)**: scripts/slurm/ru101_margins_7b.sbatch (job 157077, gnode6 H100, 310초=0.086 GPU-h): scripts/analysis/dump_branch_margins.py로 Primary 7 × 50 fold의 7-branch per-branch margin(cv·bm·bd·qa·ds·sj·sh)을 provenance와 함께 덤프(config_sha256 d8c8ae4dca9b8ecf). 이어 저장 margin을 오프라인 재분석해 trimmed_mean 집계를 재구성했다(7-branch vs sh/sj 제거 5-branch).
+- **관측 결과 (Observations)**: 재구성한 macro가 공식값을 정확히 재현했다 — 7br 0.6226, 5br 0.6169, 과제별 Δ는 RU-100과 일치. SJ 단독 AUROC(fold-mean): 악화 3과제 PBRM1 0.477·Histologic_Grade 0.530·progression 0.472 (평균 0.493 ≈ 무정보), 나머지 4과제 ARID1A 0.640·KEAP1 0.579·KRAS 0.480·SMAD4 0.543 (평균 0.561). SH 단독: 악화 평균 0.549 vs 나머지 0.571(차 작음). SH는 PBRM1 0.501로 무정보에 가깝고 progression에서는 0.622로 높다. 즉 SJ가 7-branch가 악화되는 과제들에서 정확히 무정보(0.49)이고, 나머지에서 상대적으로 유용하다.
+- **결정 (Decision)**: 지지(부분) · 종료. 관측은 'SJ 추가가 악화 3과제에서 앙상블을 희석한다'와 일관된다 — SJ 단독 AUROC이 그 과제들에서 ≈0.49로 무정보다. SH는 같은 방향이나 약하다. 단 이것은 연관이며 인과 분해가 아니다: trimmed_mean(sigmoid 후 트림 평균)와 브랜치 간 상호작용을 margin만으로 완전히 분해하지 못했다. **기전 부분 확인.** 다음 후보 아이디어로 '과제 적응적 브랜치 가중/무정보 브랜치 제거'를 검토 대상에 올린다(승격 아님, T2).
+- **결과별 후속 행동**: 기전이 보이면: 후보 설계(집계·가중·브랜치 조합) 입력으로 정리하고 research_directions §0에 후보를 등록한다(승격 아님, T2). 안 보이면: '판별 불가'로 종료하고 3/7 악화를 미확인 상태로 남기며 추가 진단의 필요성을 기록한다.
+- **원문 근거 (Evidence)**:
+  - scripts/slurm/ru101_margins_7b.sbatch
+  - predictions/margins_7b/*.pt (7과제, per-branch margin + provenance)
+  - predictions/margins_7b/provenance.json
+  - slurm_outputs/2026-09-19/1918/ru101-157077.out
+  - talks/reports/2026-09-19_ru100_parity_manifest.json
+  - talks/reports/2026-09-18_arm_parity.md
+- **선행·후속 관계 (Relations)**: 선행 RU-100(7-branch 3/7 악화 재현, provenance) · C-20260919-2((a) 진단 보류 해소) · talks/reports/2026-09-18_arm_parity.md · PROJECT.md §4.1(fold는 과제 내 독립 아님) · D-053(provenance).
+- **확인 필요 사항 및 한계 (Uncertainties)**: per-branch margin은 결정론적 산출이나, 진단은 저장 margin의 오프라인 재분석이라 GPU를 1회만 쓴다. 3과제 악화가 과제별 fold sd와 구분되는지는 fold 수준 분산으로 보고하되 판정 컷은 두지 않는다. SH/SJ의 기여가 집계 함수(trimmed_mean)와 상호작용하므로 margin만으로 trimmed_mean 결과를 완전 분해하지는 못한다.
+
+---
