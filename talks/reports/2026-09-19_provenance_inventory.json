@@ -1,0 +1,242 @@
+{
+ "checked_at_kst": "2026-09-19",
+ "round": "C-20260919-2 step-1 (GPU-0 read-only)",
+ "evaluate_pure_provenance": {
+  "call_site": "scripts/evaluate_pure.py main() output-save block (unconditional when --output)",
+  "gated_by_screen_only": false,
+  "config_hash_basis": "declared config file (args.config) via TrainingFreeConfig.from_yaml; no substitution path",
+  "save_keys": [
+   "task_dir",
+   "fold_indices",
+   "fold_aurocs",
+   "fold_auroc_mean",
+   "per_fold",
+   "provenance"
+  ],
+  "per_fold_keys": [
+   "fold",
+   "slide_id",
+   "label",
+   "probability"
+  ],
+  "per_branch_margin": false,
+  "per_branch_margin_note": "per-branch margins are produced by scripts/analysis/dump_branch_margins.py, not by the official runner"
+ },
+ "screen_only": {
+  "implemented_in_src": false,
+  "read_by": [],
+  "exported_by_scripts": [
+   "scripts/run_ru85_tier1_screen.sh",
+   "scripts/run_ru87_precision.sh",
+   "scripts/run_ru90_shape_triple.sh",
+   "scripts/run_v121_loo_capacity.sh",
+   "scripts/run_v121_shape_screen.sh",
+   "scripts/run_v121_rm_screen.sh"
+  ],
+  "note": "D-050/D-053: ICF_* env vars are never read by src/. evaluate_pure mentions it only in a legacy-golden comment."
+ },
+ "wrapping_runner": {
+  "name": "scripts/eval_seal_tasks.sh",
+  "invokes": "scripts/evaluate_pure.py directly",
+  "substitution_fallback": "removed - rejects configs carrying a 'model:' block with a loud error (was D-053 silent fallback)",
+  "screen_only_interface": false
+ },
+ "artifacts": [
+  {
+   "path": "predictions/parity_cptac_ccrcc_PBRM1_mutation_v121_7branch_active.pt",
+   "n_folds": 50,
+   "per_branch_margin": false,
+   "config_sha256": "d8c8ae4dca9b8ecf",
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa",
+    "sh",
+    "sj"
+   ]
+  },
+  {
+   "path": "predictions/parity_cptac_ccrcc_PBRM1_mutation_v121_active.pt",
+   "n_folds": 50,
+   "per_branch_margin": false,
+   "config_sha256": "2a2ec33a97ab3e45",
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa"
+   ]
+  },
+  {
+   "path": "predictions/parity_cptac_lscc_ARID1A_mutation_v121_7branch_active.pt",
+   "n_folds": 50,
+   "per_branch_margin": false,
+   "config_sha256": "d8c8ae4dca9b8ecf",
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa",
+    "sh",
+    "sj"
+   ]
+  },
+  {
+   "path": "predictions/parity_cptac_lscc_ARID1A_mutation_v121_active.pt",
+   "n_folds": 50,
+   "per_branch_margin": false,
+   "config_sha256": "2a2ec33a97ab3e45",
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa"
+   ]
+  },
+  {
+   "path": "predictions/parity_cptac_lscc_Histologic_Grade_v121_7branch_active.pt",
+   "n_folds": 50,
+   "per_branch_margin": false,
+   "config_sha256": "d8c8ae4dca9b8ecf",
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa",
+    "sh",
+    "sj"
+   ]
+  },
+  {
+   "path": "predictions/parity_cptac_lscc_Histologic_Grade_v121_active.pt",
+   "n_folds": 50,
+   "per_branch_margin": false,
+   "config_sha256": "2a2ec33a97ab3e45",
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa"
+   ]
+  },
+  {
+   "path": "predictions/parity_cptac_lscc_KEAP1_mutation_v121_7branch_active.pt",
+   "n_folds": 50,
+   "per_branch_margin": false,
+   "config_sha256": "d8c8ae4dca9b8ecf",
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa",
+    "sh",
+    "sj"
+   ]
+  },
+  {
+   "path": "predictions/parity_cptac_lscc_KEAP1_mutation_v121_active.pt",
+   "n_folds": 50,
+   "per_branch_margin": false,
+   "config_sha256": "2a2ec33a97ab3e45",
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa"
+   ]
+  },
+  {
+   "path": "predictions/parity_cptac_luad_KRAS_mutation_v121_7branch_active.pt",
+   "n_folds": 50,
+   "per_branch_margin": false,
+   "config_sha256": "d8c8ae4dca9b8ecf",
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa",
+    "sh",
+    "sj"
+   ]
+  },
+  {
+   "path": "predictions/parity_cptac_luad_KRAS_mutation_v121_active.pt",
+   "n_folds": 50,
+   "per_branch_margin": false,
+   "config_sha256": "2a2ec33a97ab3e45",
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa"
+   ]
+  },
+  {
+   "path": "predictions/parity_cptac_pda_SMAD4_mutation_v121_7branch_active.pt",
+   "n_folds": 50,
+   "per_branch_margin": false,
+   "config_sha256": "d8c8ae4dca9b8ecf",
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa",
+    "sh",
+    "sj"
+   ]
+  },
+  {
+   "path": "predictions/parity_cptac_pda_SMAD4_mutation_v121_active.pt",
+   "n_folds": 50,
+   "per_branch_margin": false,
+   "config_sha256": "2a2ec33a97ab3e45",
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa"
+   ]
+  },
+  {
+   "path": "predictions/parity_ucla_lung_progression_regression_v121_7branch_active.pt",
+   "n_folds": 50,
+   "per_branch_margin": false,
+   "config_sha256": "d8c8ae4dca9b8ecf",
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa",
+    "sh",
+    "sj"
+   ]
+  },
+  {
+   "path": "predictions/parity_ucla_lung_progression_regression_v121_active.pt",
+   "n_folds": 50,
+   "per_branch_margin": false,
+   "config_sha256": "2a2ec33a97ab3e45",
+   "branch_list": [
+    "bd",
+    "bm",
+    "cv",
+    "ds",
+    "qa"
+   ]
+  }
+ ]
+}

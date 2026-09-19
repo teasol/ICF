@@ -1,0 +1,31 @@
+{
+  "round_id": "C-20260919-2",
+  "question": "계측 복구가 진전됐다. 공식 러너(evaluate_pure.py)에 provenance가 붙었고(RU-100), D-042 승격 비교(5→7)가 verified이며(Δ_macro +0.0057, 과제군집 95% CI [-0.0115,+0.0228] 0 포함, 3/7 악화), SEAL 10 개봉은 보류다(D-047·D-057). 목표는 SEAL 10에서 ABMIL(0.7266)을 넘는 것이나 후보 선택은 Primary 7만으로 한다.\n\n이 회차는 다음 한 수를 정한다. 다음 중 무엇을 먼저 할 것인가:\n(a) 7-branch가 3/7 과제(`Histologic_Grade`·`progression_regression`·`PBRM1`)를 악화시키는 기전 진단,\n(b) 오염 검사 재설계(계측 복구 잔여: 값 앵커는 D-050으로 폐지, 대체 검사 필요),\n(c) Primary 7에서 개선 여지가 있는 새 탐색 프로브(닫힌 축 제외).\n\n답할 것:\n(1) 세 선택지 각각의 사전 고정 기준·비용(GPU-hour)·반증 조건을 대라.\n(2) 셋 중 하나를 고르고 왜 그 순서인지 대라.\n(3) 고른 것의 실행 가능한 첫 스텝(제출 명령·산출물 형식 포함)을 대라.\n(4) 그 선택이 SEAL 10 결과를 선택에 쓰지 않으면서(D-047) 목표에 다가가는 경로인지 밝혀라.\n\n제약: 이 회차는 탐색이며 공식 후보 승격이 아니다(T2). Primary 7만 쓴다. SEAL 10은 입력에 없다. 제공된 문서에 없는 수치를 지어내지 말라. 관측과 추론을 구분하라. 동의 자체에는 가치가 없다. 합의를 추구하지 말라.",
+  "ru_type": "탐색",
+  "prefixed_criteria": "",
+  "composition_rationale": "다음 한 수 선택이므로 제안(P)이 세 선택지의 비용·기준·첫 스텝을 구체화하고, 반증(R)이 '고른 선택이 목표에 닿지 못한다/반증 불가능하다/닫힌 축을 되살린다'를 공격한다. 감사(A)는 선택 프로브가 SEAL 10 숫자를 선택에 쓰는지(D-047), 닫힌 축(`closed_axes.md`)을 건드리는지, 평가 독립성·라벨 사용을 점검한다. 이론(T)은 (a)의 기전 식별 가능성과 (b)의 검사 설계 타당성을 본다. 종합(S)은 네 칸으로 나누고 실행 가능한 첫 스텝 하나를 특정한다. 실측(M)과 외부(E)는 제외: 좌석은 GPU 실행·인터넷이 없고 질문이 내부 방향 선택이다. 좌석 전원 동일 모델·엔드포인트(모델 다양성 0) - 결론에 명시. Phase B 기본 꺼짐(2026-09-18 A/B).",
+  "max_authority": "T1",
+  "convener": "opencode (deepseek-v4.1-flash)",
+  "state_documents": [
+    "docs/PROJECT.md",
+    "docs/current_status.md",
+    "docs/closed_axes.md",
+    "talks/reports/2026-09-18_arm_parity.md",
+    "talks/reports/2026-09-18_foldfit_cost.md"
+  ],
+  "max_tokens_per_seat": 32000,
+  "max_total_calls": 14,
+  "seats": [
+    {"name": "P1", "archetype": "P", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.7,
+     "data_slice": ["docs/PROJECT.md", "docs/current_status.md", "docs/closed_axes.md", "talks/reports/2026-09-18_arm_parity.md", "talks/reports/2026-09-18_foldfit_cost.md"]},
+    {"name": "R1", "archetype": "R", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.5,
+     "data_slice": ["docs/PROJECT.md", "docs/current_status.md", "docs/closed_axes.md", "talks/reports/2026-09-18_arm_parity.md", "talks/reports/2026-09-18_foldfit_cost.md"]},
+    {"name": "A1", "archetype": "A", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.2,
+     "data_slice": ["docs/PROJECT.md", "docs/current_status.md", "docs/closed_axes.md", "talks/reports/2026-09-18_arm_parity.md", "talks/reports/2026-09-18_foldfit_cost.md"]},
+    {"name": "T1", "archetype": "T", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.4,
+     "data_slice": ["docs/PROJECT.md", "docs/current_status.md", "docs/closed_axes.md", "talks/reports/2026-09-18_arm_parity.md", "talks/reports/2026-09-18_foldfit_cost.md"]},
+    {"name": "S1", "archetype": "S", "endpoint": "http://100.97.255.47:8000/v1/chat/completions", "model": "deepseek-v4.1-flash", "temperature": 0.2,
+     "data_slice": ["docs/PROJECT.md", "docs/current_status.md", "docs/closed_axes.md", "talks/reports/2026-09-18_arm_parity.md", "talks/reports/2026-09-18_foldfit_cost.md"]}
+  ],
+  "note": "다음 연구 방향 선택(탐색). SEAL 10 수치 미입력(D-047·D-057). 좌석 전원 동일 모델 - 모델 다양성 0. Phase B 기본 꺼짐. max_authority T1(탐색 순서 결정; 공식 후보 승격은 T2)."
+}
