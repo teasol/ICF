@@ -106,6 +106,15 @@ A6000에서 과제당 50 fold가 `72\~1264`초(과제 크기에 따라 `1.4\~25`
   (`5branch 454a2effff16b2db`, `7branch bf8f25ee1ff0ab9d`). 그 사이 `src/` 변경
   `e2b0d79`·`bda3503`(미검토 자동 편집)은 집계 경로에 영향 없음.
 
+### 직전 판의 데이터 경고는 해소됐다
+
+NHN 쪽 세션이 `e604b9c`에서 **"코드는 lustre라 따라가지만 feature 데이터는 로컬 xfs라
+계산 노드에서 안 보일 수 있다 — 그 전에는 어떤 제출도 의미가 없다"**고 경고했다.
+그 경고는 NHN 기계 기준이었고, **이 클러스터에서는 해당되지 않는다.** 실측:
+`data/repro_labels_folds/features/*`가 `/data-hdd/archive/public/HE/pathobench/...`로
+심볼릭돼 있고 계산 노드에서 정상적으로 읽힌다(RU-98 job 4건이 실제로 완주했다).
+NHN에서 계산 노드로 나갈 때는 그 경고가 여전히 유효하다.
+
 ## 4. 오늘 고친 것 — 안전망이 고장나 있었다
 
 **`numeric_fingerprint.py --check`가 아무것도 비교하지 않고 통과해 왔다.**
