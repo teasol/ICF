@@ -105,25 +105,30 @@ class TestTaskBranches(unittest.TestCase):
     def setUp(self):
         self._tmp = TemporaryDirectory()
         self._saved_branches = qm.git_branches
+        self._saved_subjects = qm.git_subjects
         self._saved_tasks = qm.TASKS
         qm.TASKS = Path(self._tmp.name)
         qm.git_branches = lambda: ["main", "chore/queue_monitor-0919-0855",
                                    "origin/chore/docs_links-0918"]
+        qm.git_subjects = lambda: ["Merge branch 'chore/docs_links-0918'"]
         for name in ("queue_monitor", "docs_links", "perf_transfer"):
             (qm.TASKS / f"{name}.md").write_text("x", encoding="utf-8")
 
     def tearDown(self):
         qm.git_branches = self._saved_branches
+        qm.git_subjects = self._saved_subjects
         qm.TASKS = self._saved_tasks
         self._tmp.cleanup()
 
-    def test_branch_prefix_marks_task_started(self):
+    def test_commit_marks_completed_and_branch_marks_started(self):
         by_name = {t["name"]: t for t in qm.read_tasks()}
         self.assertEqual(by_name["queue_monitor"]["branch"],
                          "chore/queue_monitor-0919-0855")
         self.assertTrue(by_name["queue_monitor"]["started"])
-        self.assertEqual(by_name["docs_links"]["branch"],
-                         "origin/chore/docs_links-0918")
+        self.assertEqual(by_name["queue_monitor"]["status"], "착수됨")
+        self.assertIsNone(by_name["docs_links"]["branch"])
+        self.assertEqual(by_name["docs_links"]["status"], "완료")
+        self.assertTrue(by_name["docs_links"]["completed"])
         self.assertFalse(by_name["perf_transfer"]["started"])
 
 

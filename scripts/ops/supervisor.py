@@ -60,6 +60,7 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 OPS = PROJECT_ROOT / "talks/ops"
 QUEUE, DONE = OPS / "queue", OPS / "done"
+TASKS = OPS / "tasks"
 FAILURES = OPS / "failures.jsonl"
 #: Templates that re-enter the queue on a period. A chore that runs once and
 #: lands in done/ stops being a chore -- on 2026-09-18 the queue drained in one
@@ -147,6 +148,66 @@ def refill_recurring(now: float) -> list[str]:
         target.write_text(json.dumps(spec, ensure_ascii=False), encoding="utf-8")
         refilled.append(spec.get("label", tpl.stem))
     return refilled
+
+
+def _git_lines(*args: str) -> list[str]:
+    """Run one bounded git query; a failed query means no evidence."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(PROJECT_ROOT), *args],
+            capture_output=True, text=True, timeout=30,
+        )
+        return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+    except Exception:  # noqa: BLE001 - dispatch must survive an unavailable git
+        return []
+
+
+def task_state(name: str, refs: list[str], subjects: list[str]) -> str:
+    """Return completed / started / pending from durable Git evidence.
+
+    A branch is only transient evidence: merged task branches are normally
+    deleted. Commit subjects survive that cleanup, so they decide completion.
+    """
+    edit_subject = f"chore({name}):"
+    merge_subject = f"Merge branch 'chore/{name}-"
+    if any(edit_subject in subject or merge_subject in subject for subject in subjects):
+        return "completed"
+    for ref in refs:
+        core = ref[len("origin/"):] if ref.startswith("origin/") else ref
+        if core == f"chore/{name}" or core.startswith(f"chore/{name}-"):
+            return "started"
+    return "pending"
+
+
+def refill_delegated_tasks() -> list[str]:
+    """Queue each unfinished task specification exactly once.
+
+    The task directory used to be display-only: adding a markdown task made it
+    visible in the monitor but nothing copied it into the supervisor queue.
+    Done markers prevent automatic retries after a failed run; failures remain
+    explicit in failures.jsonl and require a deliberate human retry.
+    """
+    refs = _git_lines("for-each-ref", "--format=%(refname:short)",
+                      "refs/heads", "refs/remotes")
+    subjects = _git_lines("log", "--all", "--format=%s")
+    queued = []
+    for task in sorted(TASKS.glob("*.md")):
+        name = task.stem
+        card_name = f"40_task_{name}.json"
+        if (QUEUE / card_name).exists() or (DONE / card_name).exists():
+            continue
+        if task_state(name, refs, subjects) != "pending":
+            continue
+        spec = {
+            "kind": "routine",
+            "label": f"task:{name}",
+            "cmd": f"bash scripts/ops/routine_opencode.sh talks/ops/tasks/{name}.md",
+            "parallel": True,
+        }
+        (QUEUE / card_name).write_text(
+            json.dumps(spec, ensure_ascii=False), encoding="utf-8")
+        queued.append(name)
+    return queued
 
 
 def next_item() -> Path | None:
@@ -310,6 +371,10 @@ def main() -> None:
         refilled = refill_recurring(time.time())
         if refilled:
             print(f"[{datetime.now(KST):%H:%M:%S}] 주기 잡무 복귀: {', '.join(refilled)}",
+                  flush=True)
+        delegated = refill_delegated_tasks()
+        if delegated:
+            print(f"[{datetime.now(KST):%H:%M:%S}] 위임 작업 큐 등록: {', '.join(delegated)}",
                   flush=True)
         snap = snapshot()
 

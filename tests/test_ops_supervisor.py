@@ -53,5 +53,41 @@ class TestQueueOrder(unittest.TestCase):
         self.assertTrue((sup.DONE / "01_bad.json").is_file())
 
 
+class TestDelegatedTasks(unittest.TestCase):
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        root = Path(self._tmp.name)
+        self._saved = (sup.QUEUE, sup.DONE, sup.TASKS, sup._git_lines)
+        sup.QUEUE, sup.DONE, sup.TASKS = root / "queue", root / "done", root / "tasks"
+        sup.QUEUE.mkdir(); sup.DONE.mkdir(); sup.TASKS.mkdir()
+
+    def tearDown(self):
+        sup.QUEUE, sup.DONE, sup.TASKS, sup._git_lines = self._saved
+        self._tmp.cleanup()
+
+    def test_merged_tasks_are_not_queued_but_pending_tasks_are(self):
+        for name in ("docs_links", "perf_transfer"):
+            (sup.TASKS / f"{name}.md").write_text("task", encoding="utf-8")
+        sup._git_lines = lambda *args: (
+            ["main"] if args[0] == "for-each-ref"
+            else ["Merge branch 'chore/docs_links-0918-2055'"])
+
+        self.assertEqual(sup.refill_delegated_tasks(), ["perf_transfer"])
+        card = json.loads((sup.QUEUE / "40_task_perf_transfer.json").read_text())
+        self.assertEqual(card["label"], "task:perf_transfer")
+        self.assertIn("perf_transfer.md", card["cmd"])
+
+    def test_done_marker_prevents_automatic_retry(self):
+        (sup.TASKS / "perf_transfer.md").write_text("task", encoding="utf-8")
+        (sup.DONE / "40_task_perf_transfer.json").write_text("{}", encoding="utf-8")
+        sup._git_lines = lambda *args: []
+        self.assertEqual(sup.refill_delegated_tasks(), [])
+
+    def test_task_state_prefers_durable_completion(self):
+        refs = ["chore/queue_monitor-0919-0855"]
+        subjects = ["Merge branch 'chore/queue_monitor-0919-0855'"]
+        self.assertEqual(sup.task_state("queue_monitor", refs, subjects), "completed")
+
+
 if __name__ == "__main__":
     unittest.main()

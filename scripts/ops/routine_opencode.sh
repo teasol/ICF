@@ -22,8 +22,68 @@ TASK="${1:?usage: routine_opencode.sh <task.md>}"
 NAME="$(basename "$TASK" .md)"
 BRANCH="chore/${NAME}-$(date +%m%d-%H%M)"
 TREE="${ROOT}/../ICF.worktrees/chore-${NAME}"
-# 2026-09-18: the Qwen servers died; DeepSeek took GPUs 4-7 on port 8000.
-MODEL="${ICF_OPENCODE_MODEL:-deepseek/deepseek-v4.1-flash}"
+# OpenCode's built-in `deepseek/*` provider is the public HTTPS service. Merely
+# copying llm.local.json into the worktree does not make OpenCode use our vLLM
+# server. Build an explicit OpenAI-compatible provider from the same config the
+# other ops scripts read, and fail before creating work if that endpoint is not
+# reachable. This prevents a healthy public API call from masquerading as local
+# DeepSeek utilisation.
+LLM_CONFIG="$ROOT/talks/ops/llm.local.json"
+[ -f "$LLM_CONFIG" ] || LLM_CONFIG="$ROOT/talks/ops/llm.json"
+readarray -t LLM_VALUES < <("$ROOT/.venv/bin/python" - "$LLM_CONFIG" <<'PY'
+import json, sys
+from urllib.parse import urlsplit, urlunsplit
+
+cfg = json.load(open(sys.argv[1], encoding="utf-8"))
+endpoint = cfg["endpoints"][0]
+parts = urlsplit(endpoint)
+path = parts.path
+for suffix in ("/chat/completions", "/completions"):
+    if path.endswith(suffix):
+        path = path[:-len(suffix)]
+        break
+print(urlunsplit((parts.scheme, parts.netloc, path.rstrip("/"), "", "")))
+print(cfg["model"])
+PY
+)
+BASE_URL="${LLM_VALUES[0]:?LLM base URL missing}"
+SERVER_MODEL="${LLM_VALUES[1]:?LLM model missing}"
+MODEL="${ICF_OPENCODE_MODEL:-icf-vllm/$SERVER_MODEL}"
+export OPENCODE_CONFIG_CONTENT="$("$ROOT/.venv/bin/python" - "$BASE_URL" "$SERVER_MODEL" <<'PY'
+import json, sys
+
+base_url, model = sys.argv[1:]
+print(json.dumps({
+    "model": f"icf-vllm/{model}",
+    "provider": {
+        "icf-vllm": {
+            "npm": "@ai-sdk/openai-compatible",
+            "name": "ICF local vLLM",
+            "options": {"baseURL": base_url, "apiKey": "none"},
+            "models": {
+                model: {
+                    "id": model,
+                    "name": f"{model} (local)",
+                    "reasoning": True,
+                    "tool_call": True,
+                    "temperature": True,
+                    "limit": {"context": 262144, "output": 32000},
+                }
+            },
+        }
+    },
+}))
+PY
+)"
+
+"$ROOT/.venv/bin/python" - "$BASE_URL" <<'PY'
+import json, sys, urllib.request
+
+url = sys.argv[1].removesuffix("/v1") + "/v1/models"
+with urllib.request.urlopen(url, timeout=5) as response:
+    json.load(response)
+print(f"local-vllm-ok {url}")
+PY
 
 # Changed only by user decision and recorded by hand. A background edit here
 # would rewrite the project's canon without anyone deciding anything.
@@ -35,7 +95,7 @@ rm -rf "$TREE"
 git worktree prune
 git worktree add -b "$BRANCH" "$TREE" HEAD >/dev/null 2>&1 || {
   echo "worktree 생성 실패" >&2; exit 2; }
-echo "=== ${NAME} · 브랜치 ${BRANCH} · 모델 ${MODEL} ==="
+echo "=== ${NAME} · 브랜치 ${BRANCH} · 모델 ${MODEL} · ${BASE_URL} ==="
 
 # git-ignore 되는 기계별 override 는 새 worktree 로 따라오지 않는다. LLM 주소가 그 파일에만
 # 있는 기계(Slurm 로그인 노드)에서는 위임받은 모델이 자기 서버에 못 닿아 "No route to host"

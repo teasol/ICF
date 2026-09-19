@@ -251,19 +251,39 @@ def git_branches() -> list[str]:
         return []
 
 
+def git_subjects() -> list[str]:
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(PROJECT_ROOT), "log", "--all", "--format=%s"],
+            capture_output=True, text=True, timeout=10,
+        )
+        return [s for s in out.stdout.splitlines() if s.strip()]
+    except Exception:  # noqa: BLE001 - git이 없으면 완료 여부를 모른다
+        return []
+
+
+def task_state(name: str, branches: list[str], subjects: list[str]) -> tuple[str, str | None]:
+    """완료 커밋은 영속 증거, 브랜치는 진행 중의 일시적 증거다."""
+    edit_subject = f"chore({name}):"
+    merge_subject = f"Merge branch 'chore/{name}-"
+    if any(edit_subject in subject or merge_subject in subject for subject in subjects):
+        return "완료", None
+    for branch in branches:
+        core = branch[len("origin/"):] if branch.startswith("origin/") else branch
+        if core == f"chore/{name}" or core.startswith(f"chore/{name}-"):
+            return "착수됨", branch
+    return "미착수", None
+
+
 def read_tasks() -> list[dict[str, Any]]:
     branches = git_branches()
+    subjects = git_subjects()
     items = []
     for path in sorted(TASKS.glob("*.md")):
         name = path.stem
-        found = None
-        for branch in branches:
-            core = branch[len("origin/"):] if branch.startswith("origin/") else branch
-            if core == f"chore/{name}" or core.startswith(f"chore/{name}-"):
-                found = branch
-                break
-        items.append({"name": name, "branch": found,
-                      "started": found is not None})
+        status, branch = task_state(name, branches, subjects)
+        items.append({"name": name, "branch": branch, "status": status,
+                      "started": status != "미착수", "completed": status == "완료"})
     return items
 
 
@@ -352,6 +372,7 @@ PAGE = """<!doctype html>
   tr.fail td { background:#3a1212; color:#ffb3b3; }
   .pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:11px; }
   .pill.started { background:#1d3a24; color:#8fe0a0; }
+  .pill.done { background:#17384a; color:#8fd4ef; }
   .pill.todo { background:#3a341d; color:#e0d08f; }
   code { color:#c8d3e0; }
 </style>
@@ -410,8 +431,9 @@ function render(s){
   document.getElementById('tasks').innerHTML = table(
     ['작업','착수','브랜치'],
     s.tasks.map(t=>[esc(t.name),
-      t.started?'<span class="pill started">착수됨</span>'
-               :'<span class="pill todo">미착수</span>',
+      t.completed?'<span class="pill done">완료</span>'
+        :(t.started?'<span class="pill started">착수됨</span>'
+                   :'<span class="pill todo">미착수</span>'),
       t.branch?('<code>'+esc(t.branch)+'</code>'):'<span class="muted">없음</span>']));
 
   document.getElementById('ticks').innerHTML = table(
