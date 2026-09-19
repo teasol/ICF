@@ -4161,6 +4161,36 @@
       "end_sha": "eae04a333833cd42645d99185ccded4d3387c729",
       "date_range": "2026-09-19 ~ 2026-09-19",
       "commit_count": 0
+    },
+    {
+      "id": "RU-103",
+      "title": "TGW context-only 신호의 Context→Query 전이 검증",
+      "type": "confirmatory",
+      "start_date": "2026-09-19T19:32:04+09:00",
+      "start_sha": "e04eaf25cbb64ff0e0b67e0e31a61f52a24e49ab",
+      "question": "Context 라벨만으로 얻는 신호 — 각 형상 브랜치(SH·SJ)의 **context 집합 자기 AUROC**(context가 곧 질의) — 가 query 성능을 예측하는가? 사전 고정 규칙 R1: fold마다 형상 브랜치의 context AUROC < 0.5이면 그 브랜치 가중을 0으로, 아니면 1로 두고 trimmed_mean을 재집계한다. R1의 paired fold Δ_macro가 승격 임계 `+0.003` 이상인가?",
+      "hypothesis": "RU-102 oracle 상한(+0.0053)은 query 라벨을 쓴 것이고, context 자기 AUROC는 악화 3과제에서 낮게 나올 것이다. 그러나 context→query 전이는 약해 R1의 실현 Δ는 `+0.003`에 못 미칠 것으로 본다(전이 실패 가능성). 기전 미확인.",
+      "criteria": "결과를 보기 전에 고정한다. 신호: fold마다 `clf.branch_margins(context_bags, context_labels, context_bags)`로 context 슬라이드 자신의 브랜치 margin을 얻어 context 라벨과의 AUROC을 계산한다(쿼리 라벨 미사용 — 누출 없음). 규칙 R1(사전 고정): SH·SJ 각각 context AUROC < 0.5 → 가중 0, ≥ 0.5 → 1. 그 가중으로 trimmed_mean 재집계. 주 판정: 같은 fold에서 R1과 F7을 짝지어 Δ_macro를 구하고, `Δ ≥ +0.003`이고 과제군집 SE `0.0070`과 비교해 방향을 보고한다. 성공/실패 외에 '신호는 있으나 전이 없음'을 구분해 기록한다. 실행 무효: fold 누락, NaN, provenance 누락, 재구성 F7 macro가 0.6226과 불일치. R1 외의 규칙을 사후에 추가하지 않는다(추가하면 탐색으로 표시).",
+      "budget": "최대 0.5 GPU-hour (Primary 7 × 50 fold context+query margin 덤프, H100 실측 2.0초/fold 기준 약 0.2 GPU-h + 여유).",
+      "kill": "context/query margin이 저장되지 않거나 provenance가 누락되면 실행 무효. F7 재구성이 0.6226과 다르면 실행 무효. R1이 임계 미달이면 그 자리에서 TGW를 기각하고 추가 탐색 규칙을 만들지 않는다(추가하면 별도 RU).",
+      "next_actions": "R1 ≥ +0.003: context-only 신호 전이 확인 — TGW를 설계 후보로 승격 검토에 올린다(승격은 T2). R1 < +0.003: TGW를 'context→query 전이 실패'로 기각하고 큐에서 내리며, 그 관측을 기록한다. 신호는 있으나 전이 없음이면 그 구분을 남긴다.",
+      "experiment": "scripts/slurm/ru103_ctxq_margins.sbatch (job 157078, gnode6 H100, 635초=0.176 GPU-h): dump_context_query_margins.py로 Primary 7 × 50 fold의 context 자기 margin과 query margin을 branch별로 덤프. 이어 scripts/analysis/tgw_transfer_test.py로 사전 고정 규칙 R1을 오프라인 적용.",
+      "observations": "F7 macro 재구성 0.6226(공식 일치). context 자기 AUROC: SH 0.824~0.993(평균 0.929), SJ 0.519~0.748(평균 0.627), 350 fold 전부 ≥0.5. 따라서 규칙 R1은 SH·SJ를 **한 번도 제거하지 않았고**(drop 0.00/0.00), R1 ≡ F7, Δ = +0.0000. F7 재구성 0.6226.",
+      "decision": "판별 불가 · 종료. R1이 발동하지 않아 context→query 전이를 **시험하지 못했다.** Δ=0은 '전이 실패'가 아니라 규칙 no-op의 결과다. 사전 kill('R1 미달 → TGW 기각')을 기계적으로 적용하지 않았다 — 근거 없이 기각하면 '효과 없음'과 '판별 불가'를 혼동한다(AGENTS §7). 원인은 context 자기 AUROC이 **in-sample**(자기 자신을 예측)이라 훈련 정확도처럼 부풀려져 0.5를 넘지 못하는 구성 결함이다. TGW는 큐에 남기되 'context-only 신호 구성 실패'로 표시하고, 유효한 신호(context 내 held-out/LOO AUROC, 데이터 기반 임계) 재설계는 별도 RU로 분리한다. 사후 규칙 추가는 하지 않았다.",
+      "evidence": [
+        "scripts/analysis/dump_context_query_margins.py",
+        "scripts/analysis/tgw_transfer_test.py",
+        "scripts/slurm/ru103_ctxq_margins.sbatch",
+        "predictions/ctxq_7b/*.pt",
+        "slurm_outputs/2026-09-19/1932/ru103-157078.out",
+        "docs/research_directions.md P4 #16"
+      ],
+      "relations": "선행 RU-101(SJ 무정보) · RU-102(oracle 상한 +0.0053) · research_directions P4 #16(TGW) · closed_axes CA-08(제한된 결합 연구 예외·선택 이력 요건).",
+      "uncertainties": "context 자기 AUROC은 라벨 사용이 아니라 in-context 자기평가이며 쿼리 라벨을 쓰지 않는다. R1은 임계 0.5의 경성 규칙 하나로 사전 고정한다 — 연속 가중·다른 임계는 사후 탐색이므로 하지 않는다. 전이 실패는 신호 자체의 부재인지 규칙의 거칠음인지 구분되지 않을 수 있으며, 그 경우 '판별 불가'로 적는다.",
+      "end_date": "2026-09-19T19:44:50+09:00",
+      "end_sha": "e04eaf25cbb64ff0e0b67e0e31a61f52a24e49ab",
+      "date_range": "2026-09-19 ~ 2026-09-19",
+      "commit_count": 0
     }
   ]
 }
