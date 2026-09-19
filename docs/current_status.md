@@ -13,7 +13,7 @@
 | **GPU 배정** | Slurm `batch` 파티션 `gnode1\~6`. `gnode5`(A6000, 드라이버 595.91.07) 실측 동작. 딥시크는 NHN `NEXGEM` GPU 4\~7에 그대로 |
 | **LLM 접속** | NEXGEM이 tailscale로 **직결** — `llm.local.json`의 `100.97.255.47:8000`. 옛 `ssh nhn` 터널은 불필요. ssh도 `100.97.255.47:22`(`NEXGEM_key`) |
 | **Active Job** | 없음. RU-98 array `156357` 종료. tmux `queue_monitor` → `http://100.65.212.1:8899`; `supervisor` 가동 중 |
-| **회귀 테스트** | 전체 회귀 **286 tests 통과**(16 skipped, 71초). `RU-91`\~`96` 총람 공백을 실측 보고서·`D-043`·`D-044`에서 복원(사전 등록 필드는 `미보존`으로 명시)해 `test_docs_consistency.py` 포함 전부 초록 |
+| **회귀 테스트** | 전체 회귀 **287 tests 통과**(16 skipped). `RU-91`\~`96` 총람 공백을 실측 보고서·`D-043`·`D-044`에서 복원(사전 등록 필드는 `미보존`으로 명시)해 `test_docs_consistency.py` 포함 전부 초록 |
 
 ---
 
@@ -78,14 +78,13 @@ tmux list-sessions; squeue -u kimds
 
 ## 미해결 (Open Issues)
 
-- **fold 적합의 절반 이상이 GPU 밖이다.** 디바이스 상주 35배가 실측됐으나 이 기계에서는
-  GPU 메모리가 없어 적용 못 했다. Slurm 노드의 첫 과제다([인계](SESSION_HANDOFF.md)).
+- **fold 적합 디바이스 상주화 완료(RU-99).** 수치 전 fold 비트 동일, `12.8 → 7.1`초/fold(1.80x). 700 fold 2-arm ≈`1.38` GPU-h로 4 GPU-h 안에 들어온다.
 - **적합 분산 포함 승격 절차가 미승인**이고 `R`도 미정이다(`D-054`는 `R=1`만 정했다).
 - **지문 기준선을 기계별로 나눌지 미정.** 기계가 바뀌면 해시가 달라진다(집계 margin 절대
   `1.5e-06`) — 무효가 아니라 비트 비교 불가다. 별도로 **결론 재현 허용 오차**를 판정 규칙에
   넣을지도 사용자 판단 사안이다(RU-98 결과가 입력).
 - **재구축 운영 구조의 장기 실측이 남았다.** 명시적 상태 머신·자원별 스케줄링·로컬 vLLM 강제는 구현됐으나, 재시작 복구와 자정 토큰 rollover는 단위 테스트만 통과했다.
-- **4 GPU-hour로는 확증이 불가능하다.** 예산 증액이냐 설계 축소냐는 사용자 판단 사안이다.
+- **승격 확증 예산이 열렸다.** 디바이스 상주화로 700 fold 2-arm이 4 GPU-h 안에 들어왔으나(RU-99), 적합 분산 포함 절차(`R`) 승인은 별도다.
 - **앵커 재현 실패 원인 미확인.** RU-98이 **장비는 원인이 아님**을 보였다(`SMAD4` `0.4426`,
   `PBRM1` `0.5546` 4자리 재현). 코드인지 데이터인지는 여전히 미확인이다.
 - **PCA·subsample 사양이 문서에 없다.** 회차 16이 v1 안을 냈으나 기록되지 않았다.
@@ -96,3 +95,4 @@ tmux list-sessions; squeue -u kimds
 [작성자: OpenAI Codex / Reasoning Agent / GPT-5 (effort: 미확인) · 2026-09-19 11:20 KST]
 [작성자: opencode / Platform Agent / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 14:27 KST]
 [작성자: opencode / 종결권자(사용자 위임) / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 15:03 KST]
+[작성자: opencode / Platform Agent / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 16:40 KST]

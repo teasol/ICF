@@ -158,6 +158,7 @@ def evaluate_task(
     device: torch.device,
     n_folds: int | None = None,
     fold_start: int = 0,
+    cpu_bags: bool = False,
 ) -> list[dict]:
     """Run the official k-fold protocol with TrainingFreeClassifier. Returns a
     list of {"fold": k, "slide_id": [...], "label": Tensor, "probability": Tensor}."""
@@ -169,6 +170,17 @@ def evaluate_task(
     if missing:
         print(f"WARNING: dropping {missing} slides with no feature file")
     bags = {sid: load_slide_features(sid, h5_index) for sid in slide_ids}
+    # Fifty folds share most of their context slides, and leaving the features on
+    # the host re-sends them every fold (`extract_bag_descriptor` does
+    # `bag.to(basis.device)` per call). Resident-on-device removes that transfer
+    # without changing any arithmetic. Falls back rather than dying on OOM: this
+    # is a cost optimisation, not a correctness change.
+    if not cpu_bags and device.type == "cuda":
+        try:
+            bags = {s: v.to(device, non_blocking=True) for s, v in bags.items()}
+        except torch.cuda.OutOfMemoryError:
+            torch.cuda.empty_cache()
+            print("  GPU 메모리 부족 — 호스트 상주로 되돌린다", flush=True)
     records_by_sid = {str(r["slide_id"]).strip(): r for r in records}
     print(f"Loaded {len(bags)} slides, {len(fold_cols)} official folds "
           f"({fold_cols[0]}..{fold_cols[-1]}), raw {FEATURE_DIM}-d")
@@ -306,6 +318,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--compare-golden", type=Path, default=None,
                          help="predictions/*.pt to diff against (reconstructed via "
                               "trimmed_mean over its stored per-branch margins)")
+    parser.add_argument("--cpu-bags", action="store_true",
+                         help="bag 특징을 호스트에 둔다(기본은 GPU 상주). 전후 비용 비교용")
     return parser.parse_args()
 
 
@@ -321,6 +335,7 @@ def main() -> None:
     per_fold = evaluate_task(
         config, args.official_folds, args.features, device,
         n_folds=args.official_nfolds, fold_start=args.official_fold_start,
+        cpu_bags=args.cpu_bags,
     )
     if not per_fold:
         raise SystemExit("no folds evaluated -- check --features / --official-folds")

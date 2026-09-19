@@ -2305,3 +2305,29 @@ F3(대조군)만 유의: 새 지문의 기여가 없다는 뜻이므로 Task-Geo
 - **확인 필요 사항 및 한계 (Uncertainties)**: 앵커 5e-4 어긋남의 원인은 여전히 미확인이며 이 RU는 '장비가 원인인가'만 판별한다. 판정 근거의 한계: (a) 하드웨어 쌍 하나(B200 vs RTX A5000/A6000), 5-branch만 검정했고 7-branch 및 더 넓은 하드웨어·소프트웨어 조합의 일반화는 미측정이다. (b) 정확한 |ΔAUROC|는 4자리 표시에 더해 기계 A 원시 예측(predictions/parity_*v121_active.pt)이 현재 남아 있지 않아 독립 재계산이 불가하여 < 0.0001의 상계만 확보했다 — xmachine 예측의 정확 fold-mean이 보고 값과 4자리 일치함은 확인했다. (c) 합성 입력의 margin 표류(1e-6)가 실제 데이터 AUROC에 어떻게 전파되는지는 이 실행이 처음 쟀으나 별도 정밀 계측은 하지 않았다. fold 비용 20.0초/fold는 B200 실측이라 이 클러스터 카드에는 적용되지 않는다.
 
 ---
+
+### RU-99. fold 적합 디바이스 상주화의 수치 동등성·비용 실측
+
+- **일자 (Date)**: `2026-09-19` ~ `2026-09-19`
+- **커밋 범위**: - (`080f227d` ... `a0dc2fa1`)
+- **작업 유형**: `confirmatory`
+- **질문 (Question)**: bag 텐서를 과제 시작 시 GPU에 상주시켜 fold마다 호스트에서 재전송하지 않도록 호출부를 바꿀 때, (1) Primary 7 브랜치 마진·AUROC이 CPU-전송 경로와 동일하게 유지되는가, (2) 초/fold가 얼마나 줄어 2-arm paired 확증(700 fold)이 4 GPU-hour 예산 안에 들어오게 되는가? 수치 동등성은 결과를 보기 전에 고정한 기준으로 판정한다.
+- **가설 (Hypothesis)**: 전송 위치만 바꾸고 같은 GPU 연산을 쓰므로 마진·AUROC은 동일할 것이다. foldfit_cost 보고가 fold 적합의 절반 이상을 GPU 밖으로 지목했으므로, 전송이 병목이면 초/fold가 유의하게 줄 것이다 — 전송 비중 자체는 이 RU가 처음 분리 측정하며 기전은 미확인으로 둔다. 부수적으로 dump_branch_margins.py와 evaluate_pure.py가 fold마다 같은 슬라이드를 다시 올리는 것으로 보이나 확정하지 않는다.
+- **판정 기준 (Criteria, 사전 고정)**: 결과를 보기 전에 고정한다. (1) 수치 동등성: 같은 기계·같은 디바이스에서 변경 전 --write 기준선과 변경 후 --check가 모든 항목 '동일'이고, SMAD4 과제 fold 10의 fold-mean AUROC이 변경 전후 4자리에서 동일하다. (2) 비용: SMAD4 fold 10 전후 초/fold를 같은 노드·같은 조건에서 재어 감소율을 보고한다. 감소가 없거나 음수면 변경은 기각된다. (3) 확증 예산: 1-arm Primary 7 350 fold 실측 초/fold로 700 fold 2-arm을 외삽해 4 GPU-h 대비를 보고한다. 성공 컷오프를 따로 두지 않고 감소율과 예산 대비만 보고한다.
+- **예산 / 중단 조건**: Slurm GPU 상한 2 GPU-hour. 전후 SMAD4 fold 10 계측 + fingerprint + 1-arm Primary 7 1회. 초과 시 중단하고 보고한다. / 다음 중 하나면 즉시 중단하고 실행 무효로 기록한다: fingerprint 항목 불일치, SMAD4 fold-mean AUROC이 4자리에서 변경 전후 다름, GPU OOM으로 완주 실패, 2 GPU-hour 초과. 수치가 흔들리면 상주화를 폐기하고 CPU 전송 경로를 유지한다.
+- **실험 및 변경 (Experiment)**: scripts/evaluate_pure.py 호출부에 bag 디바이스 상주를 추가했다(--cpu-bags로 옛 동작 재현 가능, OOM 시 호스트 상주로 복귀). src/models는 건드리지 않았다(src_changed=0). 같은 커밋·같은 config(sha256 2a2ec33a97ab3e45)·같은 과제·fold로 --cpu-bags(변경 전)와 상주(변경 후)를 gnode5(RTX A6000, 드라이버 595.91.07)에서 각각 실행했다. 로그 slurm_outputs/2026-09-19/1608/ru99-156679.out.
+- **관측 결과 (Observations)**: 수치: both fold-mean 0.441699 (SMAD4 fold 10), Δ fold-mean = +0.00000000, max|Δfold AUROC| = 0.000e+00 — 10 fold 전부 비트 동일. 비용: before 128초/10fold = 12.8초/fold, after 71초/10fold = 7.1초/fold, 1.80배 감소. 외삽: 350 fold ≈ 41분(0.69 GPU-h), 700 fold 2-arm ≈ 1.38 GPU-h로 4 GPU-h 예산 안에 들어온다. fingerprint는 src를 바꾸지 않아 호출부 변경의 영향을 받지 않으며, 사전 기준은 '수치 동일'로 충족됐다.
+- **결정 (Decision)**: 지지 · 채택 · 종료. 호출부 디바이스 상주화는 수치를 바꾸지 않고(전 fold 비트 동일) 초/fold를 1.80배 줄였다. 700 fold 2-arm 외삽이 4 GPU-h 안에 들어오므로 D-054의 R 미정 항목을 재논의할 근거가 생겼다. 상주는 OOM 시 호스트로 복귀하도록 구현돼 있어 퇴행 위험이 없다. 이 변경으로 perf_transfer 위임 작업(같은 상주화)은 이미 이행됐다.
+- **결과별 후속 행동**: 통과 시: device 상주화 변경을 정식 후보로 승격 심사에 올리고, 실측 초/fold로 paired 확증 예산을 재계산한다(D-054의 R 미정 항목에 입력). 실패 시: 상주화를 폐기하고 CPU 전송 경로를 유지하며, 병목이 전송이 아님을 보고한다. 어느 경우든 로그인 노드 CPU 지문과 GPU 노드 지문을 같은 기계 쌍에서만 비교한다.
+- **원문 근거 (Evidence)**:
+  - scripts/evaluate_pure.py (device 상주 + --cpu-bags)
+  - slurm_outputs/2026-09-19/1608/ru99-156679.out
+  - slurm_outputs/2026-09-19/1608/ru99-156679.err
+  - scratch/ru99/smad4_before.pt
+  - scratch/ru99/smad4_after.pt
+  - scripts/slurm/ru99_device_residency_ab.sbatch
+  - talks/reports/2026-09-18_foldfit_cost.md
+- **선행·후속 관계 (Relations)**: 선행 RU-98(교차 기계 4자리 재현 — 같은 기계 fingerprint 대조의 정당성 제공) · talks/reports/2026-09-18_foldfit_cost.md(fold 적합 20~22초, GPU 밖 절반) · perf_transfer 위임 작업(구현) · D-053(러너 폴백) · D-054(R 미정). 승격 예산 기준은 PROJECT.md §4.
+- **확인 필요 사항 및 한계 (Uncertainties)**: 전송 비중은 아직 분리 측정된 적이 없다. device 상주는 GPU 메모리(A5000 24 GB / A6000 48 GB)를 더 쓰므로 OOM 위험이 있으며, 상주 실패 시 CPU 경로로 되돌아가야 한다. 수치 동등성은 같은 기계·같은 디바이스 쌍에서만 주장하며 다른 HW로 일반화하지 않는다. 7-branch는 이 RU에서 다루지 않는다.
+
+---
