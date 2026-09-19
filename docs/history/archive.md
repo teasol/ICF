@@ -3488,3 +3488,31 @@ _by Orca / Main Agent / claude-opus-5 (effort: high) on nexgem-s1 at 2026-09-10_
 - **관련**: `AGENTS.md` §7.0 · RU-98 · `D-054`(반복 없음, 빠른 승격)와 같은 방향.
 
 [작성자: Claude Code / Platform Agent / claude-opus-5 (effort: 미확인) · 2026-09-19 09:08 KST]
+
+---
+
+## D-056 · 2026-09-19 · 자동 잡무 중단, 오케스트레이션을 세션 직접 수행으로 *(사용자 결정)*
+
+### 결정
+
+- **주기 잡무와 위임 큐의 자동 운영을 중단한다.** `talks/ops/recurring/*.json` 6건을
+  `talks/ops/recurring/disabled/`로 옮기고, 감독자 `scripts/ops/supervisor.py`를 정지했다.
+- **오케스트레이션은 이 세션(opencode)이 직접 한다.** 회차는 `scripts/council.py run`을
+  직접 호출해 띄우고(감독자를 되살리는 `run_round.sh`의 `check_supervisor.sh` 경로는 쓰지
+  않는다), RU는 `scripts/docs/ru.py`, 실험은 `sbatch`로 제출한다.
+
+### 이유
+
+사용자 지시 — "잡무 대기 걸어 놓은 거는 다 없애고, 너가 직접 오케스트레이션 해." 잡무가
+원격 모델 응답 실패(14:38\~15:28)와 감독자 정지(15:57) 동안 조용히 실패/정지했고, 그
+회복·관리가 오케스트레이션 비용을 소모했다. 자동 디스패치를 걷어내고 세션이 판단·실행한다.
+
+### 되돌리는 방법
+
+`talks/ops/recurring/disabled/*.json`을 상위 `recurring/`으로 옮기고
+`bash scripts/ops/check_supervisor.sh`로 감독자를 재기동한다. `queue_monitor`는 계속
+떠 있으나 감독자가 없으면 `state.md`가 갱신되지 않아 표시가 멈춘다.
+
+- **관련**: 운영 구조 · `talks/ops/recurring/` · `scripts/ops/supervisor.py` · `D-053`.
+
+[작성자: opencode / Platform Agent / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 17:45 KST]

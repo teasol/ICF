@@ -12,7 +12,7 @@
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · `pytest` 9.1.1. `scripts/node_env.sh`가 `ICF_DATA_ROOT=data/repro_labels_folds`로 해소 |
 | **GPU 배정** | Slurm `batch` 파티션 `gnode1\~6`. `gnode5`(A6000, 드라이버 595.91.07) 실측 동작. 딥시크는 NHN `NEXGEM` GPU 4\~7에 그대로 |
 | **LLM 접속** | NEXGEM이 tailscale로 **직결** — `llm.local.json`의 `100.97.255.47:8000`. 옛 `ssh nhn` 터널은 불필요. ssh도 `100.97.255.47:22`(`NEXGEM_key`) |
-| **Active Job** | 없음. RU-98 array `156357` 종료. tmux `queue_monitor` → `http://100.65.212.1:8899`; `supervisor` 가동 중 |
+| **Active Job** | 없음. 자동 잡무 중단·감독자 정지(`D-056`). `queue_monitor` → `http://100.65.212.1:8899`(표시 정지) |
 | **회귀 테스트** | 전체 회귀 **290 tests 통과**(16 skipped). `RU-91`\~`96` 총람 공백을 실측 보고서·`D-043`·`D-044`에서 복원(사전 등록 필드는 `미보존`으로 명시)해 `test_docs_consistency.py` 포함 전부 초록 |
 
 ---
@@ -65,15 +65,15 @@ Primary 7 전 과제가 Slurm A5000/A6000에서 완료, B200 참조와 소수 4�
 ### Immediate Next Command
 
 ```bash
-# 0. NEXGEM vLLM 도달 확인 (tailscale 직결, 터널 불필요)
+# 0. NEXGEM vLLM 도달 확인 (tailscale 직결)
 curl -s -m 5 http://100.97.255.47:8000/v1/models >/dev/null && echo llm-ok || echo llm-DOWN
-
 # 1. (Slurm 풀리면) provenance-fixed 전후 검정 — SMAD4 fold 10, 상주화 ON/OFF
-#    선행 확인에서 걸린 공식 러너 provenance 는 evaluate_pure.py 에 구현·테스트 완료
-
-# 2. 운영 상태 확인
-tmux list-sessions; squeue -u kimds
+# 2. 운영: sbatch 로 실험, 회차는 `scripts/council.py run` 직접 (감독자 정지, D-056)
 ```
+
+**오케스트레이션은 이 세션이 직접 한다(`D-056`).** 주기 잡무 6건은
+`talks/ops/recurring/disabled/`로 옮겼고 감독자는 정지 상태다. `queue_monitor`는 떠 있으나
+`state.md`가 갱신되지 않아 표시가 멈춘다.
 
 ---
 
@@ -97,4 +97,4 @@ tmux list-sessions; squeue -u kimds
 [작성자: opencode / Platform Agent / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 14:27 KST]
 [작성자: opencode / 종결권자(사용자 위임) / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 15:03 KST]
 [작성자: opencode / Platform Agent / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 16:40 KST]
-[작성자: opencode / 소집자 / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 17:30 KST]
+[작성자: opencode / 소집자·오케스트레이터 / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 17:45 KST]
