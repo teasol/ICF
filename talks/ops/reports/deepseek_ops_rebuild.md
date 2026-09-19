@@ -148,3 +148,90 @@ tests/test_llm_env.py             3 passed
 `scripts/ops/routine_opencode.sh`, `talks/ops/recurring/*.json`(자원 필드),
 `tests/test_ops_supervisor.py`, `tests/test_queue_monitor.py`, `.gitignore`,
 `docs/current_status.md`, `docs/agent_handoff.md`(테스트 수).
+
+---
+
+## 6. 후속 요구 통합 (2026-09-19)
+
+> 이 절은 위 1\~5절이 확정한 상태 머신·자원 스케줄링·수명주기 정본을 **보존한 채**
+> 사용자가 추가로 요구한 모니터 표시·수집 경로를 얹은 결과다. 기존 전이는 건드리지
+> 않았다.
+
+### 6.1 오늘 생성 토큰 (M 단위) — 누적 카드 제거
+
+- `vllm:generation_tokens_total`은 **프로세스 누적**이라 그대로 쓰면 "오늘"이 아니다.
+  자정 기준선과 마지막 counter를 `talks/ops/token_baseline.json`(git-ignore)에 영속
+  저장하고 **누적 차분**으로 오늘치를 만든다. 순수 함수 `advance_today`가 자정
+  rollover와 counter reset을 처리하고, `format_tokens_m`이 M 단위 문자열을 만든다.
+- **첫 관측이 자정 이후면 전체인 척하지 않는다.** 시작 시각을 기록하고
+  `partial=True`로 표시하며, 화면에 "자정\~관측 시작 구간 미포함 · 관측 시작 ..."을
+  적는다. 자정 정각부터 관측한 경우에만 `partial=False`다.
+- **서버 재시작**으로 counter가 줄면 재기록한다. 리셋 이전에 측정해 둔 양은
+  `accumulated`에 남기고 리셋 이후 counter를 더하므로, 오늘치가 음수로 가지 않는다.
+- 누적 프롬프트 토큰(`vllm:prompt_tokens_total`)과 누적 생성 토큰은 **API dict와
+  화면 양쪽에서 제거**했다(`build_server_payload`가 일부러 넣지 않는다).
+
+### 6.2 GPU 4-7 전력·가동률 — 캐시 수집 경로
+
+- 모니터는 `nexgem` 로그인 노드에서 돌고 GPU는 원격 NHN `NEXGEM`(GPU `4-7`)에 있다.
+  이 기계에는 `nvidia-smi`가 없다. 브라우저가 2초마다 폴링하므로 **요청 경로에서
+  SSH/nvidia-smi를 실행하지 않는다.**
+- `scripts/ops/gpu_telemetry.py`가 TTL(기본 15초)마다 한 번 `ssh nhn`으로 원격
+  `nvidia-smi`를 실행해 `talks/ops/gpu_telemetry_cache.json`에 원자적으로 쓴다.
+  모니터는 데몬 스레드로 이 수집기만 돌리고, 요청 경로는 **캐시 파일만 읽는다**
+  (`gpu_state` → `telemetry_state`). 설정은 `talks/ops/gpu.json`(추적)이,
+  기계별 override는 `gpu.local.json`(git-ignore)이 정한다(D-053).
+- **수집 실패·부분 누락·캐시 없음은 0이 아니라 `모름`/도달 불가로 그린다.** 파싱
+  실패(`[N/A]`)와 장치 누락은 `None`이고, 실제 유휴의 `0 W`/`0 %`만 0으로 남는다.
+  화면은 출처·수집 시각과 `(캐시 오래됨)` 표시를 함께 낸다.
+- **이 환경에서 실측 확인**: `nvidia-smi --query-gpu=index,power.draw,power.limit,utilization.gpu`
+  로 GPU 4\~7 각각 `~240 W`, 한도 `1000 W`, 가동률 `0 %`가 반환됐다(`ok=true`,
+  `missing=[]`). 즉 현재 SSH 경로로 정확한 수치를 얻는다.
+- **SSH가 막힐 때의 exporter 요구를 명시**했다(코드 docstring과 화면 안내). 대안은
+  NEXGEM에 `nvidia_gpu_exporter`(`nvidia_smi_power_draw_watts`,
+  `nvidia_smi_power_limit_watts`, `nvidia_smi_utilization_gpu_ratio`) 또는
+  `dcgm-exporter`(`DCGM_FI_DEV_POWER_USAGE`, `DCGM_FI_DEV_POWER_MGMT_LIMIT`,
+  `DCGM_FI_DEV_GPU_UTIL`)를 세우고 Prometheus scrape 뒤 `gpu.json`에
+  `mode: "http"`, `exporter_url`을 적는 것이다. **HTTP 수집 모드는 아직 구현하지
+  않았다** — 그 전까지는 도달 불가로 표시한다.
+
+### 6.3 할 일과 완료 분리
+
+- 화면은 task 파일 목록이 아니라 **명시적 수명주기 정본(`task_state.json`)에서 읽은
+  실제 `running`/`pending`만** "딥시크가 할 일"로 보여준다. 완료는 별도 "최근 완료"
+  섹션이다. 두 목록은 겹치지 않는다(`read_work` / `read_completed`).
+- 각 항목은 카드에서 뽑은 제목과 1\~2문장 요약(모델 요약이 아니라 첫 문단),
+  상태, 상태 진입 시각(`state_since`)을 표시한다. 상태를 task 파일에서 다시
+  추론하지 않으므로 이중 상태가 없다.
+
+### 6.4 검증
+
+```
+tests/test_queue_monitor.py   30 passed   (오늘 토큰 rollover/reset/M, 누적 필드 부재,
+                                           GPU 정상/부분 누락/도달 불가, work/completed 분리)
+```
+
+관련 ops 회귀: `test_ops_supervisor`·`test_ops_task_lifecycle`·`test_ops_task_queue`·
+`test_ops_opencode_config`·`test_llm_env` → 25 passed. 상태 머신 전이는 그대로다.
+
+### 6.5 남은 위험 (후속)
+
+1. **자정 rollover의 실측 미확인**: 순수 함수로만 검증했고, 실제 자정을 넘겨
+   모니터를 이어 돌려 관측하지는 않았다(`모름`). 부분 집계 표기는 그 불확실성을
+   숨기지 않기 위한 것이다.
+2. **SSH 경로의 가용성 의존**: `ssh nhn`(alias 설정·키·원격 `nvidia-smi`)이 살아야
+   수치가 나온다. 터널/SSH가 끊기면 정확한 값이 아니라 도달 불가가 뜬다 — 0을
+   만들지 않으므로 오해는 없지만, 수집 스레드가 없으면 화면은 계속 도달 불가다.
+3. **exporter HTTP 모드 미구현**: 위 6.2에 적은 설정을 요구하며, 구현 전까지는
+   SSH 불가 시 자동 대체 경로가 없다.
+4. **모니터 실브라우저 검증 미실행**: HTTP 렌더를 띄워 눈으로 확인하지 않았다.
+   순수 함수·문자열 수준(PAGE에 누적 카드 문자열 부재)까지만 시험했다.
+
+## 7. 변경 파일 (후속)
+
+추가: `scripts/ops/gpu_telemetry.py`, `talks/ops/gpu.json`, 이 절.
+
+수정: `scripts/ops/queue_monitor.py`(오늘 토큰·GPU 캐시 표시·work/completed 분리·
+누적 카드 제거·수집 스레드), `tests/test_queue_monitor.py`(+19 tests),
+`.gitignore`(`gpu.local.json`, `gpu_telemetry_cache.json`, `token_baseline.json`),
+`docs/current_status.md`, `docs/agent_handoff.md`(테스트 수 `263 tests`).

@@ -106,3 +106,6 @@ talks/ops/seat_questions.md
 talks/lit/raw/
 talks/ops/failures.jsonl
 talks/ops/llm.local.json
+talks/ops/gpu.local.json
+talks/ops/gpu_telemetry_cache.json
+talks/ops/token_baseline.json
