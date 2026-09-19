@@ -7,13 +7,13 @@
 | 항목 | 값 |
 |:---|:---|
 | **Last Updated** | 2026-09-19 15:03 KST |
-| **Status** | **D-042 verified** · RU-100이 5·7-branch를 provenance와 함께 재확증(§4 충족) · RU-98/99 종료 · 공식 러너 provenance · 자동 잡무 중단(`D-056`) |
+| **Status** | **D-042 verified** · RU-100 재확증 · 오염 검사 **L1 재설계**(provenance 귀속) · 자동 잡무 중단(`D-056`) · `SEAL 10` 보류(`D-057`) |
 | **Host / Node** | **`nexgem`(소문자) = Slurm 로그인 노드.** GPU 없음, 20 CPU · 93 GB. 계산은 전부 `sbatch`/`srun`. 대문자 `NEXGEM`(NHN, B200)은 **다른 기계**다 |
 | **Environment** | uv venv `.venv` · Python 3.12.11 · PyTorch 2.14.0+cu130 · `pytest` 9.1.1. `scripts/node_env.sh`가 `ICF_DATA_ROOT=data/repro_labels_folds`로 해소 |
 | **GPU 배정** | Slurm `batch` 파티션 `gnode1\~6`. `gnode5`(A6000, 드라이버 595.91.07) 실측 동작. 딥시크는 NHN `NEXGEM` GPU 4\~7에 그대로 |
 | **LLM 접속** | NEXGEM이 tailscale로 **직결** — `llm.local.json`의 `100.97.255.47:8000`. 옛 `ssh nhn` 터널은 불필요. ssh도 `100.97.255.47:22`(`NEXGEM_key`) |
 | **Active Job** | 없음. 자동 잡무 중단·감독자 정지(`D-056`). `queue_monitor` → `http://100.65.212.1:8899`(표시 정지) |
-| **회귀 테스트** | 전체 회귀 **290 tests 통과**(16 skipped). `RU-91`\~`96` 총람 공백을 실측 보고서·`D-043`·`D-044`에서 복원(사전 등록 필드는 `미보존`으로 명시)해 `test_docs_consistency.py` 포함 전부 초록 |
+| **회귀 테스트** | 전체 회귀 **295 tests 통과**(16 skipped). `RU-91`\~`96` 총람 공백을 실측 보고서·`D-043`·`D-044`에서 복원(사전 등록 필드는 `미보존`으로 명시)해 `test_docs_consistency.py` 포함 전부 초록 |
 
 ---
 
@@ -82,6 +82,7 @@ curl -s -m 5 http://100.97.255.47:8000/v1/models >/dev/null && echo llm-ok || ec
   호스트·디바이스별 분리 · 앵커 `5e-4` 원인 규명 보류 · 확률적 `R>1`·fold 재분할은 트리거 대기.
 - **`SEAL 10` 개봉 보류(사용자, `D-057`).** 성능이 충분히 오른 후보가 없어 열지 않는다. 후보가
   서면 그때 다시 정하며, 개봉은 독립 최종 검증 가치를 소멸시킨다(`D-047`).
+- **오염 검사는 L1 귀속 검사로 재설계(C-20260919-2).** `check_artifacts.py`가 provenance를 선언 config와 대조한다. 시점 간 드리프트 검출은 상실됐고 공백으로 명시한다(L2는 현행 closed-form 전용).
 - **PCA·subsample 사양이 문서에 없다.** 회차 16이 v1 안을 냈으나 기록되지 않았다.
 - **재구축 운영 구조의 장기 실측이 남았다.** 자정 토큰 rollover·재시작 복구는 단위 테스트만 통과했다.
 - **7-branch가 `3/7` 과제(`Grade`·`progression`·`PBRM1`)를 악화시키는 기전 미확인.**
@@ -96,3 +97,4 @@ curl -s -m 5 http://100.97.255.47:8000/v1/models >/dev/null && echo llm-ok || ec
 [작성자: opencode / 소집자·오케스트레이터 / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 17:45 KST]
 [작성자: opencode / Platform Agent / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 18:00 KST]
 [작성자: opencode / 소집자·오케스트레이터 / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 18:10 KST]
+[작성자: opencode / Platform Agent / deepseek-v4.1-flash (effort: 미확인) · 2026-09-19 19:16 KST]

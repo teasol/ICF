@@ -179,6 +179,14 @@ SEAL 논문(`seal_univ2_baseline_17tasks.csv`)의 UNI2 기준선이다.
 > 설계 한계 지적은 그대로 유효하므로, **provenance 기반 재설계 결정은 유지한다.**
 > 재설계가 완료될 때까지 오염 검사 통과를 주장하는 실행은 무효다.
 
+> **2026-09-19 재설계 규격·구현 (C-20260919-2).** 값 앵커를 **L1 귀속 검사**로 대체한다.
+> `scripts/analysis/check_artifacts.py`가 저장 산출물의 provenance(`config_sha256`·
+> `branch_list`·`manifest_hash` 등)를 선언 config와 대조해 `D-053`류 설정 치환을 검출한다.
+> 규격: [`contamination_check_spec.md`](../talks/reports/2026-09-19_contamination_check_spec.md).
+> **이 검사는 귀속만 검증한다 — 시점 간·기계 간 수치 드리프트 검출 능력은 상실됐고 공백으로
+> 명시한다.** 같은 기계 재현(L2)은 현행 closed-form에만 `4자리 동일`로 적용한다(`D-048`은
+> 학습 파라미터 후보의 결정론을 폐기). 기계 간 허용 오차는 도입하지 않는다(`D-057`).
+
 ---
 
 ## 4. 승격 기준 (Promotion)
